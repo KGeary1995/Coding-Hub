@@ -23,7 +23,7 @@ function fixture(discover = async (engine: 'claude' | 'codex') => engines(engine
   const processes: FakePty[] = [];
   const events: SessionEvent[] = [];
   const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
-  const manager = new PtyManager((_owner, event) => events.push(event), { spawn, discover, environment: () => ({ PATH: '/bin', HUB_FIXTURE: 'inherited' }) });
+  const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover, environment: () => ({ PATH: '/bin', HUB_FIXTURE: 'inherited' }) });
   managers.push(manager);
   return { manager, processes, events, spawn };
 }

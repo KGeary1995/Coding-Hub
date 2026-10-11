@@ -14,7 +14,7 @@ function discovery(provider: AccountProvider, installed = true) {
 }
 function fixture(inspect = async (provider: AccountProvider) => discovery(provider)) {
   const pty = new FakePty(); const spawn = vi.fn(() => pty as unknown as IPty); const events: AccountEvent[] = []; const openGuide = vi.fn(async () => {});
-  const manager = new AccountLoginManager((_owner, event) => events.push(event), { inspect, spawn, openGuide });
+  const manager = new AccountLoginManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, inspect, spawn, openGuide });
   return { manager, pty, spawn, events, openGuide };
 }
 describe('account setup independent of project sessions', () => {

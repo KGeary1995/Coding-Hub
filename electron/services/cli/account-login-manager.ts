@@ -1,4 +1,4 @@
-import { stopProcess } from './stop-process';
+import { stopProcess, type StopDependencies } from './stop-process';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { z } from 'zod';
@@ -15,7 +15,7 @@ export class AccountLoginManager {
   private pending: { owner: number; cancelled: boolean } | null = null;
   private closing = false;
   get active() { return Boolean(this.run || this.pending); }
-  constructor(private emit: (owner: number, event: AccountEvent) => void, private dependencies: { inspect?: typeof inspectAccount; spawn?: (file: string, args: string[], options: IPtyForkOptions) => IPty; openGuide: (url: string) => Promise<void> }) {}
+  constructor(private emit: (owner: number, event: AccountEvent) => void, private dependencies: { stopDependencies?: StopDependencies; inspect?: typeof inspectAccount; spawn?: (file: string, args: string[], options: IPtyForkOptions) => IPty; openGuide: (url: string) => Promise<void> }) {}
   async execute(owner: number, input: unknown): Promise<AccountResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_ACCOUNT_REQUEST', 'Invalid account request.'); const request = parsed.data;
     const inspect = this.dependencies.inspect ?? inspectAccount;
@@ -48,7 +48,7 @@ export class AccountLoginManager {
     if (this.pending?.owner === owner && !id) this.pending.cancelled = true;
     const run = this.run; if (!run) return;
     if (run.owner !== owner || (id && run.login.runId !== id)) throw new HubError('STALE_LOGIN', 'This login terminal belongs to another window or has ended.');
-    if (await stopProcess(run.pty, run.exited)) this.finish(run, 130);
+    if (await stopProcess(run.pty, run.exited, this.dependencies.stopDependencies)) this.finish(run, 130);
   }
   private finish(run: Run, exitCode: number) { if (run.finished) return; run.finished = true; if (this.run === run) this.run = null; this.emit(run.owner, { type: 'exit', ...run.login, exitCode }); run.resolve(); }
 
