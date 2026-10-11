@@ -332,7 +332,11 @@ const { _electron } = require('playwright-core');
     assert.equal(history.value.every((run) => run.status === 'completed'), true);
     await restored.getByRole('button', { name: 'Session history', exact: true }).click();
     await restored.waitForFunction(() => document.querySelectorAll('.history-run').length === 3);
-    await restored.locator('.history-run').last().click();
+    // Concurrent engine discovery can change start order. Select the original
+    // Claude run by identity rather than assuming it is the oldest list entry.
+    const originalClaudeIndex = history.value.findIndex((run) => run.runId === starts.find((run) => run.engine === 'claude').runId);
+    assert.ok(originalClaudeIndex >= 0);
+    await restored.locator('.history-run').nth(originalClaudeIndex).click();
     await restored.waitForFunction(() => document.querySelector('pre[aria-label="Saved terminal output"]')?.textContent.includes('ECHO:desktop-first'));
     // Exercise v1.2 workflows against the production bridge and visible UI.
     await restored.getByRole('button', { name: 'Restore launch settings to a session', exact: true }).click();

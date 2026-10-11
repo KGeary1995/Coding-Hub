@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
+import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { PtyManager } from './services/cli/pty-manager';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { finishWorkspaceFlushSchema } from '../shared/schemas';
@@ -34,7 +35,8 @@ let storageFailure = 'Local storage is unavailable. Check access to ~/.coding-hu
 let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
 const rendererFile = path.join(__dirname, '../../dist/index.html');
-const accounts = new AccountLoginManager((owner, event) => { const target = webContents.fromId(owner); if (target && !target.isDestroyed()) target.send(IPC_CHANNELS.accountEvent, event); }, { openGuide: (url) => shell.openExternal(url) });
+const claudeProfiles = new ClaudeProfiles(process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub'));
+const accounts = new AccountLoginManager((owner, event) => { const target = webContents.fromId(owner); if (target && !target.isDestroyed()) target.send(IPC_CHANNELS.accountEvent, event); }, { profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 const manager = new PtyManager((owner, event) => {
@@ -45,14 +47,14 @@ const manager = new PtyManager((owner, event) => {
   if (event.type === 'exit') hub?.telemetry?.end(event.runId);
   const target = webContents.fromId(owner);
   if (target && !target.isDestroyed()) target.send(IPC_CHANNELS.sessionEvent, event);
-}, { prepareLaunch: (run, config, info, launch) => {
+}, { profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
 }, onStarted: (run, config) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
-  try { hub?.telemetry?.start(run, config); } catch { reportStorageError('Usage recording is unavailable for this run.'); }
+  try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); } catch { reportStorageError('Usage recording is unavailable for this run.'); }
 } });
 
 function reportStorageError(message: string) {
@@ -217,7 +219,16 @@ else app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
-  handle(IPC_CHANNELS.startSession, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.'); return manager.start(owner, payload); });
+  handle(IPC_CHANNELS.startSession, (owner, payload) => {
+    if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
+    // The manager validates the complete request. This guard also covers pending
+    // login discovery, preventing a session from racing a credential replacement.
+    if (payload && typeof payload === 'object' && 'config' in payload) {
+      const config = (payload as { config?: { engine?: string; accountProfileId?: string } }).config;
+      if (config?.engine === 'claude' && config.accountProfileId && accounts.activeProfileId === config.accountProfileId) throw new HubError('PROFILE_BUSY', 'Finish or cancel this profile’s login before starting a coding session.');
+    }
+    return manager.start(owner, payload);
+  });
   handle(IPC_CHANNELS.writeSession, (owner, payload) => { manager.write(owner, payload); return null; });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => { manager.resize(owner, payload); return null; });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });

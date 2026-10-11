@@ -24,11 +24,11 @@ export async function findGitHub(): Promise<Executable> {
   }
   throw new HubError('GITHUB_CLI_NOT_FOUND', 'GitHub CLI (gh) is not installed or not on PATH. Open the installation guide, install it, and refresh.');
 }
-export async function inspectAccount(provider: AccountProvider): Promise<{ connection: AccountConnection; executable: Executable | null }> {
+export async function inspectAccount(provider: AccountProvider, environment = hostEnvironment()): Promise<{ connection: AccountConnection; executable: Executable | null }> {
   const connection: AccountConnection = { provider, installed: false, executable: null, version: null, state: 'unknown', message: 'Checking local CLI…', canLogin: false, checkedAt: new Date().toISOString() };
   try {
     const executable = provider === 'github' ? await findGitHub() : await findExecutable(provider);
-    const env = hostEnvironment(); const [version, help] = await Promise.all([probeCLI(executable, ['--version'], env), probeCLI(executable, ['--help'], env)]);
+    const env = environment; const [version, help] = await Promise.all([probeCLI(executable, ['--version'], env), probeCLI(executable, ['--help'], env)]);
     if (version.exitCode !== 0 || help.exitCode !== 0) throw new HubError('ACCOUNT_CLI_FAILED', 'CLI health check failed or timed out. Repair its installation and refresh.');
     connection.installed = true; connection.executable = executable.displayPath; connection.version = (version.stdout + '\n' + version.stderr).trim().split('\n')[0].slice(0, 120);
     const helpText = help.stdout + '\n' + help.stderr;

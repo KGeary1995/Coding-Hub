@@ -29,7 +29,7 @@ export interface StartSessionRequest {
   rows: number;
 }
 export interface RunReference { sessionId: string; runId: string }
-export interface RunningSession extends RunReference { pid: number; cwd: string; engine: CLIEngine }
+export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: CLIEngine }
 export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
   | ({ type: 'data'; data: string } & RunReference)

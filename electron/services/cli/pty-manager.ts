@@ -24,15 +24,15 @@ interface ManagedRun {
 
 export class PtyManager {
   private runs = new Map<string, ManagedRun>();
-  private pending = new Map<string, { owner: number; cancelled: boolean }>();
+  private pending = new Map<string, { owner: number; cancelled: boolean; profileId?: string }>();
   private closing = false;
   private spawn: Spawn;
-  private discover: (engine: CLIEngine) => Promise<DiscoveredEngine>;
+  private discover: typeof discoverEngine;
   private environment: () => Record<string, string>;
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; onStarted?: (session: RunningSession, config: CLIEngineConfig) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
+    private dependencies: { stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -40,6 +40,8 @@ export class PtyManager {
   }
 
   usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => path.resolve(run.session.cwd) === path.resolve(directory)) || this.pending.size > 0; }
+
+  usesProfile(id: string): boolean { return [...this.runs.values()].some((run) => run.session.accountProfileId === id) || [...this.pending.values()].some((run) => run.profileId === id); }
 
   get hasSessions(): boolean { return this.runs.size > 0 || this.pending.size > 0; }
 
@@ -50,7 +52,8 @@ export class PtyManager {
     if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
     if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
     if (this.runs.size + this.pending.size >= 4) throw new HubError('SESSION_LIMIT', 'At most four CLI processes can run simultaneously.');
-    const reservation = { owner, cancelled: false };
+    const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
+    const reservation = { owner, cancelled: false, profileId };
     this.pending.set(request.sessionId, reservation);
     try {
       if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working directory.');
@@ -59,13 +62,19 @@ export class PtyManager {
         cwd = await realpath(request.cwd);
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
-      const engine = await this.discover(request.config.engine);
+      const profileEnvironment = this.dependencies.profileEnvironment;
+      if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
+      const baseEnvironment = this.environment();
+      const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
+      const engine = await this.discover(request.config.engine, discoveryEnvironment);
+      if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
       const launch = buildLaunch(request.config, engine.info);
       if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
       if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
-      const session: RunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd };
+      const session: RunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
       this.dependencies.prepareLaunch?.(session, request.config, engine.info, launch);
-      const env = { ...this.environment(), ...engine.executable.extraEnv, ...launch.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
+      const env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       let pty: IPty;
       try {
         pty = this.spawn(engine.executable.file, [...engine.executable.prefixArgs, ...launch.args], { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });

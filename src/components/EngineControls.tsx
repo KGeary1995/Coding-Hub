@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
 import type { CLIEngineConfig, ReasoningEffort } from '../../shared/types';
 
 const claudeModels = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-opus-latest'];
@@ -11,6 +13,8 @@ function tokenValue(value: string): number | null {
 }
 
 export function EngineControls({ id, config, onChange }: { id: string; config: CLIEngineConfig; onChange: (config: CLIEngineConfig) => void }) {
+  const { profiles, error } = useAccountStore();
+  useEffect(() => { void refreshClaudeProfiles(); }, []);
   return (
     <div className="engine-controls">
       <label className="model-control">Model
@@ -18,6 +22,14 @@ export function EngineControls({ id, config, onChange }: { id: string; config: C
         <datalist id={`models-${id}`}>{(config.engine === 'claude' ? claudeModels : codexModels).map((model) => <option key={model} value={model} />)}</datalist>
       </label>
       {config.engine === 'claude' ? <>
+        <label className="model-control">Claude account profile
+          <select aria-label="Claude account profile" value={config.accountProfileId ?? ''} onChange={(event) => {
+            const { accountProfileId: _old, ...rest } = config;
+            onChange(event.target.value ? { ...rest, accountProfileId: event.target.value } : rest);
+          }}><option value="">Default · existing CLI login</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{config.accountProfileId && !profiles.some((p) => p.id === config.accountProfileId) && <option value={config.accountProfileId}>Saved profile · unavailable</option>}</select>
+          <small>Create and connect named accounts in Accounts & connections. Stop this session before changing its account.</small>
+          {error && <small role="alert">{error}</small>}
+        </label>
         <label>thinking.budget_tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
         <label>Max output tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: tokenValue(event.target.value) } })} /></label>
         <label>Session token limit<input type="number" min="0" step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: tokenValue(event.target.value) } })} /></label>

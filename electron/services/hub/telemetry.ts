@@ -28,7 +28,7 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
 export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
-interface Watcher { run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
+interface Watcher { claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
@@ -42,14 +42,14 @@ export class TelemetryService {
     if (config.engine === 'claude' && info.supportsSessionId) launch.args.push('--session-id', run.runId);
     if (config.engine === 'codex' && info.supportsConfig) { const logDir = path.join(this.root, run.runId); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); launch.args.push('--config', `log_dir=${JSON.stringify(logDir.replace(/\\/g, '/'))}`); }
   }
-  start(run: RunningSession, config: CLIEngineConfig) {
-    const watch: Watcher = { run, config, start: Date.now(), file: null, offset: 0, partial: Buffer.alloc(0), model: config.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
+  start(run: RunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
+    const watch: Watcher = { claudeHome, run, config, start: Date.now(), file: null, offset: 0, partial: Buffer.alloc(0), model: config.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() }));
     this.watches.set(run.runId, watch); watch.timer = setInterval(() => this.poll(watch), 750); this.poll(watch);
   }
   private find(w: Watcher): string | null {
     if (w.run.engine === 'claude') {
-      const root = path.join(this.claudeHome, 'projects');
+      const root = path.join(w.claudeHome, 'projects');
       try { for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).slice(0, 500)) { const file = path.join(root, d.name, w.run.runId + '.jsonl'); if (fs.existsSync(file) && fs.lstatSync(file).isFile()) return file; } } catch { /* CLI has not written structured output yet. */ }
       return null;
     }

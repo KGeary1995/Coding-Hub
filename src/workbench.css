@@ -135,3 +135,8 @@ h1 { font-size: 24px; color: #edf0f6; font-weight: 600; letter-spacing: -.6px; }
 @media (max-width: 1180px) { .nav-item { font-size: 11px; } .account-details { grid-column: 1 / -1; } }
 
 @media (max-width: 1180px) { .workspace-topbar .privacy-badge, .workspace-topbar .version { display: none; } .command-trigger { min-width: 140px; } }
+.claude-profile-manager { margin-top: 20px; }
+.profile-create, .profile-connect { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.profile-create label, .profile-connect label { display: flex; flex-direction: column; gap: 8px; min-width: 240px; color: #abb8d0; font-size: 11px; }
+.profile-connect .account-state { align-self: center; }
+.account-profile-chip { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border: 1px solid #43506a; border-radius: 4px; color: #b4c4e8; font-size: 9px; flex-shrink: 0; }

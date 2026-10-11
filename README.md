@@ -2,6 +2,16 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Multiple Claude accounts (v1.4.0)
+
+Open **Accounts & connections → Claude account profiles**. Add a name such as Personal or Work, then use **Connect Claude profile** and complete the official CLI login. Choose the intended account in the browser; browser cookies can preselect your current account. Repeat for your other accounts. Up to ten named profiles are supported, plus **Default**, which preserves your existing local CLI login.
+
+In each Claude session, open **Configure → Claude account profile**, select a profile, and start the session. Connect a named profile before launching; the host verifies its CLI login and blocks unverified or signed-out profiles. Different profiles can run at the same time, within the existing four-session limit. Stop a session before changing its account. Reconnecting a named profile requires stopping sessions using it; other profiles can continue. Labels can be renamed without changing login storage or saved session assignments.
+
+Named profiles use separate `CLAUDE_CONFIG_DIR` directories under `~/.coding-hub/claude-profiles/<profile-id>/`. The registry stores only profile IDs, labels, and creation dates. Claude Code handles credential storage and refresh; Coding Hub does not copy, read, or export credential files. Authentication environment overrides inherited from the host are cleared for named profiles. The default login and other host environment variables are preserved. Project settings can still explicitly configure authentication helpers or environment values; review those if the CLI reports an unexpected account. Named profiles start with independent user settings, skills, and user MCP configuration; project-level instructions and integrations remain shared. Profile credentials are not included in curated Drive memory or source archives. Usage follows each profile's structured session logs, and profile choices are retained in local workspace/history settings.
+
+Profile tests use isolated fixture CLIs to exercise separate logins, simultaneous PTYs, telemetry, reconnect protection, and restart persistence. Real subscription login and model completion must be verified on your desktop with your own accounts. Credential-directory behavior was inspected in Anthropic's published Claude Code 2.1.29 CLI; use a current official CLI.
+
 ## Workbench layout (v1.3.0)
 
 Navigation is grouped into Workbench, Review & insights, Agent configuration, and Resources. The active project and local CLI health sit above a compact session toolbar. The terminal canvas fills the remaining window; columns, rows, and a four-session grid adapt to its height. Larger custom tiles scroll within the canvas. Toggle the file explorer beside the layout controls, or isolate a session using its expand button. Project setup remains visible until a root folder is selected.
@@ -146,6 +156,7 @@ npm run test:pty
 npm run test:memory
 npm run test:desktop
 npm run test:design
+npm run test:profiles
 npm run build
 ```
 

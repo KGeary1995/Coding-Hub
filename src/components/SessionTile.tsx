@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, Copy, FolderOpen, Folder, GripVertical, Maximize2, Minimize2, Settings2, TerminalSquare, X, Play, Square, LoaderCircle, OctagonPause, AlertCircle, Asterisk } from 'lucide-react';
+import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
@@ -10,6 +11,10 @@ import { writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, formatNumber, dollars } from '../state/hub-store';
 
 export function SessionTile({ session, index }: { session: Session; index: number }) {
+  const profiles = useAccountStore((s) => s.profiles);
+  useEffect(() => { if (session.config.engine === 'claude') void refreshClaudeProfiles(); }, [session.config.engine]);
+  const profileId = session.config.engine === 'claude' ? session.config.accountProfileId : undefined;
+  const profileName = profileId ? profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile' : 'Default';
   const [controlsOpen, setControlsOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
   const usage = useHubStore((s) => s.usage.find((u) => u.runId === session.runId));
@@ -38,7 +43,7 @@ export function SessionTile({ session, index }: { session: Session; index: numbe
           <button className="icon-button" title="Stop and close session (keep at least two)" aria-label={`Close session ${index + 1}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={15} /></button>
         </span>
       </header>
-      <div className="tile-model-row"><span className={`process-dot ${session.status}`} /><span className="process-status">{session.status}</span><span className="model-name" title={session.config.model || 'Model from local CLI configuration'}>{session.config.model || 'CLI default model'}</span><button className="quiet-button" onClick={() => setControlsOpen(!controlsOpen)}>{busy ? 'Settings' : 'Configure'} <ChevronDown size={12} /></button></div>
+      <div className="tile-model-row">{claude && <span className="account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}<span className={`process-dot ${session.status}`} /><span className="process-status">{session.status}</span><span className="model-name" title={session.config.model || 'Model from local CLI configuration'}>{session.config.model || 'CLI default model'}</span><button className="quiet-button" onClick={() => setControlsOpen(!controlsOpen)}>{busy ? 'Settings' : 'Configure'} <ChevronDown size={12} /></button></div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
         <EngineControls id={session.id} config={session.config} onChange={(config) => updateConfig(session.id, config)} />
         <label className="binding-control">Working directory<select aria-label="Working directory" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
@@ -51,7 +56,7 @@ export function SessionTile({ session, index }: { session: Session; index: numbe
         {session.status === 'running' ? <><button className="icon-button" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${index + 1}`} onClick={() => void writeTerminal(session.id, '\x03')} disabled={stopping}><OctagonPause size={14} /></button><button className="button stop-button" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={12} className="spin" /> : <Square size={11} />}{stopping ? 'Stopping' : 'Stop'}</button></> : <button className="button start-button" onClick={() => void startSession(session.id)} disabled={session.status === 'starting'}>{session.status === 'starting' ? <LoaderCircle size={12} className="spin" /> : <Play size={11} />}{session.status === 'starting' ? 'Starting' : session.status === 'exited' ? 'Restart' : 'Start session'}</button>}
       </div>
       {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && <button className="quiet-button" onClick={() => useWorkspaceStore.getState().setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
-      {!busy && engines.find((engine) => engine.engine === session.config.engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
+      {!busy && !profileId && engines.find((engine) => engine.engine === session.config.engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       <div className="terminal-frame"><TerminalViewport session={session} /></div>
       <footer className="tile-footer"><span className="cwd-label" title={cwd ?? 'No workspace selected'}><Folder size={12} />{cwd || 'Choose a working directory'}</span><span className="token-label" title={usage ? 'Reported CLI usage · estimated cost' : 'Waiting for structured CLI usage'}>Tokens <b>{usage ? formatNumber(tokens(usage)) : '—'}</b><span>Cost <b>{dollars(usage?.cost ?? null)}</b></span>{usage?.context && <span>Context <b>{Math.round(usage.context.used / usage.context.limit * 100)}%</b></span>}</span></footer>
     </article>

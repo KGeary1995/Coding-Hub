@@ -4,6 +4,8 @@ export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface ClaudeCLIEngineConfig {
   engine: 'claude';
+  /** Absent selects the existing host CLI login; named profiles are host-owned IDs. */
+  accountProfileId?: string;
   model: string;
   thinking: { budget_tokens: number | null };
   tokenLimits: {

@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ClaudeProfiles } from './claude-profiles';
 import { describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { AccountEvent, AccountProvider } from '../../../shared/accounts';
@@ -43,6 +47,26 @@ describe('account setup independent of project sessions', () => {
     const missing = fixture(async (provider) => discovery(provider, false));
     await expect(missing.manager.execute(7, { action: 'login', provider: 'codex', cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'LOGIN_UNAVAILABLE' });
     expect(missing.spawn).not.toHaveBeenCalled(); await manager.close(); await missing.manager.close();
+  });
+  it('routes named login and authentication checks through one isolated directory and blocks reconnecting an active profile', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-login-profile-'));
+    const profiles = new ClaudeProfiles(root); const profile = profiles.create('Work');
+    const pty = new FakePty(); const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => pty as unknown as IPty);
+    const inspect = vi.fn(async (provider: AccountProvider, _env?: Record<string, string>) => discovery(provider));
+    let inUse = false;
+    const manager = new AccountLoginManager(() => {}, { profiles, profileInUse: () => inUse, inspect, spawn, openGuide: async () => {}, stopDependencies: { platform: 'linux', signalGroup: () => {} } });
+    try {
+      const login = await manager.execute(7, { action: 'login', provider: 'claude', profileId: profile.id, cols: 80, rows: 24 });
+      expect(login).toMatchObject({ profileId: profile.id });
+      expect(spawn.mock.calls[0][2]).toMatchObject({ env: { CLAUDE_CONFIG_DIR: profiles.directory(profile.id) } });
+      expect(inspect.mock.calls[0][1]?.CLAUDE_CONFIG_DIR).toBe(profiles.directory(profile.id));
+      await manager.stopOwner(7);
+      await manager.execute(7, { action: 'status', profileId: profile.id });
+      expect(inspect.mock.calls.filter(([provider]) => provider === 'claude').at(-1)?.[1]?.CLAUDE_CONFIG_DIR).toBe(profiles.directory(profile.id));
+      inUse = true;
+      await expect(manager.execute(7, { action: 'login', provider: 'claude', profileId: profile.id, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'PROFILE_BUSY' });
+      await expect(manager.execute(7, { action: 'login', provider: 'codex', profileId: profile.id, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_REQUEST' });
+    } finally { await manager.close(); fs.rmSync(root, { recursive: true, force: true }); }
   });
   it('keeps GitHub status redacted and opens only fixed official installation guides', async () => {
     expect(githubAuthentication('', 'Logged in to github.com account private-user (keyring)\nToken: private-token', 0)).toBe('authenticated');

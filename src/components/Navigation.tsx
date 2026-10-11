@@ -42,7 +42,7 @@ export function Navigation() {
         </div>)}
       </nav>
       <button className={`nav-item settings-item ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><Settings2 size={18} />Settings</button>
-      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v1.3.0</small></span></div>
+      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v1.4.0</small></span></div>
     </aside>
   );
 }

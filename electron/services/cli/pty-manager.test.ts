@@ -29,6 +29,31 @@ function fixture(discover = async (engine: 'claude' | 'codex') => engines(engine
 }
 
 describe('PTY lifecycle and IPC ownership', () => {
+  it('binds concurrent Claude sessions to their selected profile environments before discovery and spawning', async () => {
+    const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
+    const discover = vi.fn(async (engine: 'claude' | 'codex', _env?: Record<string, string>) => { const result = engines(engine); result.info.authentication = { state: 'authenticated', checkedAt: new Date().toISOString(), message: 'Profile authenticated.' }; return result; });
+    const profileEnvironment = vi.fn((base: Record<string, string>, id?: string) => id ? { PATH: base.PATH, CLAUDE_CONFIG_DIR: '/profiles/' + id } : base);
+    const manager = new PtyManager(() => {}, { spawn, discover, profileEnvironment, environment: () => ({ PATH: '/bin', ANTHROPIC_API_KEY: 'inherited' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } });
+    managers.push(manager);
+    const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+    await Promise.all(ids.map((id, index) => manager.start(7, { ...request('profile-' + index), config: { engine: 'claude', accountProfileId: id, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })));
+    expect(manager.usesProfile(ids[0])).toBe(true); expect(manager.usesProfile(ids[1])).toBe(true);
+    expect(discover.mock.calls.map((call) => call[1]?.CLAUDE_CONFIG_DIR).sort()).toEqual(ids.map((id) => '/profiles/' + id).sort());
+    expect(spawn.mock.calls.map((call) => (call[2] as { env: Record<string, string> }).env.CLAUDE_CONFIG_DIR).sort()).toEqual(ids.map((id) => '/profiles/' + id).sort());
+    for (const call of spawn.mock.calls) expect((call[2] as { env: Record<string, string> }).env).not.toHaveProperty('ANTHROPIC_API_KEY');
+  });
+  it('requires a verified profile login before starting so sign-in output cannot enter coding history', async () => {
+    const spawn = vi.fn();
+    const manager = new PtyManager(() => {}, { spawn, discover: async (engine) => engines(engine), profileEnvironment: (base) => base });
+    managers.push(manager);
+    await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_LOGIN_REQUIRED' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it('rejects named profiles when host profile storage is unavailable instead of using the default account', async () => {
+    const { manager, spawn } = fixture();
+    await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_STORAGE' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
   it('routes input/resize and flushes the last output before exit', async () => {
     const { manager, processes, events, spawn } = fixture();
     const run = await manager.start(7, request());

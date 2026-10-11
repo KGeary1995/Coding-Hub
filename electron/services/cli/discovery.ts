@@ -81,10 +81,9 @@ export async function checkAuthentication(engine: CLIEngine, executable: Executa
   return classifyAuthentication(engine, result);
 }
 
-export async function discoverEngine(engine: CLIEngine): Promise<DiscoveredEngine> {
+export async function discoverEngine(engine: CLIEngine, env = hostEnvironment()): Promise<DiscoveredEngine> {
   const info: EngineInfo = { engine, available: false, executable: null, version: null, supportsModel: false, supportsConfig: false, supportsNoDaemon: false, error: null, checkedAt: new Date().toISOString() };
   try {
-    const env = hostEnvironment();
     const executable = await findExecutable(engine, env);
     info.executable = executable.displayPath;
     const [version, help] = await Promise.all([probe(executable, '--version', env), probe(executable, '--help', env)]);
