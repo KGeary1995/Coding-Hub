@@ -2,6 +2,12 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Workbench layout (v1.3.0)
+
+Navigation is grouped into Workbench, Review & insights, Agent configuration, and Resources. The active project and local CLI health sit above a compact session toolbar. The terminal canvas fills the remaining window; columns, rows, and a four-session grid adapt to its height. Larger custom tiles scroll within the canvas. Toggle the file explorer beside the layout controls, or isolate a session using its expand button. Project setup remains visible until a root folder is selected.
+
+Accounts shows connection actions first, with executable paths and login commands under **CLI details & login command**. The temporary sign-in terminal expands while a login is active. The shared visual system uses neutral surfaces, blue navigation/actions, amber Claude accents, and green for Git additions and running/authenticated states. Existing compact density, zoom, contrast, keyboard shortcuts, and saved layouts remain available.
+
 ## Run on Windows
 
 Install **Node.js 24 LTS** (minimum 22.13), Git for Windows, and the official Claude Code and Codex CLIs. Authenticate each CLI using its normal login flow. Extract the source ZIP into a local development folder, then open PowerShell **in the folder containing `package.json`**:
@@ -139,6 +145,7 @@ npm test
 npm run test:pty
 npm run test:memory
 npm run test:desktop
+npm run test:design
 npm run build
 ```
 

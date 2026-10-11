@@ -1,4 +1,4 @@
-import { FolderOpen, CircleUserRound, Blocks, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
+import { FolderOpen, CircleUserRound, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 
 const navigation = [
@@ -24,17 +24,25 @@ export function Navigation() {
         <span className="brand-mark"><Braces size={22} strokeWidth={2.4} /></span>
         <span>Coding Hub<small>LOCAL AI WORKSPACE</small></span>
       </a>
-      <div className="nav-section-label">WORKSPACE</div>
       <nav aria-label="Main navigation">
-        {navigation.map(({ id, label, icon: Icon }) => (
-          <button key={id} aria-label={label} className={`nav-item ${activeView === id ? 'active' : ''}`} onClick={() => setView(id)} aria-current={activeView === id ? 'page' : undefined}>
-            <Icon size={18} /><span>{label}</span>{id === 'workspace' && <span className="nav-count">{sessions.length}</span>}
-          </button>
-        ))}
+        {[
+          { label: 'WORKBENCH', ids: ['workspace', 'projects', 'accounts'] },
+          { label: 'REVIEW & INSIGHTS', ids: ['files', 'diff', 'history', 'usage'] },
+          { label: 'AGENT CONFIGURATION', ids: ['connectors', 'skills', 'memory', 'rules'] },
+          { label: 'RESOURCES', ids: ['help'] },
+        ].map((group) => <div className="nav-group" key={group.label}>
+          <div className="nav-section-label">{group.label}</div>
+          {group.ids.map((id) => {
+            const item = navigation.find((entry) => entry.id === id)!;
+            const Icon = item.icon;
+            return <button key={id} aria-label={item.label} className={`nav-item ${activeView === id ? 'active' : ''}`} onClick={() => setView(item.id)} aria-current={activeView === id ? 'page' : undefined}>
+              <Icon size={16} /><span>{item.label}</span>{id === 'workspace' && <span className="nav-count">{sessions.length}</span>}
+            </button>;
+          })}
+        </div>)}
       </nav>
-      <div className="sidebar-note"><Blocks size={21} /><strong>Your tools. One workspace.</strong><p>Claude Code and Codex, side by side on your machine.</p><span className="local-label"><i /> Local by design</span></div>
       <button className={`nav-item settings-item ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><Settings2 size={18} />Settings</button>
-      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v1.2.1</small></span></div>
+      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v1.3.0</small></span></div>
     </aside>
   );
 }

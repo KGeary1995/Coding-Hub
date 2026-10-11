@@ -4,7 +4,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 interface DisplaySettings { scale: number; density: 'comfortable' | 'compact'; contrast: boolean }
 const defaults: DisplaySettings = { scale: 100, density: 'comfortable', contrast: false };
 function load(): DisplaySettings { try { const value = JSON.parse(localStorage.getItem('coding-hub-display') ?? 'null'); return value && [80, 90, 100, 110, 125].includes(value.scale) && ['comfortable', 'compact'].includes(value.density) && typeof value.contrast === 'boolean' ? value : defaults; } catch { return defaults; } }
-function apply(value: DisplaySettings) { document.documentElement.style.zoom = String(value.scale / 100); document.documentElement.dataset.density = value.density; document.documentElement.dataset.contrast = value.contrast ? 'high' : 'normal'; }
+function apply(value: DisplaySettings) { document.documentElement.style.zoom = String(value.scale / 100); document.documentElement.style.setProperty('--display-scale', String(value.scale / 100)); document.documentElement.dataset.density = value.density; document.documentElement.dataset.contrast = value.contrast ? 'high' : 'normal'; }
 export function useAccessibility() {
   useEffect(() => {
     apply(load());
