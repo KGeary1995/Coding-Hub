@@ -2,7 +2,7 @@
 
 ## Build a candidate
 
-On a Windows desktop with Node >=22.13 installed, run `npm ci`, then `npm run dist:win`. Build candidates on Windows using the manually triggered **Windows release candidate** GitHub Actions workflow too. The workflow executes unit/release tests, production desktop smoke tests using fixture CLIs, package verification, and an isolated installed-app upgrade/uninstall test. It uploads artifacts without creating tags or publishing releases.
+On a Windows desktop with Node >=22.13 installed, run `npm ci`, then `npm run dist:win`. Build candidates on Windows using the **Windows release candidate** GitHub Actions workflow too. It runs on pushes to main and supports manual dispatch. The workflow executes unit/release tests, production desktop smoke tests using fixture CLIs, package verification, and an isolated installed-app upgrade/uninstall test. It uploads artifacts without creating tags or publishing releases.
 
 Each attempt packages into a unique `release/.build-<id>/` staging folder. The previous `win-unpacked` is never renamed or deleted, so a running older unpacked app cannot lock the new build. Once verified, artifacts are promoted to `release/`, with metadata last. `last-build.json` identifies the verified staging directory for `npm run verify:win`. If an installer EXE itself is open and locked, close it and retry; its staged candidate remains available. Old staging folders can be manually archived after closing apps that use them.
 
