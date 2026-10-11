@@ -1,0 +1,45 @@
+name: Windows release candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:release
+      - run: npm run test:desktop
+      - run: npm run dist:win
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      - name: Build upgrade baseline (same source, previous package version)
+        run: node scripts/build-windows.cjs --output release/baseline --version 1.2.0
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      - run: npm run test:install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-Coding-Hub-Windows-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            release/*-Setup.exe
+            release/*-Setup.exe.blockmap
+            release/*-Portable.exe
+            release/latest.yml
+            release/windows-install-report.json
+      - name: Upload installation report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-install-diagnostics-${{ github.run_number }}
+          if-no-files-found: ignore
+          path: release/windows-install-report.json

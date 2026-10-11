@@ -1,0 +1,169 @@
+# AI Coding Hub
+
+A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
+
+## Run on Windows
+
+Install **Node.js 24 LTS** (minimum 22.13), Git for Windows, and the official Claude Code and Codex CLIs. Authenticate each CLI using its normal login flow. Extract the source ZIP into a local development folder, then open PowerShell **in the folder containing `package.json`**:
+
+```powershell
+npm.cmd ci
+npm.cmd run dev
+```
+
+`npm.cmd` avoids the blocked PowerShell `npm.ps1` wrapper without changing execution policy. Verify `claude --version`, `codex --version`, and `git --version` in the terminal used to launch the app. Use `claude.cmd` / `codex.cmd` for npm launchers if their PowerShell wrappers are blocked. Claude Code may require Git Bash according to its current Windows installation instructions.
+
+After installation, `npm.cmd start` builds and opens the production app. Restart the app after installing a CLI, changing PATH, or editing native host source. Renderer edits reload during development.
+
+## Account and project setup (v1.2.1)
+
+Open **Accounts & connections** to connect Claude Code, OpenAI Codex, and GitHub before starting a coding session. Refresh detects existing CLI sign-ins; Connect runs the official login command in a temporary interactive terminal. The CLI may open your browser or display a URL/code. Credentials remain with the provider CLI; login output is excluded from coding history and Drive memory. Account setup does not require a project or shared-rule application. Missing CLIs show installation guides and Windows commands; installing the app does not install the agent CLIs.
+
+Open **Projects** to browse an existing folder, enter its absolute path, create a new local project, or list/clone GitHub repositories. A folder picker hides files; use **Use this folder** to select its current location. GitHub listing requires the local GitHub CLI (`gh`) and its own login; it lists up to 100 repositories for the account/selected owner. Cloning requires Git and a parent folder, preserves existing folders, and opens the new local copy. Independent session settings also provide **Browse repository folder**. Apply shared rules to the selected folder when rules are configured.
+
+**Stop** now terminates a Windows session’s process tree before closing ConPTY, verifies its launcher exited, and gives cleanup more time. Unix stops its process group with TERM/KILL escalation. A missing PTY exit event is recovered only after the process is verified gone. Account-login cancellation shares these safeguards. The terminal exits its alternate screen and disables input after exit; Stop failures keep the PID available and surface an error.
+
+Windows packaging uses a fresh staging folder for every attempt, avoiding the locked `release/win-unpacked` rename failure. Verified installers/update metadata are then copied to `release/`; prior staging directories remain intact. `npm run verify:win` follows the last successful build manifest. A Windows workflow additionally installs two package versions, checks retained data, and uninstalls in an isolated runner.
+
+## Windows installer and updates (v1.2)
+
+The per-user installer creates Start Menu and desktop shortcuts and does not require administrator access. Installed editions provide **Settings → Application updates**, with automatic stable-release checks, explicit downloads, progress, and a confirmed restart. Checks contact GitHub; project contents and terminal output are not sent. Source and portable editions use manual upgrades.
+
+Installation is blocked while CLI processes are running or starting. The app saves the workspace before starting the installer and blocks new launches during that restart. Downloaded updates do not install on ordinary app exit. All local settings, rules, history, and handoffs remain in `~/.coding-hub` across upgrades and uninstall.
+
+A public stable GitHub release with its installer, `latest.yml`, and blockmap is required for live updates. No release has been published by this change. The manual Windows workflow builds and tests a reviewable candidate; [release instructions](docs/windows-releases.md) cover signing and publication.
+
+## Reliability and workflow improvements (v1.2)
+
+- **CLI health:** inspect installed versions, advertised flags, and redacted local authentication status. Fresh discovery validates every launch. Unknown login or model access stays unknown; the app never tests model access through an API or bypasses CLI permissions.
+- **Isolated worktrees:** in session settings, choose **Create isolated worktree**. This binds the panel to a unique `coding-hub/<uuid>` branch starting from committed HEAD. Uncommitted changes and untracked files are not copied. Apply shared rules in that directory before starting. Use Git diff with its repository selected, then combine branches through your normal Git review. Settings removes clean, unbound managed worktrees while retaining their branches. No automatic merges or commits.
+- **Recovery:** interrupted processes are marked in history. **Restore launch settings to a session** creates an idle panel with its recorded repository and parameters; it never revives a PID or claims to resume a model conversation. With four panels, confirmation allows replacing the first idle panel; active panels are preserved. Start the new CLI when ready.
+- **Rules validation:** the Shared rules page scans bounded project instruction files, warns about nested/local/override scopes, and offers defined npm `test`, `typecheck`, and `lint` scripts. A native confirmation precedes execution of project code and npm pre/post hooks. Output is capped at 512,000 characters and checks stop after 60 seconds. Semantic conflicts and compliance beyond test coverage cannot be guaranteed.
+- **Memory history:** search handoff titles, content, and authors. Revise notes by creating new immutable handoffs linked to their originals. Concurrent revisions coexist. **Inspect Drive conflicts → Keep both versions** preserves both reviewed contents under separate IDs and a backup of the conflicting remote file; stale resolution is rejected. The local folder mirror is tested, while Google Drive owns actual cloud transport.
+- **Usage evidence:** each run shows its CLI JSONL source, reported-count label, event count, and configured-price basis. Missing/invalid primary token fields stay unknown. Costs use current exact-model rates and recalculate historical estimates when rates change; they are not billing records.
+- **Display and keyboard:** Settings offers 80–125% interface scale, compact/comfortable density, and higher contrast. `Alt+1–4` focuses sessions, `F1` opens help, and `Ctrl/Cmd+Shift+P` opens commands. Visible focus, a skip link, and reduced-motion support improve navigation. Display settings remain in the local Electron profile, separately from synced memory.
+
+## Help and shared rules (v1.1)
+
+**Help & AI guide** provides 24 searchable local articles covering AI agents, models, reasoning, tokens/context, MCP, skills, plugins, hooks, permissions, instruction scope, memory, prompting, review, usage, authentication, Windows setup, and troubleshooting. Search titles and article text, filter by category, and follow related topics. The guide is available offline and can be opened from navigation, the top bar, or the command menu.
+
+**Shared rules** provides one saved rule document for Claude Code and Codex:
+
+1. Open Shared rules and write your expectations, or use the example as a starting point.
+2. Select the workspace root, independent session repositories, and any additional project folders you want to receive them. Previously registered projects are listed too.
+3. Choose **Save and apply**. The identical managed section is written into each selected project's `CLAUDE.md` and `AGENTS.md`. Existing text and shared-memory sections are preserved; private backups are created.
+4. Restart running sessions to load the new instructions. When nonempty shared rules exist, the native host refuses new launches in a directory unless both engine files contain the current saved version. Apply the rules to a new project before starting its sessions.
+
+The rule source is local at `~/.coding-hub/shared-rules.json`; it is separate from Drive handoff notes. Updating the rules applies them to selected projects. Unselected projects with an older version must be updated before their next launch through Coding Hub. CLI sessions started outside this app use their own normal instruction discovery.
+
+Saving with no projects selected stores the rule draft locally. Clearing the editor and saving removes only the managed rules section from selected projects. Refresh/reload explicitly replaces an unsaved draft. Stale project files and stale saved-rule revisions are rejected rather than overwritten; failed multi-file saves roll back completed replacements when no external edit or file lock prevents restoration.
+
+These rules are real project instructions, not a guarantee of model compliance. Higher-priority engine instructions, nested project files, and CLI permissions still apply. Resolve contradictory instructions and verify results. Tests, hooks, permissions, and CI provide mechanical enforcement when required. Rules do not automatically commit, deploy, or change permission settings.
+
+## Shared Google Drive memory
+
+The default shared folder is **`G:\My Drive\Coding Hub`**, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Coding Hub.
+
+1. Confirm **Settings → Local Drive folder** points to the actual synced/mounted folder. Save preferences if you change it.
+2. Open your project, then open **Shared memory**. Use the same **shared project key** on every desktop participating in that project's handoffs. Different project keys keep notes separate.
+3. Use **Enable memory for both CLIs** and review the changes, then **Install local memory server**. This adds a `coding-hub-memory` entry to project `.mcp.json` and `.codex/config.toml`, and appends marked instructions to `CLAUDE.md` and `AGENTS.md`. Existing files receive private backups. Existing server entries with that name are never silently replaced.
+4. Restart the CLI sessions. Approve the MCP server / project trust through the CLI's normal controls. The local server exposes **read_memory** and **write_handoff**.
+5. Save a manual handoff or ask the agent to record its decisions, changed files, checks, remaining work, and blockers. The next agent can read those notes through MCP.
+
+Notes are stored locally at `~/.coding-hub/memory/<project-key>/<uuid>.json` and mirrored into `G:\My Drive\Coding Hub\AI-Coding-Hub-Memory\<project-key>\`. Sync is additive and retries every 30 seconds for projects opened in the app; **Sync now** gives an explicit result. If Drive is offline, notes remain local and sync later. Conflicting note IDs preserve both files and require review. Google Drive may create its own conflict copies; these are not silently merged.
+
+The app reports folder synchronization, not Google's cloud upload completion. Check Drive for desktop's own status when moving between machines. The existing Drive folder URL is a reference; the app uses the local folder, not a website connector. Terminal logs, SQLite databases, and credentials do not sync. Conversations are not automatically copied between agents; curated notes are read as project data. The memory server uses the app's current executable and compiled source paths; reinstall its project entries if you move the app directory or switch to a packaged executable.
+
+## Workspace
+
+- Open a local project and launch each engine independently. CLIs inherit local authentication, environment, Git context, hooks, and tools. There are no direct model API requests or approval-bypass flags.
+- Run **2–4** configured panels; duplicate, close, drag, resize, split into rows/columns, arrange a grid, or isolate a session. Panels may share the root or use independent repository directories. Launch settings lock while running.
+- Click a terminal to type or paste. **Interrupt / Ctrl+C** interrupts an operation; **Stop** ends the process. Xterm supports ANSI output, interactive prompts, resize propagation, and a WebGL renderer with fallback.
+- **Show explorer** opens a file tree beside the terminals. **Files** provides the larger source preview; **Changes** provides staged, unstaged, untracked, renamed, binary, and conflict diffs. Choose workspace or session context to review another repository. Refresh after agent changes. These views do not stage, discard, or commit; run Git commands in your normal workflow after review.
+- **Ctrl+Shift+P** (Cmd+Shift+P on macOS) opens the command menu. Switching pages retains the same terminal and scrollback.
+
+Closing/reloading stops the app's PTYs. The app restores directory bindings, models, raw settings, and layout as **idle** panels. It does not attach to old PIDs or resume an agent conversation automatically. **Restart** starts a new CLI process; use the CLI's own resume controls for prior conversations. Detached background jobs and remote processes have their own lifetimes.
+
+File previews are bounded to 1 MiB / 4,000 rendered lines; folders list up to 500 entries. UTF-8 and BOM-marked UTF-16 are supported. Links and special files cannot be opened; Git metadata is hidden. Git commands have a ten-second timeout and 2 MiB output limit; lists cap at 1,000 changed paths. Limits and unsupported encodings are reported in the interface.
+
+## Raw engine controls
+
+Blank fields inherit local CLI settings. Suggested model names are editable examples; your CLI and account determine model availability.
+
+**Claude Code:** model maps to `--model`; manual `thinking.budget_tokens` maps to `MAX_THINKING_TOKENS` only for explicit supported manual-thinking models. Adaptive-thinking aliases/default models are rejected when a manual budget is configured. The budget must be at least 1,024 and smaller than an explicit output limit. Maximum output tokens maps to `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. A session token threshold stops the process **after reported usage** reaches it; a response may exceed it. Enforcement requires structured transcript usage and advertised `--session-id` support. It is not a hard request-level billing cap.
+
+**Codex:** model maps to `--model`; reasoning maps to `--config model_reasoning_effort="<effort>"`. Choices are `none`, `low`, `medium`, `high`, and `xhigh`; supported efforts depend on the selected model. When advertised, `--no-daemon` keeps the session attached to its PTY.
+
+Windows npm launchers resolve to the official package's declared JavaScript entry and run in Electron's Node mode with argument arrays, without shell interpolation.
+
+## MCP, skills, plugins, and hooks
+
+**MCP servers** inspects Claude's global `.claude.json` (including a custom CLAUDE_CONFIG_DIR / legacy `.config.json` when applicable), project-local server entries, project `.mcp.json`, and Codex's user/project `config.toml`. Environment and header names are displayed without their values. The legacy `~/.claude/mcp.json` is identified if present but is not treated as automatically active in current Claude Code.
+
+Add stdio or HTTP servers, toggle enablement, or explicitly remove them. Claude toggles are project scoped; select a project before toggling its user servers. Edits preserve unknown settings, reject stale inspected files and parse errors, create private backups, and replace the target atomically. TOML comments and formatting may normalize. Enabled means configured; server health, authorization, and project trust are verified by the CLI when it starts. Restart sessions after edits.
+
+**Skills & plugins** inspects local `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, skill folders, installed plugin metadata/cache manifests, configured plugin activation, and hook event names. Supported Codex skill and configured plugin activation can be toggled. Instruction files and Claude skills are inspected in place; hook commands are never executed by discovery. Inspection is bounded and does not resolve remote marketplaces or install third-party packages.
+
+## Usage and prices
+
+Usage comes from the CLIs' **local structured JSONL session logs**. Claude sessions are correlated by the app's generated UUID; Codex uses a per-run TUI log directory and thread ID to locate its rollout. CODEX_HOME and CLI authentication are inherited unchanged. Same-directory Codex sessions are not assigned usage when their thread association is ambiguous. Unsupported versions, disabled transcript logging, or missing usage events display unknown values.
+
+Repeated Claude message snapshots are deduplicated; Codex cumulative events replace earlier totals. Claude cache reads/writes are separate from noncached input. Codex cached input is already included in input, and reasoning tokens are already included in output. Missing reasoning or context limits remain unknown. Context percentage is shown only when the CLI supplies a usage/window pair.
+
+Configure exact model IDs and **USD per million tokens** rates in **Settings → Model pricing**. Unconfigured models show no cost estimate. Rates are user supplied; estimates are not an invoice and exclude discounts and billing adjustments. The Usage dashboard provides per-run counts, estimates, and the latest 14 active days. Daily totals group entire runs by session start date in local time, including sessions crossing midnight. Usage records retain up to one year and the UI loads the latest 2,000 runs.
+
+## Local storage
+
+All runtime data is outside the source folder, normally `C:\Users\<you>\.coding-hub` on Windows:
+
+| Location | Contents |
+| --- | --- |
+| `storage.db` | Workspace settings and session run metadata |
+| `logs/<run-id>.log` | Terminal output, up to 5 MiB per run |
+| `telemetry/usage.db` | Deduplicated usage records and run metadata |
+| `preferences.json` | Drive directory, terminal font size, price rates |
+| `worktrees.json`, `worktrees/<uuid>/` | Managed isolated branches and working directories |
+| `updates.json` | Automatic update-check preference |
+| `shared-rules.json` | Canonical shared rules and registered project directories |
+| `memory/<project>/<note-id>.json` | Curated handoffs |
+
+Finished output retains up to **100 runs for 30 days**; active runs are excluded from pruning. The history viewer shows the last 1 MiB of large logs, strips ANSI escapes, and identifies capped/interrupted runs. Normal closing requests a final settings snapshot, stops processes, and flushes logs. Invalid/future saved data is preserved rather than overwritten. Storage failures do not prevent basic interactive CLI execution.
+
+Storage is local and unencrypted. Logs include whatever a CLI prints, including echoed input. Input, environment variables, and authentication files are not collected separately. To change the storage root, set `CODING_HUB_STORAGE_DIR` to an absolute writable path before launch.
+
+## Build and verification
+
+```sh
+npm run typecheck
+npm test
+npm run test:pty
+npm run test:memory
+npm run test:desktop
+npm run build
+```
+
+The desktop smoke test uses test CLIs and isolated real repositories, databases, and a local Drive-folder fixture. It exercises production Electron/preload, actual PTYs, input/resize/retention/cleanup, file and Git review, unchanged index bytes, usage/cost updates, MCP toggles, skill inspection, shared notes/Drive mirror, restoration, unavailable storage, help search/navigation, matching rules in both engines, and launch rejection for unapplied rules. The standalone memory smoke checks an actual stdio MCP process across Claude/Codex fixture sessions.
+
+Cloud Linux validation does not replace authenticated model completion tests or native Windows/macOS testing. Drive folder mirroring is tested locally; actual Drive authentication/upload is managed by your desktop installation and cannot be verified from the cloud machine. The Windows installer and update lifecycle are prepared; live distribution requires a published release. See [Windows releases](docs/windows-releases.md).
+
+Optional Windows installer and portable build:
+
+```powershell
+npm.cmd run dist:win
+```
+
+Outputs go into `release/`. Publishing is disabled. Builds are unsigned unless a signing certificate is configured. The output includes Setup.exe, Portable.exe, latest.yml, and an installer blockmap. The build checks PE architecture, native terminal helpers, and application assets, but does not prove native Windows behavior. node-pty uses real filesystem paths, so the package disables ASAR and retains required runtime helpers.
+
+## macOS/Linux and cloud setup
+
+Use `npm ci`, then `npm run dev` on a graphical desktop. Linux source builds need Python 3, make, a C/C++ compiler, and Electron's GTK/NSS/X11 libraries. macOS may require Xcode Command Line Tools. Windows uses supplied ConPTY binaries; native source rebuilding requires appropriate Visual Studio C++ tools and Windows SDK. `npm run rebuild:native` repairs the binding if needed.
+
+For a read-only cloud home, use writable caches:
+
+```sh
+npm_config_cache=/workspace/.cache/npm npm_package_config_node_gyp_devdir=/workspace/.cache/node-gyp electron_config_cache=/workspace/.cache/electron ELECTRON_GET_USE_PROXY=1 NODE_USE_ENV_PROXY=1 npm ci
+```
+
+Keep TLS and package/artifact integrity checks enabled. `CODING_HUB_TEST_NO_SANDBOX=1` is a test-only desktop runner flag for restricted Linux CI; the production launcher does not supply it. `npm run dev:web` renders a browser preview, which cannot access local processes or native integrations.
+
+See [the folder structure and architecture](docs/architecture.md), [domain interfaces](shared/types.ts), and [native bridge contracts](shared/ipc.ts).

@@ -1,0 +1,8 @@
+import { useEffect, useState } from 'react';
+import type { ManagedWorktree } from '../../shared/project-tools';
+export function WorktreeManager() {
+  const [trees, setTrees] = useState<ManagedWorktree[]>([]); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  async function refresh() { const result = await window.codingHub?.projectTools({ action: 'worktree-list' }); if (result?.ok) setTrees(result.value as ManagedWorktree[]); }
+  useEffect(() => { void refresh(); }, []);
+  return <article className="storage-card"><h2>Managed Git worktrees</h2><p>Create worktrees in a session's settings. Each has its own branch and working files. Review changes using that session's repository in Git diff before combining branches.</p>{error && <p className="error-message" role="alert">{error}</p>}{trees.length ? trees.map((tree) => <div className="hub-preview" key={tree.id}><strong>{tree.branch}</strong><p><code>{tree.directory}</code></p><button className="button secondary" disabled={busy} onClick={() => void (async () => { setBusy(true); setError(''); try { const result = await window.codingHub!.projectTools({ action: 'worktree-remove', id: tree.id }); if (!result.ok) throw new Error(result.error.message); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Removal failed.'); } finally { setBusy(false); } })()}>Remove clean, unbound worktree</button></div>) : <p className="muted">No managed worktrees yet.</p>}<small className="control-note">Removal refuses changed or session-bound worktrees and preserves branches and committed work. Unbind the session first. Nothing is merged, committed, or force deleted automatically.</small></article>;
+}

@@ -1,0 +1,19 @@
+import { useWorkspaceStore } from '../state/workspace-store';
+import { ProjectsPanel } from './ProjectsPanel';
+import { AccountsPanel } from './AccountsPanel';
+import { RulesPanel } from './RulesPanel';
+import { HelpPanel } from './HelpPanel';
+import { ConfigurationPanel, MemoryPanel, SettingsPanel, UsagePanel } from './HubPanels';
+export function FeaturePanel() {
+  const view = useWorkspaceStore((s) => s.activeView);
+  if (view === 'projects') return <ProjectsPanel />;
+  if (view === 'accounts') return <AccountsPanel />;
+  if (view === 'connectors') return <ConfigurationPanel />;
+  if (view === 'skills') return <ConfigurationPanel skills />;
+  if (view === 'memory') return <MemoryPanel />;
+  if (view === 'usage') return <UsagePanel />;
+  if (view === 'rules') return <RulesPanel />;
+  if (view === 'help') return <HelpPanel />;
+  if (view === 'settings') return <SettingsPanel />;
+  return null;
+}

@@ -1,0 +1,30 @@
+import type { CLIEngineConfig, ReasoningEffort } from '../../shared/types';
+
+const claudeModels = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-opus-latest'];
+const codexModels = ['gpt-5.3-codex', 'gpt-5.1-codex-max'];
+const efforts: ReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
+
+function tokenValue(value: string): number | null {
+  if (value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+export function EngineControls({ id, config, onChange }: { id: string; config: CLIEngineConfig; onChange: (config: CLIEngineConfig) => void }) {
+  return (
+    <div className="engine-controls">
+      <label className="model-control">Model
+        <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} value={config.model} onChange={(event) => onChange({ ...config, model: event.target.value })} spellCheck={false} />
+        <datalist id={`models-${id}`}>{(config.engine === 'claude' ? claudeModels : codexModels).map((model) => <option key={model} value={model} />)}</datalist>
+      </label>
+      {config.engine === 'claude' ? <>
+        <label>thinking.budget_tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
+        <label>Max output tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: tokenValue(event.target.value) } })} /></label>
+        <label>Session token limit<input type="number" min="0" step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: tokenValue(event.target.value) } })} /></label>
+      </> : <label>Reasoning effort
+        <select aria-label="Reasoning effort" value={config.reasoningEffort ?? ''} onChange={(event) => onChange({ ...config, reasoningEffort: event.target.value === '' ? null : event.target.value as ReasoningEffort })}><option value="">CLI default</option>{efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select>
+      </label>}
+      <p className="control-note">Blank values inherit local CLI settings. {config.engine === 'claude' ? 'Thinking budgets require an explicit manual-thinking model. Session limits stop the CLI after reported usage reaches the threshold; a response can exceed it. Usage must be available for enforcement.' : 'Reasoning overrides use model_reasoning_effort. The selected model determines which effort levels it accepts.'}</p>
+    </div>
+  );
+}

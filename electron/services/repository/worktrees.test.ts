@@ -1,0 +1,24 @@
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, expect, it, vi } from 'vitest';
+import { WorktreeService } from './worktrees';
+import type { ManagedWorktree } from '../../../shared/project-tools';
+const roots: string[] = [];
+afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+it('isolates two agents from uncommitted files and blocks removing changed or bound worktrees', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });
+  git('init'); writeFileSync(path.join(repository, 'app.txt'), 'committed'); git('add', '.'); git('commit', '-m', 'baseline'); writeFileSync(path.join(repository, 'app.txt'), 'uncommitted');
+  const inUse = vi.fn(() => false); const service = new WorktreeService(path.join(root, 'storage'), inUse);
+  const a = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  const b = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  expect(a.branch).not.toBe(b.branch); expect(readFileSync(path.join(a.directory, 'app.txt'), 'utf8')).toBe('committed');
+  writeFileSync(path.join(a.directory, 'app.txt'), 'agent A'); expect(readFileSync(path.join(b.directory, 'app.txt'), 'utf8')).toBe('committed'); expect(readFileSync(path.join(repository, 'app.txt'), 'utf8')).toBe('uncommitted');
+  await expect(service.execute({ action: 'worktree-remove', id: a.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
+  inUse.mockReturnValue(true); await expect(service.execute({ action: 'worktree-remove', id: b.id })).rejects.toMatchObject({ code: 'WORKTREE_IN_USE' });
+  inUse.mockReturnValue(false); await service.execute({ action: 'worktree-remove', id: b.id }); expect(service.list()).toHaveLength(1);
+  expect(git('branch', '--list', b.branch).toString()).toContain(b.branch);
+  await expect(service.execute({ action: 'worktree-create', directory: 'relative' })).rejects.toMatchObject({ code: 'INVALID_WORKTREE_REQUEST' });
+});

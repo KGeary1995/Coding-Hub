@@ -1,0 +1,102 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { ConfigService, readConfig, updateConfig } from './config';
+import { MemoryService } from './memory';
+import { DriveMirror } from './drive';
+import { DEFAULT_PREFERENCES, type UsageRecord } from '../../../shared/hub';
+import { parseUsage, TelemetryService, totalTokens, usageCost } from './telemetry';
+import { hubRequestSchema } from './service';
+const roots: string[] = [];
+function setup() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-integrations-')); roots.push(root); const project = path.join(root, 'project'); fs.mkdirSync(project); return { root, project }; }
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+describe('native configuration management', () => {
+  it('redacts environment/header credentials, preserves unknown TOML fields, toggles and backs up', () => {
+    const { root, project } = setup(); fs.mkdirSync(path.join(root, '.codex')); const file = path.join(root, '.codex', 'config.toml'); fs.writeFileSync(file, 'model="custom"\n[mcp_servers.private]\ncommand="server"\nargs=["--token", "credential-value"]\nenv={API_KEY="credential-value"}\nenv_vars=["OTHER_KEY"]\ncustom_field=42\n');
+    const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); const server = inventory.servers[0]; expect(JSON.stringify(inventory)).not.toContain('credential-value'); expect(server.transport.type === 'stdio' && server.transport.envVariableNames).toEqual(['API_KEY', 'OTHER_KEY']);
+    service.mutate({ action: 'toggle-server', id: server.id, enabled: false }); const data = readConfig(file).data; expect(data.model).toBe('custom'); expect(data.mcp_servers.private.custom_field).toBe(42); expect(data.mcp_servers.private.env.API_KEY).toBe('credential-value'); expect(data.mcp_servers.private.enabled).toBe(false); expect(fs.readdirSync(path.dirname(file)).some((n) => n.includes('backup'))).toBe(true);
+  });
+  it('rejects stale inspection instead of overwriting CLI changes', () => {
+    const { root, project } = setup(); const file = path.join(project, '.mcp.json'); fs.writeFileSync(file, '{"mcpServers":{"server":{"command":"old"}}}'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const server = service.inventory(project).servers[0]; fs.writeFileSync(file, '{"mcpServers":{"server":{"command":"new"}}}'); expect(() => service.mutate({ action: 'remove-server', id: server.id })).toThrow('changed'); expect(readConfig(file).data.mcpServers.server.command).toBe('new');
+  });
+  it('uses Claude project disable settings and user project-scoped disable lists', () => {
+    const { root, project } = setup(); fs.writeFileSync(path.join(project, '.mcp.json'), '{"mcpServers":{"project-server":{"command":"x"}}}'); fs.writeFileSync(path.join(root, '.claude.json'), '{"mcpServers":{"user-server":{"command":"y"}},"unknown":true}'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project);
+    service.mutate({ action: 'toggle-server', id: inventory.servers.find((s) => s.name === 'project-server')!.id, enabled: false }); expect(readConfig(path.join(project, '.claude', 'settings.local.json')).data.disabledMcpjsonServers).toEqual(['project-server']);
+    service.mutate({ action: 'toggle-server', id: service.inventory(project).servers.find((s) => s.name === 'user-server')!.id, enabled: false }); const data = readConfig(path.join(root, '.claude.json')).data; expect(data.projects[project].disabledMcpServers).toEqual(['user-server']); expect(data.unknown).toBe(true); expect(service.inventory(project).servers.every((s) => !s.enabled)).toBe(true);
+  });
+  it('removes the selected local Claude server when a same-name user server exists', () => {
+    const { root, project } = setup(); const file = path.join(root, '.claude.json'); fs.writeFileSync(file, JSON.stringify({ mcpServers: { duplicate: { command: 'user' } }, projects: { [project]: { mcpServers: { duplicate: { command: 'local' } } } } }));
+    const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); const server = inventory.servers.find((s) => s.transport.type === 'stdio' && s.transport.command === 'local')!; service.mutate({ action: 'remove-server', id: server.id }); const cfg = readConfig(file).data; expect(cfg.mcpServers.duplicate.command).toBe('user'); expect(cfg.projects[project].mcpServers.duplicate).toBeUndefined();
+  });
+  it('keeps malformed config untouched and rejects symbolic links', () => {
+    const { root, project } = setup(); const file = path.join(project, '.mcp.json'); fs.writeFileSync(file, '{broken'); expect(() => updateConfig(file, null, () => {})).toThrow('preserved'); expect(fs.readFileSync(file, 'utf8')).toBe('{broken'); fs.unlinkSync(file); fs.symlinkSync(path.join(root, 'outside.json'), file); expect(() => readConfig(file)).toThrow('symbolic');
+  });
+  it('discovers instruction/skill files and disables a Codex skill without disturbing other settings', () => {
+    const { root, project } = setup(); fs.writeFileSync(path.join(project, 'AGENTS.md'), 'Project instructions'); const skill = path.join(root, '.codex', 'skills', 'review'); fs.mkdirSync(skill, { recursive: true }); fs.writeFileSync(path.join(skill, 'SKILL.md'), '# Review skill'); fs.writeFileSync(path.join(root, '.codex', 'config.toml'), 'model="custom"\n'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); expect(inventory.extensions.some((s) => s.kind === 'memory' && s.preview === 'Project instructions')).toBe(true); const found = inventory.extensions.find((s) => s.kind === 'skill')!; service.mutate({ action: 'toggle-extension', id: found.id, enabled: false }); const cfg = readConfig(path.join(root, '.codex', 'config.toml')).data; expect(cfg.model).toBe('custom'); expect(cfg.skills.config).toEqual([{ path: skill, enabled: false }]);
+  });
+  it('validates IPC inputs, model rates, project keys, and protocol URLs', () => {
+    expect(hubRequestSchema.safeParse({ action: 'memory-list', project: '../other' }).success).toBe(false); expect(hubRequestSchema.safeParse({ action: 'inventory', directory: '/tmp', executable: 'arbitrary' }).success).toBe(false); expect(hubRequestSchema.safeParse({ action: 'save-preferences', preferences: { ...DEFAULT_PREFERENCES, prices: [{ model: 'x', input: -1, output: 1, cacheRead: 1, cacheWrite: 1 }] } }).success).toBe(false);
+  });
+});
+describe('shared handoff memory and Drive mirror', () => {
+  it('syncs immutable notes in both directions and retries without duplication', () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); local.write('shared', 'Claude', 'Next task', 'claude'); remote.write('shared', 'Codex', 'Tests passed', 'codex'); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); expect(drive.sync('shared')).toEqual({ uploaded: 1, downloaded: 1 }); expect(drive.sync('shared')).toEqual({ uploaded: 0, downloaded: 0 }); expect(local.list('shared')).toHaveLength(2); expect(remote.list('shared')).toHaveLength(2);
+  });
+  it('preserves both conflicting versions and remains usable offline', () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); const note = local.write('shared', 'Local', 'Content', 'human'); remote.import({ ...note, content: 'Remote changed' }); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); expect(() => drive.sync('shared')).toThrow('conflicting'); expect(local.list('shared')[0].content).toBe('Content'); expect(remote.list('shared')[0].content).toBe('Remote changed'); fs.rmSync(folder, { recursive: true }); expect(() => drive.sync('shared')).toThrow('unavailable'); expect(local.list('shared')).toHaveLength(1);
+  });
+  it('binds projects independently and refuses invalid paths or note overwrite', () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'memory')); memory.write('alpha', 'A', 'One', 'claude'); memory.write('beta', 'B', 'Two', 'codex'); expect(memory.list('alpha').map((n) => n.content)).toEqual(['One']); expect(() => memory.list('../alpha')).toThrow(); const note = memory.list('alpha')[0]; expect(() => memory.import({ ...note, content: 'Changed' })).toThrow('conflicts');
+  });
+  it('installs both CLI MCP entries and appends instructions while preserving existing content', () => {
+    const { root, project } = setup(); fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Existing instructions\n'); const memory = new MemoryService(path.join(root, 'memory')); memory.install(project, 'shared', '/app/memory-server.js', '/app/electron'); expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toContain('# Existing instructions\n'); expect(readConfig(path.join(project, '.mcp.json')).data.mcpServers['coding-hub-memory'].args).toContain('shared'); expect(readConfig(path.join(project, '.codex', 'config.toml')).data.mcp_servers['coding-hub-memory'].env.ELECTRON_RUN_AS_NODE).toBe('1'); expect(() => memory.install(project, 'shared', '/app/server', '/app/electron')).toThrow('already configured');
+  });
+});
+describe('memory installation rollback', () => {
+  it('restores earlier configuration and instructions if a later replacement fails', () => {
+    const { root, project } = setup(); fs.writeFileSync(path.join(project, 'AGENTS.md'), 'Original instructions');
+    const memory = new MemoryService(path.join(root, 'memory')); const rename = fs.renameSync; let failed = false;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => { if (String(to).endsWith('CLAUDE.md') && !failed) { failed = true; throw new Error('Fixture file lock'); } return rename(from, to); });
+    expect(() => memory.install(project, 'shared', '/app/memory-server.js', '/app/electron')).toThrow('restored');
+    expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toBe('Original instructions');
+    expect(fs.existsSync(path.join(project, '.mcp.json'))).toBe(false); expect(fs.existsSync(path.join(project, '.codex', 'config.toml'))).toBe(false);
+  });
+});
+describe('structured telemetry', () => {
+  const run = { runId: randomUUID(), sessionId: 'session', engine: 'claude' as const, cwd: '/project', pid: 1 };
+  it('parses actual engine formats without treating reasoning as additional output', () => {
+    const event = parseUsage('codex', { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 60, output_tokens: 40, reasoning_output_tokens: 20 }, last_token_usage: { input_tokens: 90, output_tokens: 30 }, model_context_window: 1000 } } }, 'model')!; expect(event.context).toEqual({ used: 120, limit: 1000 }); const record = { ...run, ...event, timestamp: new Date().toISOString(), engine: 'codex', cost: null } as UsageRecord; expect(totalTokens(record)).toBe(140); expect(usageCost(record, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }])).toBeCloseTo(0.00054); expect(usageCost(record, [])).toBeNull(); expect(parseUsage('claude', { type: 'user', message: {} }, '')).toBeNull();
+  });
+  it('deduplicates Claude snapshots, persists totals, and triggers the reported session limit', () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl'); const publish = vi.fn(); const stop = vi.fn(); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], publish, stop, home, path.join(root, 'codex'));
+    telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 150 } }); const event = (output: number) => JSON.stringify({ type: 'assistant', message: { id: 'same-message', model: 'actual-model', usage: { input_tokens: 100, output_tokens: output, cache_read_input_tokens: 20, cache_creation_input_tokens: 10 } } }) + '\n'; fs.writeFileSync(file, event(10) + event(30)); vi.advanceTimersByTime(750); expect(telemetry.list()[0]).toMatchObject({ input: 100, output: 30, cached: 20, cacheWrite: 10, model: 'actual-model', reasoning: null }); expect(totalTokens(telemetry.list()[0])).toBe(160); expect(stop).toHaveBeenCalledTimes(1); fs.appendFileSync(file, event(20)); vi.advanceTimersByTime(750); expect(telemetry.list()[0].output).toBe(30); expect(stop).toHaveBeenCalledTimes(1); telemetry.close();
+    const restored = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home); expect(restored.list()[0].output).toBe(30); restored.close();
+  });
+  it('correlates Codex thread IDs and refuses ambiguous same-directory sessions', () => {
+    vi.useFakeTimers(); const { root } = setup(); const codex = path.join(root, 'codex'); const now = new Date(); const dir = path.join(codex, 'sessions', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), String(now.getUTCDate()).padStart(2, '0')); fs.mkdirSync(dir, { recursive: true }); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, path.join(root, 'claude'), codex); const a = { ...run, runId: randomUUID(), engine: 'codex' as const }; const b = { ...a, runId: randomUUID(), sessionId: 'second' }; const config = { engine: 'codex' as const, model: '', reasoningEffort: null }; const thread = randomUUID(); fs.writeFileSync(path.join(dir, `rollout-${thread}.jsonl`), JSON.stringify({ type: 'session_meta', timestamp: now.toISOString(), payload: { id: thread, cwd: a.cwd } }) + '\n' + JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-actual' } }) + '\n' + JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 25 } } } }) + '\n');
+    // Starts happen before the file becomes visible to avoid accidental sequential assignment.
+    const file = path.join(dir, `rollout-${thread}.jsonl`); const contents = fs.readFileSync(file); fs.unlinkSync(file); telemetry.start(a, config); telemetry.start(b, config); fs.writeFileSync(file, contents); vi.advanceTimersByTime(750); expect(telemetry.list()).toEqual([]); const logDir = path.join(root, 'telemetry', a.runId); fs.mkdirSync(logDir); fs.writeFileSync(path.join(logDir, 'codex-tui.log'), `thread_id="${thread}"`); vi.advanceTimersByTime(750); expect(telemetry.list()[0]).toMatchObject({ runId: a.runId, model: 'gpt-actual', input: 100, output: 25 }); telemetry.close();
+  });
+});
+
+describe('memory revisions and Drive conflict review', () => {
+  it('preserves originals and rejects stale conflict resolution while retaining both reviewed versions', () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
+    const memory = new MemoryService(path.join(root, 'memory')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory'));
+    const original = memory.write('shared', 'Decision', 'Local content', 'claude'); const revision = memory.write('shared', 'Decision updated', 'Revised content', 'human', original.id);
+    expect(revision.supersedes).toBe(original.id); expect(memory.list('shared')).toHaveLength(2);
+    remote.import({ ...original, content: 'Drive content' }); const mirror = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
+    expect(() => mirror.sync('shared')).toThrow('conflicting'); const conflict = mirror.conflicts('shared')[0];
+    expect(() => mirror.resolve('shared', original.id, '0'.repeat(64), conflict.remoteHash)).toThrow('changed');
+    mirror.resolve('shared', original.id, conflict.localHash, conflict.remoteHash);
+    expect(mirror.conflicts('shared')).toHaveLength(0); mirror.sync('shared');
+    expect(memory.list('shared').map((note) => note.content).sort()).toEqual(['Drive content', 'Local content', 'Revised content']);
+    expect(remote.list('shared')).toHaveLength(3); expect(fs.readdirSync(remote.directory('shared')).some((name) => name.includes('conflict-backup'))).toBe(true);
+  });
+  it('leaves missing or invalid primary token counts unknown rather than displaying zero', () => {
+    expect(parseUsage('claude', { type: 'assistant', message: { id: 'a', usage: { output_tokens: 20 } } }, 'm')).toBeNull();
+    expect(parseUsage('codex', { type: 'token_count', info: { total_token_usage: { input_tokens: -1, output_tokens: 20 } } }, 'm')).toBeNull();
+  });
+});
