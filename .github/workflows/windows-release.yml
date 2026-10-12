@@ -23,6 +23,7 @@ jobs:
       - run: npm run test:desktop
       - run: npm run test:design
       - run: npm run test:profiles
+      - run: npm run test:workbench
       - run: npm run dist:win
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}

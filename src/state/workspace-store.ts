@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 
-export type NavigationView = 'workspace' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings';
+export type NavigationView = 'workspace' | 'design' | 'coaching' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 export function createSession(engine: CLIEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
@@ -103,7 +103,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (session.id !== event.sessionId) return session;
     if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null } : session;
     if (event.runId !== session.runId) return session;
-    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, exitCode: event.exitCode, endedAt: new Date().toISOString() };
+    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, error: event.diagnostic ?? session.error, exitCode: event.exitCode, endedAt: new Date().toISOString() };
     if (event.type === 'error') return { ...session, error: event.message };
     return session;
   }) })),

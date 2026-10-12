@@ -54,6 +54,11 @@ describe('PTY lifecycle and IPC ownership', () => {
     await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_STORAGE' });
     expect(spawn).not.toHaveBeenCalled();
   });
+  it('retains a bounded ANSI-free failure diagnostic even when the CLI clears its alternate screen', async () => {
+    const { manager, processes, events } = fixture(); const run = await manager.start(7, request());
+    processes[0].data('\x1b[?1049hError: invalid model\x1b[?1049l'); processes[0].exit({ exitCode: 1 });
+    expect(events.find((event) => event.type === 'exit')).toMatchObject({ runId: run.runId, exitCode: 1, diagnostic: 'CLI exited with code 1.\nError: invalid model' });
+  });
   it('routes input/resize and flushes the last output before exit', async () => {
     const { manager, processes, events, spawn } = fixture();
     const run = await manager.start(7, request());

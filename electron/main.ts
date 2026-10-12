@@ -1,6 +1,8 @@
+import { CoachingService } from './services/coaching/service';
+import { DesignArchive } from './services/design/archive';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, BrowserWindow, dialog, ipcMain, webContents, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { ProjectChecks } from './services/repository/project-checks';
@@ -120,7 +122,7 @@ function createWindow() {
     const connections = production ? "'self'" : "'self' http://127.0.0.1:5173 ws://127.0.0.1:5173";
     callback({ responseHeaders: {
       ...details.responseHeaders,
-      'Content-Security-Policy': [`default-src 'self'; script-src ${scripts}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ${connections}; object-src 'none'; frame-src 'none'; base-uri 'self'`],
+      'Content-Security-Policy': [`default-src 'self'; script-src ${scripts}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ${connections}; object-src 'none'; frame-src 'self'; base-uri 'self'`],
     } });
   });
   if (production) void window.loadFile(path.join(__dirname, '../../dist/index.html'));
@@ -151,6 +153,13 @@ else app.whenReady().then(() => {
       if (window && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
   } catch { /* Live sessions remain available without optional storage integrations. */ }
+  const designs = new DesignArchive(process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub'), async () => {
+    const result = await dialog.showOpenDialog(window!, { title: 'Save a design preview', properties: ['openFile'], filters: [{ name: 'HTML or screenshots', extensions: ['html', 'htm', 'png', 'jpg', 'jpeg', 'webp'] }] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  }, (bytes) => { const image = nativeImage.createFromBuffer(bytes); const size = image.getSize(); return !image.isEmpty() && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 40000000; });
+  handle(IPC_CHANNELS.designs, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return designs.execute(payload); });
+  const coaching = hub ? new CoachingService(process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub'), hub.rules) : null;
+  handle(IPC_CHANNELS.coaching, (_owner, payload) => { if (!coaching) throw new HubError('COACHING_STORAGE', 'Local coaching storage is unavailable.'); if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return coaching.execute(payload); });
   const projectSetup = new ProjectSetup();
   handle(IPC_CHANNELS.projects, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return projectSetup.execute(payload); });
   handle(IPC_CHANNELS.accounts, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing an update.'); return accounts.execute(owner, payload); });

@@ -2,6 +2,22 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Design workspace and AI coaching (v1.5.0)
+
+**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. This is a static preview archive, not a JavaScript application runner or automatic Claude Design/cloud history sync. Import exported HTML or screenshots from those tools when available.
+
+**AI coaching** shows local usage trends, token totals, configured-price estimates, and heuristic suggestions. Add curated prompt examples and record successful/partial/failed outcomes; no full session logs are mined automatically. Select up to five examples and review the complete coaching report. Nothing is sent to a model by opening this screen or preparing a report.
+
+For deeper agent advice, explicitly approve the reviewed report and choose **Prepare Claude coaching** or **Prepare Codex coaching**. This creates an idle session in a separate local report directory, with your shared rules applied. Choose its account/model, start it, finish any CLI trust/setup prompts, then click **Send coaching request**. The agent is asked to analyze the selected examples, suggest meaning-preserving rewrites, and propose measurable experiments. Advice appears in the interactive terminal and ordinary local session history. Provider CLI configuration/tools/approvals still apply; the prompt asks for analysis without commands, edits, or unrelated file access. This optional step uses provider inference and is not offline AI. Local heuristic findings are not labeled as AI advice, and token use alone does not establish outcome quality. Prompt examples and prepared reports remain under `~/.coding-hub/coaching`, outside curated Drive memory. Reports are capped at 100; prompt examples at 100. After an app restart, saved coaching sessions retain their report directory, but you must type “Read COACHING_REPORT.md and provide coaching” yourself.
+
+The setup guide dismisses automatically after a shared or independent project folder is configured, and can be dismissed manually. Completion is remembered in the desktop profile.
+
+## Codex launch troubleshooting
+
+Accounts & connections reports local login status, not verified model access or a successful interactive launch. On Windows, Coding Hub prefers the native Codex binary inside official npm packages so ConPTY attaches directly to the console program; older JavaScript launchers remain a fallback. Native package executable entries are launched directly rather than interpreted as JavaScript. Failed coding runs preserve a bounded terminal diagnostic even when the CLI clears its alternate screen. A failed Codex tile offers **Use Codex CLI defaults**, clearing model and reasoning overrides before you retry.
+
+If Codex still exits with code 1, read the error printed above the exit marker and shown in the session tile. In PowerShell, change to the same project directory and test `codex.cmd --version`, `codex.cmd login status`, and `codex.cmd` (use `codex` for native installations). Resolve the CLI's actual error, such as invalid local configuration, unavailable model, missing dependency, terminal compatibility, or provider access. Cloud fixture tests do not prove that a specific Windows/provider installation is fixed.
+
 ## Multiple Claude accounts (v1.4.0)
 
 Open **Accounts & connections → Claude account profiles**. Add a name such as Personal or Work, then use **Connect Claude profile** and complete the official CLI login. Choose the intended account in the browser; browser cookies can preselect your current account. Repeat for your other accounts. Up to ten named profiles are supported, plus **Default**, which preserves your existing local CLI login.
@@ -157,6 +173,7 @@ npm run test:memory
 npm run test:desktop
 npm run test:design
 npm run test:profiles
+npm run test:workbench
 npm run build
 ```
 

@@ -6,6 +6,8 @@ import type { UsageRecord } from '../shared/hub';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
+  coaching: (request) => ipcRenderer.invoke('coding-hub:coaching', request),
+  designs: (request) => ipcRenderer.invoke('coding-hub:designs', request),
   projects: (request) => ipcRenderer.invoke('coding-hub:projects', request),
   accounts: (request) => ipcRenderer.invoke('coding-hub:accounts', request),
   onAccountEvent: (listener) => {

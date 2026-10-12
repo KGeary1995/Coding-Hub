@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
@@ -22,7 +23,7 @@ export function hostEnvironment(): Record<string, string> {
 }
 
 /** Resolve Windows npm shims to JavaScript; never interpolate argv into cmd.exe. */
-export async function npmEntryForShim(shim: string, engine: CLIEngine): Promise<Executable> {
+export async function npmEntryForShim(shim: string, engine: CLIEngine, architecture: string = process.arch): Promise<Executable> {
   const packageName = engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex';
   const packageRoot = path.join(path.dirname(shim), 'node_modules', ...packageName.split('/'));
   let entry: string;
@@ -34,6 +35,18 @@ export async function npmEntryForShim(shim: string, engine: CLIEngine): Promise<
     if (!entry.startsWith(packageRoot + path.sep) || !(await stat(entry)).isFile()) throw new Error('Invalid CLI entry');
   } catch {
     throw new HubError('UNSUPPORTED_WINDOWS_SHIM', `Cannot resolve ${engine}'s npm launcher. Reinstall its official CLI, or use the native executable.`);
+  }
+  if (/\.exe$/i.test(entry)) return { file: entry, prefixArgs: [], extraEnv: {}, displayPath: entry };
+  // Codex is a native console program. Attach ConPTY directly to that binary,
+  // avoiding an Electron/Node wrapper between the terminal and the Rust TUI.
+  if (engine === 'codex' && ['x64', 'arm64'].includes(architecture)) {
+    const triple = architecture === 'x64' ? 'x86_64-pc-windows-msvc' : 'aarch64-pc-windows-msvc';
+    const vendors = [path.join(packageRoot, 'vendor')];
+    try { vendors.unshift(path.join(path.dirname(createRequire(path.join(packageRoot, 'package.json')).resolve(`@openai/codex-win32-${architecture}/package.json`)), 'vendor')); } catch { /* Older releases bundle vendor directly. */ }
+    for (const vendor of vendors) for (const folder of ['bin', 'codex']) {
+      const binary = path.join(vendor, triple, folder, 'codex.exe');
+      try { if ((await stat(binary)).isFile()) return { file: binary, prefixArgs: [], extraEnv: { CODEX_MANAGED_BY_NPM: '1', CODEX_MANAGED_PACKAGE_ROOT: packageRoot }, displayPath: binary }; } catch { /* Keep the JS fallback for older/fixture packages. */ }
+    }
   }
   return { file: process.execPath, prefixArgs: [entry], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim };
 }

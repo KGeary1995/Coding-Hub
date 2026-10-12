@@ -1,11 +1,15 @@
-import { useState } from 'react';
-import { PanelLeft, Columns2, FolderOpen, Grid2X2, Plus, Rows2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, PanelLeft, Columns2, FolderOpen, Grid2X2, Plus, Rows2 } from 'lucide-react';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { EngineHealth } from './EngineHealth';
 import { useHubStore, tokens, formatNumber, dollars } from '../state/hub-store';
 
 export function WorkspaceHeader({ explorer, onToggleExplorer }: { explorer: boolean; onToggleExplorer: () => void }) {
   const { rootDirectory, setRootDirectory, sessions, layoutMode, arrange, focusedSessionId } = useWorkspaceStore();
+  const [setupDismissed, setSetupDismissed] = useState(() => { try { return localStorage.getItem('coding-hub-setup-complete') === 'true'; } catch { return false; } });
+  const hasProject = Boolean(rootDirectory || sessions.some((session) => session.binding.mode === 'independent' && /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(session.binding.cwd)));
+  const dismissSetup = () => { setSetupDismissed(true); try { localStorage.setItem('coding-hub-setup-complete', 'true'); } catch { /* The current window still dismisses the guide. */ } };
+  useEffect(() => { if (hasProject && !setupDismissed) dismissSetup(); }, [hasProject, setupDismissed]);
   const [editingPath, setEditingPath] = useState(false);
   const [path, setPath] = useState('');
   const [error, setError] = useState('');
@@ -31,7 +35,7 @@ export function WorkspaceHeader({ explorer, onToggleExplorer }: { explorer: bool
         <div className="project-identity"><span className="project-icon"><FolderOpen size={20} /></span><div><div className="eyebrow">ACTIVE PROJECT</div><h1>{rootDirectory ? rootDirectory.split(/[\\/]/).filter(Boolean).at(-1) : 'Your coding workspace'}</h1><p title={rootDirectory ?? undefined}>{rootDirectory ?? 'Connect your tools and choose a project to get started.'}</p></div></div>
         <div className="project-actions"><button className="quiet-button" onClick={() => useWorkspaceStore.getState().setView('projects')}>Manage projects</button><button className="button secondary" onClick={chooseDirectory}><FolderOpen size={15} />{rootDirectory ? 'Change project' : 'Open project'}</button></div>
       </div>
-      {!rootDirectory && <div className="workspace-setup"><strong>Set up your workspace</strong><p>First connect your accounts. Then choose a folder on your PC, create a new project, or clone a GitHub repository. Account setup works before any coding session starts.</p><div className="hub-toolbar"><button className="button primary" onClick={() => useWorkspaceStore.getState().setView('accounts')}>1. Connect accounts</button><button className="button secondary" onClick={() => useWorkspaceStore.getState().setView('projects')}>2. Choose or clone a project</button><button className="quiet-button" onClick={chooseDirectory}>Browse local folder</button></div></div>}
+      {!hasProject && !setupDismissed && <div className="workspace-setup"><button className="icon-button setup-dismiss" aria-label="Dismiss workspace setup" title="Dismiss setup guide" onClick={dismissSetup}><X size={15} /></button><strong>Set up your workspace</strong><p>First connect your accounts. Then choose a folder on your PC, create a new project, or clone a GitHub repository. Account setup works before any coding session starts.</p><div className="hub-toolbar"><button className="button primary" onClick={() => useWorkspaceStore.getState().setView('accounts')}>1. Connect accounts</button><button className="button secondary" onClick={() => useWorkspaceStore.getState().setView('projects')}>2. Choose or clone a project</button><button className="quiet-button" onClick={chooseDirectory}>Browse local folder</button></div></div>}
       {editingPath && <form className="path-entry" onSubmit={(event) => { event.preventDefault(); if (path.trim()) { setRootDirectory(path.trim()); setEditingPath(false); } }}><label htmlFor="workspace-path">Workspace directory</label><input id="workspace-path" autoFocus required value={path} onChange={(event) => setPath(event.target.value)} placeholder="/absolute/path/to/project" /><button className="button primary" type="submit">Set directory</button><button className="quiet-button" type="button" onClick={() => setEditingPath(false)}>Cancel</button><small>Browser preview stores the path only. Desktop mode uses the native folder picker.</small></form>}
       {error && <p role="alert" className="error-message">{error}</p>}
       <div className="workspace-connection-bar"><EngineHealth /><div className="workspace-usage" aria-label="Current session usage"><span>Tokens <strong>{usage.length ? formatNumber(total) : '—'}</strong></span><span>Est. cost <strong>{dollars(cost)}</strong></span><button className="quiet-button" onClick={() => useWorkspaceStore.getState().setView('usage')}>Usage details</button></div></div>

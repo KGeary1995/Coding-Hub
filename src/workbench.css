@@ -140,3 +140,63 @@ h1 { font-size: 24px; color: #edf0f6; font-weight: 600; letter-spacing: -.6px; }
 .profile-create label, .profile-connect label { display: flex; flex-direction: column; gap: 8px; min-width: 240px; color: #abb8d0; font-size: 11px; }
 .profile-connect .account-state { align-self: center; }
 .account-profile-chip { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border: 1px solid #43506a; border-radius: 4px; color: #b4c4e8; font-size: 9px; flex-shrink: 0; }
+.design-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 20px 0; gap: 14px; }
+.design-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+.design-heading h1 { display: flex; align-items: center; gap: 10px; }
+.design-heading p { color: var(--muted); margin: 8px 0 0; font-size: 12px; }
+.design-import { display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 12px; align-items: end; background: var(--surface); padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.design-import label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #abb8d0; }
+.design-panel input, .design-panel select { min-width: 0; background: #121720; border: 1px solid #414b61; color: #e1e6f1; border-radius: 5px; padding: 8px; }
+.design-toolbar, .design-toolbar > div, .design-toolbar > span { display: flex; align-items: center; gap: 10px; }
+.design-toolbar { justify-content: space-between; color: var(--muted); font-size: 11px; }
+.design-workbench { flex: 1; min-height: 350px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; }
+.design-workbench.with-agents { grid-template-columns: 190px minmax(0, 1fr) minmax(350px, .9fr); }
+.design-history { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.design-search { display: flex; align-items: center; gap: 6px; padding: 10px; border-bottom: 1px solid var(--border); }
+.design-search input { width: 100%; border: 0; font-size: 11px; padding: 5px; }
+.design-history-list { overflow-y: auto; flex: 1; }
+.design-history-list > button { display: flex; flex-direction: column; width: 100%; gap: 8px; text-align: left; padding: 15px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: #d5ddeb; }
+.design-history-list > button[aria-pressed="true"] { background: #283450; box-shadow: inset 2px 0 var(--accent); }
+.design-history-list small, .design-history-list span { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.design-history-list > p { padding: 15px; color: var(--muted); font-size: 11px; }
+.design-previews { display: grid; min-width: 0; min-height: 0; gap: 12px; }
+.design-previews.comparing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.design-preview { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; min-height: 0; min-width: 0; }
+.design-preview > header { display: flex; justify-content: space-between; gap: 10px; background: var(--surface); padding: 12px; font-size: 11px; }
+.design-preview > header span { color: var(--muted); font-size: 10px; }
+.design-preview-scroll { flex: 1; min-height: 0; overflow: auto; background: #242935; padding: 16px; }
+.design-device { margin: 0 auto; background: #fff; min-height: 100%; }
+.design-device iframe { border: 0; display: block; width: 100%; height: 650px; background: #fff; }
+.design-device img { width: 100%; display: block; }
+.design-notes { margin: 0; padding: 12px; background: var(--surface); color: #abb8d0; font-size: 11px; white-space: pre-wrap; }
+.design-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--muted); padding: 25px; border: 1px dashed #414b61; border-radius: 8px; gap: 15px; }
+.design-empty h2 { color: #d5ddeb; font-size: 18px; }
+.design-empty p, .design-empty small { max-width: 600px; line-height: 1.8; margin: 0; }
+.design-agents { min-height: 0; min-width: 0; }
+.session-error > span { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1180px) { .design-workbench.with-agents { grid-template-columns: 160px minmax(0, 1fr); } .design-agents { grid-column: 1 / -1; height: 450px; } .design-toolbar { flex-wrap: wrap; } }
+.coaching-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.coaching-metrics article { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
+.coaching-metrics span { display: block; color: var(--muted); font-size: 10px; }
+.coaching-metrics strong { display: block; font-size: 25px; font-weight: 500; margin-top: 10px; }
+.coaching-trend { display: grid; gap: 10px; margin: 18px 0; }
+.coaching-trend > div { display: grid; grid-template-columns: 90px minmax(50px, 1fr) 140px; gap: 15px; align-items: center; font-size: 11px; }
+.coaching-trend > div > div { background: #272e3e; height: 12px; border-radius: 3px; overflow: hidden; }
+.coaching-trend i { display: block; background: #8da4ff; height: 100%; }
+.coaching-trend strong { font-size: 10px; font-weight: 400; }
+.coaching-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.coaching-columns li { color: #aab3c4; font-size: 12px; line-height: 1.8; margin-bottom: 12px; }
+.coaching-example-form { padding: 0; border: 0; }
+.coaching-examples > article { position: relative; padding: 15px; border-top: 1px solid var(--border); }
+.coaching-examples label { display: flex; align-items: center; gap: 10px; font-size: 11px; text-transform: capitalize; }
+.coaching-examples p { white-space: pre-wrap; }
+.coaching-examples small { color: var(--muted); }
+.coaching-examples .icon-button { position: absolute; top: 12px; right: 8px; }
+.coaching-packet { max-height: 400px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: #111720; border: 1px solid var(--border); border-radius: 6px; font-size: 10px; line-height: 1.7; }
+@media (max-width: 1180px) { .coaching-columns { grid-template-columns: 1fr; } }
+.workspace-setup { position: relative; padding-right: 42px; }
+.setup-dismiss { position: absolute; right: 10px; top: 10px; }
+
+.coaching-columns ul { list-style: disc; padding-left: 18px; }
+
+.session-error { max-height: 72px; }

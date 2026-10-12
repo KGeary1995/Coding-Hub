@@ -1,4 +1,5 @@
 import { stopProcess, type StopDependencies } from './stop-process';
+import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,6 +15,7 @@ interface ManagedRun {
   owner: number;
   session: RunningSession;
   pty: IPty;
+  outputTail: string;
   pendingData: string;
   flushTimer?: ReturnType<typeof setTimeout>;
   exit: Promise<void>;
@@ -82,10 +84,11 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, pendingData: '', exit, resolveExit, stopping: null, finished: false };
+      const run: ManagedRun = { owner, session, pty, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false };
       this.runs.set(request.sessionId, run);
       pty.onData((data) => {
         if (run.finished) return;
+        run.outputTail = (run.outputTail + data).slice(-8192);
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
@@ -150,7 +153,9 @@ export class PtyManager {
     run.finished = true;
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
-    this.emit(run.owner, { type: 'exit', sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
+    const tail = stripVTControlCharacters(run.outputTail).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
+    const diagnostic = exitCode !== 0 && !run.stopping ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project directory.'}` : undefined;
+    this.emit(run.owner, { type: 'exit', ...(diagnostic ? { diagnostic } : {}), sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
     run.resolveExit();
   }
 

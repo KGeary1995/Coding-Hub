@@ -1,3 +1,5 @@
+import type { CoachingRequest, CoachingResponse } from './coaching';
+import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
 import type { CLIEngine, CLIEngineConfig, SavedWorkspace, StorageInfo, SessionHistoryRun, RunLog, RepositoryContext, DirectoryListing, FilePreview, GitStatus, GitFileDiff, DiffArea } from './types';
@@ -33,11 +35,13 @@ export interface RunningSession extends RunReference { accountProfileId?: string
 export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
   | ({ type: 'data'; data: string } & RunReference)
-  | ({ type: 'exit'; exitCode: number; signal?: number } & RunReference)
+  | ({ type: 'exit'; diagnostic?: string; exitCode: number; signal?: number } & RunReference)
   | ({ type: 'error'; message: string } & RunReference);
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {
+  coaching(request: CoachingRequest): Promise<HostResult<CoachingResponse>>;
+  designs(request: DesignRequest): Promise<HostResult<DesignResponse>>;
   projects(request: ProjectRequest): Promise<HostResult<ProjectResponse>>;
   accounts(request: AccountRequest): Promise<HostResult<AccountResponse>>;
   onAccountEvent(listener: (event: AccountEvent) => void): () => void;
@@ -69,6 +73,8 @@ export interface CodingHubHost {
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
 }
 export const IPC_CHANNELS = {
+  coaching: 'coding-hub:coaching',
+  designs: 'coding-hub:designs',
   projects: 'coding-hub:projects',
   accounts: 'coding-hub:accounts',
   accountEvent: 'coding-hub:account-event',

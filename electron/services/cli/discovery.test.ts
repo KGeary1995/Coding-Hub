@@ -20,6 +20,19 @@ describe('Windows npm CLI shim resolution', () => {
     const { shim, packageRoot } = await fixture({ codex: 'cli.cjs' });
     expect(await npmEntryForShim(shim, 'codex')).toEqual({ file: process.execPath, prefixArgs: [path.join(packageRoot, 'cli.cjs')], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim });
   });
+  it('attaches directly to native Codex binaries in modern and legacy Windows package layouts', async () => {
+    for (const folder of ['bin', 'codex']) {
+      const { shim, packageRoot } = await fixture('cli.cjs');
+      const directory = path.join(packageRoot, 'vendor/x86_64-pc-windows-msvc', folder); await mkdir(directory, { recursive: true });
+      const binary = path.join(directory, 'codex.exe'); await writeFile(binary, 'native fixture');
+      const resolved = await npmEntryForShim(shim, 'codex', 'x64'); expect(resolved.file).toBe(binary); expect(resolved.prefixArgs).toEqual([]); expect(resolved.extraEnv).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+    }
+  });
+  it('runs native package bin entries without asking Electron to interpret an EXE as JavaScript', async () => {
+    const { shim, packageRoot } = await fixture('cli.cjs'); await writeFile(path.join(packageRoot, 'claude.exe'), 'native fixture');
+    await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { codex: 'claude.exe' } }));
+    expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toEqual([]);
+  });
   it('supports string bin declarations', async () => {
     const { shim } = await fixture('cli.cjs');
     expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toHaveLength(1);
