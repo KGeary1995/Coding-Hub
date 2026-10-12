@@ -2,6 +2,14 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Desktop interface refresh (v1.6.1)
+
+The app now uses a consistent dark desktop design system: restrained blue accents, clearer typography, aligned controls, readable data tables, and matching configuration/review surfaces. The workspace overview shows actual running sessions, reported tokens, configured-price estimates, and assigned working directories; unavailable usage remains unknown. Idle session cards explain how to launch or resume without covering running terminal output.
+
+Collapse navigation with the button beside the app name to give terminals more room. Icon buttons retain names, tooltips, keyboard access, and active states. The choice persists in the desktop profile. Project context stays in the top bar, session layouts adapt to smaller windows, and the task editor sits beside the task board at larger widths. Compact density, interface scale, and higher contrast remain available in Settings.
+
+To update an installed Windows copy, extract this version into a new folder, run `npm.cmd ci` and `npm.cmd run dist:win`, then open the new **Setup.exe** under `release`. Source files do not replace an older installed shortcut. `npm.cmd start` runs the source edition directly.
+
 ## Complete workflow release (v1.6.0)
 
 This release adds all eight workflow improvements. See [the usage guide](docs/workflows-v1.6.md) for setup and examples.

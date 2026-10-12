@@ -101,6 +101,7 @@ const { _electron } = require('playwright-core');
     assert.equal(await page.locator('.process-dot.running').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Task coordination', 'Verification profiles', 'AI coaching', 'Settings']) {
       await page.getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(150);
+      if (process.env.CODING_HUB_REVIEW_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_REVIEW_SCREENSHOTS, 'AI-Coding-Hub-v' + runtime.version + '-' + name.toLowerCase().replaceAll(' ', '-') + '.png') });
     }
     await page.getByRole('heading', { name: 'Running application', exact: true }).waitFor();
     if (process.env.CODING_HUB_ENTERPRISE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_ENTERPRISE_SCREENSHOT });

@@ -1,6 +1,6 @@
 import { APP_VERSION } from './version';
 import { useState } from 'react';
-import { CircleHelp, TerminalSquare } from 'lucide-react';
+import { CircleHelp, TerminalSquare, Folder, ShieldCheck } from 'lucide-react';
 import { useAccessibility } from './components/AccessibilityControls';
 import { Navigation } from './components/Navigation';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
@@ -24,17 +24,17 @@ export function App() {
   useAccessibility();
   useNativeHost();
   const [explorer, setExplorer] = useState(false);
-  const { activeView, setView, persistenceReady, persistenceStatus, persistenceError, logError } = useWorkspaceStore();
+  const { activeView, setView, rootDirectory, sessions, persistenceReady, persistenceStatus, persistenceError, logError } = useWorkspaceStore();
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-view={activeView}>
       <Navigation />
       <a className="skip-link" href="#main-content">Skip to workspace content</a>
       <main id="main-content" tabIndex={-1} className="main-shell">
         <header className="workspace-topbar">
-          <span className="breadcrumb">Coding Hub <span>/</span><strong>{titles[activeView]}</strong></span>
+          <span className="breadcrumb"><Folder size={14} /><span className="breadcrumb-project" title={rootDirectory ?? undefined}>{rootDirectory ? rootDirectory.split(/[\\/]/).filter(Boolean).at(-1) : 'Local workspace'}</span><span>/</span><strong>{titles[activeView]}</strong></span>
           <CommandMenu />
           <button className="icon-button topbar-help" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={17} /></button>
-          <span className="privacy-badge"><i />Local workspace</span>
+          <span className="privacy-badge" title="Project data is stored locally. CLI requests use the selected provider."><ShieldCheck size={13} />Local storage</span>
           <span className="version">v{APP_VERSION}</span>
         </header>
         {(persistenceError || logError) && <div className="persistence-alert" role="alert">{persistenceError || logError}</div>}
@@ -52,7 +52,7 @@ export function App() {
             : activeView === 'files' || activeView === 'diff' ? <RepositoryPanel mode={activeView} />
               : <FeaturePanel />}
         <footer className="app-statusbar">
-          <span><TerminalSquare size={13} />{window.codingHub ? 'Native host connected · local PTY sessions' : 'Browser preview · desktop host required'}</span>
+          <span><i className={`host-indicator ${window.codingHub ? 'online' : ''}`} /><TerminalSquare size={13} />{window.codingHub ? 'Desktop host connected' : 'Browser preview · desktop host required'}<span className="statusbar-divider" />{sessions.filter((session) => session.status === 'running').length} running</span>
           <span className={`storage-status ${persistenceStatus}`} data-testid="persistence-status">
             {persistenceStatus === 'saved' ? 'Workspace saved locally' : persistenceStatus === 'saving' ? 'Saving workspace…' : persistenceStatus === 'error' ? 'Storage needs attention' : persistenceStatus === 'loading' ? 'Loading workspace…' : 'Browser preview'}
           </span>

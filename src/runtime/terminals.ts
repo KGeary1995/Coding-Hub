@@ -26,7 +26,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     disableStdin: true, cursorBlink: false, scrollback: 5000,
     fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
     fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.45,
-    theme: { background: '#121517', foreground: '#bdc9d0', green: '#b4e88b', cyan: '#88bac8', yellow: '#e8bd91', selectionBackground: '#34433d' },
+    theme: { background: '#0c1017', foreground: '#c9d3e1', black: '#141b27', brightBlack: '#69778e', red: '#f18c93', green: '#8ed9b4', yellow: '#e6bf8a', blue: '#7baaff', magenta: '#b7a0ed', cyan: '#8acddd', white: '#dce4ef', selectionBackground: '#283e61', cursor: '#a8c8ff' },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
