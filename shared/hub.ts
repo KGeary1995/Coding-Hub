@@ -23,7 +23,7 @@ export type HubRequest =
   | { action: 'drive-sync'; project: string };
 export interface MemoryNote { id: string; project: string; title: string; content: string; author: CLIEngine | 'human'; createdAt: string; supersedes?: string }
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
-export interface UsageRecord { source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
+export interface UsageRecord { conversationId?: string; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
 export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number }
 export interface DriveStatus { connected: boolean; clientConfigured: boolean; persistent: boolean; folderId: string }

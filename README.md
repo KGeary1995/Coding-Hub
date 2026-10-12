@@ -2,6 +2,23 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Professional workflow release (v1.7.0)
+
+All eight productivity improvements are included with progressive disclosure. One **Workflow center** adds Recovery, Search, Templates, and Support tabs. Git delivery stays collapsed under Changes; session names/budgets live in expandable settings; design comparison and linked tasks appear only when requested. The terminal canvas retains its existing focus.
+
+| Improvement | Where it lives |
+| --- | --- |
+| Session recovery | Workflow center → Recovery: failure history, exact-directory/profile diagnostics, setup guidance, and explicit retry |
+| Persistent conversations | Session settings and native history: names, pinned references, retained native IDs, and unsent prepared requests |
+| Git delivery | Changes → Git delivery: reviewed staging, unstaging, commit, non-force push, and draft/regular PR creation through local gh |
+| Unified search | Workflow center → Search, or Ctrl/Cmd+Shift+F: files, notes, rules, annotations, and optional recorded output |
+| Design iteration | Design workspace: mobile/tablet/desktop live viewports, screenshot pixel differences, and tasks linked to annotations |
+| Usage budgets | Session settings → Session name & budget alerts: per-run token/cost targets and context warnings |
+| Project templates | Workflow center → Templates: layouts, raw engine parameters, budgets, optional rules and verification profiles |
+| Release reliability | Workflow center → Support: redacted diagnostic export, Windows signature inspection, and a certificate-required signed build/upgrade workflow |
+
+See [the complete workflow guide](docs/workflows-v1.7.md). Signing setup is prepared; no signing certificate or published signed release is supplied. `npm.cmd run dist:win` still builds an ordinary candidate, while `npm.cmd run dist:win:signed` requires native Windows and configured certificate/publisher settings.
+
 ## Desktop interface refresh (v1.6.1)
 
 The app now uses a consistent dark desktop design system: restrained blue accents, clearer typography, aligned controls, readable data tables, and matching configuration/review surfaces. The workspace overview shows actual running sessions, reported tokens, configured-price estimates, and assigned working directories; unavailable usage remains unknown. Idle session cards explain how to launch or resume without covering running terminal output.
@@ -33,7 +50,7 @@ Conversation resume uses the installed CLI's advertised resume support and recor
 
 **AI coaching** shows local usage trends, token totals, configured-price estimates, and heuristic suggestions. Add curated prompt examples and record successful/partial/failed outcomes; no full session logs are mined automatically. Select up to five examples and review the complete coaching report. Nothing is sent to a model by opening this screen or preparing a report.
 
-For deeper agent advice, explicitly approve the reviewed report and choose **Prepare Claude coaching** or **Prepare Codex coaching**. This creates an idle session in a separate local report directory, with your shared rules applied. Choose its account/model, start it, finish any CLI trust/setup prompts, then click **Send coaching request**. The agent is asked to analyze the selected examples, suggest meaning-preserving rewrites, and propose measurable experiments. Advice appears in the interactive terminal and ordinary local session history. Provider CLI configuration/tools/approvals still apply; the prompt asks for analysis without commands, edits, or unrelated file access. This optional step uses provider inference and is not offline AI. Local heuristic findings are not labeled as AI advice, and token use alone does not establish outcome quality. Prompt examples and prepared reports remain under `~/.coding-hub/coaching`, outside curated Drive memory. Reports are capped at 100; prompt examples at 100. After an app restart, saved coaching sessions retain their report directory, but you must type “Read COACHING_REPORT.md and provide coaching” yourself.
+For deeper agent advice, explicitly approve the reviewed report and choose **Prepare Claude coaching** or **Prepare Codex coaching**. This creates an idle session in a separate local report directory, with your shared rules applied. Choose its account/model, start it, finish any CLI trust/setup prompts, then click **Send coaching request**. The agent is asked to analyze the selected examples, suggest meaning-preserving rewrites, and propose measurable experiments. Advice appears in the interactive terminal and ordinary local session history. Provider CLI configuration/tools/approvals still apply; the prompt asks for analysis without commands, edits, or unrelated file access. This optional step uses provider inference and is not offline AI. Local heuristic findings are not labeled as AI advice, and token use alone does not establish outcome quality. Prompt examples and prepared reports remain under `~/.coding-hub/coaching`, outside curated Drive memory. Reports are capped at 100; prompt examples at 100. Prepared requests now persist with the workspace. After restarting, start the idle tile, handle CLI prompts, and explicitly send the retained request.
 
 The setup guide dismisses automatically after a shared or independent project folder is configured, and can be dismissed manually. Completion is remembered in the desktop profile.
 
@@ -94,7 +111,7 @@ A public stable GitHub release with its installer, `latest.yml`, and blockmap is
 
 - **CLI health:** inspect installed versions, advertised flags, and redacted local authentication status. Fresh discovery validates every launch. Unknown login or model access stays unknown; the app never tests model access through an API or bypasses CLI permissions.
 - **Isolated worktrees:** in session settings, choose **Create isolated worktree**. This binds the panel to a unique `coding-hub/<uuid>` branch starting from committed HEAD. Uncommitted changes and untracked files are not copied. Apply shared rules in that directory before starting. Use Git diff with its repository selected, then combine branches through your normal Git review. Settings removes clean, unbound managed worktrees while retaining their branches. No automatic merges or commits.
-- **Recovery:** interrupted processes are marked in history. **Restore launch settings to a session** creates an idle panel with its recorded repository and parameters; it never revives a PID or claims to resume a model conversation. With four panels, confirmation allows replacing the first idle panel; active panels are preserved. Start the new CLI when ready.
+- **Recovery:** interrupted processes are marked in history. **Restore launch settings to a session** creates an idle panel with its recorded repository and parameters; it never revives a PID. A recorded native conversation ID is retained when available; launch/resume still requires Start. With four panels, confirmation allows replacing the first idle panel; active panels are preserved. Start the new CLI when ready.
 - **Rules validation:** the Shared rules page scans bounded project instruction files, warns about nested/local/override scopes, and offers defined npm `test`, `typecheck`, and `lint` scripts. A native confirmation precedes execution of project code and npm pre/post hooks. Output is capped at 512,000 characters and checks stop after 60 seconds. Semantic conflicts and compliance beyond test coverage cannot be guaranteed.
 - **Memory history:** search handoff titles, content, and authors. Revise notes by creating new immutable handoffs linked to their originals. Concurrent revisions coexist. **Inspect Drive conflicts → Keep both versions** preserves both reviewed contents under separate IDs and a backup of the conflicting remote file; stale resolution is rejected. The local folder mirror is tested, while Google Drive owns actual cloud transport.
 - **Usage evidence:** each run shows its CLI JSONL source, reported-count label, event count, and configured-price basis. Missing/invalid primary token fields stay unknown. Costs use current exact-model rates and recalculate historical estimates when rates change; they are not billing records.
@@ -204,6 +221,7 @@ npm run test:design
 npm run test:profiles
 npm run test:workbench
 npm run test:enterprise
+npm run test:productivity
 npm run build
 ```
 

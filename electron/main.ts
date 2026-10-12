@@ -1,3 +1,9 @@
+import { redactDiagnostic } from '../shared/productivity';
+import { Workflows } from './services/workbench/workflows';
+import { Delivery } from './services/workbench/delivery';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'node:fs';
 import { Diagnostics } from './services/workbench/diagnostics';
 import { NativeSessions } from './services/workbench/native-sessions';
 import { Backups, resolveStorageRoot } from './services/workbench/backups';
@@ -35,6 +41,8 @@ import { TelemetryService } from './services/hub/telemetry';
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub');
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
 const storageRoot = resolveStorageRoot(storageBase, profileRoot);
+let workflows: Workflows | null = null;
+let delivery: Delivery | null = null;
 let verification: Verification | null = null;
 let livePreview: LivePreview | null = null;
 let backups: Backups | null = null;
@@ -108,6 +116,7 @@ function handle<T>(channel: string, operation: (owner: number, payload: unknown)
     try {
       assertSender(event);
       if (backups?.busy && [IPC_CHANNELS.startSession, IPC_CHANNELS.accounts, IPC_CHANNELS.projects, IPC_CHANNELS.projectChecks, IPC_CHANNELS.projectTools].includes(channel as never)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before starting or changing local jobs.');
+      if ((delivery?.running || workflows?.running) && [IPC_CHANNELS.startSession, IPC_CHANNELS.projectChecks, IPC_CHANNELS.projectTools].some((item) => item === channel)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting or changing local jobs.');
       return { ok: true, value: await operation(event.sender.id, payload) };
     } catch (error) {
       return { ok: false, error: error instanceof z.ZodError ? { code: 'INVALID_REQUEST', message: error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' ').slice(0, 1500) } : error instanceof HubError ? { code: error.code, message: error.message } : { code: 'HOST_ERROR', message: 'The native operation failed. Check file permissions and refresh before retrying.' } };
@@ -154,6 +163,7 @@ function createWindow() {
   current.on('close', (event) => {
     if (closing || quitting) return;
     event.preventDefault();
+    if (delivery?.running || workflows?.running) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before closing the app.' }); return; }
     closing = true;
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(current.webContents.id), accounts.stopOwner(current.webContents.id)])).finally(() => { repositoryFiles.closeOwner(current.webContents.id); current.destroy(); });
   });
@@ -182,17 +192,51 @@ else app.whenReady().then(() => {
   const tasks = new Tasks(storageRoot, verification);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   livePreview = coaching ? new LivePreview(storageRoot, designs, coaching, async (url) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Open isolated preview', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Approve local design preview', message: url, detail: 'This local application can execute browser JavaScript in a separate sandboxed window. It cannot access Coding Hub IPC, local files, permissions, downloads, or other network origins. Start the trusted development server yourself.' })).response === 0 && !updateRestart) : null;
-  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
+  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Coding-Hub-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Coding Hub backup', extensions: ['gz'] }] })).filePath ?? null,
     importFile: async () => { const selected = await dialog.showOpenDialog(window!, { title: 'Import local backup', properties: ['openFile'], filters: [{ name: 'Coding Hub backup', extensions: ['gz'] }] }); return selected.canceled ? null : selected.filePaths[0] ?? null; },
     confirmRestore: async (record) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Activate restored copy on restart', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Review verified restore', message: `${record.files} files · ${record.bytes} bytes · version ${record.appVersion}`, detail: 'The backup was checked and copied into a new local restore directory. Current data and project files remain intact. Credentials are excluded, so named profiles may need login again. Restart to activate the restored copy.' })).response === 0 && !updateRestart,
   });
+  const confirmWorkflow = async (title: string, detail: string) => (await dialog.showMessageBox(window!, { type: 'question', title, message: title, detail, buttons: ['Confirm reviewed action', 'Cancel'], defaultId: 1, cancelId: 1 })).response === 0 && !updateRestart && !backups?.busy;
+  const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop coding sessions and verification before changing repositories or applying templates.'); };
+  delivery = new Delivery(confirmWorkflow, workflowReady);
+  workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
     if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); livePreview?.close(); app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
+    if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
+    if (action.startsWith('flow-')) {
+      if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
+      if (action.startsWith('flow-git-')) return delivery!.execute(payload);
+      if (action === 'flow-open-pr') { const request = z.object({ action: z.literal('flow-open-pr'), url: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/) }).strict().parse(payload); await shell.openExternal(request.url); return null; }
+      if (action === 'flow-preview-size' || action === 'flow-design-diff') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
+      if (action === 'flow-design-task') {
+        const request = z.object({ action: z.literal('flow-design-task'), snapshotId: z.uuid(), annotationId: z.uuid(), directory: z.string().max(4096), scope: z.array(z.string().max(300)).min(1).max(30) }).strict().parse(payload);
+        const comments = await livePreview!.execute({ action: 'annotation-list', snapshotId: request.snapshotId }) as import('../shared/workbench').Annotation[];
+        const comment = comments.find((item) => item.id === request.annotationId); if (!comment) throw new HubError('DESIGN_TASK', 'Select an available annotation.');
+        return tasks.execute({ action: 'task-save', title: comment.text.slice(0, 150), directory: request.directory, sessionId: null, scope: request.scope, status: 'queued', notes: `Design ${request.snapshotId} at (${comment.x}%, ${comment.y}%): ${comment.text}`, verificationId: null, designRef: { snapshotId: request.snapshotId, annotationId: comment.id } });
+      }
+      if (action === 'flow-release-status') {
+        z.object({ action: z.literal('flow-release-status') }).strict().parse(payload);
+        if (!app.isPackaged || process.platform !== 'win32') return { state: app.isPackaged ? 'Platform verification unavailable' : 'Source edition — no installer signature', publisher: null };
+        try { const signature = await promisify(execFile)(path.win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile','-NonInteractive','-Command', `(Get-AuthenticodeSignature -LiteralPath '${process.execPath.replace(/'/g, "''")}') | Select-Object @{Name='Status';Expression={[string]$_.Status}},@{Name='Publisher';Expression={$_.SignerCertificate.Subject}} | ConvertTo-Json -Compress`], { timeout: 10000, maxBuffer: 8192, windowsHide: true }); const info = JSON.parse(signature.stdout); return { state: String(info.Status), publisher: typeof info.Publisher === 'string' ? info.Publisher : null }; } catch { return { state: 'Signature verification failed', publisher: null }; }
+      }
+      if (action === 'flow-support-export') {
+        const request = z.object({ action: z.literal('flow-support-export'), engine: z.enum(['claude','codex']), directory: z.string().max(4096).nullable(), profileId: z.uuid().optional() }).strict().parse(payload);
+        const report = await diagnostics.execute({ ...request, action: 'diagnose' });
+        const sanitized = redactDiagnostic(report, homedir(), request.directory);
+        const result = await dialog.showSaveDialog(window!, { title: 'Export diagnostic report (no session output or credentials)', defaultPath: `Coding-Hub-${app.getVersion()}-diagnostics.json`, filters: [{ name: 'JSON report', extensions: ['json'] }] });
+        if (!result.filePath) return { exported: false };
+        if (fs.existsSync(result.filePath) && fs.lstatSync(result.filePath).isSymbolicLink()) throw new HubError('REPORT_PATH', 'Choose a regular output file.');
+        fs.writeFileSync(result.filePath, JSON.stringify({ appVersion: app.getVersion(), platform: process.platform, packaged: app.isPackaged, report: sanitized, excludes: ['Session output','Prompt text','Environment values','Credentials','Configuration contents'] }, null, 2), { mode: 0o600 }); return { exported: true };
+      }
+      if (!workflows) throw new HubError('WORKFLOW_STORAGE', 'Writable local workflow storage is unavailable.');
+      if (action === 'flow-template-apply') workflowReady();
+      return workflows.execute(payload);
+    }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
     if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'preview-capture', 'design-feedback', 'annotation-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
@@ -224,14 +268,14 @@ else app.whenReady().then(() => {
     storageDirectory: storageRoot,
     updater: autoUpdater,
     publish: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.updateStatus, status); },
-    hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy),
+    hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running),
     installationFailed: () => { updateRestart = false; },
     prepareRestart: async () => {
       const answer = await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart AI Coding Hub?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {
-        if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
+        if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy || delivery?.running || workflows?.running) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
         if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'The workspace could not be saved. Resolve the storage issue before updating.'); }
         else throw new HubError('UPDATE_SAVE_FAILED', 'Load the local workspace successfully before updating.');
         return true;
@@ -293,6 +337,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
+  if (delivery?.running || workflows?.running) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before quitting.' }); return; }
   quitting = true;
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).finally(() => {
     try { projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); } finally { app.quit(); }

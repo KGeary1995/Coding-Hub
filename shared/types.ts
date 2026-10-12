@@ -31,6 +31,8 @@ export type WorkspaceBinding =
   | { mode: 'independent'; cwd: string };
 
 export interface Session {
+  budget?: import('./productivity').SessionBudget;
+  preparedRequest?: import('./productivity').PreparedSessionRequest;
   id: string;
   title: string;
   config: CLIEngineConfig;
@@ -116,7 +118,7 @@ export interface LocalExtension {
 export interface SavedWorkspace {
   version: 1;
   rootDirectory: string | null;
-  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt'>[];
+  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt' | 'budget' | 'preparedRequest'>[];
   tiles: GridTile[];
   layoutMode: 'columns' | 'rows' | 'grid';
   focusedSessionId: string | null;

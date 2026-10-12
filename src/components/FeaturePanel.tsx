@@ -1,3 +1,5 @@
+import { lazy, Suspense } from 'react';
+const WorkflowCenter = lazy(() => import('./WorkflowCenter').then((module) => ({ default: module.WorkflowCenter })));
 import { TasksPanel } from './TasksPanel';
 import { VerificationPanel } from './VerificationPanel';
 import { CoachingPanel } from './CoachingPanel';
@@ -10,6 +12,7 @@ import { HelpPanel } from './HelpPanel';
 import { ConfigurationPanel, MemoryPanel, SettingsPanel, UsagePanel } from './HubPanels';
 export function FeaturePanel() {
   const view = useWorkspaceStore((s) => s.activeView);
+  if (view === 'workflow') return <Suspense fallback={<p className="control-note">Opening workflow tools…</p>}><WorkflowCenter /></Suspense>;
   if (view === 'tasks') return <TasksPanel />;
   if (view === 'verification') return <VerificationPanel />;
   if (view === 'coaching') return <CoachingPanel />;

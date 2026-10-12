@@ -1,3 +1,4 @@
+import { VisualComparison } from './DesignIterationTools';
 import { DesignReviewPanel } from './DesignReviewPanel';
 import { useEffect, useRef, useState } from 'react';
 import { Columns2, FileImage, History, PanelsTopLeft, Plus, RefreshCw, Search, TerminalSquare } from 'lucide-react';
@@ -23,6 +24,7 @@ function Preview({ value, width }: { value: DesignPreview; width: number }) {
   return <div className="design-preview"><header><strong>{value.snapshot.title}</strong><span>v{value.snapshot.version} · {value.snapshot.sourceName}</span></header><div className="design-preview-scroll"><div className="design-device" style={{ width }}>{value.snapshot.kind === 'html' ? <iframe title={`${value.snapshot.title} version ${value.snapshot.version}`} sandbox="" referrerPolicy="no-referrer" srcDoc={designDocument(value.content)} /> : <img src={`data:${value.mime};base64,${value.content}`} alt={`${value.snapshot.title} version ${value.snapshot.version}`} />}</div></div>{value.snapshot.notes && <p className="design-notes">{value.snapshot.notes}</p>}</div>;
 }
 export function DesignPanel() {
+  const targetSnapshot = useWorkspaceStore((s) => s.designSnapshotId);
   const rootDirectory = useWorkspaceStore((s) => s.rootDirectory);
   const [snapshots, setSnapshots] = useState<DesignSnapshot[]>([]);
   const [selected, setSelected] = useState<DesignPreview | null>(null);
@@ -42,6 +44,7 @@ export function DesignPanel() {
       if (mounted.current && generation.current === current) { setSelected(value); setPrevious(before); setTitle(snapshot.title); setNotes(''); setNewDesign(false); }
     } catch (e) { if (mounted.current && generation.current === current) setError(e instanceof Error ? e.message : 'Preview unavailable.'); }
   }
+  useEffect(() => { if (!targetSnapshot) return; const target = snapshots.find((item) => item.id === targetSnapshot); if (target) { void select(target); useWorkspaceStore.setState({ designSnapshotId: null }); } }, [targetSnapshot, snapshots]);
   async function save() {
     if (busy || !title.trim()) return; setBusy(true); setError('');
     const current = ++generation.current;
@@ -56,6 +59,7 @@ export function DesignPanel() {
     <form className="design-import" onSubmit={(event) => { event.preventDefault(); void save(); }}><label>Design title<input aria-label="Design title" required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} disabled={busy} placeholder="Checkout flow, Dashboard, Landing page…" /></label><label>Version notes<input aria-label="Design version notes" maxLength={4000} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={busy} placeholder="What changed or needs review?" /></label><button className="button primary" disabled={busy || !title.trim()}><FileImage size={14} />{busy ? 'Saving…' : newDesign ? 'Import preview' : 'Save next version'}</button></form>
     {error && <p className="error-message" role="alert">{error}</p>}
     <div className="design-toolbar"><span><History size={14} />{snapshots.length} saved versions</span><div><select aria-label="Design preview viewport" value={width} onChange={(event) => setWidth(Number(event.target.value))}><option value={1024}>Desktop · 1024 px</option><option value={768}>Tablet · 768 px</option><option value={390}>Mobile · 390 px</option></select><button className="button secondary" aria-pressed={compare} disabled={!previous} onClick={() => setCompare(!compare)}><Columns2 size={14} />Compare versions</button><button className="button secondary" aria-pressed={agents} onClick={() => setAgents(!agents)}><TerminalSquare size={14} />{agents ? 'Hide sessions' : 'Show sessions'}</button></div></div>
+    <VisualComparison key={selected?.snapshot.id ?? 'empty'} before={previous} after={selected} />
     <DesignReviewPanel selected={selected} onCapture={(value) => { setPrevious(selected); setSelected(value); setTitle(value.snapshot.title); setNewDesign(false); void refresh(); }} />
     <div className={`design-workbench ${agents ? 'with-agents' : ''}`}><aside className="design-history"><div className="design-search"><Search size={14} /><input aria-label="Search saved designs" placeholder="Search designs…" value={search} onChange={(event) => setSearch(event.target.value)} /><button className="icon-button" aria-label="Refresh design archive" onClick={() => void refresh()}><RefreshCw size={13} /></button></div><div className="design-history-list">{filtered.map((item) => <button key={item.id} aria-label={`${item.title} version ${item.version}`} aria-pressed={selected?.snapshot.id === item.id} onClick={() => void select(item)} disabled={busy}><strong>{item.title}</strong><span>v{item.version} · {new Date(item.createdAt).toLocaleDateString()}</span><small>{item.notes || item.sourceName}</small></button>)}{!filtered.length && <p>No saved previews found.</p>}</div></aside><div className={`design-previews ${compare && previous ? 'comparing' : ''}`}>{selected ? <>{compare && previous && <Preview value={previous} width={width} />}<Preview value={selected} width={width} /></> : <div className="design-empty"><PanelsTopLeft size={38} /><h2>Your design history starts here</h2><p>Enter a title and import self-contained HTML or a PNG, JPEG, or WebP screenshot. Save another version after your next iteration.</p><small>HTML is a static preview. Scripts, external assets, forms, and network access are disabled. Exports from other design tools can be imported; cloud project history is not synced.</small></div>}</div>{agents && <div className="design-agents"><SessionGrid /></div>}</div>
   </section>;

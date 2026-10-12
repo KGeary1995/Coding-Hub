@@ -33,7 +33,7 @@ export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
   private baselines = new Map<string, { file: string; offset: number; usage: Snapshot | null }>();
-  isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || (engine === 'claude' ? watch.run.runId === id : watch.thread === id))); }
+  isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || Boolean(watch.file && path.basename(watch.file).includes(id)) || (engine === 'claude' ? watch.run.runId === id : watch.thread === id))); }
   setResumeSource(runId: string, file: string, engine: 'claude' | 'codex', model: string) {
     const size = fs.statSync(file).size; let usage: Snapshot | null = null; let actualModel = model || 'CLI default';
     if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
@@ -84,6 +84,9 @@ export class TelemetryService {
     try {
       if (!w.file) { w.file = this.find(w); if (w.file) this.assigned.add(w.file); }
       if (!w.file) return;
+      const conversationId = path.basename(w.file).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
+      if (conversationId) { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId); if (record) { const metadata = JSON.parse(String(record.value)); if (metadata.conversationId !== conversationId) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...metadata, conversationId }), w.run.runId); } }
+
       const size = fs.statSync(w.file).size; if (size < w.offset) { w.offset = 0; w.partial = Buffer.alloc(0); }
       const count = Math.min(512000, size - w.offset); if (count <= 0) return;
       const buffer = Buffer.alloc(count); const fd = fs.openSync(w.file, 'r'); let read: number; try { read = fs.readSync(fd, buffer, 0, count, w.offset); } finally { fs.closeSync(fd); } w.offset += read;

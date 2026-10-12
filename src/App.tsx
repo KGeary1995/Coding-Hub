@@ -14,7 +14,7 @@ import { RepositoryPanel } from './components/RepositoryPanel';
 import { WorkspaceExplorer } from './components/WorkspaceExplorer';
 
 const titles: Record<NavigationView, string> = {
-  workspace: 'Workspace', design: 'Design workspace', coaching: 'AI coaching', tasks: 'Task coordination', verification: 'Verification profiles', projects: 'Projects', accounts: 'Accounts & connections',
+  workflow: 'Workflow center', workspace: 'Workspace', design: 'Design workspace', coaching: 'AI coaching', tasks: 'Task coordination', verification: 'Verification profiles', projects: 'Projects', accounts: 'Accounts & connections',
   history: 'Session history', files: 'Files', diff: 'Changes', usage: 'Usage',
   connectors: 'MCP servers', skills: 'Skills & plugins', memory: 'Shared memory',
   rules: 'Shared rules', help: 'Help & AI guide', settings: 'Settings',

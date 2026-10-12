@@ -1,9 +1,10 @@
 import { APP_VERSION } from '../version';
 import { useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, ListTodo, CheckCheck, GraduationCap, PanelsTopLeft, FolderOpen, CircleUserRound, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
+import { Workflow, PanelLeftClose, PanelLeftOpen, ListTodo, CheckCheck, GraduationCap, PanelsTopLeft, FolderOpen, CircleUserRound, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 
 const navigation = [
+  { id: 'workflow', label: 'Workflow center', icon: Workflow },
   { id: 'workspace', label: 'Workspace', icon: LayoutDashboard },
   { id: 'design', label: 'Design workspace', icon: PanelsTopLeft },
   { id: 'projects', label: 'Projects', icon: FolderOpen },
@@ -39,7 +40,7 @@ export function Navigation() {
       <div className="sidebar-workspace" title={`${sessions.length} sessions · ${running} running`}><span className="workspace-avatar">W</span><div><strong>Local workspace</strong><small><i className={running ? 'online' : ''} />{running ? `${running} active ${running === 1 ? 'session' : 'sessions'}` : 'No active processes'}</small></div></div>
       <nav aria-label="Main navigation">
         {[
-          { label: 'WORKBENCH', ids: ['workspace', 'design', 'projects', 'accounts'] },
+          { label: 'WORKBENCH', ids: ['workspace', 'design', 'projects', 'accounts', 'workflow'] },
           { label: 'REVIEW & INSIGHTS', ids: ['files', 'diff', 'history', 'usage', 'coaching', 'tasks', 'verification'] },
           { label: 'AGENT CONFIGURATION', ids: ['connectors', 'skills', 'memory', 'rules'] },
           { label: 'RESOURCES', ids: ['help'] },

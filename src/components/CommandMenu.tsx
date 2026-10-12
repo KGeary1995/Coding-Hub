@@ -34,6 +34,10 @@ export function CommandMenu() {
     return () => { window.removeEventListener('keydown', trapFocus); if (previousFocus?.isConnected) previousFocus.focus(); };
   }, [open]);
   const commands = [
+    { name: 'Search local workspace', detail: 'Workflow', run: () => { useWorkspaceStore.setState({ workflowTab: 'search' }); setView('workflow'); } },
+    { name: 'Recover a failed session', detail: 'Workflow', run: () => { useWorkspaceStore.setState({ workflowTab: 'recovery' }); setView('workflow'); } },
+    { name: 'Apply a project template', detail: 'Workflow', run: () => { useWorkspaceStore.setState({ workflowTab: 'templates' }); setView('workflow'); } },
+    { name: 'Export a diagnostic report', detail: 'Support', run: () => { useWorkspaceStore.setState({ workflowTab: 'support' }); setView('workflow'); } },
     { name: 'Go to workspace', detail: 'Navigation', run: () => setView('workspace') },
     { name: 'Open, create, or clone a project', detail: 'Setup', run: () => setView('projects') },
     { name: 'Connect Claude, Codex, or GitHub account', detail: 'Setup', run: () => setView('accounts') },

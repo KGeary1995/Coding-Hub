@@ -54,25 +54,26 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   return entry;
 }
 
-export function writeTerminal(id: string, data: string): Promise<void> {
+export function writeTerminal(id: string, data: string): Promise<boolean> {
   const entry = terminals.get(id);
   const run = entry?.run;
-  if (!entry || !run || !window.codingHub) return Promise.resolve();
+  if (!entry || !run || !window.codingHub) return Promise.resolve(false);
   // Serialize complete input events so typing cannot interleave with a large paste.
+  let succeeded = true;
   entry.inputQueue = entry.inputQueue.then(async () => {
     try {
       for (let offset = 0; offset < data.length;) {
-        if (entry.run?.runId !== run.runId) break;
+        if (entry.run?.runId !== run.runId) { succeeded = false; break; }
         let end = Math.min(offset + 16 * 1024, data.length);
         const last = data.charCodeAt(end - 1);
         if (end < data.length && last >= 0xD800 && last <= 0xDBFF) end--;
         const result = await window.codingHub!.writeSession({ ...run, data: data.slice(offset, end) });
-        if (!result.ok) { if (entry.run?.runId === run.runId) reportInputError(id, result.error.message); break; }
+        if (!result.ok) { succeeded = false; if (entry.run?.runId === run.runId) reportInputError(id, result.error.message); break; }
         offset = end;
       }
-    } catch { reportInputError(id, 'The native terminal connection was lost.'); }
+    } catch { succeeded = false; reportInputError(id, 'The native terminal connection was lost.'); }
   });
-  return entry.inputQueue;
+  return entry.inputQueue.then(() => succeeded);
 }
 
 export function routeTerminalEvent(event: SessionEvent) {

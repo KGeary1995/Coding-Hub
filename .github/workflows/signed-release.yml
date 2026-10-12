@@ -1,0 +1,45 @@
+name: Signed Windows release verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  signed-windows:
+    runs-on: windows-latest
+    env:
+      CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - name: Verify signing configuration is present
+        shell: pwsh
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:WINDOWS_PUBLISHER_NAME) { throw 'Configure signing secrets and the public publisher name in repository settings.' }
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:release
+      - run: npm run test:enterprise
+      - run: npm run test:productivity
+      - run: npm run dist:win:signed
+      - name: Build signed upgrade baseline
+        run: node scripts/build-windows.cjs --signed --output release/baseline --version 1.6.1
+      - run: npm run test:install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AI-Coding-Hub-Signed-Windows
+          if-no-files-found: error
+          path: |
+            release/*-Setup.exe
+            release/*-Setup.exe.blockmap
+            release/*-Portable.exe
+            release/latest.yml
+            release/windows-signature-report.json
+            release/windows-install-report.json

@@ -20,6 +20,8 @@ export const savedWorkspaceSchema = z.object({
   sessions: z.array(z.object({
     id: identifier, title: z.string().min(1).max(160), config: engineConfigSchema,
     binding: z.discriminatedUnion('mode', [z.object({ mode: z.literal('workspace') }).strict(), z.object({ mode: z.literal('independent'), cwd: directory }).strict()]),
+    budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
+    preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
     createdAt: z.string().datetime(),
   }).strict()).min(2).max(4),
   tiles: z.array(z.object({

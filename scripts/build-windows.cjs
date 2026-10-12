@@ -10,6 +10,8 @@ function run(file, args) {
 }
 try {
   const args = process.argv.slice(2);
+  const signed = args.includes('--signed'); if (signed) args.splice(args.indexOf('--signed'), 1);
+  if (signed && (process.platform !== 'win32' || !process.env.CSC_LINK || !process.env.WINDOWS_PUBLISHER_NAME)) throw new Error('Signed builds require native Windows, CSC_LINK, and the public WINDOWS_PUBLISHER_NAME. Configure certificate/password securely in build settings.');
   let output = path.join(root, 'release'); let version = require('../package.json').version;
   for (let i = 0; i < args.length; i += 2) {
     if (!args[i + 1]) throw new Error('Missing release argument value.');
@@ -23,7 +25,9 @@ try {
   const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');
   run(process.execPath, [builder, '--config', 'electron-builder.cjs', '--win', '--x64', '--publish', 'never', `--config.directories.output=${stage}`, `--config.extraMetadata.version=${version}`]);
   run(process.execPath, [path.join(__dirname, 'verify-windows-package.cjs'), '--directory', stage, '--version', version]);
+  if (signed) run(process.execPath, [path.join(__dirname, 'verify-windows-signatures.cjs'), '--directory', stage]);
   promote(stage, output, version);
+  if (signed) fs.copyFileSync(path.join(stage, 'windows-signature-report.json'), path.join(output, 'windows-signature-report.json'));
   console.log(`Verified Windows release files: ${output}`);
   console.log('Open the Setup.exe to install. Staging directories are retained for verification; old builds and user data are never deleted automatically.');
 } catch (error) {

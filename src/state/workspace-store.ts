@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 
-export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings';
+export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 export function createSession(engine: CLIEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
@@ -53,6 +53,9 @@ interface WorkspaceState {
   focusedSessionId: string | null;
   activeView: NavigationView;
   helpTopicId: string;
+  workflowTab: 'recovery' | 'search' | 'templates' | 'support';
+  designSnapshotId: string | null;
+  recoverySessionId: string | null;
   engines: EngineInfo[];
   discovering: boolean;
   discoveryError: string | null;
@@ -92,6 +95,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
+  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null,
   engines: [],
   discovering: false,
   discoveryError: null,
@@ -122,7 +126,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (state.sessions.length >= 4) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
     const session = createSession(engine, source ? { ...source.binding } : undefined);
-    if (source?.config.engine === engine) session.config = structuredClone(source.config);
+    if (source?.config.engine === engine) { session.config = structuredClone(source.config); delete session.config.resumeId; }
     const sessions = [...state.sessions, session];
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),
@@ -150,7 +154,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorkspace {
   return {
     version: 1, rootDirectory: state.rootDirectory,
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt }) => ({ id, title, config, binding, createdAt })),
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}) })),
     tiles: state.tiles, layoutMode: state.layoutMode, focusedSessionId: state.focusedSessionId,
   };
 }

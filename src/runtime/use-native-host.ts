@@ -21,7 +21,10 @@ export function useNativeHost() {
     let cancelled = false;
     let loaded = false;
     let unsubscribeSave = () => {};
-    const unsubscribeUsage = host.onUsage((usage) => useHubStore.getState().upsert(usage));
+    const unsubscribeUsage = host.onUsage((usage) => {
+      useHubStore.getState().upsert(usage);
+      if (usage.conversationId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.runId === usage.runId && session.config.engine === usage.engine && session.config.resumeId !== usage.conversationId ? { ...session, config: { ...session.config, resumeId: usage.conversationId } } : session) }));
+    });
     void hubCall<UsageRecord[]>({ action: 'usage' }).then((usage) => { if (!cancelled) { const live = useHubStore.getState().usage; useHubStore.getState().setUsage([...live, ...usage.filter((u) => !live.some((l) => l.runId === u.runId))]); } }).catch(() => {});
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     const unsubscribe = host.onSessionEvent((event) => {

@@ -1,0 +1,101 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { randomUUID } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const { _electron } = require('playwright-core');
+(async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-'));
+  const bin = path.join(root, 'bin'), project = path.join(root, 'project');
+  await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
+  const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
+  for (const engine of ['claude', 'codex']) {
+    if (process.platform === 'win32') {
+      const folder = path.join(bin, 'node_modules', ...(engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex').split('/'));
+      await fs.mkdir(folder, { recursive: true }); await fs.writeFile(path.join(folder, 'package.json'), JSON.stringify({ bin: { [engine]: 'fixture.cjs' } }));
+      await fs.writeFile(path.join(folder, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
+    } else await fs.writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
+  }
+  await fs.writeFile(path.join(project, 'package.json'), JSON.stringify({ scripts: { check: 'node -e "console.log(12345)"' } }));
+  execFileSync('git', ['init', '-b', 'main'], { cwd: project, stdio: 'pipe' });
+  await fs.mkdir(path.join(project, 'src')); await fs.writeFile(path.join(project, 'src/app.txt'), 'edit');
+  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
+  const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
+  if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
+  let app; const errors = [];
+  let previewColor = '#ffffff';
+  const server = http.createServer((_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<style>html,body{margin:0;background:'+previewColor+';color:#678;font:20px sans-serif}h1{padding:30px}</style><h1>Live design</h1><script>window.live=true;fetch("https://example.invalid/").catch(()=>window.blocked=true)</script>'); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = 'http://127.0.0.1:' + server.address().port;
+  const native = async (page, method, request) => { const result = await page.evaluate(({ method, request }) => window.codingHub[method](request), { method, request }); assert.equal(result.ok, true, result.error?.message); return result.value; };
+  const wb = (page, request) => native(page, 'workbench', request);
+  async function launch() {
+    app = await _electron.launch({ executablePath: require('electron'), args, env }); const page = await app.firstWindow(); page.setDefaultTimeout(20000); page.on('pageerror', (e) => errors.push(e.message));
+    await page.waitForSelector('.session-tile');
+    await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
+    await page.evaluate(() => { window.events = []; window.usages = []; window.codingHub.onSessionEvent((e) => window.events.push(e)); window.codingHub.onUsage((e) => window.usages.push(e)); });
+    return page;
+  }
+  const git = (...values) => execFileSync('git', ['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false',...values], { cwd:project, encoding:'utf8', stdio:'pipe' }).trim();
+  try {
+    await fs.writeFile(path.join(project,'.gitignore'),'.env\n'); await fs.writeFile(path.join(project,'src/app.ts'),'needle source'); await fs.writeFile(path.join(project,'.env'),'needle PRIVATE_SECRET');
+    git('config','user.name','Fixture'); git('config','user.email','fixture@example.invalid'); git('config','commit.gpgsign','false'); git('add','.'); git('commit','-m','Baseline');
+    if (process.platform !== 'win32') await fs.writeFile(path.join(bin,'gh'), '#!/usr/bin/env node\nconst fs=require("node:fs");const args=process.argv.slice(2);if(args[0]!=="pr"||args[1]!=="create")process.exit(1);fs.writeFileSync('+JSON.stringify(path.join(root,'pr-body.txt'))+',fs.readFileSync(args[args.indexOf("--body-file")+1],"utf8"));console.log("https://github.com/fixture/project/pull/42");', {mode:0o755});
+    let page=await launch();
+    await app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},project);
+    await page.getByRole('button',{name:'Open project',exact:true}).click();
+    const tile=page.locator('.session-tile').nth(1);
+    await page.getByRole('button',{name:'Engine settings for session 2',exact:true}).click();
+    await tile.getByText('Session name & budget alerts',{exact:true}).click();
+    await tile.getByLabel('Session name',{exact:true}).fill('Implementation');
+    await tile.getByLabel('Session token target',{exact:true}).fill('100');
+    await tile.getByLabel('Session context warning',{exact:true}).fill('10');
+    await page.getByRole('button',{name:'Engine settings for session 2',exact:true}).click();
+    await tile.getByRole('button',{name:'Start session',exact:true}).click();
+    await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('READY')));
+    await tile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('needle task');await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>document.querySelectorAll('.budget-notice').length===1);
+    const usage=await page.evaluate(()=>window.usages.at(-1));assert.ok(usage.conversationId);
+    await tile.getByRole('button',{name:'Stop',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.process-dot.running').length===0);
+    const saved=await native(page,'loadWorkspace');assert.equal(saved.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(saved.workspace.sessions[1].title,'Implementation');
+    await page.getByRole('button',{name:'Session history',exact:true}).click();await page.getByRole('button',{name:'View native CLI conversations',exact:true}).click();
+    await page.getByText('Name and pin conversation',{exact:true}).click();await page.getByLabel('Conversation name',{exact:true}).fill('Pinned implementation');await page.getByLabel('Pin conversation',{exact:true}).check();await page.getByRole('button',{name:'Save conversation preferences',exact:true}).click();
+    await page.getByRole('heading',{name:'★ Pinned implementation',exact:true}).waitFor();
+    const labels=await wb(page,{action:'flow-conversations'});assert.equal(labels[0].pinned,true);
+    await page.getByRole('button',{name:'Resume in new tile',exact:true}).click();await page.locator('.session-tile').nth(2).waitFor();
+    await page.getByRole('button',{name:'AI coaching',exact:true}).click();await page.getByRole('button',{name:'Review coaching report',exact:true}).click();await page.getByLabel('Approve sharing coaching report through my CLI',{exact:true}).check();await page.getByRole('button',{name:'Prepare Claude coaching',exact:true}).click();await page.locator('.session-tile').nth(3).waitFor();
+    await app.close();app=null;page=await launch();
+    let restored=await native(page,'loadWorkspace');assert.equal(restored.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(restored.workspace.sessions[3].preparedRequest.label,'Send coaching request');assert.equal((await wb(page,{action:'flow-conversations'}))[0].name,'Pinned implementation');
+    const resumedTile=page.locator('.session-tile').nth(1);await resumedTile.getByRole('button',{name:'Start session',exact:true}).click();await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));
+    await resumedTile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('fail-launch');await page.keyboard.press('Enter');await page.waitForFunction(()=>[...document.querySelectorAll('.session-error')].some((element)=>element.textContent.includes('fixture invalid model')));
+    await page.getByRole('button',{name:'Open session recovery center',exact:true}).click();await page.getByRole('button',{name:'Run recovery checks',exact:true}).click();await page.getByText('Interactive terminal transport · passed',{exact:true}).waitFor();assert.ok((await wb(page,{action:'flow-failures'})).some((run)=>run.diagnostic.includes('fixture invalid model')));
+    const rules=await native(page,'hub',{action:'rules-read',directories:[project]});await native(page,'hub',{action:'rules-save',content:'needle rules: verify changes before delivery.',revision:rules.revision,targets:rules.targets.map(({directory,claudeHash,codexHash})=>({directory,claudeHash,codexHash}))});
+    await native(page,'hub',{action:'memory-write',project:'demo',title:'Needle handoff',content:'needle memory',author:'human'});
+    const previewEvent=app.waitForEvent('window');await wb(page,{action:'preview-open',url});const preview=await previewEvent;await preview.waitForFunction(()=>window.live);
+    await wb(page,{action:'flow-preview-size',width:400,height:500});await preview.waitForFunction(()=>innerWidth===400&&innerHeight===500);
+    const first=await wb(page,{action:'preview-capture',title:'Iteration',notes:'Before',projectDirectory:project});previewColor='#102030';await preview.reload();await preview.waitForFunction(()=>window.live&&getComputedStyle(document.body).backgroundColor==='rgb(16, 32, 48)');
+    const second=await wb(page,{action:'preview-capture',title:'Iteration',notes:'After',projectDirectory:project,designId:first.snapshot.designId});
+    const comparison=await wb(page,{action:'flow-design-diff',before:first.snapshot.id,after:second.snapshot.id,threshold:20});assert.ok(comparison.changedPixels>100);assert.equal(comparison.totalPixels,200000);assert.equal((await wb(page,{action:'flow-design-diff',before:first.snapshot.id,after:first.snapshot.id,threshold:0})).changedPixels,0);
+    const annotation=await wb(page,{action:'annotation-add',snapshotId:second.snapshot.id,x:25,y:40,text:'needle annotation: improve spacing'});const task=await wb(page,{action:'flow-design-task',snapshotId:second.snapshot.id,annotationId:annotation.id,directory:project,scope:['src/**']});assert.equal(task.designRef.snapshotId,second.snapshot.id);await wb(page,{action:'preview-close'});
+    await page.getByRole('button',{name:'Task coordination',exact:true}).click();await page.getByRole('button',{name:'View linked design',exact:true}).click();await page.getByRole('img',{name:'Iteration version 2',exact:true}).waitFor();await page.getByText('Screenshot differences',{exact:true}).click();await page.getByRole('button',{name:'Compare saved screenshots',exact:true}).click();await page.getByRole('img',{name:'Highlighted screenshot differences',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Workflow center',exact:true}).click();await page.getByRole('tab',{name:'Search',exact:true}).click();await page.getByLabel('Workspace search query',{exact:true}).fill('needle');await page.getByRole('button',{name:'Search local workspace',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.search-results article').length>=4);
+    const search=await wb(page,{action:'flow-search',query:'needle',directory:project,includeOutput:false});assert.ok(['file','memory','rules','annotation'].every((kind)=>search.hits.some((hit)=>hit.kind===kind)));assert.ok(!JSON.stringify(search).includes('PRIVATE_SECRET'));assert.ok(!search.hits.some((hit)=>hit.kind==='output'));
+    const outputSearch=await wb(page,{action:'flow-search',query:'needle task',directory:null,includeOutput:true});assert.ok(outputSearch.hits.some((hit)=>hit.kind==='output'));
+    await fs.writeFile(path.join(project,'src/app.ts'),'needle revised source');const initial=await wb(page,{action:'flow-git-inspect',directory:project});await wb(page,{action:'flow-git-stage',directory:project,revision:initial.revision,paths:['src/app.ts','CLAUDE.md','AGENTS.md']});const staged=await wb(page,{action:'flow-git-inspect',directory:project});assert.equal(staged.staged.length,3);await wb(page,{action:'flow-git-commit',directory:project,revision:staged.revision,message:'Reviewed implementation'});
+    const remote=path.join(root,'remote.git');await fs.mkdir(remote);execFileSync('git',['init','--bare',remote],{stdio:'pipe'});git('remote','add','origin',remote);const committed=await wb(page,{action:'flow-git-inspect',directory:project});await wb(page,{action:'flow-git-push',directory:project,revision:committed.revision,remote:'origin'});assert.equal(execFileSync('git',['--git-dir',remote,'rev-parse','main'],{encoding:'utf8'}).trim(),git('rev-parse','HEAD'));
+    if(process.platform!=='win32'){const current=await wb(page,{action:'flow-git-inspect',directory:project});const result=await wb(page,{action:'flow-git-pr',directory:project,revision:current.revision,title:'Fixture review',body:'Summary\n\nValidation: fixture checks pass.',base:'main',draft:true});assert.equal(result.url,'https://github.com/fixture/project/pull/42');assert.equal(await fs.readFile(path.join(root,'pr-body.txt'),'utf8'),'Summary\n\nValidation: fixture checks pass.');}
+    await wb(page,{action:'verification-save',name:'Template check',directory:project,steps:[{label:'Check',tool:'npm',args:['run','check']}],timeoutSeconds:15});
+    await page.getByRole('button',{name:'Workflow center',exact:true}).click();await page.getByRole('tab',{name:'Templates',exact:true}).click();await page.getByText('Save the current workspace as a template',{exact:true}).click();await page.getByLabel('Template name',{exact:true}).fill('Paired implementation');await page.getByRole('button',{name:'Save project template',exact:true}).click();await page.getByRole('heading',{name:'Paired implementation',exact:true}).waitFor();
+    const templates=await wb(page,{action:'flow-templates'});assert.equal(templates[0].checks.length,1);assert.ok(templates[0].workspace.sessions.every((session)=>!session.config.resumeId&&!session.preparedRequest));
+    const target=path.join(root,'new-project');await fs.mkdir(target);await page.getByRole('button',{name:'Use template',exact:true}).click();await page.getByLabel('Template target directory',{exact:true}).fill(target);await page.getByRole('button',{name:'Review and apply template',exact:true}).click();await page.waitForSelector('.session-tile');restored=await native(page,'loadWorkspace');assert.equal(restored.workspace.rootDirectory,target);assert.equal(restored.workspace.sessions[1].budget.tokens,100);assert.ok((await wb(page,{action:'verification-list'})).profiles.some((item)=>item.directory===target));assert.ok((await fs.readFile(path.join(target,'CLAUDE.md'),'utf8')).includes('needle rules'));
+    await page.getByRole('button',{name:'Workflow center',exact:true}).click();await page.getByRole('tab',{name:'Support & releases',exact:true}).click();await page.getByRole('button',{name:'Check running executable signature',exact:true}).click();await page.getByText('Source edition — no installer signature',{exact:true}).waitFor();
+    const reportFile=path.join(root,'report.json');await app.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({filePath:file,canceled:false});},reportFile);await page.getByRole('button',{name:'Export diagnostic report',exact:true}).click();await page.getByText('Diagnostic report exported.',{exact:true}).waitFor();const report=JSON.parse(await fs.readFile(reportFile,'utf8'));assert.equal(report.appVersion,require('../package.json').version);assert.ok(report.excludes.includes('Credentials'));assert.ok(!JSON.stringify(report).includes('PRIVATE_SECRET'));
+    if(process.env.CODING_HUB_PRODUCTIVITY_SCREENSHOT)await page.screenshot({path:process.env.CODING_HUB_PRODUCTIVITY_SCREENSHOT});
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(900,640));await page.waitForTimeout(250);assert.equal(await page.evaluate(()=>document.body.scrollWidth>innerWidth),false);assert.equal(await page.getByRole('tab',{name:'Recovery',exact:true}).isVisible(),true);
+    const backup=await wb(page,{action:'backup-create',includeLogs:true});const restoredBackup=await wb(page,{action:'backup-restore',id:backup.record.id});await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'runtime'})).storagePath,restoredBackup.restoredPath);assert.equal((await wb(page,{action:'flow-conversations'}))[0].pinned,true);assert.equal((await wb(page,{action:'flow-templates'}))[0].name,'Paired implementation');
+    assert.deepEqual(errors,[]);console.log('PASS: named sessions and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, responsive live viewport and pixel differences, linked design tasks, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
+  } finally {if(app)await app.close();await new Promise((resolve)=>server.close(resolve));await fs.rm(root,{recursive:true,force:true});}
+})().catch((error)=>{console.error(error);process.exitCode=1;});

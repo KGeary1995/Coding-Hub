@@ -11,7 +11,7 @@ const MAX = 64 * 1024 * 1024;
 const recordSchema = z.object({ id: z.uuid(), createdAt: z.iso.datetime(), appVersion: z.string().max(60), files: z.number().int().min(0).max(10000), bytes: z.number().int().min(0).max(MAX), includesLogs: z.boolean() }).strict();
 const entrySchema = z.object({ path: z.string().min(1).max(500), hash: z.string().regex(/^[a-f0-9]{64}$/), content: z.string().max(24 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/) }).strict();
 const manifestSchema = z.object({ version: z.literal(1), sourceRoot: z.string().max(4096).optional(), record: recordSchema, entries: z.array(entrySchema).max(10000) }).strict();
-const exact = ['storage.db', 'telemetry/usage.db', 'preferences.json', 'shared-rules.json', 'updates.json', 'worktrees.json', 'claude-profiles/profiles.json', 'tasks.json', 'experiments.json', 'verification.json', 'design-annotations.json'];
+const exact = ['storage.db', 'telemetry/usage.db', 'preferences.json', 'shared-rules.json', 'updates.json', 'worktrees.json', 'claude-profiles/profiles.json', 'tasks.json', 'experiments.json', 'verification.json', 'design-annotations.json', 'conversation-labels.json', 'project-templates.json'];
 function allowed(name: string, logs: boolean) { return !name.includes('\\') && !name.startsWith('/') && !name.split('/').some((p) => !p || p === '.' || p === '..') && !name.includes(':') && (exact.includes(name) || ['memory/', 'designs/', 'coaching/', ...(logs ? ['logs/'] : [])].some((prefix) => name.startsWith(prefix))) && !name.endsWith('.credentials.json') && !name.endsWith('-wal') && !name.endsWith('-shm') && !name.endsWith('.tmp'); }
 export function resolveStorageRoot(base: string, profile: string) {
   try { const pointer = JSON.parse(fs.readFileSync(path.join(profile, 'storage-location.json'), 'utf8')); const prefix = path.join(base, 'restores') + path.sep; if (pointer.base === base && typeof pointer.directory === 'string' && pointer.directory.startsWith(prefix) && pointer.directory === path.join(base, 'restores', path.basename(pointer.directory)) && z.uuid().safeParse(path.basename(pointer.directory)).success && !fs.lstatSync(pointer.directory).isSymbolicLink() && fs.statSync(pointer.directory).isDirectory()) return pointer.directory; } catch {}
@@ -39,7 +39,7 @@ export class Backups {
       if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, walk(item, name)]));
       return value;
     };
-    for (const file of ['shared-rules.json', 'tasks.json', 'verification.json', 'worktrees.json']) { const target = path.join(restored, file); if (fs.existsSync(target)) save(restored, file, walk(JSON.parse(fs.readFileSync(target, 'utf8')))); }
+    for (const file of ['shared-rules.json', 'tasks.json', 'verification.json', 'worktrees.json', 'project-templates.json']) { const target = path.join(restored, file); if (fs.existsSync(target)) save(restored, file, walk(JSON.parse(fs.readFileSync(target, 'utf8')))); }
     for (const file of ['storage.db', 'telemetry/usage.db']) {
       const target = path.join(restored, file); if (!fs.existsSync(target)) continue; const db = new DatabaseSync(target);
       try {

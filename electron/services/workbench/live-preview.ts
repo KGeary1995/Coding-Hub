@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, nativeImage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { Annotation, PreparedRequest } from '../../../shared/workbench';
 import type { DesignArchive } from '../design/archive';
 import type { CoachingService } from '../coaching/service';
+import { difference } from './visual-diff';
 import { load, save } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 const annotation = z.object({ id: z.uuid(), snapshotId: z.uuid(), x: z.number().min(0).max(100), y: z.number().min(0).max(100), text: z.string().trim().min(1).max(1000), createdAt: z.iso.datetime() }).strict();
@@ -16,6 +17,24 @@ export class LivePreview {
   constructor(private root: string, private archive: DesignArchive, private coaching: CoachingService, private confirm: (url: string) => Promise<boolean>) {}
   close() { this.window?.destroy(); this.window = null; }
   async execute(input: unknown) {
+    const action = z.object({ action: z.string() }).passthrough().parse(input).action;
+    if (action === 'flow-preview-size') {
+      const request = z.object({ action: z.literal('flow-preview-size'), width: z.number().int().min(320).max(1920), height: z.number().int().min(400).max(1200) }).strict().parse(input);
+      if (!this.window || this.window.isDestroyed()) throw new HubError('PREVIEW_CLOSED', 'Open an approved preview first.');
+      this.window.setContentSize(request.width, request.height); return null;
+    }
+    if (action === 'flow-design-diff') {
+      const request = z.object({ action: z.literal('flow-design-diff'), before: z.uuid(), after: z.uuid(), threshold: z.number().int().min(0).max(255) }).strict().parse(input);
+      const images = await Promise.all([request.before, request.after].map(async (id) => {
+        const preview = await this.archive.execute({ action: 'read', id }) as import('../../../shared/design').DesignPreview;
+        if (preview.snapshot.kind !== 'image') throw new HubError('DESIGN_COMPARE', 'Pixel comparison requires two saved screenshots.');
+        return nativeImage.createFromBuffer(Buffer.from(preview.content, 'base64'));
+      }));
+      const size = images[0].getSize(); const other = images[1].getSize();
+      if (images.some((image) => image.isEmpty()) || size.width !== other.width || size.height !== other.height || size.width * size.height > 4000000) throw new HubError('DESIGN_COMPARE', 'Compare screenshots with matching dimensions, up to four million pixels. Capture both at the same viewport size.');
+      const result = difference(images[0].toBitmap(), images[1].toBitmap(), size.width, size.height, request.threshold);
+      return { content: nativeImage.createFromBitmap(result.pixels, size).toPNG().toString('base64'), ...size, changedPixels: result.changedPixels, totalPixels: result.totalPixels };
+    }
     const request = z.discriminatedUnion('action', [z.object({ action: z.literal('preview-open'), url: z.string().max(2000) }).strict(), z.object({ action: z.literal('preview-close') }).strict(), z.object({ action: z.literal('preview-capture'), title: z.string().trim().min(1).max(100), notes: z.string().max(4000), designId: z.uuid().optional(), projectDirectory: z.string().max(4096).nullable() }).strict(), z.object({ action: z.literal('annotation-list'), snapshotId: z.uuid() }).strict(), z.object({ action: z.literal('annotation-add'), snapshotId: z.uuid(), x: annotation.shape.x, y: annotation.shape.y, text: annotation.shape.text }).strict(), z.object({ action: z.literal('design-feedback'), snapshotId: z.uuid() }).strict()]).parse(input);
     if (request.action === 'preview-close') { this.close(); return null; }
     if (request.action === 'preview-open') {

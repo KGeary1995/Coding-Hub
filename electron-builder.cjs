@@ -26,6 +26,7 @@ module.exports = {
     '!node_modules/node-pty/prebuilds/darwin-arm64/**',
   ],
   win: {
+    ...(process.env.WINDOWS_PUBLISHER_NAME ? { publisherName: process.env.WINDOWS_PUBLISHER_NAME } : {}),
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'portable', arch: ['x64'] }],
     icon: 'assets/icon.ico',
     signExecutable: Boolean(process.env.CSC_LINK),
