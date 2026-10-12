@@ -1,0 +1,2 @@
+import type { WorkbenchRequest, WorkbenchResponse } from '../../shared/workbench';
+export async function workbench<T extends WorkbenchResponse>(request: WorkbenchRequest): Promise<T> { if (!window.codingHub) throw new Error('This feature requires the desktop app.'); const result = await window.codingHub.workbench(request); if (!result.ok) throw new Error(result.error.message); return result.value as T; }

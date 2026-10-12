@@ -39,7 +39,7 @@ export class DesignArchive {
     const record = this.record(id); const bytes = this.bounded(path.join(this.root, id + '.asset'), record.kind === 'html' ? 1048576 : 8388608);
     return { snapshot: this.summary(record), content: record.kind === 'html' ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytes.toString('base64'), mime: record.mime };
   }
-  async execute(input: unknown): Promise<DesignResponse> {
+  async execute(input: unknown, captureFile?: string): Promise<DesignResponse> {
     const parsed = requestSchema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_DESIGN_REQUEST', 'Invalid design archive request.');
     const request = parsed.data;
     if (request.action === 'list') return this.list();
@@ -48,7 +48,7 @@ export class DesignArchive {
     if (before.length >= 200) throw new HubError('DESIGN_LIMIT', 'Up to 200 saved design versions are supported.');
     if (request.designId && !before.some((item) => item.designId === request.designId)) throw new HubError('DESIGN_NOT_FOUND', 'The design selected for a new version is unavailable.');
     if (request.projectDirectory && (!path.isAbsolute(request.projectDirectory) || request.projectDirectory.includes('\0'))) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute project directory.');
-    const file = await this.pickFile(); if (!file) return null;
+    const file = captureFile ?? await this.pickFile(); if (!file) return null;
     const extension = path.extname(file).toLowerCase(); const html = ['.html', '.htm'].includes(extension);
     if (!html && !['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) throw new HubError('DESIGN_FORMAT', 'Import a self-contained HTML file or PNG, JPEG, or WebP screenshot.');
     const bytes = this.bounded(file, html ? 1048576 : 8388608);

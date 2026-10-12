@@ -2,9 +2,26 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Complete workflow release (v1.6.0)
+
+This release adds all eight workflow improvements. See [the usage guide](docs/workflows-v1.6.md) for setup and examples.
+
+| Feature | Where to use it |
+| --- | --- |
+| Connection diagnostics | Accounts & connections: installation, login, configuration, directory, and native terminal checks |
+| Version and installation clarity | Settings: renderer/host versions, executable, source/installed edition, and active data folder |
+| Native conversation resume | Session history → View native CLI conversations: default accounts and named Claude profiles |
+| Live design review | Design workspace: approve a local dev server, capture screenshots, pin annotations, prepare agent feedback |
+| Coaching experiments | AI coaching: compare A/B prompt wording, measured CLI tokens, time, rework, and outcome evidence |
+| Backup and restore | Settings: verified local backups, export/import, separate restored data copy, explicit restart |
+| Task coordination | Task coordination: assign sessions and file scopes, audit overlaps and Git changes, record review evidence |
+| Repository verification | Verification profiles: saved argument-based npm/pnpm/yarn/Python/Cargo/Go/.NET checks and recorded results |
+
+Conversation resume uses the installed CLI's advertised resume support and recorded conversation ID. Resumed-run telemetry counts newly reported usage rather than previous conversation totals. Login and terminal diagnostics leave actual provider/model completion unverified until you send a task. Live previews execute browser JavaScript in a separate sandboxed window restricted to one loopback origin; static archive previews continue to block scripts. Backups exclude CLI credentials and external repositories. Task scopes help coordinate work; they do not enforce permissions or identify who edited a file.
+
 ## Design workspace and AI coaching (v1.5.0)
 
-**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. This is a static preview archive, not a JavaScript application runner or automatic Claude Design/cloud history sync. Import exported HTML or screenshots from those tools when available.
+**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. Archive HTML is static; use the new approved live preview window for JavaScript applications. Claude Design/cloud history is not synced automatically. Import exported HTML or screenshots from those tools when available.
 
 **AI coaching** shows local usage trends, token totals, configured-price estimates, and heuristic suggestions. Add curated prompt examples and record successful/partial/failed outcomes; no full session logs are mined automatically. Select up to five examples and review the complete coaching report. Nothing is sent to a model by opening this screen or preparing a report.
 
@@ -77,7 +94,7 @@ A public stable GitHub release with its installer, `latest.yml`, and blockmap is
 
 ## Help and shared rules (v1.1)
 
-**Help & AI guide** provides 24 searchable local articles covering AI agents, models, reasoning, tokens/context, MCP, skills, plugins, hooks, permissions, instruction scope, memory, prompting, review, usage, authentication, Windows setup, and troubleshooting. Search titles and article text, filter by category, and follow related topics. The guide is available offline and can be opened from navigation, the top bar, or the command menu.
+**Help & AI guide** provides searchable local articles covering AI agents, models, reasoning, tokens/context, MCP, skills, plugins, hooks, permissions, instruction scope, memory, prompting, review, usage, authentication, Windows setup, and troubleshooting. Search titles and article text, filter by category, and follow related topics. The guide is available offline and can be opened from navigation, the top bar, or the command menu.
 
 **Shared rules** provides one saved rule document for Claude Code and Codex:
 
@@ -158,6 +175,10 @@ All runtime data is outside the source folder, normally `C:\Users\<you>\.coding-
 | `updates.json` | Automatic update-check preference |
 | `shared-rules.json` | Canonical shared rules and registered project directories |
 | `memory/<project>/<note-id>.json` | Curated handoffs |
+| `designs/`, `design-annotations.json` | Immutable design versions and review comments |
+| `coaching/`, `experiments.json` | Curated examples, prepared reports, A/B trial evidence |
+| `tasks.json`, `verification.json` | Task scopes, command profiles, recorded check results |
+| `backups/`, `restores/` | Verified backups and separate restored data copies |
 
 Finished output retains up to **100 runs for 30 days**; active runs are excluded from pruning. The history viewer shows the last 1 MiB of large logs, strips ANSI escapes, and identifies capped/interrupted runs. Normal closing requests a final settings snapshot, stops processes, and flushes logs. Invalid/future saved data is preserved rather than overwritten. Storage failures do not prevent basic interactive CLI execution.
 
@@ -174,6 +195,7 @@ npm run test:desktop
 npm run test:design
 npm run test:profiles
 npm run test:workbench
+npm run test:enterprise
 npm run build
 ```
 

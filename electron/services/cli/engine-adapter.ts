@@ -39,5 +39,6 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
       env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(config.tokenLimits.maxOutputTokens);
     }
   }
+  if (config.resumeId) { if (!engine.supportsResume) throw new HubError('RESUME_UNAVAILABLE', 'This CLI does not advertise conversation resume. Update it before resuming.'); if (config.engine === 'claude') args.push('--resume', config.resumeId); else args.unshift('resume', config.resumeId); }
   return { args, env };
 }

@@ -1,3 +1,5 @@
+import { TasksPanel } from './TasksPanel';
+import { VerificationPanel } from './VerificationPanel';
 import { CoachingPanel } from './CoachingPanel';
 import { DesignPanel } from './DesignPanel';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -8,6 +10,8 @@ import { HelpPanel } from './HelpPanel';
 import { ConfigurationPanel, MemoryPanel, SettingsPanel, UsagePanel } from './HubPanels';
 export function FeaturePanel() {
   const view = useWorkspaceStore((s) => s.activeView);
+  if (view === 'tasks') return <TasksPanel />;
+  if (view === 'verification') return <VerificationPanel />;
   if (view === 'coaching') return <CoachingPanel />;
   if (view === 'design') return <DesignPanel />;
   if (view === 'projects') return <ProjectsPanel />;

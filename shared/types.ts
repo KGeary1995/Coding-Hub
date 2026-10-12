@@ -4,6 +4,7 @@ export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface ClaudeCLIEngineConfig {
   engine: 'claude';
+  resumeId?: string;
   /** Absent selects the existing host CLI login; named profiles are host-owned IDs. */
   accountProfileId?: string;
   model: string;
@@ -16,6 +17,7 @@ export interface ClaudeCLIEngineConfig {
 
 export interface CodexCLIEngineConfig {
   engine: 'codex';
+  resumeId?: string;
   model: string;
   reasoningEffort: ReasoningEffort | null;
 }

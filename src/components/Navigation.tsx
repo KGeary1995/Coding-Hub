@@ -1,4 +1,5 @@
-import { GraduationCap, PanelsTopLeft, FolderOpen, CircleUserRound, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
+import { APP_VERSION } from '../version';
+import { ListTodo, CheckCheck, GraduationCap, PanelsTopLeft, FolderOpen, CircleUserRound, Braces, Cable, Files, GitCompareArrows, LayoutDashboard, Settings2, Sparkles, ChartNoAxesCombined, History, BookOpen, ShieldCheck, CircleHelp } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 
 const navigation = [
@@ -9,6 +10,8 @@ const navigation = [
   { id: 'history', label: 'Session history', icon: History },
   { id: 'files', label: 'Files', icon: Files },
   { id: 'diff', label: 'Changes', icon: GitCompareArrows },
+  { id: 'tasks', label: 'Task coordination', icon: ListTodo },
+  { id: 'verification', label: 'Verification profiles', icon: CheckCheck },
   { id: 'coaching', label: 'AI coaching', icon: GraduationCap },
   { id: 'usage', label: 'Usage', icon: ChartNoAxesCombined },
   { id: 'connectors', label: 'MCP servers', icon: Cable },
@@ -29,7 +32,7 @@ export function Navigation() {
       <nav aria-label="Main navigation">
         {[
           { label: 'WORKBENCH', ids: ['workspace', 'design', 'projects', 'accounts'] },
-          { label: 'REVIEW & INSIGHTS', ids: ['files', 'diff', 'history', 'usage', 'coaching'] },
+          { label: 'REVIEW & INSIGHTS', ids: ['files', 'diff', 'history', 'usage', 'coaching', 'tasks', 'verification'] },
           { label: 'AGENT CONFIGURATION', ids: ['connectors', 'skills', 'memory', 'rules'] },
           { label: 'RESOURCES', ids: ['help'] },
         ].map((group) => <div className="nav-group" key={group.label}>
@@ -44,7 +47,7 @@ export function Navigation() {
         </div>)}
       </nav>
       <button className={`nav-item settings-item ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><Settings2 size={18} />Settings</button>
-      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v1.5.0</small></span></div>
+      <div className="sidebar-footer"><span className="avatar">CH</span><span>Personal workspace<small>Local desktop · v{APP_VERSION}</small></span></div>
     </aside>
   );
 }

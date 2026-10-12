@@ -101,6 +101,7 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
     info.executable = executable.displayPath;
     const [version, help] = await Promise.all([probe(executable, '--version', env), probe(executable, '--help', env)]);
     info.version = version.trim().split('\n').at(-1)?.slice(0, 120) ?? null;
+    info.supportsResume = engine === 'claude' ? advertisesFlag(help, '--resume') : /^\s*resume\b/m.test(help);
     info.supportsModel = advertisesFlag(help, '--model');
     info.supportsConfig = advertisesFlag(help, '--config');
     info.supportsNoDaemon = advertisesFlag(help, '--no-daemon');

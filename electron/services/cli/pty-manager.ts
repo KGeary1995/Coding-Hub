@@ -15,6 +15,7 @@ interface ManagedRun {
   owner: number;
   session: RunningSession;
   pty: IPty;
+  nativeKey?: string;
   outputTail: string;
   pendingData: string;
   flushTimer?: ReturnType<typeof setTimeout>;
@@ -26,7 +27,7 @@ interface ManagedRun {
 
 export class PtyManager {
   private runs = new Map<string, ManagedRun>();
-  private pending = new Map<string, { owner: number; cancelled: boolean; profileId?: string }>();
+  private pending = new Map<string, { owner: number; cancelled: boolean; nativeKey?: string; profileId?: string }>();
   private closing = false;
   private spawn: Spawn;
   private discover: typeof discoverEngine;
@@ -55,7 +56,9 @@ export class PtyManager {
     if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
     if (this.runs.size + this.pending.size >= 4) throw new HubError('SESSION_LIMIT', 'At most four CLI processes can run simultaneously.');
     const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
-    const reservation = { owner, cancelled: false, profileId };
+    const nativeKey = request.config.resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${request.config.resumeId}` : undefined;
+    if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');
+    const reservation = { owner, cancelled: false, profileId, nativeKey };
     this.pending.set(request.sessionId, reservation);
     try {
       if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working directory.');
@@ -84,7 +87,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false };
       this.runs.set(request.sessionId, run);
       pty.onData((data) => {
         if (run.finished) return;

@@ -1,5 +1,5 @@
 if (process.argv.includes('--version')) { console.log('2.1.296 (Coding Hub test fixture)'); process.exit(0); }
-if (process.argv.includes('--help')) { console.log('--model <model> --config <value> --session-id <uuid>\nauth Manage authentication\nlogin Sign in\nstatus Show authentication status'); process.exit(0); }
+if (process.argv.includes('--help')) { console.log('--model <model> --config <value> --session-id <uuid> --resume <uuid>\nresume Resume conversation\nauth Manage authentication\nlogin Sign in\nstatus Show authentication status'); process.exit(0); }
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -13,17 +13,19 @@ if ((fixtureArgs[0] === 'auth' || fixtureArgs[0] === 'login') && fixtureArgs[1] 
   else console.error(authenticated ? 'Logged in using fixture' : 'Not logged in');
   process.exit(authenticated ? 0 : 1);
 }
+const resumeIndex = process.argv.indexOf('--resume'); const resumeId = resumeIndex >= 0 ? process.argv[resumeIndex + 1] : fixtureArgs[0] === 'resume' ? fixtureArgs[1] : null;
+if (resumeId) console.log('RESUMING:' + resumeId);
 let usageFile = null;
 let engine = null;
 const sessionIndex = process.argv.indexOf('--session-id');
-if (sessionIndex >= 0 && process.env.CLAUDE_CONFIG_DIR) {
-  engine = 'claude'; const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', '-fixture'); fs.mkdirSync(dir, { recursive: true }); usageFile = path.join(dir, process.argv[sessionIndex + 1] + '.jsonl'); fs.writeFileSync(usageFile, '');
+if ((sessionIndex >= 0 || resumeIndex >= 0) && process.env.CLAUDE_CONFIG_DIR) {
+  engine = 'claude'; const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', '-fixture'); fs.mkdirSync(dir, { recursive: true }); usageFile = path.join(dir, (resumeId ?? process.argv[sessionIndex + 1]) + '.jsonl'); if (!resumeId || !fs.existsSync(usageFile)) fs.writeFileSync(usageFile, JSON.stringify({ type: 'user', cwd: process.cwd(), sessionId: resumeId ?? process.argv[sessionIndex + 1] }) + '\n');
 } else if (process.env.CODEX_HOME && process.argv.some((a) => a.startsWith('log_dir='))) {
-  engine = 'codex'; const thread = randomUUID(); const logDir = JSON.parse(process.argv.find((a) => a.startsWith('log_dir=')).slice(8)); fs.mkdirSync(logDir, { recursive: true }); fs.writeFileSync(path.join(logDir, 'codex-tui.log'), `thread_id="${thread}"\n`);
+  engine = 'codex'; const thread = resumeId ?? randomUUID(); const logDir = JSON.parse(process.argv.find((a) => a.startsWith('log_dir=')).slice(8)); fs.mkdirSync(logDir, { recursive: true }); fs.writeFileSync(path.join(logDir, 'codex-tui.log'), `thread_id="${thread}"\n`);
   const now = new Date(); const dir = path.join(process.env.CODEX_HOME, 'sessions', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), String(now.getUTCDate()).padStart(2, '0')); fs.mkdirSync(dir, { recursive: true }); usageFile = path.join(dir, `rollout-${thread}.jsonl`);
-  fs.writeFileSync(usageFile, JSON.stringify({ type: 'session_meta', timestamp: now.toISOString(), payload: { id: thread, cwd: process.cwd() } }) + '\n' + JSON.stringify({ type: 'turn_context', payload: { model: 'fixture-model' } }) + '\n');
+  if (!resumeId || !fs.existsSync(usageFile)) fs.writeFileSync(usageFile, JSON.stringify({ type: 'session_meta', timestamp: now.toISOString(), payload: { id: thread, cwd: process.cwd() } }) + '\n' + JSON.stringify({ type: 'turn_context', payload: { model: 'fixture-model' } }) + '\n');
 }
-let turn = 0;
+let turn = 0; if (resumeId && engine === 'codex' && usageFile) try { for (const line of fs.readFileSync(usageFile, 'utf8').split('\n')) { try { const event = JSON.parse(line); if (event.payload?.info?.total_token_usage) turn = Math.floor(event.payload.info.total_token_usage.input_tokens / 100); } catch {} } } catch {}
 function reportUsage() {
   if (!usageFile) return; turn++;
   const event = engine === 'claude' ? { type: 'assistant', message: { id: 'message-' + turn, model: 'fixture-model', usage: { input_tokens: 100, output_tokens: 25, cache_read_input_tokens: 20 } } } : { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: turn * 100, cached_input_tokens: turn * 20, output_tokens: turn * 25, reasoning_output_tokens: turn * 10 }, last_token_usage: { input_tokens: 100, output_tokens: 25 }, model_context_window: 1000 } } };

@@ -1,6 +1,6 @@
 {
   "name": "ai-coding-hub",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/main.js",
@@ -23,7 +23,8 @@
     "test:install": "node scripts/windows-install-smoke.cjs",
     "test:design": "npm run build && node scripts/design-smoke.cjs",
     "test:profiles": "npm run build && node scripts/profiles-smoke.cjs",
-    "test:workbench": "npm run build && node scripts/workbench-smoke.cjs"
+    "test:workbench": "npm run build && node scripts/workbench-smoke.cjs",
+    "test:enterprise": "npm run build && node scripts/enterprise-smoke.cjs"
   },
   "engines": {
     "node": ">=22.13.0"

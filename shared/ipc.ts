@@ -1,3 +1,4 @@
+import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
@@ -15,6 +16,7 @@ export interface EngineInfo {
   available: boolean;
   executable: string | null;
   version: string | null;
+  supportsResume?: boolean;
   supportsModel: boolean;
   supportsConfig: boolean;
   supportsNoDaemon: boolean;
@@ -40,6 +42,7 @@ export type SessionEvent =
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {
+  workbench(request: WorkbenchRequest): Promise<HostResult<WorkbenchResponse>>;
   coaching(request: CoachingRequest): Promise<HostResult<CoachingResponse>>;
   designs(request: DesignRequest): Promise<HostResult<DesignResponse>>;
   projects(request: ProjectRequest): Promise<HostResult<ProjectResponse>>;
@@ -73,6 +76,7 @@ export interface CodingHubHost {
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
 }
 export const IPC_CHANNELS = {
+  workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
   designs: 'coding-hub:designs',
   projects: 'coding-hub:projects',

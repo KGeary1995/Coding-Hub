@@ -4,8 +4,8 @@ const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 const model = z.string().max(160).refine((value) => value === '' || /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(value), 'Use a model identifier, or leave blank for the CLI default.');
 const tokens = z.number().int().min(0).max(1_000_000).nullable();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
-  z.object({ engine: z.literal('claude'), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
-  z.object({ engine: z.literal('codex'), model, reasoningEffort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).nullable() }).strict(),
+  z.object({ engine: z.literal('claude'), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
+  z.object({ engine: z.literal('codex'), resumeId: z.uuid().optional(), model, reasoningEffort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).nullable() }).strict(),
 ]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();

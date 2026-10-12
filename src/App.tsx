@@ -1,3 +1,4 @@
+import { APP_VERSION } from './version';
 import { useState } from 'react';
 import { CircleHelp, TerminalSquare } from 'lucide-react';
 import { useAccessibility } from './components/AccessibilityControls';
@@ -13,7 +14,7 @@ import { RepositoryPanel } from './components/RepositoryPanel';
 import { WorkspaceExplorer } from './components/WorkspaceExplorer';
 
 const titles: Record<NavigationView, string> = {
-  workspace: 'Workspace', design: 'Design workspace', coaching: 'AI coaching', projects: 'Projects', accounts: 'Accounts & connections',
+  workspace: 'Workspace', design: 'Design workspace', coaching: 'AI coaching', tasks: 'Task coordination', verification: 'Verification profiles', projects: 'Projects', accounts: 'Accounts & connections',
   history: 'Session history', files: 'Files', diff: 'Changes', usage: 'Usage',
   connectors: 'MCP servers', skills: 'Skills & plugins', memory: 'Shared memory',
   rules: 'Shared rules', help: 'Help & AI guide', settings: 'Settings',
@@ -34,7 +35,7 @@ export function App() {
           <CommandMenu />
           <button className="icon-button topbar-help" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={17} /></button>
           <span className="privacy-badge"><i />Local workspace</span>
-          <span className="version">v1.5.0</span>
+          <span className="version">v{APP_VERSION}</span>
         </header>
         {(persistenceError || logError) && <div className="persistence-alert" role="alert">{persistenceError || logError}</div>}
         {!persistenceReady ? <div className="history-empty">Restoring local workspace…</div>

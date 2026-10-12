@@ -28,10 +28,17 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
 export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
-interface Watcher { claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
+interface Watcher { baseline: Snapshot | null; claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
+  private baselines = new Map<string, { file: string; offset: number; usage: Snapshot | null }>();
+  isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || (engine === 'claude' ? watch.run.runId === id : watch.thread === id))); }
+  setResumeSource(runId: string, file: string, engine: 'claude' | 'codex', model: string) {
+    const size = fs.statSync(file).size; let usage: Snapshot | null = null; let actualModel = model || 'CLI default';
+    if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
+    this.baselines.set(runId, { file, offset: size, usage });
+  }
   private assigned = new Set<string>();
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: RunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
@@ -39,18 +46,19 @@ export class TelemetryService {
     const cutoff = new Date(Date.now() - 366 * 86400000).toISOString(); this.database.prepare('DELETE FROM metadata WHERE json_extract(value,\'$.timestamp\') < ?').run(cutoff); this.database.exec('DELETE FROM usage WHERE run NOT IN(SELECT run FROM metadata);');
   }
   prepare(run: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
-    if (config.engine === 'claude' && info.supportsSessionId) launch.args.push('--session-id', run.runId);
+    if (config.engine === 'claude' && !config.resumeId && info.supportsSessionId) launch.args.push('--session-id', run.runId);
     if (config.engine === 'codex' && info.supportsConfig) { const logDir = path.join(this.root, run.runId); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); launch.args.push('--config', `log_dir=${JSON.stringify(logDir.replace(/\\/g, '/'))}`); }
   }
   start(run: RunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
-    const watch: Watcher = { claudeHome, run, config, start: Date.now(), file: null, offset: 0, partial: Buffer.alloc(0), model: config.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
+    const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
+    const watch: Watcher = { baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() }));
     this.watches.set(run.runId, watch); watch.timer = setInterval(() => this.poll(watch), 750); this.poll(watch);
   }
   private find(w: Watcher): string | null {
     if (w.run.engine === 'claude') {
       const root = path.join(w.claudeHome, 'projects');
-      try { for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).slice(0, 500)) { const file = path.join(root, d.name, w.run.runId + '.jsonl'); if (fs.existsSync(file) && fs.lstatSync(file).isFile()) return file; } } catch { /* CLI has not written structured output yet. */ }
+      try { for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).slice(0, 500)) { const file = path.join(root, d.name, (w.config.resumeId ?? w.run.runId) + '.jsonl'); if (fs.existsSync(file) && fs.lstatSync(file).isFile()) return file; } } catch { /* CLI has not written structured output yet. */ }
       return null;
     }
     try {
@@ -84,7 +92,7 @@ export class TelemetryService {
         if (end - start <= 2 * 1024 * 1024) try {
           const raw = JSON.parse(data.subarray(start, end).toString()); if (raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
           const parsed = parseUsage(w.run.engine, raw, w.model);
-          if (parsed) { const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
+          if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
             this.database.prepare('INSERT INTO usage(run,event,snapshot) VALUES(?,?,?) ON CONFLICT(run,event) DO UPDATE SET snapshot=excluded.snapshot').run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
           }
         } catch { /* Non-usage events and malformed partial records are ignored. */ }

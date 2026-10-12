@@ -200,3 +200,22 @@ h1 { font-size: 24px; color: #edf0f6; font-weight: 600; letter-spacing: -.6px; }
 .coaching-columns ul { list-style: disc; padding-left: 18px; }
 
 .session-error { max-height: 72px; }
+.diagnostic-step { padding: 12px; margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; }
+.diagnostic-step.failed { border-color: #915849; }
+.diagnostic-step.passed { border-left: 3px solid #88bd9e; }
+.backup-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); }
+.backup-row > span { margin-right: auto; font-size: 11px; }
+.task-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.task-board > section { background: #191d25; border: 1px solid var(--border); padding: 12px; border-radius: 8px; }
+.task-board h2 { text-transform: capitalize; }
+.task-board article { background: #222a39; padding: 12px; margin-top: 12px; border-radius: 6px; }
+.task-board small, .task-board code { display: block; overflow-wrap: anywhere; font-size: 10px; }
+.design-review { border: 1px solid var(--border); padding: 12px; border-radius: 7px; flex-shrink: 0; }
+.design-review[open] { max-height: 50vh; overflow-y: auto; }
+.design-review summary { cursor: pointer; color: #c0d0f5; font-size: 12px; }
+.design-review p { color: var(--muted); font-size: 11px; line-height: 1.7; }
+.annotation-image { position: relative; width: min(100%, 700px); cursor: crosshair; }
+.annotation-image img { width: 100%; display: block; }
+.annotation-image > span { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: #6282e0; color: #fff; padding: 3px 7px; border: 1px solid #fff; font-size: 11px; }
+.experiment-summary { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+@media (max-width: 1180px) { .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
