@@ -5,7 +5,7 @@ const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { _electron } = require('playwright-core');
-const { artifactNames } = require('./release-paths.cjs');
+const { artifactNames, installBaselineVersion } = require('./release-paths.cjs');
 const command = promisify(execFile);
 const version = require('../package.json').version;
 
@@ -25,7 +25,7 @@ async function nativeResult(page, method, request) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-installed-'));
   const install = path.join(root, 'application'); const data = path.join(root, 'data'); const profile = path.join(root, 'profile'); const project = path.join(root, 'project'); const bin = path.join(root, 'bin');
   assert.equal(/\s/.test(install), false, 'Use a Windows TEMP path without spaces for the NSIS /D argument.');
-  const baselineVersion = '1.2.0';
+  const baselineVersion = installBaselineVersion();
   const baseline = path.resolve(__dirname, '../release/baseline', artifactNames(baselineVersion)[0]);
   const candidate = path.resolve(__dirname, '../release', artifactNames(version)[0]);
   assert.notEqual(version, baselineVersion, 'Candidate must have a higher version than the baseline.');

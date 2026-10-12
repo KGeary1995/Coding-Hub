@@ -36,3 +36,14 @@ test('does not follow a malicious last-build manifest or mismatched version', ()
   fs.writeFileSync(path.join(output, 'last-build.json'), JSON.stringify({ version: '9.0.0', stage: path.basename(stage) })); assert.throws(() => lastBuild(output, version), /version/);
   assert.throws(() => releaseVersion('1.0.0 --publish always')); assert.equal(lastBuild(stage, version), stage);
 });
+
+test('signed upgrade build and installation check use the same validated baseline', () => {
+  const { installBaselineVersion } = require('./release-paths.cjs');
+  const { load } = require('js-yaml');
+  const workflow = load(fs.readFileSync(path.resolve(__dirname, '../.github/workflows/signed-release.yml'), 'utf8'));
+  const job = workflow.jobs['signed-windows'];
+  assert.equal(installBaselineVersion({}), '1.2.0');
+  assert.equal(installBaselineVersion(job.env), '1.6.1');
+  assert.ok(job.steps.find((step) => step.name === 'Build signed upgrade baseline').run.includes('${{ env.CODING_HUB_BASELINE_VERSION }}'));
+  assert.throws(() => installBaselineVersion({ CODING_HUB_BASELINE_VERSION: '../escape' }));
+});

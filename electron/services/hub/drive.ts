@@ -53,8 +53,11 @@ export class DriveMirror {
       const local = this.local.list(project); const remote = mirror.list(project); const known = new Map(local.map((n) => [n.id, n]));
       for (const note of remote) if (known.has(note.id) && JSON.stringify(known.get(note.id)) !== JSON.stringify(note)) throw new HubError('MEMORY_CONFLICT', 'A Drive note has conflicting contents. No notes were overwritten. Review that file before syncing.');
       let uploaded = 0; let downloaded = 0;
-      for (const note of remote) if (this.local.import(note)) downloaded++;
-      for (const note of local) if (mirror.import(note)) uploaded++;
+      const remoteIds = new Set(remote.map((note) => note.id));
+      // Existing IDs were compared above. Reimporting them rescanned and parsed
+      // the whole directory for every note on each 30-second sync tick.
+      for (const note of remote) if (!known.has(note.id) && this.local.import(note)) downloaded++;
+      for (const note of local) if (!remoteIds.has(note.id) && mirror.import(note)) uploaded++;
       return { uploaded, downloaded };
     } finally { this.syncing = false; }
   }

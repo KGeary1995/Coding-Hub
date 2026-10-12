@@ -79,3 +79,20 @@ describe('verification and experiment evidence', () => {
     const trial = { action: 'trial-add', experimentId: experiment.id, variant: 'A', runId: id, minutes: 5, rework: 1, outcome: 'partial', evidence: 'One failing test corrected' }; service.execute(trial); expect(() => service.execute(trial)).toThrow('already'); expect(() => service.execute({ ...trial, runId: randomUUID() })).toThrow('recorded');
   });
 });
+
+it('keeps the annotation link when the task editor updates an existing task', async () => {
+ const root=fixture(), tasks=new Tasks(root,new Verification(root,async()=>true));
+ const designRef={snapshotId:randomUUID(),annotationId:randomUUID()};
+ const fields={title:'Design fix',directory:root,sessionId:null,scope:['src/**'],status:'queued',notes:'',verificationId:null};
+ const created=await tasks.execute({action:'task-save',...fields,designRef}) as any;
+ const updated=await tasks.execute({action:'task-save',...fields,id:created.id,title:'Updated design fix'}) as any;
+ expect(updated.designRef).toEqual(designRef);
+});
+
+it('persists all steps of noisy verification without exceeding the JSON record limit', async () => {
+ const root=fixture(), checks=new Verification(root,async()=>true);
+ const profile=await checks.execute({action:'verification-save',name:'Noisy checks',directory:root,steps:Array.from({length:8},(_,i)=>({label:`Step ${i}`,tool:'python',args:['-c','import sys;sys.stdout.write(chr(1)*512000)']})),timeoutSeconds:5}) as any;
+ const result=await checks.execute({action:'verification-run',id:profile.id}) as any;
+ expect(result.passed).toBe(true); expect(result.steps).toHaveLength(8); expect(result.steps.some((step:any)=>step.truncated)).toBe(true);
+ expect(checks.data().results[0].id).toBe(result.id); expect(fs.statSync(path.join(root,'verification.json')).size).toBeLessThanOrEqual(4*1024*1024);
+});

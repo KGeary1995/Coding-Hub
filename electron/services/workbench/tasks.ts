@@ -23,7 +23,9 @@ export class Tasks {
       const cwd = directory(request.directory);
       if (request.status === 'done' && !request.notes.trim()) throw new HubError('TASK_REVIEW', 'Record completion and review evidence before marking the task done.');
       if (request.verificationId) { const check = this.verification.data().results.find((r) => r.id === request.verificationId); if (!check?.passed || path.resolve(check.directory) !== cwd) throw new HubError('TASK_CHECK', 'Select a passing verification result for this project.'); }
-      const value: Task = { ...(request.designRef ? { designRef: request.designRef } : {}), id: request.id ?? randomUUID(), title: request.title, directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: tasks.find((t) => t.id === request.id)?.createdAt ?? new Date().toISOString() };
+      const previous = tasks.find((t) => t.id === request.id);
+      const designRef = request.designRef ?? previous?.designRef;
+      const value: Task = { ...(designRef ? { designRef } : {}), id: request.id ?? randomUUID(), title: request.title, directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: previous?.createdAt ?? new Date().toISOString() };
       save(this.root, 'tasks.json', [...tasks.filter((t) => t.id !== value.id), value]); return value;
     }
     const active = tasks.filter((t) => t.status !== 'done'); const report: TaskAudit = { tasks, overlaps: [], changes: [], warnings: ['Git changes can come from humans, either agent, or earlier work. This audit identifies scope conflicts, not edit authorship or enforced permissions.'] };

@@ -100,3 +100,50 @@ describe('memory revisions and Drive conflict review', () => {
     expect(parseUsage('codex', { type: 'token_count', info: { total_token_usage: { input_tokens: -1, output_tokens: 20 } } }, 'm')).toBeNull();
   });
 });
+
+it('records a short Codex run whose rollout appears only immediately before exit', () => {
+ vi.useFakeTimers(); const {root,project}=setup(); const codex=path.join(root,'codex'); const now=new Date();
+ const folder=path.join(codex,'sessions',String(now.getUTCFullYear()),String(now.getUTCMonth()+1).padStart(2,'0'),String(now.getUTCDate()).padStart(2,'0'));
+ fs.mkdirSync(folder,{recursive:true}); const telemetry=new TelemetryService(path.join(root,'telemetry'),()=>[],()=>{},()=>{},path.join(root,'claude'),codex);
+ const run={runId:randomUUID(),sessionId:'short',engine:'codex' as const,cwd:project,pid:1}; const id=randomUUID();
+ try {
+  telemetry.start(run,{engine:'codex',model:'',reasoningEffort:null});
+  fs.writeFileSync(path.join(folder,`rollout-${id}.jsonl`),JSON.stringify({type:'session_meta',timestamp:now.toISOString(),payload:{id,cwd:project}})+'\n'+JSON.stringify({type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:123,output_tokens:45}}}})+'\n');
+  telemetry.end(run.runId); expect(telemetry.list()).toEqual([expect.objectContaining({runId:run.runId,input:123,output:45,conversationId:id})]);
+ } finally {telemetry.close();}
+});
+
+it('keeps a valid handoff readable when JSON encoding expands its content', () => {
+ const {root}=setup(); const memory=new MemoryService(path.join(root,'memory')); const content='\x01'.repeat(60000);
+ const note=memory.write('shared','Escaped content',content,'human'); expect(memory.list('shared')).toEqual([note]); expect(memory.import(note)).toBe(false);
+});
+
+it('refuses symlinked memory roots instead of writing into another directory', () => {
+ if(process.platform==='win32')return; const {root}=setup();const outside=path.join(root,'outside');fs.mkdirSync(outside);const link=path.join(root,'memory');fs.symlinkSync(outside,link);
+ expect(()=>new MemoryService(link)).toThrow('link'); expect(fs.readdirSync(outside)).toEqual([]);
+});
+
+it('refuses the next handoff before exceeding the readable project limit', () => {
+ const {root}=setup();const memory=new MemoryService(path.join(root,'memory'));const dir=memory.directory('full');fs.mkdirSync(dir);
+ for(let i=0;i<5000;i++)fs.writeFileSync(path.join(dir,randomUUID()+'.json'),'{}');
+ expect(()=>memory.write('full','One too many','Preserve existing records','human')).toThrow('5,000');
+ expect(fs.readdirSync(dir)).toHaveLength(5000);expect(()=>memory.list('full')).not.toThrow();
+});
+
+it('does not rescan every handoff for every unchanged note during Drive sync', () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
+ for(let i=0;i<20;i++)local.write('shared',`Note ${i}`,'Ready for the next session','human');
+ const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));drive.sync('shared');
+ const scans=vi.spyOn(MemoryService.prototype,'list');expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).toHaveBeenCalledTimes(2);
+});
+
+it('never guesses a rollout after overlapping same-directory Codex runs exit', () => {
+ vi.useFakeTimers();const {root,project}=setup();const codex=path.join(root,'codex');const now=new Date();
+ const folder=path.join(codex,'sessions',String(now.getUTCFullYear()),String(now.getUTCMonth()+1).padStart(2,'0'),String(now.getUTCDate()).padStart(2,'0'));fs.mkdirSync(folder,{recursive:true});
+ const telemetry=new TelemetryService(path.join(root,'telemetry'),()=>[],()=>{},()=>{},path.join(root,'claude'),codex);
+ const a={runId:randomUUID(),sessionId:'a',engine:'codex' as const,cwd:project,pid:1};const b={...a,runId:randomUUID(),sessionId:'b'};const id=randomUUID();
+ try {telemetry.start(a,{engine:'codex',model:'',reasoningEffort:null});telemetry.start(b,{engine:'codex',model:'',reasoningEffort:null});
+ fs.writeFileSync(path.join(folder,`rollout-${id}.jsonl`),JSON.stringify({type:'session_meta',timestamp:now.toISOString(),payload:{id,cwd:project}})+'\n'+JSON.stringify({type:'event_msg',payload:{type:'token_count',info:{total_token_usage:{input_tokens:500,output_tokens:200}}}})+'\n');
+ telemetry.end(a.runId);telemetry.end(b.runId);expect(telemetry.list()).toEqual([]);
+ }finally{telemetry.close();}
+});

@@ -13,6 +13,7 @@ jobs:
       CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
       CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+      CODING_HUB_BASELINE_VERSION: '1.6.1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,7 +31,7 @@ jobs:
       - run: npm run test:productivity
       - run: npm run dist:win:signed
       - name: Build signed upgrade baseline
-        run: node scripts/build-windows.cjs --signed --output release/baseline --version 1.6.1
+        run: node scripts/build-windows.cjs --signed --output release/baseline --version ${{ env.CODING_HUB_BASELINE_VERSION }}
       - run: npm run test:install
       - uses: actions/upload-artifact@v4
         with:

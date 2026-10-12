@@ -12,6 +12,9 @@ function artifactNames(version) {
   releaseVersion(version);
   return [`AI-Coding-Hub-${version}-Windows-x64-Setup.exe`, `AI-Coding-Hub-${version}-Windows-x64-Setup.exe.blockmap`, `AI-Coding-Hub-${version}-Windows-x64-Portable.exe`, 'latest.yml'];
 }
+function installBaselineVersion(environment = process.env) {
+  return releaseVersion(environment.CODING_HUB_BASELINE_VERSION ?? '1.2.0');
+}
 function createStage(output) {
   fs.mkdirSync(output, { recursive: true });
   const root = fs.realpathSync(output);
@@ -55,4 +58,4 @@ function lastBuild(output, version) {
   if (fs.realpathSync(stage) !== stage) throw new Error('Build staging directory cannot be a link.');
   return stage;
 }
-module.exports = { releaseVersion, artifactNames, createStage, verifyMetadata, promote, lastBuild };
+module.exports = { releaseVersion, artifactNames, installBaselineVersion, createStage, verifyMetadata, promote, lastBuild };

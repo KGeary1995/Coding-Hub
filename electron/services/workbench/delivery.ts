@@ -35,8 +35,8 @@ export class Delivery {
   hash.update(await this.command(root, 'git', ['diff','--no-ext-diff','--no-textconv','--binary'])); hash.update(await this.command(root, 'git', ['diff','--cached','--no-ext-diff','--no-textconv','--binary']));
   let reviewedBytes = 0;
   for (const item of status.changes.filter((change) => change.untracked)) { validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', 'An untracked file exceeds the review limit. Use local Git tools.'); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
-  const remotes = (await this.command(root, 'git', ['remote'])).toString().trim().split('\n').filter(Boolean);
-  for (const remote of remotes) hash.update(JSON.stringify({remote,urls:(await this.command(root, 'git', ['remote', 'get-url', '--all', remote])).toString()}));
+  const remotes = (await this.command(root, 'git', ['remote'])).toString().trim().split(/\r?\n/).filter(Boolean);
+  for (const remote of remotes) hash.update(JSON.stringify({remote,urls:(await this.command(root, 'git', ['remote', 'get-url', '--all', remote])).toString(),pushUrls:(await this.command(root, 'git', ['remote', 'get-url', '--push', '--all', remote])).toString()}));
   return { directory: root, branch: status.branch, head: status.head, revision: hash.digest('hex'), renames: Object.fromEntries(status.changes.filter((item) => item.originalPath).map((item) => [item.path, item.originalPath!])), staged: status.changes.filter((item) => !item.untracked && item.indexStatus !== ' ').map((item) => item.path), unstaged: status.changes.filter((item) => item.untracked || item.worktreeStatus !== ' ').map((item) => item.path), remotes };
  }
  async execute(input: unknown): Promise<DeliveryStatus | DeliveryResult | null> {

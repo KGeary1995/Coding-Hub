@@ -9,18 +9,20 @@ import { readConfig, updateConfig } from './config';
 export const projectSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
 export const noteSchema = z.object({ id: z.uuid(), project: projectSchema, title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), createdAt: z.iso.datetime(), supersedes: z.uuid().optional() }).strict();
 export class MemoryService {
-  constructor(readonly root: string) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); }
-  directory(project: string) { projectSchema.parse(project); const target = path.join(this.root, project); if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory project cannot be a symbolic link.'); return target; }
+  constructor(readonly root: string) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.checkRoot(); }
+  private checkRoot() { if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real directory, not a symbolic link.'); }
+  directory(project: string) { this.checkRoot(); projectSchema.parse(project); const target = path.join(this.root, project); if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory project cannot be a symbolic link.'); return target; }
   list(project: string): MemoryNote[] {
     const dir = this.directory(project); if (!fs.existsSync(dir)) return [];
     const files = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && /^[0-9a-f-]{36}\.json$/.test(e.name));
     if (files.length > 5000) throw new HubError('MEMORY_LIMIT', 'This project exceeds 5,000 handoffs. Archive older notes before syncing.');
     const notes: MemoryNote[] = [];
-    for (const file of files) { const target = path.join(dir, file.name); if (fs.statSync(target).size > 256000) continue; try { const note = noteSchema.parse(JSON.parse(fs.readFileSync(target, 'utf8'))); if (note.project === project && note.id + '.json' === file.name) notes.push(note); } catch { /* Invalid records are preserved, never executed. */ } }
+    for (const file of files) { const target = path.join(dir, file.name); if (fs.statSync(target).size > 512000) continue; try { const note = noteSchema.parse(JSON.parse(fs.readFileSync(target, 'utf8'))); if (note.project === project && note.id + '.json' === file.name) notes.push(note); } catch { /* Invalid records are preserved, never executed. */ } }
     return notes.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   }
   import(input: unknown): boolean {
     const note = noteSchema.parse(input); const dir = this.directory(note.project); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (!fs.existsSync(path.join(dir, note.id + '.json')) && fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && /^[0-9a-f-]{36}\.json$/.test(entry.name)).length >= 5000) throw new HubError('MEMORY_LIMIT', 'This project already contains 5,000 handoffs. Archive older notes before adding more.');
     try { fs.writeFileSync(path.join(dir, note.id + '.json'), JSON.stringify(note, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); return true; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') { const original = this.list(note.project).find((s) => s.id === note.id); if (original && JSON.stringify(original) === JSON.stringify(note)) return false; throw new HubError('MEMORY_CONFLICT', 'A remote handoff conflicts with a local ID. Both files were preserved; inspect the remote note before importing.'); } throw error; }
   }

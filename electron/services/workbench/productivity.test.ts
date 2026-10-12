@@ -70,3 +70,14 @@ describe('usage targets and screenshot evidence',()=>{
   expect(recoveryAdvice('invalid model',1,true).title).toContain('configuration');expect(recoveryAdvice('unauthorized',1,true).view).toBe('accounts');expect(recoveryAdvice('',1,false).view).toBe('projects');expect(recoveryAdvice('',1,true).title).toBe('Investigate CLI exit 1');
  });
 });
+
+it('rejects a changed push URL while leaving the fetch URL unchanged', async () => {
+ const cwd=root(), fetch=root(), first=root(), second=root();
+ for (const remote of [fetch,first,second]) git(remote,'init','--bare');
+ git(cwd,'init','-b','main'); fs.writeFileSync(path.join(cwd,'file.txt'),'baseline'); git(cwd,'add','.'); git(cwd,'commit','-m','Baseline');
+ git(cwd,'remote','add','origin',fetch); git(cwd,'remote','set-url','--push','origin',first);
+ const service=new Delivery(async()=>{git(cwd,'remote','set-url','--push','origin',second);return true;},()=>{});
+ const state=await service.inspect(cwd);
+ await expect(service.execute({action:'flow-git-push',directory:cwd,revision:state.revision,remote:'origin'})).rejects.toMatchObject({code:'DELIVERY_STALE'});
+ expect(()=>git(first,'rev-parse','main')).toThrow(); expect(()=>git(second,'rev-parse','main')).toThrow();
+});

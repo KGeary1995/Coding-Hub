@@ -18,3 +18,9 @@ it('escalates Unix process groups and refuses invalid or host-owned PIDs', async
   await stopProcess(pty, exited, { platform: 'linux', signalGroup: (_pid, signal) => { signals.push(signal); }, waitMilliseconds: 1 }); expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
   await expect(stopProcess({ ...pty, pid: process.pid } as IPty, exited)).rejects.toMatchObject({ code: 'STOP_FAILED' });
 });
+
+it('kills remaining Unix descendants even when the root exits during SIGTERM', async () => {
+ const {pty,exited,resolve}=fixture(); const signals:string[]=[];
+ await stopProcess(pty,exited,{platform:'linux',signalGroup:(_pid,signal)=>{signals.push(signal);if(signal==='SIGTERM')resolve();},waitMilliseconds:1});
+ expect(signals).toEqual(['SIGTERM','SIGKILL']);
+});

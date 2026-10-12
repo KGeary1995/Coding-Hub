@@ -26,7 +26,12 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
   }
   const group = dependencies.signalGroup ?? ((pid, signal) => { try { process.kill(-pid, signal); } catch { /* Group already exited. */ } });
   group(pty.pid, 'SIGTERM'); killPty('SIGTERM');
-  if (await wait(dependencies.waitMilliseconds ?? 1500)) return false;
+  if (await wait(dependencies.waitMilliseconds ?? 1500)) {
+    // Parent exit does not imply its process group exited: descendants can
+    // ignore SIGTERM. Clean up the detached group without signalling a new root.
+    group(pty.pid, 'SIGKILL');
+    return false;
+  }
   group(pty.pid, 'SIGKILL'); killPty('SIGKILL');
   if (await wait(dependencies.waitMilliseconds ?? 2500)) return false;
   if (!alive(pty.pid)) return true;

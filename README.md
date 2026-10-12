@@ -2,6 +2,10 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Code review and reliability fixes (v1.7.1)
+
+This release fixes Git push destination review, short/overlapping Codex usage correlation, Unix child-process cleanup, linked design-task editing, large verification results, escaped memory/design records, memory limits and redirected storage, malformed MCP messages, repeated Drive scans, and signed upgrade baseline selection. Vitest is upgraded to remove the critical development-tool advisories found during review. See [the audit report](docs/audit-v1.7.1.md) for reproduction evidence, validation, and outstanding Windows/provider checks and development-dependency advisories.
+
 ## Professional workflow release (v1.7.0)
 
 All eight productivity improvements are included with progressive disclosure. One **Workflow center** adds Recovery, Search, Templates, and Support tabs. Git delivery stays collapsed under Changes; session names/budgets live in expandable settings; design comparison and linked tasks appear only when requested. The terminal canvas retains its existing focus.

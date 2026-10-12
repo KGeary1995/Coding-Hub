@@ -19,3 +19,9 @@ describe('local immutable design versions', () => {
     fs.writeFileSync(file, Buffer.alloc(1048577)); await expect(archive.execute({ action: 'import', title: 'Big', notes: '', projectDirectory: null })).rejects.toMatchObject({ code: 'DESIGN_SIZE' }); expect(archive.list()).toEqual([]);
   });
 });
+
+it('keeps valid escaped metadata readable after saving a design', async () => {
+ const {archive}=fixture(); const notes='\x01'.repeat(4000);
+ const value=await archive.execute({action:'import',title:'Escaped notes',notes,projectDirectory:null}) as any;
+ expect(archive.list()).toHaveLength(1); expect((await archive.execute({action:'read',id:value.snapshot.id}) as any).snapshot.notes).toBe(notes);
+});

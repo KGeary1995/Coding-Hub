@@ -25,7 +25,8 @@ export class DesignArchive {
       return buffer;
     } finally { fs.closeSync(fd); }
   }
-  private record(id: string) { return snapshotSchema.parse(JSON.parse(this.bounded(path.join(this.root, id + '.json'), 16384).toString('utf8'))); }
+  // Schema-valid notes and paths can expand to six bytes per character in JSON.
+  private record(id: string) { return snapshotSchema.parse(JSON.parse(this.bounded(path.join(this.root, id + '.json'), 65536).toString('utf8'))); }
   private summary(record: z.infer<typeof snapshotSchema>): DesignSnapshot { const { mime: _mime, ...snapshot } = record; return snapshot; }
   list(): DesignSnapshot[] {
     this.ensure();

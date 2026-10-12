@@ -18,6 +18,22 @@ export class Verification {
   get running() { return this.busy; }
   constructor(private root: string, private confirm: (profile: VerificationProfile) => Promise<boolean>) {}
   data(): VerificationData { return { ...load(this.root, 'verification.json', dataSchema, { profiles: [], results: [] }), running: this.busy }; }
+  private persist(profiles: VerificationProfile[], results: VerificationResult[]) {
+    const limit = 4 * 1024 * 1024;
+    // Measure the actual pretty-printed JSON: escaping control characters can
+    // expand output sixfold, and profiles share this file with the results.
+    if (Buffer.byteLength(JSON.stringify({ profiles, results: [] }, null, 2)) > limit - 65536) throw new HubError('CHECK_LIMIT', 'Verification profiles exceed the storage limit. Existing records were preserved.');
+    const retained = structuredClone(results);
+    const bytes = () => Buffer.byteLength(JSON.stringify({ profiles, results: retained }, null, 2));
+    while (retained.length > 1 && bytes() > limit) retained.pop();
+    while (bytes() > limit) {
+      const largest = retained[0]?.steps.reduce<VerificationResult['steps'][number] | undefined>((best, step) => !best || step.output.length > best.output.length ? step : best, undefined);
+      if (!largest?.output.length) throw new HubError('CHECK_LIMIT', 'Verification records exceed the storage limit. Existing records were preserved.');
+      largest.output = largest.output.slice(0, Math.floor(largest.output.length / 2)); largest.truncated = true;
+    }
+    save(this.root, 'verification.json', { profiles, results: retained });
+    return retained;
+  }
   private executable(tool: VerificationTool): { file: string; args: string[]; env: Record<string, string> } {
     const env = hostEnvironment(); const key = Object.keys(env).find((s) => s.toUpperCase() === 'PATH') ?? 'PATH';
     for (const folder of env[key].split(path.delimiter).filter(Boolean)) {
@@ -38,7 +54,7 @@ export class Verification {
       if (!request.id && data.profiles.length >= 100) throw new HubError('CHECK_LIMIT', 'Up to 100 verification profiles are supported.');
       if (request.id && !data.profiles.some((p) => p.id === request.id)) throw new HubError('CHECK_PROFILE', 'Verification profile is unavailable.');
       const next: VerificationProfile = { id: request.id ?? randomUUID(), name: request.name, directory: directory(request.directory), steps: request.steps, timeoutSeconds: request.timeoutSeconds, createdAt: data.profiles.find((p) => p.id === request.id)?.createdAt ?? new Date().toISOString() };
-      save(this.root, 'verification.json', { profiles: [...data.profiles.filter((p) => p.id !== next.id), next], results: data.results }); return next;
+      this.persist([...data.profiles.filter((p) => p.id !== next.id), next], data.results); return next;
     }
     if (this.busy) throw new HubError('CHECK_BUSY', 'Verification is already running.');
     const selected = data.profiles.find((p) => p.id === request.id); if (!selected) throw new HubError('CHECK_PROFILE', 'Verification profile is unavailable.');
@@ -64,7 +80,7 @@ export class Verification {
         completed.steps.push(outcome); if (outcome.exitCode !== 0 || outcome.timedOut) break;
       }
       completed.endedAt = new Date().toISOString(); completed.cancelled = this.cancelled; completed.passed = !this.cancelled && completed.steps.length === selected.steps.length && completed.steps.every((s) => s.exitCode === 0 && !s.timedOut);
-      const current = this.data(); const results = [completed, ...current.results].slice(0, 50); while (results.length > 1 && Buffer.byteLength(JSON.stringify(results)) > 3 * 1024 * 1024) results.pop(); save(this.root, 'verification.json', { profiles: current.profiles, results }); return completed;
+      const current = this.data(); return this.persist(current.profiles, [completed, ...current.results].slice(0, 50))[0];
     } finally { this.busy = false; }
   }
   private kill() { if (!this.child?.pid) return; if (process.platform === 'win32') execFile(path.win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/taskkill.exe'), ['/PID', String(this.child.pid), '/T', '/F'], { windowsHide: true }, () => {}); else try { process.kill(-this.child.pid, 'SIGKILL'); } catch { this.child.kill(); } }

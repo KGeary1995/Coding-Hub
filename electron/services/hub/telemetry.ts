@@ -28,7 +28,7 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
 export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
-interface Watcher { baseline: Snapshot | null; claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
+interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
@@ -51,8 +51,9 @@ export class TelemetryService {
   }
   start(run: RunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
-    const watch: Watcher = { baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
+    const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() }));
+    if (run.engine === 'codex') for (const other of this.watches.values()) { if (other.run.engine === 'codex' && other.run.cwd === run.cwd && !other.stopped) { other.requiresThread = true; watch.requiresThread = true; } }
     this.watches.set(run.runId, watch); watch.timer = setInterval(() => this.poll(watch), 750); this.poll(watch);
   }
   private find(w: Watcher): string | null {
@@ -76,7 +77,9 @@ export class TelemetryService {
       } } catch { /* Date folder not created. */ }
     }
     // Same-cwd sessions need an explicit thread association. Do not guess.
-    if (w.stopped || [...this.watches.values()].filter((other) => other.run.engine === 'codex' && other.run.cwd === w.run.cwd && !other.stopped).length > 1) return null;
+    // The exiting watcher still participates in ambiguity checks during its final
+    // poll. A short run may not have created its rollout at the initial poll.
+    if (w.requiresThread || [...this.watches.values()].filter((other) => other.run.engine === 'codex' && other.run.cwd === w.run.cwd && (other === w || !other.stopped)).length > 1) return null;
     return matches.length === 1 ? matches[0] : null;
   }
   private poll(w: Watcher) {

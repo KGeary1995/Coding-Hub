@@ -7,9 +7,10 @@ const memory = new MemoryService(root);
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on('line', (line) => {
-  if (Buffer.byteLength(line) > 256000) return;
+  if (Buffer.byteLength(line) > 512000) return;
   let message: { id?: string | number; method?: string; params?: any };
   try { message = JSON.parse(line); } catch { send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Invalid JSON' } }); return; }
+  if (!message || typeof message !== 'object' || Array.isArray(message)) { send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid request' } }); return; }
   if (message.id === undefined) return;
   try {
     let result: unknown;
