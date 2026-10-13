@@ -40,6 +40,8 @@ export class LivePreview {
     if (request.action === 'preview-open') {
       const url = previewURL(request.url); if (!await this.confirm(url.toString())) return null;
       this.close(); const window = new BrowserWindow({ width: 1100, height: 800, title: 'Isolated design preview', autoHideMenuBar: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, partition: 'design-preview-' + randomUUID() } }); this.window = window;
+      // WebRTC UDP bypasses webRequest; without a proxy this disables it, keeping the one-origin restriction.
+      window.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false)); window.webContents.session.on('will-download', (event) => event.preventDefault());
       window.webContents.session.webRequest.onBeforeRequest((details, callback) => {
         try { const requested = new URL(details.url); const same = requested.hostname === url.hostname && requested.port === url.port && (['http:', 'https:'].includes(requested.protocol) ? requested.origin === url.origin : requested.protocol === (url.protocol === 'https:' ? 'wss:' : 'ws:')); callback({ cancel: !same && !['data:', 'blob:', 'about:'].includes(requested.protocol) }); } catch { callback({ cancel: true }); }

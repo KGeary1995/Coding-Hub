@@ -147,3 +147,17 @@ it('never guesses a rollout after overlapping same-directory Codex runs exit', (
  telemetry.end(a.runId);telemetry.end(b.runId);expect(telemetry.list()).toEqual([]);
  }finally{telemetry.close();}
 });
+describe('telemetry regressions', () => {
+  const run = { runId: randomUUID(), sessionId: 'session', engine: 'claude' as const, cwd: '/project', pid: 1 };
+  it('enforces the session limit and ignores zero-usage synthetic entries even when prices cannot be read', () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const stop = vi.fn();
+    let broken = true; const rates = () => { if (broken) throw new Error('preferences.json failed validation'); return [{ model: 'actual-model', input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }]; };
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), rates, () => {}, stop, home, path.join(root, 'codex'));
+    telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 100 } });
+    const line = (id: string, model: string, input: number, output: number) => JSON.stringify({ type: 'assistant', message: { id, model, usage: { input_tokens: input, output_tokens: output } } }) + '\n';
+    fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), line('real', 'actual-model', 100, 50) + line('synthetic', '<synthetic>', 0, 0)); vi.advanceTimersByTime(750);
+    expect(stop).toHaveBeenCalledTimes(1);
+    broken = false; expect(telemetry.list()[0]).toMatchObject({ model: 'actual-model', costBasis: 'configured-model-rates' }); expect(telemetry.list()[0].cost).toBeCloseTo(0.00015);
+    telemetry.close();
+  });
+});

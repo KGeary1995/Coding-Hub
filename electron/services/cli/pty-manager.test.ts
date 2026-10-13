@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
-import { PtyManager } from './pty-manager';
+import { isWithinDirectory, PtyManager } from './pty-manager';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { DiscoveredEngine } from './discovery';
 
 class FakePty {
@@ -120,4 +123,14 @@ it('keeps Claude lifecycle owned and resolves exit even if native event delivery
  const config={engine:'claude' as const,model:'',thinking:{budget_tokens:null},tokenLimits:{maxOutputTokens:null,maxSessionTokens:null}};
  await expect(manager.start(7,{...request(),config})).resolves.toMatchObject({engine:'claude'});
  expect(()=>{pty.data('last output');pty.exit({exitCode:0});}).not.toThrow();expect(manager.hasSessions).toBe(false);expect(failures).toHaveBeenCalled();await manager.dispose();
+});
+
+describe('worktree in-use detection', () => {
+  it('treats sessions in subfolders and through links as inside the directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-within-')); const tree = path.join(root, 'tree'); fs.mkdirSync(path.join(tree, 'packages', 'web'), { recursive: true }); fs.symlinkSync(tree, path.join(root, 'link'));
+    try {
+      expect(isWithinDirectory(tree, tree)).toBe(true); expect(isWithinDirectory(tree, path.join(tree, 'packages', 'web'))).toBe(true); expect(isWithinDirectory(tree, path.join(root, 'link', 'packages'))).toBe(true);
+      expect(isWithinDirectory(tree, root)).toBe(false); expect(isWithinDirectory(tree, tree + '-sibling')).toBe(false);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
 });

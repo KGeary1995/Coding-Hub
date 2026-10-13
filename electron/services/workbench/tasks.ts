@@ -32,7 +32,7 @@ export class Tasks {
     for (let i = 0; i < active.length; i++) for (const other of active.slice(i + 1)) if (active[i].directory === other.directory && scopesOverlap(active[i].scope, other.scope)) report.overlaps.push(`${active[i].title} ↔ ${other.title}`);
     for (const cwd of [...new Set(active.map((t) => t.directory))]) try {
       const command = promisify(execFile); const { stdout: repository } = await command('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 8000, maxBuffer: 65536 });
-      const { stdout } = await command('git', ['-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { timeout: 8000, maxBuffer: 1048576 });
+      const { stdout } = await command('git', ['--no-optional-locks', '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { timeout: 8000, maxBuffer: 1048576 });
       const entries = stdout.split('\0'); const prefix = path.relative(repository.trim(), cwd).replace(/\\/g, '/');
       for (let i = 0; i < entries.length; i++) { if (!entries[i]) continue; const name = entries[i].slice(3); if (/[RC]/.test(entries[i].slice(0, 2))) i++; const relative = prefix && name.startsWith(prefix + '/') ? name.slice(prefix.length + 1) : name; const covered = active.filter((t) => t.directory === cwd && matchesScope(relative, t.scope)); report.changes.push({ directory: cwd, path: relative, tasks: covered.map((t) => t.title), outsideScope: !covered.length }); if (report.changes.length >= 500) break; }
     } catch { report.warnings.push(`Git status unavailable: ${cwd}`); }

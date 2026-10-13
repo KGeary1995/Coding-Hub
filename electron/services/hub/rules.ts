@@ -8,7 +8,7 @@ import { HubError } from '../cli/engine-adapter';
 const START = '<!-- coding-hub-rules:start -->';
 const END = '<!-- coding-hub-rules:end -->';
 const hash = (text: string | null) => createHash('sha256').update(text === null ? 'absent' : 'file:' + text).digest('hex');
-const stateSchema = z.object({ version: z.literal(1), content: z.string().max(60000), directories: z.array(z.string().min(1).max(4096)).max(100) }).strict();
+const stateSchema = z.object({ version: z.literal(1), content: z.string().max(60000), directories: z.array(z.string().min(1).max(4096)).max(200) }).strict();
 interface FileState { file: string; text: string | null; fingerprint: string; mode: number }
 
 export function replaceRules(text: string, content: string): string {
@@ -21,6 +21,8 @@ export function replaceRules(text: string, content: string): string {
 }
 function applied(text: string, content: string) {
   if (!content.trim()) return !text.includes(START) && !text.includes(END);
+  // Git for Windows (core.autocrlf) checks instruction files out with CRLF; that is still the applied block.
+  text = text.replace(/\r\n/g, '\n'); content = content.replace(/\r\n/g, '\n');
   const block = `${START}\n## Shared rules for Claude Code and Codex\n\n${content}\n${END}`;
   return text.includes(block) && text.indexOf(START) === text.lastIndexOf(START) && text.indexOf(END) === text.lastIndexOf(END);
 }
@@ -28,7 +30,13 @@ function applied(text: string, content: string) {
 /** One source of rules; changes replace only the managed block in both engine files. */
 export class RulesService {
   private file: string;
-  constructor(root: string) { this.file = path.join(root, 'shared-rules.json'); }
+  private transientRoot: string;
+  constructor(root: string) { this.file = path.join(root, 'shared-rules.json'); this.transientRoot = path.join(root, 'coaching'); }
+  /** Prepared coaching/design-feedback folders are registered but do not count as user projects. */
+  private transient(directory: string) {
+    let root = this.transientRoot; try { root = fs.realpathSync(root); } catch { /* Not created yet. */ }
+    return path.dirname(directory) === root;
+  }
   private readFile(file: string): FileState {
     let cursor = file;
     for (;;) { try { if (fs.lstatSync(cursor).isSymbolicLink()) throw new HubError('RULES_LINK', 'Shared rules cannot edit paths containing symbolic links.'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; } const parent = path.dirname(cursor); if (parent === cursor) break; cursor = parent; }
@@ -48,13 +56,16 @@ export class RulesService {
     catch { throw new HubError('RULES_DIRECTORY', 'A selected rules project is missing or inaccessible. Remove it from the selection or restore its directory.'); }
   }
   read(directories: string[]): SharedRules {
-    const { source, state } = this.state(); const targets = [...new Set(directories)].map((input) => {
+    const { source, state } = this.state(); const seen = new Set<string>();
+    const targets = [...new Set(directories)].map((input) => {
       try {
       const directory = this.directory(input);
+      // Different spellings (symlinks, junctions, raw vs resolved roots) can name one project.
+      if (seen.has(directory)) return null; seen.add(directory);
       const claude = this.readFile(path.join(directory, 'CLAUDE.md')); const codex = this.readFile(path.join(directory, 'AGENTS.md'));
       return { directory, claudeHash: claude.fingerprint, codexHash: codex.fingerprint, applied: state.directories.includes(directory) && applied(claude.text ?? '', state.content) && applied(codex.text ?? '', state.content) };
       } catch (e) { return { directory: input, claudeHash: hash(null), codexHash: hash(null), applied: false, error: e instanceof HubError ? e.message : 'Project rules could not be inspected.' }; }
-    });
+    }).filter((target) => target !== null);
     return { content: state.content, revision: source.fingerprint, directories: state.directories, targets };
   }
   verifyLaunch(directory: string) {
@@ -73,10 +84,11 @@ export class RulesService {
     for (const target of selected) for (const [name, expected] of [['CLAUDE.md', target.claudeHash], ['AGENTS.md', target.codexHash]]) {
       const before = this.readFile(path.join(target.directory, name)); if (before.fingerprint !== expected) throw new HubError('RULES_CHANGED', 'Project instructions changed since inspection. Reload to preserve those changes. Your unsaved rules remain in the editor.');
       const after = replaceRules(before.text ?? '', content); if (Buffer.byteLength(after) > 1024 * 1024) throw new HubError('RULES_FILE', 'Applying rules would exceed the 1 MiB instruction-file limit.');
-      if (before.text !== after) writes.push({ before, after });
+      if (before.text !== after && !(before.text === null && after === '')) writes.push({ before, after });
     }
-    const directories = [...new Set([...state.directories, ...selected.map((t) => t.directory)])];
-    if (directories.length > 100) throw new HubError('RULES_LIMIT', 'At most 100 projects can be registered for shared rules.');
+    // Drop registrations whose folders were deleted so the registry cannot fill up permanently.
+    const directories = [...new Set([...state.directories.filter((directory) => fs.existsSync(directory)), ...selected.map((t) => t.directory)])];
+    if (directories.filter((directory) => !this.transient(directory)).length > 100 || directories.length > 200) throw new HubError('RULES_LIMIT', 'At most 100 projects can be registered for shared rules.');
     const afterState = JSON.stringify({ version: 1, content, directories }, null, 2) + '\n';
     writes.push({ before: source, after: afterState });
     const completed: typeof writes = [];

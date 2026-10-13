@@ -2,6 +2,7 @@ import { stopProcess, type StopDependencies } from './stop-process';
 import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
@@ -9,6 +10,16 @@ import type { RunningSession, SessionEvent, EngineInfo } from '../../../shared/i
 import { resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
+
+function canonical(directory: string) {
+  let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+/** True when `candidate` is `directory` or any folder below it, after resolving links. */
+export function isWithinDirectory(directory: string, candidate: string): boolean {
+  const relative = path.relative(canonical(directory), canonical(candidate));
+  return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
 
 type Spawn = (file: string, args: string[], options: IPtyForkOptions) => IPty;
 interface ManagedRun {
@@ -35,7 +46,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -47,7 +58,7 @@ export class PtyManager {
     catch { try { this.dependencies.onEventError?.(); } catch { /* Reporting must not interrupt process cleanup. */ } }
   }
 
-  usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => path.resolve(run.session.cwd) === path.resolve(directory)) || this.pending.size > 0; }
+  usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => isWithinDirectory(directory, run.session.cwd)) || this.pending.size > 0; }
 
   usesProfile(id: string): boolean { return [...this.runs.values()].some((run) => run.session.accountProfileId === id) || [...this.pending.values()].some((run) => run.profileId === id); }
 
@@ -103,7 +114,7 @@ export class PtyManager {
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
-      this.dependencies.onStarted?.(session, request.config);
+      this.dependencies.onStarted?.(session, request.config, owner);
       this.send(owner, { type: 'started', ...session });
       return session;
     } finally {

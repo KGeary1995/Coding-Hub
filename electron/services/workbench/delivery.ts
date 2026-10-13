@@ -29,12 +29,16 @@ export class Delivery {
  }
  async inspect(input: string): Promise<DeliveryStatus> {
   const cwd = directory(input); const root = directory((await this.command(cwd, 'git', ['rev-parse','--show-toplevel'])).toString().trim());
-  const status = parseStatus(await this.command(root, 'git', ['status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
+  // --no-optional-locks: never take index.lock while agents may be running their own git commands.
+  const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks','status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
   if (status.limited) throw new HubError('DELIVERY_LIMIT', 'Too many changes for a safe delivery review. Use local Git tools.');
   const hash = createHash('sha256').update(JSON.stringify(status));
   hash.update(await this.command(root, 'git', ['diff','--no-ext-diff','--no-textconv','--binary'])); hash.update(await this.command(root, 'git', ['diff','--cached','--no-ext-diff','--no-textconv','--binary']));
   let reviewedBytes = 0;
-  for (const item of status.changes.filter((change) => change.untracked)) { validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', 'An untracked file exceeds the review limit. Use local Git tools.'); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
+  for (const item of status.changes.filter((change) => change.untracked)) {
+   // Git lists an untracked nested repository or worktree as a directory with a trailing slash.
+   if (item.path.endsWith('/')) { validateRelativePath(item.path.slice(0, -1)); hash.update(JSON.stringify({path:item.path,kind:'directory'})); continue; }
+   validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', 'An untracked file exceeds the review limit. Use local Git tools.'); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
   const remotes = (await this.command(root, 'git', ['remote'])).toString().trim().split(/\r?\n/).filter(Boolean);
   for (const remote of remotes) hash.update(JSON.stringify({remote,urls:(await this.command(root, 'git', ['remote', 'get-url', '--all', remote])).toString(),pushUrls:(await this.command(root, 'git', ['remote', 'get-url', '--push', '--all', remote])).toString()}));
   return { directory: root, branch: status.branch, head: status.head, revision: hash.digest('hex'), renames: Object.fromEntries(status.changes.filter((item) => item.originalPath).map((item) => [item.path, item.originalPath!])), staged: status.changes.filter((item) => !item.untracked && item.indexStatus !== ' ').map((item) => item.path), unstaged: status.changes.filter((item) => item.untracked || item.worktreeStatus !== ' ').map((item) => item.path), remotes };
@@ -50,7 +54,8 @@ export class Delivery {
    let args: string[]; let detail: string; let file = 'git'; let temp: string | null = null;
    if (request.action === 'flow-git-stage' || request.action === 'flow-git-unstage') {
     for (const item of request.paths) { validateRelativePath(item); if (!(request.action === 'flow-git-stage' ? status.unstaged : status.staged).includes(item)) throw new HubError('DELIVERY_PATH', 'A selected path is no longer in this change list.'); }
-    const paths = [...new Set(request.paths.flatMap((item) => status.renames[item] ? [item, status.renames[item]] : [item]))]; paths.forEach((item) => validateRelativePath(item));
+    // Unstaging a rename must reset both sides; staging only names the new path (the old one no longer exists).
+    const paths = request.action === 'flow-git-stage' ? request.paths : [...new Set(request.paths.flatMap((item) => status.renames[item] ? [item, status.renames[item]] : [item]))]; paths.forEach((item) => validateRelativePath(item));
     args = request.action === 'flow-git-stage' ? ['add','--',...paths] : status.head ? ['reset','-q','HEAD','--',...paths] : ['rm','--cached','--ignore-unmatch','--',...paths]; detail = `Update the index for these paths. Working files are preserved.\n${request.paths.join('\n')}`;
    } else if (request.action === 'flow-git-commit') {
     if (!status.staged.length) throw new HubError('DELIVERY_EMPTY', 'Stage reviewed changes before committing.');

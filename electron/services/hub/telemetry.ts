@@ -59,15 +59,24 @@ export class TelemetryService {
   private find(w: Watcher): string | null {
     if (w.run.engine === 'claude') {
       const root = path.join(w.claudeHome, 'projects');
-      try { for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).slice(0, 500)) { const file = path.join(root, d.name, (w.config.resumeId ?? w.run.runId) + '.jsonl'); if (fs.existsSync(file) && fs.lstatSync(file).isFile()) return file; } } catch { /* CLI has not written structured output yet. */ }
+      // Claude names project folders after the cwd with non-alphanumerics replaced; try that before scanning.
+      const direct = path.join(root, w.run.cwd.replace(/[^a-zA-Z0-9]/g, '-'), (w.config.resumeId ?? w.run.runId) + '.jsonl');
+      try { if (fs.existsSync(direct) && fs.lstatSync(direct).isFile()) return direct; } catch { /* Fall back to scanning. */ }
+      try { for (const d of fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).slice(0, 5000)) { const file = path.join(root, d.name, (w.config.resumeId ?? w.run.runId) + '.jsonl'); if (fs.existsSync(file) && fs.lstatSync(file).isFile()) return file; } } catch { /* CLI has not written structured output yet. */ }
       return null;
     }
     try {
       for (const entry of fs.readdirSync(w.logDir).slice(0, 10)) { const log = path.join(w.logDir, entry); if (!fs.lstatSync(log).isFile()) continue; const size = fs.statSync(log).size; const fd = fs.openSync(log, 'r'); const data = Buffer.alloc(Math.min(size, 128000)); try { fs.readSync(fd, data, 0, data.length, Math.max(0, size - data.length)); } finally { fs.closeSync(fd); } const match = data.toString().match(/(?:thread_id|session_id)[=:]?\s*["']?([0-9a-f]{8}-[0-9a-f-]{27})/i); if (match) w.thread = match[1]; }
     } catch { /* Per-run TUI log is optional. */ }
     const matches: string[] = [];
+    // Codex names rollout folders by local date; keep UTC folders for older releases and tests.
+    const folders = new Set<string>();
     for (let day = 0; day < 3; day++) {
-      const date = new Date(w.start - day * 86400000); const dir = path.join(this.codexHome, 'sessions', String(date.getUTCFullYear()), String(date.getUTCMonth() + 1).padStart(2, '0'), String(date.getUTCDate()).padStart(2, '0'));
+      const date = new Date(w.start - day * 86400000);
+      folders.add(path.join(this.codexHome, 'sessions', String(date.getFullYear()), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')));
+      folders.add(path.join(this.codexHome, 'sessions', String(date.getUTCFullYear()), String(date.getUTCMonth() + 1).padStart(2, '0'), String(date.getUTCDate()).padStart(2, '0')));
+    }
+    for (const dir of folders) {
       try { for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).slice(-500)) {
         const file = path.join(dir, name); if (this.assigned.has(file) || !fs.lstatSync(file).isFile() || fs.statSync(file).mtimeMs < w.start - 2000) continue;
         if (w.thread) { if (name.includes(w.thread)) return file; continue; }
@@ -109,15 +118,20 @@ export class TelemetryService {
     } catch { /* Telemetry failures cannot stop interactive terminal output. */ }
     finally { w.polling = false; }
   }
-  runUsage(runId: string): UsageRecord | null {
+  /** Unreadable preferences leave usage unpriced; they must not stop usage recording or token limits. */
+  private safeRates(): PriceRate[] { try { return this.rates(); } catch { return []; } }
+  runUsage(runId: string, rates = this.safeRates()): UsageRecord | null {
     const meta = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (!meta) return null;
     const rows = this.database.prepare('SELECT snapshot FROM usage WHERE run=? ORDER BY rowid').all(runId); if (!rows.length) return null;
     const usage: UsageRecord = { ...JSON.parse(String(meta.value)), input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: null, context: null, cost: null };
     let cost = 0; let priced = true;
-    for (const row of rows) { const snapshot = JSON.parse(String(row.snapshot)) as Snapshot; const event = { ...usage, ...snapshot }; const eventCost = usageCost(event, this.rates()); if (eventCost === null) priced = false; else cost += eventCost; usage.model = snapshot.model; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += snapshot[key]; if (snapshot.reasoning !== null) usage.reasoning = (usage.reasoning ?? 0) + snapshot.reasoning; if (snapshot.context) usage.context = snapshot.context; }
+    for (const row of rows) { const snapshot = JSON.parse(String(row.snapshot)) as Snapshot;
+      // Claude writes zero-usage `<synthetic>` entries for API errors; they cost nothing and are not the run's model.
+      if (!snapshot.input && !snapshot.output && !snapshot.cached && !snapshot.cacheWrite && !snapshot.reasoning) continue;
+      const event = { ...usage, ...snapshot }; const eventCost = usageCost(event, rates); if (eventCost === null) priced = false; else cost += eventCost; usage.model = snapshot.model; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += snapshot[key]; if (snapshot.reasoning !== null) usage.reasoning = (usage.reasoning ?? 0) + snapshot.reasoning; if (snapshot.context) usage.context = snapshot.context; }
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; return usage;
   }
-  list(): UsageRecord[] { return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run))).filter((r): r is UsageRecord => r !== null); }
+  list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
   end(runId: string) { const w = this.watches.get(runId); if (w) { clearInterval(w.timer); w.stopped = true; for (let i = 0; i < 8; i++) { const offset = w.offset; this.poll(w); if (w.offset === offset) break; } this.watches.delete(runId); try { fs.rmSync(w.logDir, { recursive: true, force: true }); } catch { /* A locked Windows TUI log can be removed after the next restart. */ } } }
   close() { for (const id of [...this.watches.keys()]) this.end(id); this.database.close(); }
 }

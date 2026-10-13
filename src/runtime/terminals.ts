@@ -41,11 +41,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
   terminal.onData((data) => { void writeTerminal(session.id, data); });
-  terminal.onResize(({ cols, rows }) => {
-    if (entry.run && window.codingHub) void window.codingHub.resizeSession({ ...entry.run, cols: Math.min(500, Math.max(2, cols)), rows: Math.min(300, Math.max(1, rows)) }).then((result) => {
-      if (!result.ok && result.error.code !== 'STALE_SESSION') reportInputError(session.id, result.error.message);
-    }).catch(() => reportInputError(session.id, 'The native terminal connection was lost.'));
-  });
+  terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[${session.config.engine === 'claude' ? '33' : '32'}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
   terminal.writeln('Choose a project, then start this session.');
@@ -53,6 +49,12 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   terminal.writeln('');
   terminal.writeln('\x1b[2mNo process started. Usage appears after a reported CLI response.\x1b[0m');
   return entry;
+}
+
+function sendSize(id: string, entry: TerminalEntry, cols: number, rows: number) {
+  if (entry.run && window.codingHub) void window.codingHub.resizeSession({ ...entry.run, cols: Math.min(500, Math.max(2, cols)), rows: Math.min(300, Math.max(1, rows)) }).then((result) => {
+    if (!result.ok && result.error.code !== 'STALE_SESSION') reportInputError(id, result.error.message);
+  }).catch(() => reportInputError(id, 'The native terminal connection was lost.'));
 }
 
 export function writeTerminal(id: string, data: string): Promise<boolean> {
@@ -86,6 +88,9 @@ export function routeTerminalEvent(event: SessionEvent) {
     entry.run = { sessionId: event.sessionId, runId: event.runId };
     entry.terminal.options.disableStdin = false;
     entry.terminal.options.cursorBlink = true;
+    // Resizes while starting were dropped (no run yet), so the process may have the pre-start size.
+    try { entry.fit.fit(); } catch { /* Not attached to the page. */ }
+    sendSize(event.sessionId, entry, entry.terminal.cols, entry.terminal.rows);
   } else if (event.type === 'data') {
     entry.terminal.write(event.data);
   } else if (event.type === 'exit') {

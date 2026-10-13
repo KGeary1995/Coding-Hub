@@ -22,3 +22,13 @@ it('isolates two agents from uncommitted files and blocks removing changed or bo
   expect(git('branch', '--list', b.branch).toString()).toContain(b.branch);
   await expect(service.execute({ action: 'worktree-create', directory: 'relative' })).rejects.toMatchObject({ code: 'INVALID_WORKTREE_REQUEST' });
 });
+it('refuses to remove a worktree whose only contents are ignored files', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });
+  git('init'); writeFileSync(path.join(repository, '.gitignore'), '.env\n'); git('add', '.'); git('commit', '-m', 'baseline');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  const tree = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  writeFileSync(path.join(tree.directory, '.env'), 'SECRET=1');
+  await expect(service.execute({ action: 'worktree-remove', id: tree.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
+  expect(readFileSync(path.join(tree.directory, '.env'), 'utf8')).toBe('SECRET=1');
+});

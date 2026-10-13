@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { CodexModelCatalog } from '../../shared/workbench';
 import type { CodexCLIEngineConfig } from '../../shared/types';
 import { workbench } from '../runtime/workbench';
+import { MAX_MODEL_LENGTH, modelValue } from '../../shared/schemas';
 
 export function CodexModelPicker({ id, config, directory, onChange }: { id: string; config: CodexCLIEngineConfig; directory: string | null; onChange: (config: CodexCLIEngineConfig) => void }) {
   const [catalog, setCatalog] = useState<CodexModelCatalog | null>(null);
@@ -9,8 +10,9 @@ export function CodexModelPicker({ id, config, directory, onChange }: { id: stri
   const [notice, setNotice] = useState('');
   useEffect(() => {
     let cancelled = false; setBusy(true); setError(''); setCatalog(null);
-    void workbench<CodexModelCatalog>({ action: 'codex-models', directory }).then((value) => { if (!cancelled) setCatalog(value); }).catch((failure) => { if (!cancelled) setError(failure.message); }).finally(() => { if (!cancelled) setBusy(false); });
-    return () => { cancelled = true; };
+    // Each lookup starts a Codex process; wait until the repository path stops changing while typed.
+    const timer = setTimeout(() => void workbench<CodexModelCatalog>({ action: 'codex-models', directory }).then((value) => { if (!cancelled) setCatalog(value); }).catch((failure) => { if (!cancelled) setError(failure.message); }).finally(() => { if (!cancelled) setBusy(false); }), 400);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [directory, revision]);
   const selected = catalog?.models.find((item) => item.model === config.model);
   const efforts = selected?.reasoningEfforts.length ? selected.reasoningEfforts : ['none', 'low', 'medium', 'high', 'xhigh'];
@@ -22,7 +24,7 @@ export function CodexModelPicker({ id, config, directory, onChange }: { id: stri
   }
   return <>
     <label className="model-control">Model
-      <input aria-label="codex model" placeholder="CLI default — no override" list={`models-${id}`} value={config.model} onChange={(event) => chooseModel(event.target.value)} spellCheck={false} />
+      <input aria-label="codex model" placeholder="CLI default — no override" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) chooseModel(model); }} spellCheck={false} />
       <datalist id={`models-${id}`}>{catalog?.models.map((item) => <option key={item.model} value={item.model}>{item.displayName}{item.isDefault ? ' · catalog default' : ''}{item.hidden ? ' · additional model' : ''}</option>)}</datalist>
       <small>{busy ? 'Loading models from your local Codex CLI…' : catalog ? `${catalog.models.length} models reported by Codex. Type to search, or enter an exact custom ID.` : 'Enter an exact model ID or leave blank for CLI defaults.'}</small>
       <button type="button" className="quiet-button" disabled={busy} onClick={() => setRevision((value) => value + 1)}>Refresh Codex models</button>

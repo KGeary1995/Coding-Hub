@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { npmEntryForShim } from './discovery';
+import { CLEAR_RUN_AS_NODE, npmEntryForShim } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -18,7 +18,7 @@ async function fixture(bin: unknown) {
 describe('Windows npm CLI shim resolution', () => {
   it('resolves the declared entry with spaces in the path without invoking a shell', async () => {
     const { shim, packageRoot } = await fixture({ codex: 'cli.cjs' });
-    expect(await npmEntryForShim(shim, 'codex')).toEqual({ file: process.execPath, prefixArgs: [path.join(packageRoot, 'cli.cjs')], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim });
+    expect(await npmEntryForShim(shim, 'codex')).toEqual({ file: process.execPath, prefixArgs: [CLEAR_RUN_AS_NODE, path.join(packageRoot, 'cli.cjs')], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim });
   });
   it('attaches directly to native Codex binaries in modern and legacy Windows package layouts', async () => {
     for (const folder of ['bin', 'codex']) {
@@ -35,7 +35,7 @@ describe('Windows npm CLI shim resolution', () => {
   });
   it('supports string bin declarations', async () => {
     const { shim } = await fixture('cli.cjs');
-    expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toHaveLength(1);
+    expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toHaveLength(2);
   });
   it('rejects absent entries and paths outside the expected package', async () => {
     for (const bin of [{ other: 'cli.cjs' }, { codex: '../../../outside.cjs' }, { codex: 'missing.cjs' }]) {
