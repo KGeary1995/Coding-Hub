@@ -70,6 +70,7 @@ interface WorkspaceState {
   addSession: (engine: CLIEngine, sourceSessionId?: string) => void;
   removeSession: (id: string) => void;
   updateConfig: (id: string, config: CLIEngineConfig) => void;
+  resetCodexConfig: (id: string) => void;
   updateBinding: (id: string, binding: WorkspaceBinding) => void;
   setTiles: (tiles: GridTile[]) => void;
   arrange: (mode: LayoutMode) => void;
@@ -143,6 +144,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     sessions: state.sessions.map((session) => session.id === id && session.config.engine === config.engine && session.status !== 'running' && session.status !== 'starting'
       ? { ...session, config } : session),
   })),
+  resetCodexConfig: (id) => set((state) => ({ sessions: state.sessions.map((session) => session.id === id && session.config.engine === 'codex' && session.status !== 'running' && session.status !== 'starting' ? { ...session, config: { engine: 'codex' as const, model: '', reasoningEffort: null } } : session) })),
   updateBinding: (id, binding) => set((state) => ({
     sessions: state.sessions.map((session) => session.id === id && session.status !== 'running' && session.status !== 'starting' ? { ...session, binding, error: null } : session),
   })),

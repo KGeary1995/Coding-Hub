@@ -36,3 +36,10 @@ describe('engine-specific CLI launch policy', () => {
     for (const invalid of [{ ...request, executable: 'powershell' }, { ...request, cols: 0 }, { ...request, cwd: '/tmp/\0bad' }, { ...request, config: { ...claude, reasoningEffort: 'high' } }, { ...request, config: { ...claude, model: '--dangerously-skip-permissions' } }]) expect(startSessionSchema.safeParse(invalid).success).toBe(false);
   });
 });
+
+it('passes an explicitly selected catalog model and raw reasoning effort exactly for new and resumed Codex runs',()=>{
+ const config={engine:'codex' as const,model:'custom/provider-model',reasoningEffort:'minimal'};
+ expect(startSessionSchema.safeParse({sessionId:'custom',cwd:'/tmp',cols:80,rows:24,config}).success).toBe(true);
+ expect(buildLaunch(config,info('codex')).args).toEqual(['--model','custom/provider-model','--config','model_reasoning_effort="minimal"']);
+ const resumeId='11111111-1111-4111-8111-111111111111';expect(buildLaunch({...config,resumeId},{...info('codex'),supportsResume:true}).args).toEqual(['resume',resumeId,'--model','custom/provider-model','--config','model_reasoning_effort="minimal"']);
+});

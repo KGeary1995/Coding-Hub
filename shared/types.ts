@@ -1,6 +1,6 @@
 /** These contracts describe local CLI configuration, never direct API requests. */
 export type CLIEngine = 'claude' | 'codex';
-export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = string;
 
 export interface ClaudeCLIEngineConfig {
   engine: 'claude';

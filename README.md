@@ -2,6 +2,12 @@
 
 A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
+## Codex model catalog and application stability (v1.7.2)
+
+Codex session settings now load the full model catalog reported by the installed official CLI, including additional/hidden models and every returned page. Suggestions use exact CLI model values, and reasoning controls show the selected model's advertised levels. Custom model IDs remain editable; blank fields retain CLI defaults. **Use Codex CLI defaults** clears resume metadata as well as model/reasoning overrides so recovery starts a fresh conversation while preserving the old conversation in native history.
+
+Terminal rendering now defaults to software; optional WebGL acceleration is in Settings and applies after an app restart. Native event delivery is guarded during renderer loss, and display crashes offer reload after terminal cleanup. **Settings → Running application → Application stability & crash diagnostics** shows bounded local lifecycle records. Native crash dumps remain local and are excluded from memory sync, backups and support exports. The reported Windows application close during Claude use has not been reproduced or attributed to a specific cause; see [the release notes and validation limits](docs/models-stability-v1.7.2.md).
+
 ## Code review and reliability fixes (v1.7.1)
 
 This release fixes Git push destination review, short/overlapping Codex usage correlation, Unix child-process cleanup, linked design-task editing, large verification results, escaped memory/design records, memory limits and redirected storage, malformed MCP messages, repeated Drive scans, and signed upgrade baseline selection. Vitest is upgraded to remove the critical development-tool advisories found during review. See [the audit report](docs/audit-v1.7.1.md) for reproduction evidence, validation, and outstanding Windows/provider checks and development-dependency advisories.

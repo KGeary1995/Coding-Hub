@@ -77,3 +77,8 @@ describe('account setup independent of project sessions', () => {
     await expect(manager.execute(7, { action: 'install-guide', provider: 'github', url: 'file:///private' })).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_REQUEST' }); await manager.close();
   });
 });
+
+it('keeps login cleanup reliable when native event delivery fails',async()=>{
+ const pty=new FakePty(), failures=vi.fn();const manager=new AccountLoginManager(()=>{throw new Error('Renderer disappeared');},{inspect:async provider=>discovery(provider),spawn:()=>pty as unknown as IPty,openGuide:async()=>{},onEventError:failures,stopDependencies:{platform:'linux',signalGroup:()=>{}}});
+ try{await expect(manager.execute(7,{action:'login',provider:'claude',cols:80,rows:24})).resolves.toMatchObject({provider:'claude'});expect(()=>pty.data('Private login output')).not.toThrow();await manager.stopOwner(7);expect(manager.active).toBe(false);expect(failures).toHaveBeenCalled();}finally{await manager.close();}
+});

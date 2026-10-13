@@ -32,11 +32,12 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   terminal.loadAddon(fit);
   terminal.open(element);
   let webgl: WebglAddon | undefined;
-  try {
+  const disposeWebGL = () => { const addon = webgl; webgl = undefined; try { addon?.dispose(); } catch { /* Keep software rendering when the graphics context fails. */ } };
+  if (useHubStore.getState().preferences.terminalWebGL === true) try {
     webgl = new WebglAddon();
     terminal.loadAddon(webgl);
-    webgl.onContextLoss(() => { webgl?.dispose(); webgl = undefined; });
-  } catch { webgl?.dispose(); }
+    webgl.onContextLoss(disposeWebGL);
+  } catch { disposeWebGL(); }
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
   terminal.onData((data) => { void writeTerminal(session.id, data); });

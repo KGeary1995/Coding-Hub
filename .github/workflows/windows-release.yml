@@ -26,6 +26,7 @@ jobs:
       - run: npm run test:workbench
       - run: npm run test:enterprise
       - run: npm run test:productivity
+      - run: npm run test:models-stability
       - run: npm run dist:win
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}

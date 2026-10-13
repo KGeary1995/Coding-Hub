@@ -16,7 +16,7 @@ import { CoachingService } from './services/coaching/service';
 import { DesignArchive } from './services/design/archive';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { ProjectChecks } from './services/repository/project-checks';
@@ -31,7 +31,9 @@ import { discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { PtyManager } from './services/cli/pty-manager';
+import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
+import { HostHealth } from './services/storage/host-health';
 import { finishWorkspaceFlushSchema } from '../shared/schemas';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
@@ -41,6 +43,9 @@ import { TelemetryService } from './services/hub/telemetry';
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub');
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
 const storageRoot = resolveStorageRoot(storageBase, profileRoot);
+let hostHealth: HostHealth | null = null;
+process.on('uncaughtExceptionMonitor', (_error, origin) => hostHealth?.record('host-uncaught-exception', origin));
+app.on('child-process-gone', (_event, details) => { if (details.reason !== 'clean-exit') hostHealth?.record('child-process-gone', `${details.type}: ${details.reason}`, details.exitCode); });
 let workflows: Workflows | null = null;
 let delivery: Delivery | null = null;
 let verification: Verification | null = null;
@@ -60,19 +65,21 @@ let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
 const rendererFile = path.join(__dirname, '../../dist/index.html');
 const claudeProfiles = new ClaudeProfiles(storageRoot);
-const accounts = new AccountLoginManager((owner, event) => { const target = webContents.fromId(owner); if (target && !target.isDestroyed()) target.send(IPC_CHANNELS.accountEvent, event); }, { profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
+const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 const nativeSessions = new NativeSessions(claudeProfiles);
+const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 const manager = new PtyManager((owner, event) => {
+  if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
+  if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
   try {
     if (event.type === 'data') storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
-  if (event.type === 'exit') hub?.telemetry?.end(event.runId);
-  const target = webContents.fromId(owner);
-  if (target && !target.isDestroyed()) target.send(IPC_CHANNELS.sessionEvent, event);
-}, { profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
+  if (event.type === 'exit') try { hub?.telemetry?.end(event.runId); } catch { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); }
+  sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
+}, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
@@ -83,9 +90,15 @@ const manager = new PtyManager((owner, event) => {
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); } catch { reportStorageError('Usage recording is unavailable for this run.'); }
 } });
 
-function reportStorageError(message: string) {
-  if (window && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.storageError, message);
+function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
+  try {
+    const id = owner ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
+    const target = id === undefined ? null : webContents.fromId(id);
+    if (!target || target.isDestroyed()) return false;
+    target.send(channel, value); return true;
+  } catch { hostHealth?.record('renderer-event-delivery-failed', channel); return false; }
 }
+function reportStorageError(message: string) { sendToRenderer(IPC_CHANNELS.storageError, message); }
 function localStorage() {
   if (!storage) throw new HubError('STORAGE_UNAVAILABLE', storageFailure);
   return storage;
@@ -99,7 +112,7 @@ function flushWorkspace(): Promise<void> {
   const request = { requestId: randomUUID(), owner: window.webContents.id, resolve, promise };
   pendingFlush = request;
   const timer = setTimeout(resolve, 2000);
-  window.webContents.send(IPC_CHANNELS.workspaceFlush, request.requestId);
+  if (!sendToRenderer(IPC_CHANNELS.workspaceFlush, request.requestId, request.owner)) resolve();
   void promise.finally(() => { clearTimeout(timer); if (pendingFlush === request) pendingFlush = null; });
   return promise;
 }
@@ -154,10 +167,24 @@ function createWindow() {
   if (production) void window.loadFile(path.join(__dirname, '../../dist/index.html'));
   else void window.loadURL('http://127.0.0.1:5173');
   const current = window;
-  current.webContents.on('render-process-gone', () => { void manager.stopOwner(current.webContents.id); void accounts.stopOwner(current.webContents.id).catch(() => {}); });
-  current.webContents.on('render-process-gone', () => repositoryFiles.closeOwner(current.webContents.id));
-  current.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => {
-    if (mainFrame) { void accounts.stopOwner(current.webContents.id).catch(() => {}); void manager.stopOwner(current.webContents.id); repositoryFiles.closeOwner(current.webContents.id); }
+  const owner = current.webContents.id;
+  current.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return;
+    hostHealth?.record('renderer-process-gone', details.reason, details.exitCode);
+    void Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)]).then(async () => {
+      if (current.isDestroyed() || quitting) return;
+      if (manager.ownedProcessIds(owner).length) throw new HubError('STOP_FAILED', 'A CLI process is still owned by this window.');
+      const answer = await dialog.showMessageBox(current, { type: 'error', title: 'Workspace display stopped', message: 'The application display stopped unexpectedly. Coding and login terminals have been stopped.', detail: 'Reload restores the last saved workspace as idle tiles. Local lifecycle diagnostics are available in Settings.', buttons: ['Reload workspace', 'Close'], defaultId: 0, cancelId: 1 });
+      if (current.isDestroyed()) return;
+      if (answer.response === 0) current.webContents.reload(); else current.close();
+    }).catch(() => {
+      hostHealth?.record('renderer-recovery-failed');
+      if (!quitting && !current.isDestroyed()) dialog.showErrorBox('Workspace recovery could not finish', `A coding or login process could not be confirmed stopped. Check your system process manager before restarting Coding Hub.${manager.ownedProcessIds(owner).length ? '\nOwned coding process IDs: ' + manager.ownedProcessIds(owner).join(', ') : ''}\nLocal lifecycle diagnostics were preserved.`);
+    });
+  });
+  current.webContents.on('render-process-gone', () => repositoryFiles.closeOwner(owner));
+  current.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+    if (mainFrame && !inPlace) { void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner); }
   });
   let closing = false;
   current.on('close', (event) => {
@@ -165,19 +192,22 @@ function createWindow() {
     event.preventDefault();
     if (delivery?.running || workflows?.running) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before closing the app.' }); return; }
     closing = true;
-    void flushWorkspace().then(() => Promise.all([manager.stopOwner(current.webContents.id), accounts.stopOwner(current.webContents.id)])).finally(() => { repositoryFiles.closeOwner(current.webContents.id); current.destroy(); });
+    void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).finally(() => { repositoryFiles.closeOwner(owner); current.destroy(); });
   });
   window.on('closed', () => { window = null; });
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
+  hostHealth = new HostHealth(storageRoot);
+  try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); }
+  catch { hostHealth.record('crash-dump-setup-unavailable'); }
   try { storage = new WorkspaceStorage(storageRoot, reportStorageError); }
   catch (error) { if (error instanceof HubError) storageFailure = error.message; }
   try {
     hub = new HubService(storageRoot);
     hub.telemetry = new TelemetryService(path.join(path.dirname(hub.preferencesPath), 'telemetry'), () => hub!.preferences().prices, (usage) => {
-      if (window && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.usage, usage);
+      sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
   } catch { /* Live sessions remain available without optional storage integrations. */ }
   const designs = new DesignArchive(storageRoot, async () => {
@@ -207,6 +237,8 @@ else app.whenReady().then(() => {
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
     if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); livePreview?.close(); app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
+    if (action === 'codex-models') return modelCatalog.execute(payload);
+    if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
@@ -267,7 +299,7 @@ else app.whenReady().then(() => {
     disabledReason: 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
     storageDirectory: storageRoot,
     updater: autoUpdater,
-    publish: (status) => { if (window && !window.webContents.isDestroyed()) window.webContents.send(IPC_CHANNELS.updateStatus, status); },
+    publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
     hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running),
     installationFailed: () => { updateRestart = false; },
     prepareRestart: async () => {
@@ -340,6 +372,6 @@ app.on('before-quit', (event) => {
   if (delivery?.running || workflows?.running) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before quitting.' }); return; }
   quitting = true;
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).finally(() => {
-    try { projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); } finally { app.quit(); }
+    try { modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

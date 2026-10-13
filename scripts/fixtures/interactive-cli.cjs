@@ -4,6 +4,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const fixtureArgs = process.argv.slice(2);
+if (fixtureArgs[0] === 'app-server') {
+  const model = (model, hidden = false) => ({ id: 'picker-' + model, model, displayName: 'Catalog ' + model, description: 'Fixture catalog model', hidden, isDefault: !hidden, supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'High' }, { reasoningEffort: 'ultra', description: 'Ultra' }] });
+  require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const request = JSON.parse(line); if (request.id === undefined) return;
+    if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: { userAgent: 'fixture' } }) + '\n');
+    else if (request.method === 'model/list' && request.params?.includeHidden === true) process.stdout.write(JSON.stringify({ id: request.id, result: request.params.cursor ? { data: [model('fixture-hidden-model', true)], nextCursor: null } : { data: [model('fixture-current-model'), model('fixture-extra-model')], nextCursor: 'next-page' } }) + '\n');
+    else process.stdout.write(JSON.stringify({ id: request.id, error: { message: 'Unsupported fixture method' } }) + '\n');
+  });
+  return;
+}
 const loginProvider = fixtureArgs[0] === 'auth' && fixtureArgs[1] === 'login' ? 'claude' : fixtureArgs[0] === 'login' && fixtureArgs.length === 1 ? 'codex' : null;
 const authRoot = fixtureArgs[0] === 'auth' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME;
 const authMarker = authRoot && path.join(authRoot, 'fixture-authenticated');
@@ -32,6 +42,8 @@ function reportUsage() {
   fs.appendFileSync(usageFile, JSON.stringify(event) + '\n');
 }
 console.log(`\x1b[32mREADY\x1b[0m CWD:${process.cwd()}`);
+const modelIndex = process.argv.indexOf('--model');
+console.log('MODEL_OVERRIDE:' + (modelIndex >= 0 ? process.argv[modelIndex + 1] : 'CLI_DEFAULT'));
 const size = () => console.log(`SIZE:${process.stdout.columns}x${process.stdout.rows}`);
 size();
 process.stdout.on('resize', size);

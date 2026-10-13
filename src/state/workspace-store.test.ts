@@ -110,3 +110,9 @@ it('restores history into an idle session without reviving a PID or replacing ac
   useWorkspaceStore.setState({ sessions: useWorkspaceStore.getState().sessions.map((session) => ({ ...session, status: 'running' })) });
   const before = savedWorkspace(); expect(useWorkspaceStore.getState().restoreRun(run)).toBe(false); expect(savedWorkspace()).toEqual(before);
 });
+
+it('clears old resume metadata along with Codex overrides for a fresh-default recovery, and preserves active launches',()=>{
+ const session=useWorkspaceStore.getState().sessions[1];useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'old-model',reasoningEffort:'high',resumeId:crypto.randomUUID()});
+ useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config).toEqual({engine:'codex',model:'',reasoningEffort:null});
+ useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'chosen-model',reasoningEffort:'minimal'});useWorkspaceStore.getState().markStarting(session.id);useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config.model).toBe('chosen-model');
+});

@@ -29,7 +29,8 @@ export function useNativeHost() {
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     const unsubscribe = host.onSessionEvent((event) => {
       useWorkspaceStore.getState().applyEvent(event);
-      routeTerminalEvent(event);
+      try { routeTerminalEvent(event); }
+      catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {

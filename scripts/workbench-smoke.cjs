@@ -76,7 +76,10 @@ const { _electron } = require('playwright-core');
     assert.equal(await page.locator('.process-dot.running').count(), 0, 'Preparing a report must not launch a provider CLI');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start session', exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.xterm').textContent.includes('READY'));
+    // READY can be in scrollback in a short software-rendered tile. Verify the
+    // received startup event and the latest rendered size line independently.
+    await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('READY')));
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.xterm').textContent.includes('SIZE:'));
     assert.equal(await page.evaluate(() => window.events.filter((event) => event.type === 'data').some((event) => event.data.includes('ECHO:'))), false, 'Start must not auto-answer trust prompts or send coaching');
     await tile.getByRole('button', { name: 'Send coaching request', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));

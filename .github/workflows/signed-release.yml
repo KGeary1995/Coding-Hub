@@ -29,6 +29,7 @@ jobs:
       - run: npm run test:release
       - run: npm run test:enterprise
       - run: npm run test:productivity
+      - run: npm run test:models-stability
       - run: npm run dist:win:signed
       - name: Build signed upgrade baseline
         run: node scripts/build-windows.cjs --signed --output release/baseline --version ${{ env.CODING_HUB_BASELINE_VERSION }}

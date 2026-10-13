@@ -113,3 +113,11 @@ describe('PTY lifecycle and IPC ownership', () => {
   });
 });
 function runReference(run: { sessionId: string; runId: string }) { return { sessionId: run.sessionId, runId: run.runId }; }
+
+it('keeps Claude lifecycle owned and resolves exit even if native event delivery throws', async () => {
+ const pty=new FakePty(); const failures=vi.fn();
+ const manager=new PtyManager(()=>{throw new Error('Destroyed renderer fixture');},{spawn:()=>pty as unknown as IPty,discover:async engine=>engines(engine),onEventError:failures,stopDependencies:{platform:'linux',signalGroup:()=>{}}});managers.push(manager);
+ const config={engine:'claude' as const,model:'',thinking:{budget_tokens:null},tokenLimits:{maxOutputTokens:null,maxSessionTokens:null}};
+ await expect(manager.start(7,{...request(),config})).resolves.toMatchObject({engine:'claude'});
+ expect(()=>{pty.data('last output');pty.exit({exitCode:0});}).not.toThrow();expect(manager.hasSessions).toBe(false);expect(failures).toHaveBeenCalled();await manager.dispose();
+});

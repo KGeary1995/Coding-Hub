@@ -35,11 +35,16 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
     this.environment = dependencies.environment ?? hostEnvironment;
+  }
+
+  private send(owner: number, event: SessionEvent) {
+    try { this.emit(owner, event); }
+    catch { try { this.dependencies.onEventError?.(); } catch { /* Reporting must not interrupt process cleanup. */ } }
   }
 
   usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => path.resolve(run.session.cwd) === path.resolve(directory)) || this.pending.size > 0; }
@@ -47,6 +52,7 @@ export class PtyManager {
   usesProfile(id: string): boolean { return [...this.runs.values()].some((run) => run.session.accountProfileId === id) || [...this.pending.values()].some((run) => run.profileId === id); }
 
   get hasSessions(): boolean { return this.runs.size > 0 || this.pending.size > 0; }
+  ownedProcessIds(owner: number): number[] { return [...this.runs.values()].filter((run) => run.owner === owner).map((run) => run.session.pid); }
 
   async start(owner: number, payload: unknown): Promise<RunningSession> {
     const parsed = startSessionSchema.safeParse(payload);
@@ -98,7 +104,7 @@ export class PtyManager {
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       this.dependencies.onStarted?.(session, request.config);
-      this.emit(owner, { type: 'started', ...session });
+      this.send(owner, { type: 'started', ...session });
       return session;
     } finally {
       if (this.pending.get(request.sessionId) === reservation) this.pending.delete(request.sessionId);
@@ -112,7 +118,7 @@ export class PtyManager {
     run.pendingData = '';
     // Keep IPC payloads bounded. Xterm keeps parser state across chunk boundaries.
     for (let offset = 0; offset < data.length; offset += 16 * 1024) {
-      this.emit(run.owner, { type: 'data', sessionId: run.session.sessionId, runId: run.session.runId, data: data.slice(offset, offset + 16 * 1024) });
+      this.send(run.owner, { type: 'data', sessionId: run.session.sessionId, runId: run.session.runId, data: data.slice(offset, offset + 16 * 1024) });
     }
   }
 
@@ -158,7 +164,7 @@ export class PtyManager {
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
     const tail = stripVTControlCharacters(run.outputTail).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
     const diagnostic = exitCode !== 0 && !run.stopping ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project directory.'}` : undefined;
-    this.emit(run.owner, { type: 'exit', ...(diagnostic ? { diagnostic } : {}), sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
+    this.send(run.owner, { type: 'exit', ...(diagnostic ? { diagnostic } : {}), sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
     run.resolveExit();
   }
 
@@ -172,7 +178,7 @@ export class PtyManager {
     const runs = [...this.runs.values()].filter((run) => run.owner === owner);
     const results = await Promise.allSettled(runs.map((run) => this.stop(owner, { sessionId: run.session.sessionId, runId: run.session.runId })));
     for (let index = 0; index < results.length; index++) {
-      if (results[index].status === 'rejected') this.emit(owner, { type: 'error', sessionId: runs[index].session.sessionId, runId: runs[index].session.runId, message: 'A CLI process could not be stopped. Check your system process manager.' });
+      if (results[index].status === 'rejected') this.send(owner, { type: 'error', sessionId: runs[index].session.sessionId, runId: runs[index].session.runId, message: 'A CLI process could not be stopped. Check your system process manager.' });
     }
   }
 

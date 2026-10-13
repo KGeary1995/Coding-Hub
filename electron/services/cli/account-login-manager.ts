@@ -17,7 +17,8 @@ export class AccountLoginManager {
   private closing = false;
   get activeProfileId() { return this.run?.login.profileId ?? this.pending?.profileId; }
   get active() { return Boolean(this.run || this.pending); }
-  constructor(private emit: (owner: number, event: AccountEvent) => void, private dependencies: { profiles?: ClaudeProfiles; profileInUse?: (id: string) => boolean; stopDependencies?: StopDependencies; inspect?: typeof inspectAccount; spawn?: (file: string, args: string[], options: IPtyForkOptions) => IPty; openGuide: (url: string) => Promise<void> }) {}
+  constructor(private emit: (owner: number, event: AccountEvent) => void, private dependencies: { onEventError?: () => void; profiles?: ClaudeProfiles; profileInUse?: (id: string) => boolean; stopDependencies?: StopDependencies; inspect?: typeof inspectAccount; spawn?: (file: string, args: string[], options: IPtyForkOptions) => IPty; openGuide: (url: string) => Promise<void> }) {}
+  private send(owner: number, event: AccountEvent) { try { this.emit(owner, event); } catch { try { this.dependencies.onEventError?.(); } catch { /* Keep login cleanup reliable. */ } } }
   async execute(owner: number, input: unknown): Promise<AccountResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_ACCOUNT_REQUEST', 'Invalid account request.'); const request = parsed.data;
     const inspect = this.dependencies.inspect ?? inspectAccount;
@@ -60,9 +61,9 @@ export class AccountLoginManager {
       const spawn = this.dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
       const pty = spawn(discovered.executable.file, [...discovered.executable.prefixArgs, ...LOGIN_ARGUMENTS[request.provider]], { cwd: homedir(), cols: request.cols, rows: request.rows, env: { ...((this.dependencies.profiles?.environment({ ...env, ...discovered.executable.extraEnv }, request.profileId)) ?? { ...env, ...discovered.executable.extraEnv }), TERM: 'xterm-256color', COLORTERM: 'truecolor' } });
       let resolve!: () => void; const exited = new Promise<void>((done) => { resolve = done; }); const run: Run = { owner, login, pty, exited, resolve, finished: false }; this.run = run;
-      pty.onData((data) => { if (run.finished) return; for (let offset = 0; offset < data.length; offset += 16384) this.emit(owner, { type: 'data', ...login, data: data.slice(offset, offset + 16384) }); });
+      pty.onData((data) => { if (run.finished) return; for (let offset = 0; offset < data.length; offset += 16384) this.send(owner, { type: 'data', ...login, data: data.slice(offset, offset + 16384) }); });
       pty.onExit(({ exitCode }) => this.finish(run, exitCode));
-      this.emit(owner, { type: 'started', ...login }); return login;
+      this.send(owner, { type: 'started', ...login }); return login;
     } finally { if (this.pending === reservation) this.pending = null; }
   }
   async stopOwner(owner: number, id?: string) {
@@ -71,7 +72,7 @@ export class AccountLoginManager {
     if (run.owner !== owner || (id && run.login.runId !== id)) throw new HubError('STALE_LOGIN', 'This login terminal belongs to another window or has ended.');
     if (await stopProcess(run.pty, run.exited, this.dependencies.stopDependencies)) this.finish(run, 130);
   }
-  private finish(run: Run, exitCode: number) { if (run.finished) return; run.finished = true; if (this.run === run) this.run = null; this.emit(run.owner, { type: 'exit', ...run.login, exitCode }); run.resolve(); }
+  private finish(run: Run, exitCode: number) { if (run.finished) return; run.finished = true; if (this.run === run) this.run = null; this.send(run.owner, { type: 'exit', ...run.login, exitCode }); run.resolve(); }
 
   async close() { this.closing = true; if (this.pending) this.pending.cancelled = true; if (this.run) await this.stopOwner(this.run.owner); }
 }
