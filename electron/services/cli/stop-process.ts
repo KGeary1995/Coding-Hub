@@ -19,7 +19,9 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
     // Kill the child tree before closing ConPTY; killing its launcher first can orphan descendants.
     try { await (dependencies.killTree ?? windowsTree)(pty.pid); }
     catch { if (!exited && alive(pty.pid)) throw new HubError('STOP_FAILED', 'Windows could not stop the CLI process tree. Retry Stop or check the session PID in Task Manager.'); }
-    if (!exited) killPty('SIGKILL');
+    // node-pty rejects every signal on Windows (and a deferred rejection throws later, outside this
+    // try); only the argument-less kill closes the pseudoconsole.
+    if (!exited) try { pty.kill(); } catch { /* Process already exited. */ }
     const reported = await wait(dependencies.waitMilliseconds ?? 5000);
     if (alive(pty.pid)) throw new HubError('STOP_FAILED', 'The CLI process is still running after Stop. Check its displayed PID in Task Manager before restarting.');
     return !reported;

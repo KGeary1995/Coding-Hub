@@ -39,6 +39,13 @@ describe('backup and restore integrity', () => {
       expect(db.prepare('SELECT cwd FROM runs').get()?.cwd).toBe(report);
     } finally { db.close(); }
   });
+  it('keeps managed worktree paths pointing at the live checkouts after a restore', async () => {
+    const root = fixture(); const active = path.join(root, 'data'); fs.mkdirSync(active); const tree = path.join(active, 'worktrees', randomUUID());
+    fs.writeFileSync(path.join(active, 'worktrees.json'), JSON.stringify([{ id: path.basename(tree), repository: path.join(root, 'repo'), directory: tree, branch: 'coding-hub/x', createdAt: new Date().toISOString() }]));
+    const service = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
+    const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any; const restored = await service.execute({ action: 'backup-restore', id: created.record.id }) as any;
+    expect(JSON.parse(fs.readFileSync(path.join(restored.restoredPath, 'worktrees.json'), 'utf8'))[0].directory).toBe(tree);
+  });
   it('rejects tampered content and path traversal before activating a restore', async () => {
     const root = fixture(); const file = path.join(root, 'bad.gz'); const profile = path.join(root, 'profile'); const bytes = Buffer.from('bad');
     const manifest = { version: 1, record: { id: randomUUID(), createdAt: new Date().toISOString(), appVersion: '1.6.0', files: 1, bytes: bytes.length, includesLogs: false }, entries: [{ path: '../outside', hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.toString('base64') }] };

@@ -22,7 +22,7 @@ function checkFile(file: string) {
 export function readConfig(file: string): { data: ObjectMap; hash: string; text: string } {
   checkFile(file);
   let text = '';
-  try { if (fs.statSync(file).size > 2 * 1024 * 1024) throw new HubError('CONFIG_SIZE', 'Configuration exceeds the 2 MiB inspection limit.'); text = fs.readFileSync(file, 'utf8'); }
+  try { if (fs.statSync(file).size > 2 * 1024 * 1024) throw new HubError('CONFIG_SIZE', 'Configuration exceeds the 2 MiB inspection limit.'); text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''); }
   catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   try { const data = text.trim() ? (file.endsWith('.toml') ? TOML.parse(text) : JSON.parse(text)) : {}; if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(); return { data, hash: digest(text), text }; }
   catch { throw new HubError('CONFIG_PARSE', `Cannot parse ${file}. Existing configuration was preserved.`); }

@@ -32,3 +32,26 @@ describe('one shared rules source for both engine instructions', () => {
     const { root, project, rules } = setup(); const second = path.join(root, 'second'); fs.mkdirSync(second); const initial = rules.read([project, second]); const saved = rules.save('Use the same conventions.', initial.revision, initial.targets); expect(saved.targets.every((t) => t.applied)).toBe(true); expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toBe(fs.readFileSync(path.join(second, 'CLAUDE.md'), 'utf8')); expect(() => rules.save('Duplicate', saved.revision, [saved.targets[0], saved.targets[0]])).toThrow('once');
   });
 });
+describe('shared rules regressions', () => {
+  it('accepts instruction files checked out with CRLF line endings', () => {
+    const { project, rules } = setup(); const initial = rules.read([project]); rules.save('Line one\nLine two', initial.revision, initial.targets);
+    for (const file of ['CLAUDE.md', 'AGENTS.md']) { const target = path.join(project, file); fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace(/\n/g, '\r\n')); }
+    expect(() => rules.verifyLaunch(project)).not.toThrow();
+  });
+  it('returns one target for different spellings of the same project', () => {
+    const { root, project, rules } = setup(); const alias = path.join(root, 'alias'); fs.symlinkSync(project, alias);
+    const initial = rules.read([alias, project]); expect(initial.targets).toHaveLength(1);
+    expect(() => rules.save('Shared', initial.revision, initial.targets)).not.toThrow();
+  });
+  it('drops deleted folders and does not count prepared coaching folders toward the project limit', () => {
+    const { root, project, rules } = setup(); let state = rules.read([]);
+    for (let index = 0; index < 100; index++) { const folder = path.join(root, 'coaching', `report-${index}`); fs.mkdirSync(folder, { recursive: true }); state = rules.read([folder]); state = rules.save(state.content, state.revision, state.targets); }
+    const gone = path.join(root, 'gone'); fs.mkdirSync(gone); state = rules.read([gone]); state = rules.save(state.content, state.revision, state.targets); fs.rmSync(gone, { recursive: true });
+    state = rules.read([project]); state = rules.save(state.content, state.revision, state.targets);
+    expect(state.directories).toContain(project); expect(state.directories).not.toContain(gone);
+  });
+  it('does not create empty instruction files when saving empty rules', () => {
+    const { project, rules } = setup(); const initial = rules.read([project]); rules.save('', initial.revision, initial.targets);
+    expect(fs.existsSync(path.join(project, 'CLAUDE.md'))).toBe(false); expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false);
+  });
+});

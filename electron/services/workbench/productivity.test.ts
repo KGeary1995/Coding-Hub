@@ -81,3 +81,17 @@ it('rejects a changed push URL while leaving the fetch URL unchanged', async () 
  await expect(service.execute({action:'flow-git-push',directory:cwd,revision:state.revision,remote:'origin'})).rejects.toMatchObject({code:'DELIVERY_STALE'});
  expect(()=>git(first,'rev-parse','main')).toThrow(); expect(()=>git(second,'rev-parse','main')).toThrow();
 });
+
+describe('Git delivery regressions',()=>{
+ it('stages a file that was renamed and then edited',async()=>{
+  const cwd=root();git(cwd,'init','-b','main');fs.writeFileSync(path.join(cwd,'a.txt'),'one\ntwo\nthree\n');git(cwd,'add','.');git(cwd,'commit','-m','Baseline');
+  git(cwd,'mv','a.txt','b.txt');fs.writeFileSync(path.join(cwd,'b.txt'),'one\ntwo\nthree\nfour\n');
+  const service=new Delivery(async()=>true,()=>{});const state=await service.inspect(cwd);expect(state.unstaged).toContain('b.txt');
+  await service.execute({action:'flow-git-stage',directory:cwd,revision:state.revision,paths:['b.txt']});
+  expect(git(cwd,'status','--porcelain')).toBe('R  a.txt -> b.txt');
+ });
+ it('inspects a repository that contains an untracked nested repository',async()=>{
+  const cwd=root();git(cwd,'init','-b','main');const nested=path.join(cwd,'nested');fs.mkdirSync(nested);git(nested,'init','-b','main');fs.writeFileSync(path.join(nested,'x.txt'),'x');git(nested,'add','.');git(nested,'commit','-m','Nested');
+  const state=await new Delivery(async()=>true,()=>{}).inspect(cwd);expect(state.unstaged).toEqual(['nested/']);
+ });
+});

@@ -42,11 +42,15 @@ export class WorktreeService {
         return record;
       }
       const record = records.find((item) => item.id === request.id);
-      if (!record || path.dirname(record.directory) !== fs.realpathSync(this.root)) throw new HubError('UNKNOWN_WORKTREE', 'This worktree is not managed by Coding Hub.');
+      // Records restored from a backup keep their original storage folder (worktrees are not copied).
+      let root = this.root; try { root = fs.realpathSync(root); } catch { /* No worktrees created in this storage yet. */ }
+      const managedLocation = record && (path.dirname(record.directory) === root || (path.basename(record.directory) === record.id && path.basename(path.dirname(record.directory)) === 'worktrees'));
+      if (!record || !managedLocation) throw new HubError('UNKNOWN_WORKTREE', 'This worktree is not managed by Coding Hub.');
       if (this.inUse(record.directory)) throw new HubError('WORKTREE_IN_USE', 'Unbind all session panels from this worktree before removing it.');
       const directory = fs.realpathSync(record.directory);
       if (directory !== record.directory) throw new HubError('WORKTREE_PATH', 'Worktree path changed. Inspect it before removal.');
-      if (await git(directory, ['status', '--porcelain', '--untracked-files=all'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes. Review and commit or preserve them before removal.');
+      // `git worktree remove` deletes ignored files (.env, local databases, build output), so they count as changes.
+      if (await git(directory, ['status', '--porcelain', '--untracked-files=all', '--ignored'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
       await git(record.repository, ['worktree', 'remove', record.directory]);
       this.save(records.filter((item) => item.id !== record.id));
       return null;

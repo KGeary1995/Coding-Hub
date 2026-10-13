@@ -32,7 +32,8 @@ export class Backups {
   }
   private rebase(restored: string, source: string) {
     const old = source.replace(/\\/g, '/').replace(/\/$/, '');
-    const convert = (value: string) => { const normal = value.replace(/\\/g, '/'); return normal === old ? restored : normal.startsWith(old + '/') ? path.join(restored, ...normal.slice(old.length + 1).split('/')) : value; };
+    // Managed worktrees are live Git checkouts that backups never copy; keep pointing at the originals.
+    const convert = (value: string) => { const normal = value.replace(/\\/g, '/'); return normal === old ? restored : normal.startsWith(old + '/') && !normal.startsWith(old + '/worktrees/') ? path.join(restored, ...normal.slice(old.length + 1).split('/')) : value; };
     const walk = (value: unknown, key = ''): unknown => {
       if (typeof value === 'string' && ['directory', 'directories', 'cwd', 'rootDirectory', 'repository'].includes(key)) return convert(value);
       if (Array.isArray(value)) return value.map((item) => walk(item, key));

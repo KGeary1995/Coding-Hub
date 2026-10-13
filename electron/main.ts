@@ -18,7 +18,6 @@ import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
-import { realpathSync } from 'node:fs';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
 import { autoUpdater } from 'electron-updater';
@@ -30,7 +29,7 @@ import { IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
-import { PtyManager } from './services/cli/pty-manager';
+import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
@@ -40,7 +39,7 @@ import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { TelemetryService } from './services/hub/telemetry';
 
-const storageBase = process.env.CODING_HUB_STORAGE_DIR ?? path.join(homedir(), '.coding-hub');
+const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
 const storageRoot = resolveStorageRoot(storageBase, profileRoot);
 let hostHealth: HostHealth | null = null;
@@ -84,10 +83,17 @@ const manager = new PtyManager((owner, event) => {
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
-}, onStarted: (run, config) => {
+}, onStarted: (run, config, owner) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
-  try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); } catch { reportStorageError('Usage recording is unavailable for this run.'); }
+  try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
+  catch {
+    // Without a usage watcher a session token limit would silently go unenforced.
+    if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null) {
+      reportStorageError('Usage recording is unavailable, so the session token limit cannot be enforced. The session was stopped.');
+      setImmediate(() => void manager.stop(owner, { sessionId: run.sessionId, runId: run.runId }).catch(() => hostHealth?.record('token-limit-stop-failed')));
+    } else reportStorageError('Usage recording is unavailable for this run.');
+  }
 } });
 
 function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
@@ -155,6 +161,7 @@ function createWindow() {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
+  // file:// pages never receive response headers, so production also ships this policy as a <meta> tag (vite.config.ts).
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const scripts = production ? "'self'" : "'self' 'unsafe-inline'";
@@ -183,8 +190,11 @@ function createWindow() {
     });
   });
   current.webContents.on('render-process-gone', () => repositoryFiles.closeOwner(owner));
-  current.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
-    if (mainFrame && !inPlace) { void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner); }
+  // did-start-navigation fires before will-navigate can cancel, so clean up only once the old page is really replaced.
+  let firstDocument = true;
+  current.webContents.on('did-navigate', () => {
+    if (firstDocument) { firstDocument = false; return; }
+    void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner);
   });
   let closing = false;
   current.on('close', (event) => {
@@ -192,7 +202,7 @@ function createWindow() {
     event.preventDefault();
     if (delivery?.running || workflows?.running) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before closing the app.' }); return; }
     closing = true;
-    void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).finally(() => { repositoryFiles.closeOwner(owner); current.destroy(); });
+    void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => { repositoryFiles.closeOwner(owner); current.destroy(); });
   });
   window.on('closed', () => { window = null; });
 }
@@ -247,7 +257,8 @@ else app.whenReady().then(() => {
       if (action === 'flow-preview-size' || action === 'flow-design-diff') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
       if (action === 'flow-design-task') {
         const request = z.object({ action: z.literal('flow-design-task'), snapshotId: z.uuid(), annotationId: z.uuid(), directory: z.string().max(4096), scope: z.array(z.string().max(300)).min(1).max(30) }).strict().parse(payload);
-        const comments = await livePreview!.execute({ action: 'annotation-list', snapshotId: request.snapshotId }) as import('../shared/workbench').Annotation[];
+        if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.');
+        const comments = await livePreview.execute({ action: 'annotation-list', snapshotId: request.snapshotId }) as import('../shared/workbench').Annotation[];
         const comment = comments.find((item) => item.id === request.annotationId); if (!comment) throw new HubError('DESIGN_TASK', 'Select an available annotation.');
         return tasks.execute({ action: 'task-save', title: comment.text.slice(0, 150), directory: request.directory, sessionId: null, scope: request.scope, status: 'queued', notes: `Design ${request.snapshotId} at (${comment.x}%, ${comment.y}%): ${comment.text}`, verificationId: null, designRef: { snapshotId: request.snapshotId, annotationId: comment.id } });
       }
@@ -289,10 +300,10 @@ else app.whenReady().then(() => {
     const workspace = storage?.load();
     return Boolean(workspace?.sessions.some((session) => {
       const binding = session.binding.mode === 'independent' ? session.binding.cwd : workspace.rootDirectory;
-      try { return Boolean(binding && realpathSync(binding) === realpathSync(directory)); } catch { return false; }
+      return Boolean(binding && isWithinDirectory(directory, binding));
     }));
   });
-  handle(IPC_CHANNELS.projectTools, (_owner, payload) => worktrees.execute(payload));
+  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees.execute(payload); });
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR)),
@@ -371,7 +382,7 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (delivery?.running || workflows?.running) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before quitting.' }); return; }
   quitting = true;
-  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).finally(() => {
+  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
     try { modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

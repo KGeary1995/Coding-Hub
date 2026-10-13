@@ -1,8 +1,17 @@
 import { z } from 'zod';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
-const model = z.string().max(160).refine((value) => value === '' || /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(value), 'Use a model identifier, or leave blank for the CLI default.');
-const tokens = z.number().int().min(0).max(1_000_000).nullable();
+// Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
+export const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/[\]-]*$/;
+export const MAX_MODEL_LENGTH = 160;
+export const MAX_TOKEN_SETTING = 1_000_000;
+/** Returns the model text to store, or null when it would make the saved workspace invalid. */
+export function modelValue(value: string): string | null {
+  const model = value.trim();
+  return model === '' || (model.length <= MAX_MODEL_LENGTH && MODEL_PATTERN.test(model)) ? model : null;
+}
+const model = z.string().max(MAX_MODEL_LENGTH).refine((value) => value === '' || MODEL_PATTERN.test(value), 'Use a model identifier, or leave blank for the CLI default.');
+const tokens = z.number().int().min(0).max(MAX_TOKEN_SETTING).nullable();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
   z.object({ engine: z.literal('claude'), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
   z.object({ engine: z.literal('codex'), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),

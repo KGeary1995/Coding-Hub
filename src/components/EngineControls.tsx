@@ -2,13 +2,14 @@ import { useEffect } from 'react';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
 import type { CLIEngineConfig } from '../../shared/types';
 import { CodexModelPicker } from './CodexModelPicker';
+import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue } from '../../shared/schemas';
 
 const claudeModels = ['claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-opus-latest'];
 
 function tokenValue(value: string): number | null {
   if (value === '') return null;
   const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+  return Number.isFinite(number) && number >= 0 ? Math.min(Math.floor(number), MAX_TOKEN_SETTING) : null;
 }
 
 export function EngineControls({ id, config, directory = null, onChange }: { id: string; config: CLIEngineConfig; directory?: string | null; onChange: (config: CLIEngineConfig) => void }) {
@@ -17,7 +18,7 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
   return (
     <div className="engine-controls">
       {config.engine === 'claude' && <label className="model-control">Model
-        <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} value={config.model} onChange={(event) => onChange({ ...config, model: event.target.value })} spellCheck={false} />
+        <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />
         <datalist id={`models-${id}`}>{claudeModels.map((model) => <option key={model} value={model} />)}</datalist>
       </label>}
       {config.engine === 'claude' ? <>
@@ -29,9 +30,9 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
           <small>Create and connect named accounts in Accounts & connections. Stop this session before changing its account.</small>
           {error && <small role="alert">{error}</small>}
         </label>
-        <label>thinking.budget_tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
-        <label>Max output tokens<input type="number" min="0" step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: tokenValue(event.target.value) } })} /></label>
-        <label>Session token limit<input type="number" min="0" step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: tokenValue(event.target.value) } })} /></label>
+        <label>thinking.budget_tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
+        <label>Max output tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: tokenValue(event.target.value) } })} /></label>
+        <label>Session token limit<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: tokenValue(event.target.value) } })} /></label>
       </> : <CodexModelPicker id={id} config={config} directory={directory} onChange={onChange} />}
       <p className="control-note">Blank values inherit local CLI settings. {config.engine === 'claude' ? 'Thinking budgets require an explicit manual-thinking model. Session limits stop the CLI after reported usage reaches the threshold; a response can exceed it. Usage must be available for enforcement.' : 'Reasoning overrides use model_reasoning_effort. The selected model determines which effort levels it accepts.'}</p>
     </div>

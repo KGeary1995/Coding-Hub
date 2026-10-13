@@ -22,6 +22,12 @@ export function hostEnvironment(): Record<string, string> {
   return env;
 }
 
+/**
+ * ELECTRON_RUN_AS_NODE is read once at startup. Remove it before the CLI runs so it does not leak into
+ * every command the agent spawns (an Electron app started from an agent would otherwise run as Node).
+ */
+export const CLEAR_RUN_AS_NODE = '--import=data:text/javascript,delete%20process.env.ELECTRON_RUN_AS_NODE';
+
 /** Resolve Windows npm shims to JavaScript; never interpolate argv into cmd.exe. */
 export async function npmEntryForShim(shim: string, engine: CLIEngine, architecture: string = process.arch): Promise<Executable> {
   const packageName = engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex';
@@ -48,10 +54,11 @@ export async function npmEntryForShim(shim: string, engine: CLIEngine, architect
       try { if ((await stat(binary)).isFile()) return { file: binary, prefixArgs: [], extraEnv: { CODEX_MANAGED_BY_NPM: '1', CODEX_MANAGED_PACKAGE_ROOT: packageRoot }, displayPath: binary }; } catch { /* Keep the JS fallback for older/fixture packages. */ }
     }
   }
-  return { file: process.execPath, prefixArgs: [entry], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim };
+  return { file: process.execPath, prefixArgs: [CLEAR_RUN_AS_NODE, entry], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim };
 }
 
 export async function findExecutable(engine: CLIEngine, env = hostEnvironment()): Promise<Executable> {
+  let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat', ''] : [''];
   for (const directory of (env[pathKey] ?? '').split(path.delimiter).filter(Boolean)) {
@@ -61,10 +68,12 @@ export async function findExecutable(engine: CLIEngine, env = hostEnvironment())
         await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
         if (!(await stat(candidate)).isFile()) continue;
       } catch { continue; }
-      if (/\.(cmd|bat)$/i.test(candidate)) return npmEntryForShim(candidate, engine);
+      // A yarn/pnpm shim earlier on PATH must not hide a working executable later on PATH.
+      if (/\.(cmd|bat)$/i.test(candidate)) { try { return await npmEntryForShim(candidate, engine); } catch (error) { shimError ??= error; continue; } }
       return { file: candidate, prefixArgs: [], extraEnv: {}, displayPath: candidate };
     }
   }
+  if (shimError) throw shimError;
   throw new HubError('CLI_NOT_FOUND', `${engine === 'claude' ? 'Claude Code' : 'Codex'} was not found on PATH. Install the official CLI and restart Coding Hub from a terminal where it runs.`);
 }
 
@@ -99,8 +108,10 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
   try {
     const executable = await findExecutable(engine, env);
     info.executable = executable.displayPath;
-    const [version, help] = await Promise.all([probe(executable, '--version', env), probe(executable, '--help', env)]);
-    info.version = version.trim().split('\n').at(-1)?.slice(0, 120) ?? null;
+    const [version, help] = await Promise.all([probeCLI(executable, ['--version'], env), probe(executable, '--help', env)]);
+    if (version.exitCode !== 0) throw new HubError('CLI_PROBE_FAILED', 'CLI version/help check failed or timed out. Run the CLI in a terminal to resolve installation issues.');
+    // Runtime warnings go to stderr; prefer the first stdout line so launch checks parse the real version.
+    info.version = (version.stdout.trim() || version.stderr.trim()).split(/\r?\n/)[0]?.trim().slice(0, 120) || null;
     info.supportsResume = engine === 'claude' ? advertisesFlag(help, '--resume') : /^\s*resume\b/m.test(help);
     info.supportsModel = advertisesFlag(help, '--model');
     info.supportsConfig = advertisesFlag(help, '--config');

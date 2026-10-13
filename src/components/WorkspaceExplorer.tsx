@@ -5,7 +5,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 import { FileTree } from './FileTree';
 export function WorkspaceExplorer({ onClose }: { onClose: () => void }) {
   const root = useWorkspaceStore((s) => s.rootDirectory); const [repo, setRepo] = useState<RepositoryContext | null>(null); const [revision, setRevision] = useState(0); const [selected, setSelected] = useState<string | null>(null); const [text, setText] = useState('Select a file to preview it.'); const [error, setError] = useState('');
-  useEffect(() => { let cancelled = false; let opened: RepositoryContext | null = null; const host = window.codingHub; setRepo(null); setError(''); if (!root || !host) return;
+  useEffect(() => { let cancelled = false; let opened: RepositoryContext | null = null; const host = window.codingHub; setRepo(null); setError(''); setSelected(null); setText('Select a file to preview it.'); if (!root || !host) return;
     host.openRepository({ directory: root }).then((result) => { if (!result.ok) { if (!cancelled) setError(result.error.message); return; } opened = result.value; if (cancelled) void host.closeRepository({ repositoryId: opened.id }); else setRepo(opened); }).catch(() => setError('Explorer unavailable.'));
     return () => { cancelled = true; if (opened) void host.closeRepository({ repositoryId: opened.id }); };
   }, [root]);

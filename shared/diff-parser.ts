@@ -28,7 +28,8 @@ export function parseDiff(patch: string): { rows: DiffRow[]; additions: number; 
       additions++; rows.push({ kind: 'addition', oldLine: null, newLine: newLine++, text: text.slice(1) });
     } else if (text.startsWith('-')) {
       deletions++; rows.push({ kind: 'deletion', oldLine: oldLine++, newLine: null, text: text.slice(1) });
-    } else if (text.startsWith(' ')) {
+    } else if (text.startsWith(' ') || text === '') {
+      // diff.suppressBlankEmpty=true writes blank context lines without the leading space.
       rows.push({ kind: 'context', oldLine: oldLine++, newLine: newLine++, text: text.slice(1) });
     } else rows.push({ kind: 'notice', oldLine: null, newLine: null, text });
   }
