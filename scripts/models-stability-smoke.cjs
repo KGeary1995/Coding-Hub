@@ -29,6 +29,16 @@ const {_electron}=require('playwright-core');
   await page.locator('.navigation').getByRole('button',{name:'Settings',exact:true}).click();await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);
   await page.getByRole('button',{name:'Workspace',exact:true}).click();const first=page.locator('.session-tile').first();await first.getByRole('button',{name:'Start session',exact:true}).click();await page.waitForFunction(()=>window.events.some(event=>event.type==='started'&&event.engine==='claude'));
   claude=await page.evaluate(()=>window.events.find(event=>event.type==='started'&&event.engine==='claude'));
+  // Exercise physical Enter through Xterm, the serialized renderer input queue,
+  // IPC and the native PTY; bypassing input with writeSession would miss this path.
+  await page.waitForFunction(runId=>window.events.some(event=>event.runId===runId&&event.data?.includes('READY')),claude.runId);
+  for(const prompt of ['Review this project','Explain the current changes','Suggest the next task']){
+   await first.locator('.xterm-helper-textarea').focus();await page.keyboard.type(prompt);await page.keyboard.press('Enter');
+   await page.waitForFunction(({runId,prompt})=>window.events.filter(event=>event.runId===runId&&event.type==='data').map(event=>event.data).join('').includes('ECHO:'+prompt),{runId:claude.runId,prompt});
+   assert.equal(app.process().exitCode,null,'Submitting a prompt must keep the native host alive');
+   assert.equal(await page.evaluate(runId=>window.events.some(event=>event.runId===runId&&event.type==='exit'),claude.runId),false,'Submitting a prompt must keep the Claude session running');
+  }
+  assert.doesNotThrow(()=>process.kill(claude.pid,0));
   await page.getByRole('link',{name:'AI Coding Hub home',exact:true}).click();assert.equal(await first.getByRole('button',{name:'Stop',exact:true}).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));
   const child=app.process();await app.evaluate(async({BrowserWindow})=>{
    const window=BrowserWindow.getAllWindows().find(window=>window.getTitle()==='AI Coding Hub');
@@ -39,6 +49,6 @@ const {_electron}=require('playwright-core');
   // through Electron instead of reusing that permanently cancelled Page scope.
   const result=await app.evaluate(async({BrowserWindow})=>BrowserWindow.getAllWindows().find(window=>window.getTitle()==='AI Coding Hub').webContents.executeJavaScript('window.codingHub.workbench({action:\"host-health\"})'));assert.equal(result.ok,true);const health=result.value;assert.ok(health.events.some(event=>event.event==='renderer-process-gone'&&event.reason==='crashed'));assert.ok(!JSON.stringify(health).includes('MODEL_OVERRIDE'));
   await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'host-health'})).previousShutdown,'clean');assert.equal((await native(page,'loadWorkspace')).workspace.sessions[1].config.model,'fixture-hidden-model');
-  assert.deepEqual(errors,[]);console.log('PASS: full paginated/hidden CLI model catalog, exact selected model and raw effort delivery, software terminal default, private lifecycle diagnostics, renderer crash recovery with Claude process cleanup, saved model persistence and clean restart. Fixture CLIs; the reported Windows host crash cause is not reproduced.');
+  assert.deepEqual(errors,[]);console.log('PASS: full paginated/hidden CLI model catalog, exact selected model and raw effort delivery, repeated Claude prompt submission using physical Enter through Xterm/IPC/native PTY, software terminal default, private lifecycle diagnostics, renderer crash recovery with Claude process cleanup, saved model persistence and clean restart. Fixture CLIs; the reported Windows host crash cause is not reproduced.');
  }finally{if(app)await app.close().catch(()=>{});await fs.rm(root,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
