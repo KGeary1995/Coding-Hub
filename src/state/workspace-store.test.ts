@@ -116,3 +116,14 @@ it('clears old resume metadata along with Codex overrides for a fresh-default re
  useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config).toEqual({engine:'codex',model:'',reasoningEffort:null});
  useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'chosen-model',reasoningEffort:'minimal'});useWorkspaceStore.getState().markStarting(session.id);useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config.model).toBe('chosen-model');
 });
+
+describe('directory changes after a run', () => {
+  it('forgets the previous run directory when the binding or project root changes', () => {
+    const state = useWorkspaceStore.getState(); const session = state.sessions[0];
+    state.markStarting(session.id);
+    state.applyEvent({ type: 'started', sessionId: session.id, runId: 'run', engine: 'claude', pid: 1, cwd: '/old-root' });
+    state.applyEvent({ type: 'exit', sessionId: session.id, runId: 'run', exitCode: 0 });
+    useWorkspaceStore.getState().updateBinding(session.id, { mode: 'independent', cwd: '/new/repo' });
+    expect(useWorkspaceStore.getState().sessions[0].runningCwd).toBeNull();
+  });
+});

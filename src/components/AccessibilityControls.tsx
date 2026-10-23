@@ -9,9 +9,15 @@ export function useAccessibility() {
   useEffect(() => {
     apply(load());
     const handler = (event: KeyboardEvent) => {
-      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-4]$/.test(event.key)) {
-        const state = useWorkspaceStore.getState(); const session = state.sessions[Number(event.key) - 1];
-        if (session) { event.preventDefault(); event.stopPropagation(); state.setView('workspace'); requestAnimationFrame(() => focusTerminal(session.id)); }
+      // Top-row digits only: Alt+numpad digits are Windows character entry (Alt+0169).
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^Digit[1-4]$/.test(event.code)) {
+        const state = useWorkspaceStore.getState(); const session = state.sessions[Number(event.code.slice(5)) - 1];
+        if (session) {
+          event.preventDefault(); event.stopPropagation(); state.setView('workspace');
+          // Only the isolated tile's terminal is mounted; isolate the requested one instead.
+          if (state.focusedSessionId && state.focusedSessionId !== session.id) state.toggleFocus(session.id);
+          requestAnimationFrame(() => focusTerminal(session.id));
+        }
       }
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.setState({ workflowTab: 'search' }); useWorkspaceStore.getState().setView('workflow'); }
       if (event.key === 'F1') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.getState().setView('help'); }

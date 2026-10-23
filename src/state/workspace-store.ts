@@ -112,7 +112,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (event.type === 'error') return { ...session, error: event.message };
     return session;
   }) })),
-  setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null } : session) })),
+  setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null } : session) })),
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();
@@ -146,7 +146,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   })),
   resetCodexConfig: (id) => set((state) => ({ sessions: state.sessions.map((session) => session.id === id && session.config.engine === 'codex' && session.status !== 'running' && session.status !== 'starting' ? { ...session, config: { engine: 'codex' as const, model: '', reasoningEffort: null } } : session) })),
   updateBinding: (id, binding) => set((state) => ({
-    sessions: state.sessions.map((session) => session.id === id && session.status !== 'running' && session.status !== 'starting' ? { ...session, binding, error: null } : session),
+    sessions: state.sessions.map((session) => session.id === id && session.status !== 'running' && session.status !== 'starting' ? { ...session, binding, error: null, runningCwd: null } : session),
   })),
   setTiles: (tiles) => set({ tiles }),
   arrange: (layoutMode) => set((state) => ({ layoutMode, tiles: arrangeTiles(state.sessions, layoutMode) })),

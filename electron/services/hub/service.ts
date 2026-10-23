@@ -11,8 +11,9 @@ import { RulesService } from './rules';
 const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
 export const preferencesSchema = z.object({ folderId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/), driveDirectory: z.string().max(4096), terminalFontSize: z.number().int().min(10).max(22), terminalWebGL: z.boolean().optional(), prices: z.array(z.object({ model: z.string().min(1).max(120), input: z.number().finite().min(0).max(10000), output: z.number().finite().min(0).max(10000), cacheRead: z.number().finite().min(0).max(10000), cacheWrite: z.number().finite().min(0).max(10000) }).strict()).max(100) }).strict();
 export const hubRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('rules-read'), directories: z.array(dir).max(100) }).strict(),
-  z.object({ action: z.literal('rules-save'), content: z.string().max(60000), revision: z.string().regex(/^[a-f0-9]{64}$/), targets: z.array(z.object({ directory: dir, claudeHash: z.string().regex(/^[a-f0-9]{64}$/), codexHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(100) }).strict(),
+  // The registry holds up to 200 folders (100 projects plus prepared coaching folders) and the panel adds workspace folders.
+  z.object({ action: z.literal('rules-read'), directories: z.array(dir).max(250) }).strict(),
+  z.object({ action: z.literal('rules-save'), content: z.string().max(60000), revision: z.string().regex(/^[a-f0-9]{64}$/), targets: z.array(z.object({ directory: dir, claudeHash: z.string().regex(/^[a-f0-9]{64}$/), codexHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(250) }).strict(),
   z.object({ action: z.literal('inventory'), directory: dir.nullable() }).strict(),
   z.object({ action: z.literal('toggle-server'), id, enabled: z.boolean() }).strict(),
   z.object({ action: z.literal('remove-server'), id }).strict(),

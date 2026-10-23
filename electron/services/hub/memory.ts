@@ -23,7 +23,15 @@ export class MemoryService {
   import(input: unknown): boolean {
     const note = noteSchema.parse(input); const dir = this.directory(note.project); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!fs.existsSync(path.join(dir, note.id + '.json')) && fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && /^[0-9a-f-]{36}\.json$/.test(entry.name)).length >= 5000) throw new HubError('MEMORY_LIMIT', 'This project already contains 5,000 handoffs. Archive older notes before adding more.');
-    try { fs.writeFileSync(path.join(dir, note.id + '.json'), JSON.stringify(note, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); return true; }
+    // Write a temporary file and rename it into place so a crash never leaves a truncated note behind
+    // (a partial file would block Drive sync for that ID forever). Notes are immutable, so never replace one.
+    const target = path.join(dir, note.id + '.json'); const temporary = path.join(dir, `.${randomUUID()}.tmp`);
+    try {
+      if (fs.existsSync(target)) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
+      try { fs.writeFileSync(temporary, JSON.stringify(note, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); fs.renameSync(temporary, target); }
+      finally { try { fs.unlinkSync(temporary); } catch { /* Renamed. */ } }
+      return true;
+    }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') { const original = this.list(note.project).find((s) => s.id === note.id); if (original && JSON.stringify(original) === JSON.stringify(note)) return false; throw new HubError('MEMORY_CONFLICT', 'A remote handoff conflicts with a local ID. Both files were preserved; inspect the remote note before importing.'); } throw error; }
   }
   write(project: string, title: string, content: string, author: MemoryNote['author'], supersedes?: string): MemoryNote { if (supersedes && !this.list(project).some((note) => note.id === supersedes)) throw new HubError('MEMORY_REVISION', 'The original handoff is unavailable. Refresh before saving a revision.'); const note = noteSchema.parse({ id: randomUUID(), project, title, content, author, createdAt: new Date().toISOString(), ...(supersedes ? { supersedes } : {}) }); this.import(note); return note; }
@@ -41,10 +49,12 @@ export class MemoryService {
     for (const name of ['AGENTS.md', 'CLAUDE.md']) { const file = path.join(directory, name); if (fs.existsSync(file) && (!fs.lstatSync(file).isFile() || fs.statSync(file).size > 1024 * 1024)) throw new HubError('MEMORY_INSTRUCTIONS', 'Instruction files must be regular files under 1 MiB.'); }
     const all = [...targets, ...['AGENTS.md', 'CLAUDE.md'].map((name) => path.join(directory, name))];
     const originals = new Map(all.map((file) => [file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null]));
+    // readConfig strips a UTF-8 BOM, so compare configuration files without it.
+    const unmarked = (file: string) => (originals.get(file) ?? '').replace(/^\uFEFF/, '');
     const written = new Map<string, string>();
     const replace = (file: string, text: string) => { const temp = file + '.coding-hub-' + randomUUID(); try { fs.writeFileSync(temp, text, { mode: 0o600, flag: 'wx' }); fs.renameSync(temp, file); } finally { try { fs.unlinkSync(temp); } catch { /* Already renamed. */ } } };
     try {
-      for (const file of targets) { const inspected = readConfig(file); if (inspected.text !== (originals.get(file) ?? '')) throw new HubError('CONFIG_CHANGED', 'Configuration changed during installation.'); updateConfig(file, inspected.hash, (data) => { const key = file.endsWith('.toml') ? 'mcp_servers' : 'mcpServers'; data[key] ??= {}; data[key]['coding-hub-memory'] = { command: executable, args, env: { ELECTRON_RUN_AS_NODE: '1' } }; }); written.set(file, fs.readFileSync(file, 'utf8')); }
+      for (const file of targets) { const inspected = readConfig(file); if (inspected.text !== unmarked(file)) throw new HubError('CONFIG_CHANGED', 'Configuration changed during installation.'); updateConfig(file, inspected.hash, (data) => { const key = file.endsWith('.toml') ? 'mcp_servers' : 'mcpServers'; data[key] ??= {}; data[key]['coding-hub-memory'] = { command: executable, args, env: { ELECTRON_RUN_AS_NODE: '1' } }; }); written.set(file, fs.readFileSync(file, 'utf8')); }
       for (const name of ['AGENTS.md', 'CLAUDE.md']) { const file = path.join(directory, name); const existing = originals.get(file) ?? ''; if (!existing.includes('<!-- coding-hub-memory:start -->')) { if ((fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '') !== existing) throw new HubError('CONFIG_CHANGED', 'Instructions changed during installation.'); if (existing) fs.writeFileSync(file + '.coding-hub-backup-' + randomUUID(), existing, { flag: 'wx', mode: 0o600 }); replace(file, existing + instruction); written.set(file, existing + instruction); } }
     } catch {
       let incomplete = false;

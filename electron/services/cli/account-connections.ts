@@ -11,9 +11,12 @@ export const INSTALL_GUIDES: Record<AccountProvider, string> = {
 };
 export const LOGIN_ARGUMENTS: Record<AccountProvider, string[]> = { claude: ['auth', 'login'], codex: ['login'], github: ['auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'https'] };
 export function githubAuthentication(stdout: string, stderr: string, exitCode: number | null): AccountConnection['state'] {
-  const text = stdout + '\n' + stderr;
+  // gh lists every stored account; judge only the active one so a stale secondary token does not mask a working login.
+  const all = stdout + '\n' + stderr; const blocks = all.split(/\n(?=\s*[✓X!]\s)/); const active = blocks.find((block) => /active account:\s*true/i.test(block));
+  const text = active ?? all;
   if (/not logged (?:in|into)|token[^\n]*invalid|failed to log in|authentication failed/i.test(text)) return 'not-authenticated';
-  if (exitCode === 0 && /logged in to github\.com/i.test(text)) return 'authenticated';
+  // gh exits 1 when any stored account fails, even if the active one works.
+  if ((exitCode === 0 || active) && /logged in to github\.com/i.test(text)) return 'authenticated';
   return 'unknown';
 }
 export async function findGitHub(): Promise<Executable> {

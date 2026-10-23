@@ -39,14 +39,16 @@ export function budgetAlerts(budget: SessionBudget | undefined, usage: UsageReco
   return messages;
 }
 export function recoveryAdvice(message: string, exitCode: number | null, hasDirectory: boolean) {
-  if (!hasDirectory || /directory|cwd|enoent.*path/i.test(message)) return { title: 'Choose an existing project folder', view: 'projects' as const, detail: 'Select a workspace root or independent directory, then retry.' };
+  // Match directory failures specifically; the host's generic exit diagnostic mentions "this project directory".
+  if (!hasDirectory || /working directory|absolute local|no such file or directory|not a directory|\bcwd\b|enoent.*path/i.test(message)) return { title: 'Choose an existing project folder', view: 'projects' as const, detail: 'Select a workspace root or independent directory, then retry.' };
   if (/rules|CLAUDE\.md|AGENTS\.md/i.test(message)) return { title: 'Apply current shared rules', view: 'rules' as const, detail: 'Apply the saved rules to this session’s directory before retrying.' };
   if (/auth|login|sign.in|unauthorized|401|subscription|billing|quota|429/i.test(message)) return { title: 'Review the CLI account and provider limits', view: 'accounts' as const, detail: 'Use the correct account profile. Login checks do not verify model access or billing.' };
   if (/model|reasoning|config|toml|json|flag|argument/i.test(message)) return { title: 'Review model and CLI configuration', view: 'accounts' as const, detail: 'Run diagnostics and test local CLI defaults. Engine settings retain their raw values.' };
   return { title: exitCode ? `Investigate CLI exit ${exitCode}` : 'Check the local CLI', view: 'accounts' as const, detail: 'Review the recorded diagnostic and run connection checks. The exit code alone does not identify the cause.' };
 }
 export function redactDiagnostic(value: unknown, home: string, project: string | null): unknown {
- if (typeof value === 'string') { let text = value; for (const [source, replacement] of [[project, '<project>'], [home, '~']] as const) { if (source) { const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); text = text.replace(new RegExp(escaped, 'gi'), replacement); } } return text; }
+ // Longest path first: a project that contains the home folder (C:\ or C:\Users) must not hide the username.
+ if (typeof value === 'string') { let text = value; for (const [source, replacement] of ([[project, '<project>'], [home, '~']] as const).slice().sort((a, b) => (b[0]?.length ?? 0) - (a[0]?.length ?? 0))) { if (source) { const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); text = text.replace(new RegExp(escaped, 'gi'), replacement); } } return text; }
  if (Array.isArray(value)) return value.map((item) => redactDiagnostic(item, home, project));
  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDiagnostic(item, home, project)]));
  return value;

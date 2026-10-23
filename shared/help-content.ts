@@ -129,5 +129,7 @@ export const HELP_TOPICS: HelpTopic[] = [
 
 export function searchHelp(query: string, category = 'All topics'): HelpTopic[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return HELP_TOPICS.filter((topic) => (category === 'All topics' || topic.category === category) && words.every((word) => JSON.stringify(topic).toLowerCase().includes(word)));
+  // Search visible text only; JSON keys such as "title" or related IDs would otherwise match every topic.
+  const text = (topic: HelpTopic) => [topic.title, topic.summary, topic.category, ...topic.sections.flatMap((section) => [section.title, ...section.paragraphs, ...(section.bullets ?? []), section.example ?? ''])].join('\n').toLowerCase();
+  return HELP_TOPICS.filter((topic) => (category === 'All topics' || topic.category === category) && words.every((word) => text(topic).includes(word)));
 }

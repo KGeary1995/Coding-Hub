@@ -10,7 +10,7 @@ import type { DiscoveredEngine } from './discovery';
 class FakePty {
   pid = 99999999;
   data: (value: string) => void = () => {};
-  exit: (value: { exitCode: number }) => void = () => {};
+  exit: (value: { exitCode: number; signal?: number }) => void = () => {};
   write = vi.fn();
   resize = vi.fn();
   kill = vi.fn(() => { queueMicrotask(() => this.exit({ exitCode: 0 })); });
@@ -132,5 +132,14 @@ describe('worktree in-use detection', () => {
       expect(isWithinDirectory(tree, tree)).toBe(true); expect(isWithinDirectory(tree, path.join(tree, 'packages', 'web'))).toBe(true); expect(isWithinDirectory(tree, path.join(root, 'link', 'packages'))).toBe(true);
       expect(isWithinDirectory(tree, root)).toBe(false); expect(isWithinDirectory(tree, tree + '-sibling')).toBe(false);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('signalled exits', () => {
+  it('reports a CLI killed by a signal as a failure', async () => {
+    const { manager, processes, events } = fixture(); const run = await manager.start(1, request());
+    processes[0].exit({ exitCode: 0, signal: 9 });
+    expect(events.find((event) => event.type === 'exit')).toMatchObject({ runId: run.runId, exitCode: 137, signal: 9 });
+    expect((events.find((event) => event.type === 'exit') as { diagnostic?: string }).diagnostic).toContain('code 137');
   });
 });

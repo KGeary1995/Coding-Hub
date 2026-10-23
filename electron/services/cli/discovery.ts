@@ -60,7 +60,8 @@ export async function npmEntryForShim(shim: string, engine: CLIEngine, architect
 export async function findExecutable(engine: CLIEngine, env = hostEnvironment()): Promise<Executable> {
   let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
-  const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat', ''] : [''];
+  // Windows cannot run extensionless files (npm/pnpm/yarn put POSIX sh shims there), so never pick one.
+  const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat'] : [''];
   for (const directory of (env[pathKey] ?? '').split(path.delimiter).filter(Boolean)) {
     for (const extension of extensions) {
       const candidate = path.join(directory.replace(/^"|"$/g, ''), engine + extension);

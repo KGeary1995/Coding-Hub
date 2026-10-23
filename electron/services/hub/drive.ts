@@ -56,8 +56,11 @@ export class DriveMirror {
       const remoteIds = new Set(remote.map((note) => note.id));
       // Existing IDs were compared above. Reimporting them rescanned and parsed
       // the whole directory for every note on each 30-second sync tick.
-      for (const note of remote) if (!known.has(note.id) && this.local.import(note)) downloaded++;
-      for (const note of local) if (!remoteIds.has(note.id) && mirror.import(note)) uploaded++;
+      // One unreadable or conflicting file must not stop every other note from syncing.
+      let failure: unknown = null;
+      for (const note of remote) if (!known.has(note.id)) { try { if (this.local.import(note)) downloaded++; } catch (error) { failure ??= error; } }
+      for (const note of local) if (!remoteIds.has(note.id)) { try { if (mirror.import(note)) uploaded++; } catch (error) { failure ??= error; } }
+      if (failure) throw failure;
       return { uploaded, downloaded };
     } finally { this.syncing = false; }
   }

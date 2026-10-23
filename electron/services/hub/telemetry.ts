@@ -114,7 +114,7 @@ export class TelemetryService {
         start = end + 1;
       }
       w.partial = data.subarray(start).length <= 2 * 1024 * 1024 ? data.subarray(start) : Buffer.alloc(0);
-      if (changed) { const usage = this.runUsage(w.run.runId); if (usage) { this.publish(usage); if (w.config.engine === 'claude' && w.config.tokenLimits.maxSessionTokens !== null && totalTokens(usage) >= w.config.tokenLimits.maxSessionTokens && !w.stopped) { w.stopped = true; this.stopAtLimit(w.run); } } }
+      if (changed) { const usage = this.runUsage(w.run.runId); if (usage) { this.publish(usage); if (w.config.engine === 'claude' && w.config.tokenLimits.maxSessionTokens && totalTokens(usage) >= w.config.tokenLimits.maxSessionTokens && !w.stopped) { w.stopped = true; this.stopAtLimit(w.run); } } }
     } catch { /* Telemetry failures cannot stop interactive terminal output. */ }
     finally { w.polling = false; }
   }

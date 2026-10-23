@@ -32,3 +32,14 @@ it('refuses to remove a worktree whose only contents are ignored files', async (
   await expect(service.execute({ action: 'worktree-remove', id: tree.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
   expect(readFileSync(path.join(tree.directory, '.env'), 'utf8')).toBe('SECRET=1');
 });
+it('drops a record whose worktree was removed outside the app and refuses large ignored folders as dirty', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });
+  git('init'); writeFileSync(path.join(repository, '.gitignore'), 'node_modules/\n'); git('add', '.'); git('commit', '-m', 'baseline');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  const gone = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  git('worktree', 'remove', gone.directory); await service.execute({ action: 'worktree-remove', id: gone.id }); expect(service.list()).toHaveLength(0);
+  const big = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree; const modules = path.join(big.directory, 'node_modules'); mkdirSync(modules);
+  for (let index = 0; index < 20000; index++) writeFileSync(path.join(modules, `package-file-${index}.js`), '');
+  await expect(service.execute({ action: 'worktree-remove', id: big.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
+}, 60_000);

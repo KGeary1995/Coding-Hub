@@ -92,6 +92,29 @@ describe('Git delivery regressions',()=>{
  });
  it('inspects a repository that contains an untracked nested repository',async()=>{
   const cwd=root();git(cwd,'init','-b','main');const nested=path.join(cwd,'nested');fs.mkdirSync(nested);git(nested,'init','-b','main');fs.writeFileSync(path.join(nested,'x.txt'),'x');git(nested,'add','.');git(nested,'commit','-m','Nested');
-  const state=await new Delivery(async()=>true,()=>{}).inspect(cwd);expect(state.unstaged).toEqual(['nested/']);
+  const state=await new Delivery(async()=>true,()=>{}).inspect(cwd);expect(state.unstaged).toEqual([]);
+ });
+});
+
+describe('Git delivery size and unborn branches',()=>{
+ it('inspects tracked changes larger than the command output buffer',async()=>{
+  const cwd=root();git(cwd,'init','-b','main');const file=path.join(cwd,'lock.json');fs.writeFileSync(file,'a\n'.repeat(10));git(cwd,'add','.');git(cwd,'commit','-m','Baseline');
+  fs.writeFileSync(file,Array.from({length:120000},(_,i)=>`line ${i} ${'x'.repeat(30)}`).join('\n'));
+  const state=await new Delivery(async()=>true,()=>{}).inspect(cwd);expect(state.unstaged).toEqual(['lock.json']);
+ });
+ it('unstages an edited file in a repository without commits',async()=>{
+  const cwd=root();git(cwd,'init','-b','main');const file=path.join(cwd,'new.txt');fs.writeFileSync(file,'first');git(cwd,'add','.');fs.writeFileSync(file,'second');
+  const service=new Delivery(async()=>true,()=>{});const state=await service.inspect(cwd);
+  await service.execute({action:'flow-git-unstage',directory:cwd,revision:state.revision,paths:['new.txt']});expect(git(cwd,'diff','--cached','--name-only')).toBe('');
+ });
+});
+
+describe('diagnostic helper regressions',()=>{
+ it('keeps the username out of reports when the project contains the home folder',()=>{
+  const report=redactDiagnostic('C:\\Users\\Bob\\AppData\\Roaming\\npm\\claude.cmd','C:\\Users\\Bob','C:\\Users') as string;expect(report).not.toContain('Bob');
+ });
+ it('does not send a generic CLI exit to the project picker',()=>{
+  expect(recoveryAdvice('CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project directory.',1,true).view).toBe('accounts');
+  expect(recoveryAdvice('The working directory does not exist or is not accessible.',null,true).view).toBe('projects');
  });
 });

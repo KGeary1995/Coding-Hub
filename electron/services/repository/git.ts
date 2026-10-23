@@ -71,7 +71,9 @@ export class RepositoryGit {
     const parsed = gitDiffSchema.safeParse(payload);
     if (!parsed.success) throw new HubError('INVALID_DIFF', 'Invalid Git diff request.');
     const { repositoryId, path: pathname, area } = parsed.data;
-    validateRelativePath(pathname);
+    // Git lists an untracked nested repository or worktree as `dir/`.
+    const nested = area === 'untracked' && pathname.endsWith('/');
+    validateRelativePath(nested ? pathname.slice(0, -1) : pathname);
     const status = await this.status(owner, { repositoryId });
     const change = status.changes.find((item) => item.path === pathname);
     if (!change || (area === 'untracked' ? !change.untracked : change.untracked || (area === 'staged' ? change.indexStatus : change.worktreeStatus) === ' ')) {
@@ -79,6 +81,7 @@ export class RepositoryGit {
     }
     if (change.originalPath) validateRelativePath(change.originalPath);
     const result: GitFileDiff = { path: pathname, area, patch: '', binary: false, truncated: false, conflicted: change.conflicted };
+    if (nested) { result.patch = `Untracked nested repository or worktree: ${pathname}\nReview it with your local Git tools.\n`; return result; }
     if (area === 'untracked') {
       let preview;
       try { preview = await readTextFile(status.root, pathname); }

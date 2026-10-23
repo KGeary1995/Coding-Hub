@@ -9,3 +9,9 @@ describe('local help navigation and search', () => {
     expect(searchHelp('  MODEL CONTEXT PROTOCOL  ').map((t) => t.id)).toContain('mcp'); expect(searchHelp('reasoning tokens', 'Agents & models').map((t) => t.id)).toContain('tokens'); expect(searchHelp('reasoning tokens', 'Rules & memory')).toHaveLength(0); expect(searchHelp('nonexistentsearchterm')).toHaveLength(0); expect(searchHelp('')).toHaveLength(HELP_TOPICS.length);
   });
 });
+
+describe('help search regressions', () => {
+  it('does not match field names or related topic IDs', () => {
+    for (const key of ['paragraphs', 'related', 'summary', 'category']) expect(searchHelp(key).length).toBeLessThan(HELP_TOPICS.length);
+  });
+});

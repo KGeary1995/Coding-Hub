@@ -86,8 +86,9 @@ export class RulesService {
       const after = replaceRules(before.text ?? '', content); if (Buffer.byteLength(after) > 1024 * 1024) throw new HubError('RULES_FILE', 'Applying rules would exceed the 1 MiB instruction-file limit.');
       if (before.text !== after && !(before.text === null && after === '')) writes.push({ before, after });
     }
-    // Drop registrations whose folders were deleted so the registry cannot fill up permanently.
-    const directories = [...new Set([...state.directories.filter((directory) => fs.existsSync(directory)), ...selected.map((t) => t.directory)])];
+    // Drop deleted prepared coaching folders so they cannot fill the registry. Never prune user projects:
+    // a network share or removable drive can be briefly unreachable.
+    const directories = [...new Set([...state.directories.filter((directory) => !this.transient(directory) || fs.existsSync(directory)), ...selected.map((t) => t.directory)])];
     if (directories.filter((directory) => !this.transient(directory)).length > 100 || directories.length > 200) throw new HubError('RULES_LIMIT', 'At most 100 projects can be registered for shared rules.');
     const afterState = JSON.stringify({ version: 1, content, directories }, null, 2) + '\n';
     writes.push({ before: source, after: afterState });
