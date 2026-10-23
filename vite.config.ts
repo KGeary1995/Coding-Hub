@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 // The packaged app loads dist/index.html over file://, where response-header CSP from
 // electron/main.ts never applies. Keep this in sync with the production policy there.
-const PRODUCTION_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-src 'self'; base-uri 'self'";
+const PRODUCTION_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'self'; base-uri 'self'";
 
 function productionCsp(): Plugin {
   return {

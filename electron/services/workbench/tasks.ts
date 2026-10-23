@@ -7,7 +7,7 @@ import type { Task, TaskAudit } from '../../../shared/workbench';
 import type { Verification } from './verification';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
-const scope = z.string().trim().min(1).max(300).refine((s) => !s.includes('\\') && !s.startsWith('/') && !s.split('/').includes('..') && !s.includes('\0') && !/^[a-z]:/i.test(s) && !/[?\[\]]/.test(s) && (!s.includes('*') || s === '*' || s === '**' || s.endsWith('/**') && !s.slice(0, -3).includes('*')), 'Use relative paths such as src/** or README.md.');
+const scope = z.string().trim().min(1).max(300).refine((s) => !s.includes('\\') && !s.startsWith('/') && !s.split('/').some((part) => part === '..' || part === '.' || part === '') && !s.includes('\0') && !/^[a-z]:/i.test(s) && !/[?\[\]]/.test(s) && (!s.includes('*') || s === '*' || s === '**' || s.endsWith('/**') && !s.slice(0, -3).includes('*')), 'Use relative paths such as src/** or README.md.');
 const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('task-list') }).strict(), z.object({ action: z.literal('task-audit') }).strict(), task.omit({ createdAt: true, id: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
 export function matchesScope(file: string, patterns: string[]) { return patterns.some((pattern) => pattern === '**' || pattern === '*' || pattern.endsWith('/**') ? pattern === '**' || pattern === '*' || file.startsWith(pattern.slice(0, -2)) : file === pattern || file.startsWith(pattern.replace(/\/$/, '') + '/')); }
@@ -34,7 +34,13 @@ export class Tasks {
       const command = promisify(execFile); const { stdout: repository } = await command('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 8000, maxBuffer: 65536 });
       const { stdout } = await command('git', ['--no-optional-locks', '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { timeout: 8000, maxBuffer: 1048576 });
       const entries = stdout.split('\0'); const prefix = path.relative(repository.trim(), cwd).replace(/\\/g, '/');
-      for (let i = 0; i < entries.length; i++) { if (!entries[i]) continue; const name = entries[i].slice(3); if (/[RC]/.test(entries[i].slice(0, 2))) i++; const relative = prefix && name.startsWith(prefix + '/') ? name.slice(prefix.length + 1) : name; const covered = active.filter((t) => t.directory === cwd && matchesScope(relative, t.scope)); report.changes.push({ directory: cwd, path: relative, tasks: covered.map((t) => t.title), outsideScope: !covered.length }); if (report.changes.length >= 500) break; }
+      for (let i = 0; i < entries.length; i++) {
+        if (!entries[i]) continue;
+        // Renames and copies carry their source path as the next entry; a moved-away path is a change too.
+        const names = [entries[i].slice(3)]; if (/[RC]/.test(entries[i].slice(0, 2)) && entries[i + 1]) names.push(entries[++i]);
+        for (const name of names) { const relative = prefix && name.startsWith(prefix + '/') ? name.slice(prefix.length + 1) : name; const covered = active.filter((t) => t.directory === cwd && matchesScope(relative, t.scope)); report.changes.push({ directory: cwd, path: relative, tasks: covered.map((t) => t.title), outsideScope: !covered.length }); }
+        if (report.changes.length >= 500) break;
+      }
     } catch { report.warnings.push(`Git status unavailable: ${cwd}`); }
     return report;
   }

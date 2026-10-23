@@ -38,6 +38,8 @@ export class ProjectSetup {
         if (request.action === 'github-clone') {
           const gh = await (this.dependencies.findGitHub ?? findGitHub)();
           await run(gh.file, ['repo', 'clone', request.repository, target, '--', '--config', 'core.hooksPath='], parent);
+          // `git clone --config` persists the setting; restore normal hooks once the clone's own checkout is done.
+          await run('git', ['-C', target, 'config', '--unset', 'core.hooksPath'], parent);
         } else if (request.initializeGit) await run('git', ['-c', 'core.hooksPath=', 'init', '-b', 'main', '--', target], parent);
       } catch { throw new HubError('PROJECT_SETUP_FAILED', `Setup could not finish. The folder and any partial files were preserved at ${target}. Check CLI installation, login, network access, and permissions. You can browse and open this folder.`); }
       return { directory: this.canonical(target) };

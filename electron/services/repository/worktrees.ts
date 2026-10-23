@@ -12,6 +12,7 @@ function git(directory: string, args: string[]): Promise<string> {
 }
 export class WorktreeService {
   private busy = false;
+  get active() { return this.busy; }
   private file: string;
   private root: string;
   constructor(storage: string, private inUse: (directory: string) => boolean) { this.file = path.join(storage, 'worktrees.json'); this.root = path.join(storage, 'worktrees'); }
@@ -47,10 +48,16 @@ export class WorktreeService {
       const managedLocation = record && (path.dirname(record.directory) === root || (path.basename(record.directory) === record.id && path.basename(path.dirname(record.directory)) === 'worktrees'));
       if (!record || !managedLocation) throw new HubError('UNKNOWN_WORKTREE', 'This worktree is not managed by Coding Hub.');
       if (this.inUse(record.directory)) throw new HubError('WORKTREE_IN_USE', 'Unbind all session panels from this worktree before removing it.');
+      // Removed outside the app (terminal, agent, restore elsewhere): let Git forget it and drop the record.
+      if (!fs.existsSync(record.directory)) {
+        if (fs.existsSync(record.repository)) { try { await git(record.repository, ['worktree', 'prune']); } catch { /* The record is still stale. */ } }
+        this.save(records.filter((item) => item.id !== record.id)); return null;
+      }
       const directory = fs.realpathSync(record.directory);
       if (directory !== record.directory) throw new HubError('WORKTREE_PATH', 'Worktree path changed. Inspect it before removal.');
       // `git worktree remove` deletes ignored files (.env, local databases, build output), so they count as changes.
-      if (await git(directory, ['status', '--porcelain', '--untracked-files=all', '--ignored'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
+      // Default untracked mode collapses ignored folders (`!! node_modules/`) so large ones stay within the output limit.
+      if (await git(directory, ['status', '--porcelain', '--ignored'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
       await git(record.repository, ['worktree', 'remove', record.directory]);
       this.save(records.filter((item) => item.id !== record.id));
       return null;

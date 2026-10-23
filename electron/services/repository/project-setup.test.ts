@@ -16,6 +16,7 @@ it('uses fixed GitHub CLI listing/clone arguments and never accepts URLs or arbi
   const { parent, service, execute } = fixture(); const repos = [{ nameWithOwner: 'owner/project', description: 'Code', isPrivate: true, updatedAt: '2026-01-01' }]; execute.mockResolvedValueOnce(JSON.stringify(repos));
   expect(await service.execute({ action: 'github-list' })).toEqual(repos); expect(execute.mock.calls[0][1]).toEqual(['repo', 'list', '--limit', '100', '--json', 'nameWithOwner,description,isPrivate,updatedAt']);
   await service.execute({ action: 'github-clone', repository: 'owner/project', parent }); expect(execute.mock.calls[1][1]).toEqual(['repo', 'clone', 'owner/project', path.join(parent, 'project'), '--', '--config', 'core.hooksPath=']);
+  expect(execute.mock.calls[2]).toEqual(['git', ['-C', path.join(parent, 'project'), 'config', '--unset', 'core.hooksPath'], parent]);
   await expect(service.execute({ action: 'github-clone', repository: 'https://evil.invalid/repo', parent })).rejects.toMatchObject({ code: 'INVALID_PROJECT_REQUEST' });
   execute.mockRejectedValueOnce(new Error('private token')); await expect(service.execute({ action: 'github-clone', repository: 'owner/other', parent })).rejects.toMatchObject({ code: 'PROJECT_SETUP_FAILED' }); expect(existsSync(path.join(parent, 'other'))).toBe(true);
 });

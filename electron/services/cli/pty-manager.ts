@@ -174,7 +174,10 @@ export class PtyManager {
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
     const tail = stripVTControlCharacters(run.outputTail).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
-    const diagnostic = exitCode !== 0 && !run.stopping ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project directory.'}` : undefined;
+    // On POSIX a signalled exit reports code 0 plus the signal (OOM kill, crash); that is still a failure.
+    const failed = (exitCode !== 0 || Boolean(signal)) && !run.stopping;
+    if (failed && exitCode === 0 && signal) exitCode = 128 + signal;
+    const diagnostic = failed ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project directory.'}` : undefined;
     this.send(run.owner, { type: 'exit', ...(diagnostic ? { diagnostic } : {}), sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
     run.resolveExit();
   }

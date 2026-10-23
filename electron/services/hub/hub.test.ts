@@ -161,3 +161,19 @@ describe('telemetry regressions', () => {
     telemetry.close();
   });
 });
+describe('memory install regressions', () => {
+  it('installs into a project whose .mcp.json starts with a UTF-8 byte-order mark', () => {
+    const { root, project } = setup(); fs.writeFileSync(path.join(project, '.mcp.json'), '﻿{"mcpServers":{}}');
+    const memory = new MemoryService(path.join(root, 'memory')); memory.install(project, 'shared', '/app/memory-server.js', '/app/electron');
+    expect(JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers['coding-hub-memory']).toBeDefined();
+  });
+});
+describe('Drive sync regressions', () => {
+  it('keeps syncing other notes when one Drive file is truncated', () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
+    const memory = new MemoryService(path.join(root, 'memory')); const older = memory.write('shared', 'Older', 'First', 'human'); const newer = memory.write('shared', 'Newer', 'Second', 'human');
+    const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); fs.mkdirSync(remote.directory('shared'), { recursive: true }); fs.writeFileSync(path.join(remote.directory('shared'), newer.id + '.json'), '{"id":');
+    const mirror = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
+    expect(() => mirror.sync('shared')).toThrow(); expect(remote.list('shared').map((note) => note.id)).toEqual([older.id]);
+  });
+});

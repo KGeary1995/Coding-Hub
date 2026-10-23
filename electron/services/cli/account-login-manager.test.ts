@@ -82,3 +82,11 @@ it('keeps login cleanup reliable when native event delivery fails',async()=>{
  const pty=new FakePty(), failures=vi.fn();const manager=new AccountLoginManager(()=>{throw new Error('Renderer disappeared');},{inspect:async provider=>discovery(provider),spawn:()=>pty as unknown as IPty,openGuide:async()=>{},onEventError:failures,stopDependencies:{platform:'linux',signalGroup:()=>{}}});
  try{await expect(manager.execute(7,{action:'login',provider:'claude',cols:80,rows:24})).resolves.toMatchObject({provider:'claude'});expect(()=>pty.data('Private login output')).not.toThrow();await manager.stopOwner(7);expect(manager.active).toBe(false);expect(failures).toHaveBeenCalled();}finally{await manager.close();}
 });
+
+describe('GitHub multi-account status', () => {
+  it('judges the active account and ignores a stale inactive one', () => {
+    const output = 'github.com\n  ✓ Logged in to github.com account alice (keyring)\n  - Active account: true\n  - Git operations protocol: https\n  X Failed to log in to github.com account old (keyring)\n  - Active account: false\n  - The token in keyring is invalid.\n';
+    expect(githubAuthentication(output, '', 1)).toBe('authenticated'); expect(githubAuthentication(output, '', 0)).toBe('authenticated');
+    expect(githubAuthentication('', 'github.com\n  X Failed to log in to github.com account alice (keyring)\n  - Active account: true\n', 1)).toBe('not-authenticated');
+  });
+});

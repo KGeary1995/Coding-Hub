@@ -46,9 +46,15 @@ describe('shared rules regressions', () => {
   it('drops deleted folders and does not count prepared coaching folders toward the project limit', () => {
     const { root, project, rules } = setup(); let state = rules.read([]);
     for (let index = 0; index < 100; index++) { const folder = path.join(root, 'coaching', `report-${index}`); fs.mkdirSync(folder, { recursive: true }); state = rules.read([folder]); state = rules.save(state.content, state.revision, state.targets); }
-    const gone = path.join(root, 'gone'); fs.mkdirSync(gone); state = rules.read([gone]); state = rules.save(state.content, state.revision, state.targets); fs.rmSync(gone, { recursive: true });
+    const gone = path.join(root, 'coaching', 'report-0'); fs.rmSync(gone, { recursive: true });
     state = rules.read([project]); state = rules.save(state.content, state.revision, state.targets);
     expect(state.directories).toContain(project); expect(state.directories).not.toContain(gone);
+  });
+  it('keeps user projects registered while their folder is temporarily unreachable', () => {
+    const { root, project, rules } = setup(); let state = rules.read([project]); state = rules.save('Shared', state.revision, state.targets);
+    const away = project + '-offline'; fs.renameSync(project, away);
+    const other = path.join(root, 'other'); fs.mkdirSync(other); state = rules.read([other]); state = rules.save(state.content, state.revision, state.targets);
+    fs.renameSync(away, project); expect(() => rules.verifyLaunch(project)).not.toThrow();
   });
   it('does not create empty instruction files when saving empty rules', () => {
     const { project, rules } = setup(); const initial = rules.read([project]); rules.save('', initial.revision, initial.targets);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { DeliveryStatus, DeliveryResult } from '../../../shared/productivity';
@@ -27,13 +27,23 @@ export class Delivery {
   try { const result = await run(file, args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }, windowsHide: true, encoding: 'buffer', timeout, maxBuffer: 4 * 1024 * 1024 }); return Buffer.from(result.stdout); }
   catch (error) { const code = (error as NodeJS.ErrnoException).code; throw new HubError('DELIVERY_FAILED', code === 'ENOENT' ? `${file} was not found on PATH.` : 'The command failed or timed out. Check local Git/GitHub authentication, hooks, branch protection, and remote access. Refresh before retrying.'); }
  }
+ /** Streams command output into the review hash; whole-repository diffs can exceed any reasonable buffer. */
+ private hashOutput(cwd: string, args: string[], hash: ReturnType<typeof createHash>, timeout = 15000) {
+  return new Promise<void>((resolve, reject) => {
+   const child = spawn('git', args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+   const timer = setTimeout(() => child.kill(), timeout);
+   child.stdout.on('data', (chunk: Buffer) => hash.update(chunk));
+   child.on('error', (error) => { clearTimeout(timer); reject(new HubError('DELIVERY_FAILED', (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'git was not found on PATH.' : 'The command failed or timed out. Refresh before retrying.')); });
+   child.on('close', (code) => { clearTimeout(timer); if (code === 0) resolve(); else reject(new HubError('DELIVERY_FAILED', 'Git could not read the pending changes or timed out. Refresh before retrying.')); });
+  });
+ }
  async inspect(input: string): Promise<DeliveryStatus> {
   const cwd = directory(input); const root = directory((await this.command(cwd, 'git', ['rev-parse','--show-toplevel'])).toString().trim());
   // --no-optional-locks: never take index.lock while agents may be running their own git commands.
   const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks','status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
   if (status.limited) throw new HubError('DELIVERY_LIMIT', 'Too many changes for a safe delivery review. Use local Git tools.');
   const hash = createHash('sha256').update(JSON.stringify(status));
-  hash.update(await this.command(root, 'git', ['diff','--no-ext-diff','--no-textconv','--binary'])); hash.update(await this.command(root, 'git', ['diff','--cached','--no-ext-diff','--no-textconv','--binary']));
+  await this.hashOutput(root, ['diff','--no-ext-diff','--no-textconv','--binary'], hash); hash.update('\0cached\0'); await this.hashOutput(root, ['diff','--cached','--no-ext-diff','--no-textconv','--binary'], hash);
   let reviewedBytes = 0;
   for (const item of status.changes.filter((change) => change.untracked)) {
    // Git lists an untracked nested repository or worktree as a directory with a trailing slash.
@@ -41,7 +51,7 @@ export class Delivery {
    validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', 'An untracked file exceeds the review limit. Use local Git tools.'); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
   const remotes = (await this.command(root, 'git', ['remote'])).toString().trim().split(/\r?\n/).filter(Boolean);
   for (const remote of remotes) hash.update(JSON.stringify({remote,urls:(await this.command(root, 'git', ['remote', 'get-url', '--all', remote])).toString(),pushUrls:(await this.command(root, 'git', ['remote', 'get-url', '--push', '--all', remote])).toString()}));
-  return { directory: root, branch: status.branch, head: status.head, revision: hash.digest('hex'), renames: Object.fromEntries(status.changes.filter((item) => item.originalPath).map((item) => [item.path, item.originalPath!])), staged: status.changes.filter((item) => !item.untracked && item.indexStatus !== ' ').map((item) => item.path), unstaged: status.changes.filter((item) => item.untracked || item.worktreeStatus !== ' ').map((item) => item.path), remotes };
+  return { directory: root, branch: status.branch, head: status.head, revision: hash.digest('hex'), renames: Object.fromEntries(status.changes.filter((item) => item.originalPath).map((item) => [item.path, item.originalPath!])), staged: status.changes.filter((item) => !item.untracked && item.indexStatus !== ' ').map((item) => item.path), unstaged: status.changes.filter((item) => (item.untracked && !item.path.endsWith('/')) || (!item.untracked && item.worktreeStatus !== ' ')).map((item) => item.path), remotes };
  }
  async execute(input: unknown): Promise<DeliveryStatus | DeliveryResult | null> {
   const request = schema.parse(input); if (request.action === 'flow-git-inspect') return this.inspect(request.directory);
@@ -56,7 +66,7 @@ export class Delivery {
     for (const item of request.paths) { validateRelativePath(item); if (!(request.action === 'flow-git-stage' ? status.unstaged : status.staged).includes(item)) throw new HubError('DELIVERY_PATH', 'A selected path is no longer in this change list.'); }
     // Unstaging a rename must reset both sides; staging only names the new path (the old one no longer exists).
     const paths = request.action === 'flow-git-stage' ? request.paths : [...new Set(request.paths.flatMap((item) => status.renames[item] ? [item, status.renames[item]] : [item]))]; paths.forEach((item) => validateRelativePath(item));
-    args = request.action === 'flow-git-stage' ? ['add','--',...paths] : status.head ? ['reset','-q','HEAD','--',...paths] : ['rm','--cached','--ignore-unmatch','--',...paths]; detail = `Update the index for these paths. Working files are preserved.\n${request.paths.join('\n')}`;
+    args = request.action === 'flow-git-stage' ? ['add','--',...paths] : status.head ? ['reset','-q','HEAD','--',...paths] : ['reset','-q','--',...paths]; detail = `Update the index for these paths. Working files are preserved.\n${request.paths.join('\n')}`;
    } else if (request.action === 'flow-git-commit') {
     if (!status.staged.length) throw new HubError('DELIVERY_EMPTY', 'Stage reviewed changes before committing.');
     args = ['commit','-m',request.message]; detail = `Commit ALL staged paths:\n${status.staged.join('\n')}\n\nMessage:\n${request.message}\nLocal Git hooks may execute project code.`;

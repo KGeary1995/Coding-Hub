@@ -50,6 +50,7 @@ let delivery: Delivery | null = null;
 let verification: Verification | null = null;
 let livePreview: LivePreview | null = null;
 let backups: Backups | null = null;
+let worktrees: WorktreeService | null = null;
 const production = process.argv.includes('--production') || app.isPackaged;
 let window: BrowserWindow | null = null;
 let quitting = false;
@@ -168,7 +169,7 @@ function createWindow() {
     const connections = production ? "'self'" : "'self' http://127.0.0.1:5173 ws://127.0.0.1:5173";
     callback({ responseHeaders: {
       ...details.responseHeaders,
-      'Content-Security-Policy': [`default-src 'self'; script-src ${scripts}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ${connections}; object-src 'none'; frame-src 'self'; base-uri 'self'`],
+      'Content-Security-Policy': [`default-src 'self'; script-src ${scripts}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ${connections}; object-src 'none'; frame-src 'self'; base-uri 'self'`],
     } });
   });
   if (production) void window.loadFile(path.join(__dirname, '../../dist/index.html'));
@@ -200,8 +201,10 @@ function createWindow() {
   current.on('close', (event) => {
     if (closing || quitting) return;
     event.preventDefault();
-    if (delivery?.running || workflows?.running) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before closing the app.' }); return; }
+    if (delivery?.running || workflows?.running || worktrees?.active) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before closing the app.' }); return; }
     closing = true;
+    // The preview is a separate top-level window; left open it would keep the app alive with no main window.
+    livePreview?.close();
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => { repositoryFiles.closeOwner(owner); current.destroy(); });
   });
   window.on('closed', () => { window = null; });
@@ -232,7 +235,7 @@ else app.whenReady().then(() => {
   const tasks = new Tasks(storageRoot, verification);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   livePreview = coaching ? new LivePreview(storageRoot, designs, coaching, async (url) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Open isolated preview', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Approve local design preview', message: url, detail: 'This local application can execute browser JavaScript in a separate sandboxed window. It cannot access Coding Hub IPC, local files, permissions, downloads, or other network origins. Start the trusted development server yourself.' })).response === 0 && !updateRestart) : null;
-  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
+  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Coding-Hub-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Coding Hub backup', extensions: ['gz'] }] })).filePath ?? null,
     importFile: async () => { const selected = await dialog.showOpenDialog(window!, { title: 'Import local backup', properties: ['openFile'], filters: [{ name: 'Coding Hub backup', extensions: ['gz'] }] }); return selected.canceled ? null : selected.filePaths[0] ?? null; },
@@ -295,7 +298,7 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.accounts, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing an update.'); return accounts.execute(owner, payload); });
   projectChecks = new ProjectChecks((directory) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Shared rules storage is unavailable.'); hub.rules.verifyLaunch(directory); });
   handle(IPC_CHANNELS.projectChecks, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return projectChecks!.execute(payload, async () => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run project code', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run project check', message: 'Run this project’s npm script?', detail: 'Tests, typecheck, or lint scripts and their npm pre/post hooks execute project code with your local permissions. Only run checks in projects you trust. Output is capped and the check stops after 60 seconds.' })).response === 0 && !updateRestart); });
-  const worktrees = new WorktreeService(storageRoot, (directory) => {
+  worktrees = new WorktreeService(storageRoot, (directory) => {
     if (manager.usesDirectory(directory)) return true;
     const workspace = storage?.load();
     return Boolean(workspace?.sessions.some((session) => {
@@ -303,7 +306,7 @@ else app.whenReady().then(() => {
       return Boolean(binding && isWithinDirectory(directory, binding));
     }));
   });
-  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees.execute(payload); });
+  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees!.execute(payload); });
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR)),
@@ -311,14 +314,14 @@ else app.whenReady().then(() => {
     storageDirectory: storageRoot,
     updater: autoUpdater,
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
-    hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running),
+    hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active),
     installationFailed: () => { updateRestart = false; },
     prepareRestart: async () => {
       const answer = await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart AI Coding Hub?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {
-        if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy || delivery?.running || workflows?.running) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
+        if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy || delivery?.running || workflows?.running || worktrees?.active) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
         if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'The workspace could not be saved. Resolve the storage issue before updating.'); }
         else throw new HubError('UPDATE_SAVE_FAILED', 'Load the local workspace successfully before updating.');
         return true;
@@ -380,7 +383,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
-  if (delivery?.running || workflows?.running) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow operation to finish before quitting.' }); return; }
+  if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
   quitting = true;
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
     try { modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
