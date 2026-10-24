@@ -127,6 +127,14 @@ describe('phone remote', () => {
     expect((seen[1].data as { title: string }[])[0].title).toBe('Renamed');
   });
 
+  it('drops the screens of channels that left the workspace, and keeps at most 32', async () => {
+    const { server } = await remote();
+    for (let i = 0; i < 40; i++) server.onSessionEvent({ type: 'started', sessionId: `old-${i}`, runId: `r${i}`, pid: 1, cwd: '/p', engine: 'claude' });
+    const replay = (server as unknown as { replay: Map<string, unknown> }).replay; expect(replay.size).toBe(32);
+    server.onSessionEvent({ type: 'started', sessionId: 's1', runId: 'r1', pid: 1, cwd: '/p', engine: 'claude' });
+    server.channelsChanged(); expect([...replay.keys()]).toEqual(['s1']);
+  });
+
   it('clears a waiting prompt when the person answers on the desktop, but not for focus reports', async () => {
     const { server } = await remote(); await server.setEnabled(true);
     server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve?', at: new Date().toISOString() });

@@ -25,6 +25,8 @@ const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+/** Screens kept for replay: one per channel, and no more than this many in all (oldest started first out). */
+const REPLAY_CHANNELS = 32;
 const PAIRING_MINUTES = 5; const PAIRING_ATTEMPTS = 10; const REPLAY_BYTES = 256 * 1024; const STREAM_BUFFER = 2 * 1024 * 1024;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -95,7 +97,7 @@ export class RemoteServer {
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
   onSessionEvent(event: SessionEvent) {
-    if (event.type === 'started') { this.replay.set(event.sessionId, { runId: event.runId, text: '' }); this.attention.delete(event.sessionId); this.broadcastChannels(); return; }
+    if (event.type === 'started') { this.replay.delete(event.sessionId); this.replay.set(event.sessionId, { runId: event.runId, text: '' }); while (this.replay.size > REPLAY_CHANNELS) this.replay.delete(this.replay.keys().next().value!); this.attention.delete(event.sessionId); this.broadcastChannels(); return; }
     if (event.type === 'data') {
       const held = this.replay.get(event.sessionId); if (held?.runId === event.runId) { held.text = (held.text + event.data).slice(-REPLAY_BYTES); }
       const payload = `event: output\ndata: ${JSON.stringify({ sessionId: event.sessionId, runId: event.runId, data: event.data })}\n\n`;
@@ -110,6 +112,10 @@ export class RemoteServer {
    * shortly after, and only when the channel list they see is different.
    */
   channelsChanged() {
+    // Channels that left the workspace keep no screen or prompt here, whether or not a phone is connected.
+    const current = new Set(this.host.sessions().map((session) => session.id));
+    for (const id of [...this.replay.keys()]) if (!current.has(id)) this.replay.delete(id);
+    for (const id of [...this.attention.keys()]) if (!current.has(id)) this.attention.delete(id);
     if (this.channelsTimer || !this.streams.size) return;
     this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
   }
