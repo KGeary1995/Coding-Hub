@@ -13,11 +13,15 @@ export async function refreshEngines() {
   } catch { useWorkspaceStore.getState().setDiscovery([], 'The native host connection is unavailable.'); }
 }
 
-/** Reloads settings and the other computers' usage after a device sync; this computer's own usage arrives live. */
+/** Reloads settings and usage after a device sync: other computers' runs, and costs recalculated with synced price rates. */
 export async function refreshSynced() {
+  const before = new Map(useHubStore.getState().usage.map((record) => [record.runId, record]));
   const [preferences, usage] = await Promise.all([hubCall<HubPreferences>({ action: 'preferences' }), hubCall<UsageRecord[]>({ action: 'usage' })]);
   const store = useHubStore.getState(); if (JSON.stringify(preferences) !== JSON.stringify(store.preferences)) store.setPreferences(preferences);
-  store.setUsage([...store.usage.filter((record) => !record.machine), ...usage.filter((record) => record.machine)]);
+  // Take the host's records (costs follow synced price rates), except ones a live update replaced during the request.
+  const current = new Map(store.usage.map((record) => [record.runId, record])); const fetched = new Set(usage.map((record) => record.runId));
+  const merged = usage.map((record) => { const live = current.get(record.runId); return live && live !== before.get(record.runId) ? live : record; });
+  store.setUsage([...merged, ...store.usage.filter((record) => !record.machine && !fetched.has(record.runId))]);
 }
 
 export function useNativeHost() {
