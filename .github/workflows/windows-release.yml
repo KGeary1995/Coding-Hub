@@ -2,6 +2,9 @@ name: Windows release candidate
 on:
   push:
     branches: [main]
+  # Ready pull requests only: Windows minutes cost double on private repositories. Drafts get ci.yml alone.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -10,6 +13,7 @@ permissions:
   contents: read
 jobs:
   windows:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +41,9 @@ jobs:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       - run: npm run test:install
-      - uses: actions/upload-artifact@v4
+      # Installers are about 230 MB; keep them for main and manual runs, not every pull request push.
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
         with:
           name: AI-Coding-Hub-Windows-${{ github.run_number }}
           if-no-files-found: error
