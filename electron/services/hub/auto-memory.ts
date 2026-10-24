@@ -165,6 +165,9 @@ export class AutoMemory {
     tracked.ready = Promise.all([changedFiles(run.cwd), git(run.cwd, ['rev-parse', 'HEAD'])]).then(([files, head]) => { tracked.files = files; tracked.head = head[0] ?? null; });
   }
 
+  /** Resolves once background Git checks started by prepare() have finished. */
+  async settled() { await Promise.all([...this.runs.values()].map((run) => run.ready)); }
+
   /** Writes the end-of-session summary. Returns the note, or null when the session left nothing to record. */
   async finish(runId: string, transcript: string | null): Promise<MemoryNote | null> {
     const tracked = this.runs.get(runId); if (!tracked) return null; this.runs.delete(runId);

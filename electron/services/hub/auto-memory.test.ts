@@ -9,7 +9,12 @@ import { AutoMemory, lastAssistantMessage, memoryContext, normalizeRemote, proje
 import { MemoryService } from './memory';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+// prepare() starts git in the background; Windows cannot delete a folder a process is still using.
+const pending: AutoMemory[] = [];
+afterEach(async () => {
+  for (const auto of pending.splice(0)) await auto.settled();
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
 const temp = () => { const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-auto-memory-'))); roots.push(root); return root; };
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
 function repository(root: string, name: string, origin?: string) {
@@ -19,6 +24,7 @@ function repository(root: string, name: string, origin?: string) {
   return directory;
 }
 const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.310', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, supportsAppendSystemPrompt: true, supportsMcpConfig: true, error: null });
+const track = (auto: AutoMemory) => { pending.push(auto); return auto; };
 const run = (engine: 'claude' | 'codex', cwd: string): RunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 } as RunningSession);
 
 describe('memory keys', () => {
@@ -47,7 +53,7 @@ describe('launch context', () => {
   it('adds the memory server and context to Claude and Codex launches without touching project files', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
     const key = projectMemoryKey(project); memory.write(key, 'Earlier decision', 'Use the existing router.', 'codex');
-    const auto = new AutoMemory({ memory, enabled: () => true, server: '/app/memory-server.js', executable: '/app/electron', scratch: path.join(root, 'scratch') });
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/app/memory-server.js', executable: '/app/electron', scratch: path.join(root, 'scratch') }));
     const claude = { args: ['--session-id', 'x'] }; const claudeRun = run('claude', project); auto.prepare(claudeRun, '', info('claude'), claude);
     expect(claude.args[claude.args.indexOf('--append-system-prompt') + 1]).toContain('Use the existing router.');
     expect(claude.args.at(-2)).toBe('--mcp-config');
@@ -60,7 +66,7 @@ describe('launch context', () => {
   it('skips the server when the project installed it and does nothing when switched off', () => {
     const root = temp(); const project = repository(root, 'project'); fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': { command: 'x' } } }));
     const memory = new MemoryService(path.join(root, 'memory')); let enabled = true;
-    const auto = new AutoMemory({ memory, enabled: () => enabled, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') });
+    const auto = track(new AutoMemory({ memory, enabled: () => enabled, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') }));
     const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch);
     expect(launch.args).toContain('--append-system-prompt'); expect(launch.args).not.toContain('--mcp-config');
     enabled = false; const off = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), off); expect(off.args).toEqual([]);
@@ -77,7 +83,7 @@ describe('session summaries', () => {
   it('records files changed and commits made during the session, and skips sessions that left nothing', async () => {
     const root = temp(); const project = repository(root, 'project'); fs.writeFileSync(path.join(project, 'before.txt'), 'already dirty');
     const memory = new MemoryService(path.join(root, 'memory')); const written: string[] = [];
-    const auto = new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), onWrite: (key) => written.push(key) });
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), onWrite: (key) => written.push(key) }));
     const active = run('claude', project); auto.prepare(active, 'sonnet', info('claude'), { args: [] });
     await new Promise((resolve) => setTimeout(resolve, 300));
     fs.writeFileSync(path.join(project, 'app.txt'), 'changed\n'); git(project, 'commit', '-am', 'Change app'); fs.writeFileSync(path.join(project, 'new.txt'), 'new');
