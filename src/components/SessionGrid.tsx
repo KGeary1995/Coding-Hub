@@ -22,7 +22,7 @@ export function SessionGrid() {
   // canvas; user-resized tiles can extend it and remain reachable by scrolling.
   const bands = layoutMode === 'rows' ? sessions.length : layoutMode === 'grid' && sessions.length > 2 ? 2 : 1;
   const gridRows = bands * 12;
-  const rowHeight = Math.max(14, Math.floor((height - (gridRows - 1) * 12) / gridRows));
+  const rowHeight = Math.max(14, Math.floor((height - (gridRows - 1) * 8) / gridRows));
   const focusedIndex = sessions.findIndex((session) => session.id === focusedSessionId);
   return (
     <div ref={container} className="session-grid-container">
@@ -31,7 +31,7 @@ export function SessionGrid() {
       width={width}
       cols={12}
       rowHeight={rowHeight}
-      margin={[12, 12]}
+      margin={[8, 8]}
       containerPadding={[0, 0]}
       layout={layout}
       draggableHandle=".tile-drag-handle"
@@ -40,7 +40,7 @@ export function SessionGrid() {
       resizeHandles={['se']}
       onLayoutChange={(next) => setTiles(next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })))}
     >
-      {sessions.map((session, index) => <div key={session.id}><SessionTile session={session} index={index} /></div>)}
+      {sessions.map((session, index) => <div key={session.id}><SessionTile session={session} index={index} dense={sessions.length > 2} /></div>)}
     </GridLayout>}
     </div>
   );

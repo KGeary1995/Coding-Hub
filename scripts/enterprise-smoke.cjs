@@ -102,12 +102,12 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.getByRole('button', { name: 'Live dashboard version 1', exact: true }).click();
     await page.getByText('Live preview, annotations, and agent feedback', { exact: true }).click();
     await page.getByRole('button', { name: 'Prepare Codex design feedback', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
-    assert.equal(await page.locator('.process-dot.running').count(), 0, 'Preparing design feedback must not launch a provider');
+    assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Preparing design feedback must not launch a provider');
     await openView(page, 'Session history');
     await page.getByRole('button', { name: 'View native CLI conversations', exact: true }).click();
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
     await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(3).waitFor();
-    assert.equal(await page.locator('.process-dot.running').count(), 0, 'Resume preparation must remain idle');
+    assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Task coordination', 'Verification profiles', 'AI coaching', 'Settings']) {
       await openView(page, name); await page.waitForTimeout(150);
       if (process.env.CODING_HUB_REVIEW_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_REVIEW_SCREENSHOTS, 'AI-Coding-Hub-v' + runtime.version + '-' + name.toLowerCase().replaceAll(' ', '-') + '.png') });

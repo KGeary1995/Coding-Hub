@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView, addChannel } = require('./lib/navigate.cjs');
+const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-workbench-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
@@ -24,10 +24,10 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.session-tile');
     await page.getByRole('button', { name: 'Dismiss workspace setup', exact: true }).click(); assert.equal(await page.locator('.workspace-setup').count(), 0);
-    await page.getByRole('button', { name: 'Engine settings for session 1', exact: true }).click();
+    await (await tileControl(page, 'Engine settings for session 1')).click();
     await page.locator('.session-tile').first().getByLabel('Working directory', { exact: true }).selectOption('independent');
     await page.locator('.session-tile').first().getByLabel('Repository path', { exact: true }).fill(project);
-    await page.getByRole('button', { name: 'Engine settings for session 1', exact: true }).click();
+    await (await tileControl(page, 'Engine settings for session 1')).click();
     assert.equal(await page.locator('.workspace-setup').count(), 0);
     await page.evaluate(() => localStorage.removeItem('coding-hub-setup-complete'));
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
@@ -74,7 +74,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     if (process.env.CODING_HUB_COACHING_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_COACHING_SCREENSHOT });
     await page.getByRole('checkbox', { name: 'Approve sharing coaching report through my CLI', exact: true }).check();
     await page.getByRole('button', { name: 'Prepare Codex coaching', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
-    assert.equal(await page.locator('.process-dot.running').count(), 0, 'Preparing a report must not launch a provider CLI');
+    assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Preparing a report must not launch a provider CLI');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start session', exact: true }).click();
     // READY can be in scrollback in a short software-rendered tile. Verify the
@@ -84,17 +84,32 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     assert.equal(await page.evaluate(() => window.events.filter((event) => event.type === 'data').some((event) => event.data.includes('ECHO:'))), false, 'Start must not auto-answer trust prompts or send coaching');
     await tile.getByRole('button', { name: 'Send coaching request', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));
+    // The channel tile: state chip, a scope trace drawn from real output, and a detail row that waits for the header.
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 run', exact: true }).textContent(), '●RUN');
+    await page.waitForFunction(() => { const ys = [...document.querySelectorAll('.session-tile')[2].querySelector('.tr-scope-trace').getAttribute('d').matchAll(/ (-?[\d.]+)/g)].map((match) => Number(match[1])); return new Set(ys).size > 1; });
+    await page.mouse.move(1, 1);
+    const detail = tile.locator('.tr-tile-detail');
+    await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '0');
+    await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
+    await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '1');
+    assert.match(await detail.textContent(), /pid \d+ · cwd /);
+    await page.mouse.move(1, 1);
+    // Enter on the tile itself moves into its terminal.
+    await tile.focus(); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile') === document.querySelectorAll('.session-tile')[2]);
     // An approval request shows on the tile until the person answers in the terminal.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 hold', exact: true }).textContent(), '◆HOLD');
+    assert.equal(await tile.getAttribute('data-state'), 'waiting');
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
     // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
-    await page.getByRole('button', { name: 'Isolate session 1', exact: true }).click();
+    await (await tileControl(page, 'Isolate session 1')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
     await page.locator('.tr-sb-alert').click();
     await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile')?.textContent.includes('Approval requested'));
-    await page.getByRole('button', { name: 'Restore grid', exact: true }).click();
+    await (await tileControl(page, 'Restore grid')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 3);
     await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').waitFor({ state: 'detached' });

@@ -26,3 +26,11 @@ The Claude Design handoff in this folder (`README.md`, `design/`, `tokens.css`) 
 - **Claude Code 2.1.63 and later** (HTTP hooks were added in 2.1.63): the launch adds `--settings` with an HTTP `Notification` hook that posts to a loopback endpoint in the app (`electron/services/cli/attention.ts`). Each run gets a secret path. Only `permission_prompt` and `elicitation_dialog` count. `NO_PROXY` gains `127.0.0.1,localhost` so a proxy cannot intercept the request. Earlier versions, `--bare`, `disableAllHooks`, or an `allowedHttpHookUrls` list that excludes loopback leave the channel without alerts.
 - **Codex:** the launch sets `tui.notifications=["approval-requested"]`, `tui.notification_method="osc9"` and `tui.notification_condition="always"`, and the app reads the resulting OSC 9 notifications from the terminal output. Versions without these keys ignore them.
 - **Clearing:** the alert clears on the person's next real keystroke in that terminal. Focus and mouse reports from the terminal do not count, and a request that arrives after the keystroke was sent stays. It also clears when the run exits. It is never saved.
+
+## Channel tile (phase 4)
+
+- **Detail row:** it takes the scope strip's place while the header is pointed at, or while one of its controls has keyboard focus. In the handoff it expands below the strip, which would resize the terminal, and make the CLI redraw, every time the pointer crossed a tile. An overlay on the terminal would cover notices and the buttons in them.
+- **Approve / Deny:** a single **Answer** action focuses the terminal, per the waiting decision above. The handoff's Y / N / R / H tile keys are not added; Enter on a focused tile starts it or moves into its terminal.
+- **Scope readout:** shows terminal output (`out 1.2k/s`, characters per second), matching the trace, instead of `rate … tok/s`.
+- **Context bar:** for Claude, which does not report a context window, the bar shows the session budget used when a budget is set, and is hidden otherwise.
+- **Grid spacing:** tiles are 8 px apart, as in the handoff, so a 2 × 2 grid fits a 1100 × 800 window at 125% without scrolling.

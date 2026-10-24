@@ -3,7 +3,7 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {_electron}=require('playwright-core');
-const { openView, addChannel } = require('./lib/navigate.cjs');
+const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 (async()=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-')));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
  const fixture=await fs.readFile(path.join(__dirname,'fixtures/interactive-cli.cjs'),'utf8');
@@ -21,12 +21,12 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
  try{
   let page=await launch();await page.evaluate(()=>{window.events=[];window.codingHub.onSessionEvent(event=>window.events.push(event));});
   await app.evaluate(({dialog},project)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[project]});},project);await page.getByRole('button',{name:'Open project',exact:true}).click();
-  const tile=page.locator('.session-tile').nth(1);await page.getByRole('button',{name:'Engine settings for session 2',exact:true}).click();
+  const tile=page.locator('.session-tile').nth(1);await (await tileControl(page, 'Engine settings for session 2')).click();
   await page.waitForFunction(()=>[...document.querySelectorAll('datalist option')].some(option=>option.value==='fixture-hidden-model'));
   const options=await tile.locator('datalist option').evaluateAll(nodes=>nodes.map(node=>node.value));assert.deepEqual(options,['fixture-current-model','fixture-extra-model','fixture-hidden-model']);assert.ok(!options.some(value=>value.startsWith('picker-')));
   await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('none');await tile.getByLabel('codex model',{exact:true}).fill('fixture-hidden-model');assert.equal(await tile.getByLabel('Reasoning effort',{exact:true}).inputValue(),'');assert.ok((await tile.textContent()).includes('reasoning has been reset') || (await tile.textContent()).includes('Reasoning has been reset'));await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('ultra');
-  await page.getByRole('button',{name:'Engine settings for session 2',exact:true}).click();await tile.getByRole('button',{name:'Start session',exact:true}).click();
-  await page.waitForFunction(()=>window.events.some(event=>event.data?.includes('MODEL_OVERRIDE:fixture-hidden-model')));await tile.getByRole('button',{name:'Stop',exact:true}).click();
+  await (await tileControl(page, 'Engine settings for session 2')).click();await tile.getByRole('button',{name:'Start session',exact:true}).click();
+  await page.waitForFunction(()=>window.events.some(event=>event.data?.includes('MODEL_OVERRIDE:fixture-hidden-model')));await (await tileControl(tile, 'Stop')).click();
   await openView(page, 'Settings');await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);
   await page.getByRole('button',{name:'Workspace',exact:true}).click();const first=page.locator('.session-tile').first();await first.getByRole('button',{name:'Start session',exact:true}).click();await page.waitForFunction(()=>window.events.some(event=>event.type==='started'&&event.engine==='claude'));
   claude=await page.evaluate(()=>window.events.find(event=>event.type==='started'&&event.engine==='claude'));

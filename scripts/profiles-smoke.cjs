@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView, addChannel } = require('./lib/navigate.cjs');
+const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -57,12 +57,12 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     for (const [tileIndex, profileIndex] of [[0, 0], [2, 1]]) {
       const tile = page.locator('.session-tile').nth(tileIndex);
-      await tile.getByRole('button', { name: `Engine settings for session ${tileIndex + 1}`, exact: true }).click();
+      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
       await tile.getByLabel('Claude account profile', { exact: true }).selectOption(profiles[profileIndex].id);
-      await tile.getByRole('button', { name: `Engine settings for session ${tileIndex + 1}`, exact: true }).click();
+      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
       await tile.getByRole('button', { name: 'Start session', exact: true }).click();
     }
-    await page.waitForFunction(() => document.querySelectorAll('.process-dot.running').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile[data-status="running"]').length === 2);
     // READY can scroll out of a short tile in the four-tile grid; check the startup output each run received.
     await page.waitForFunction(() => { const runs = window.events.filter((event) => event.type === 'started').map((event) => event.runId); return runs.length === 2 && runs.every((runId) => window.events.some((event) => event.type === 'data' && event.runId === runId && event.data.includes('READY'))); });
     for (const index of [0, 2]) {
@@ -89,8 +89,8 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
       const projectLogs = path.join(root, 'storage/claude-profiles', profile.id, 'projects/-fixture');
       assert.deepEqual(await fs.readdir(projectLogs), [run.runId + '.jsonl']);
     }
-    for (const index of [0, 2]) await page.locator('.session-tile').nth(index).getByRole('button', { name: 'Stop', exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll('.process-dot.running').length === 0);
+    for (const index of [0, 2]) await (await tileControl(page.locator('.session-tile').nth(index), 'Stop')).click();
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile[data-status="running"]').length === 0);
     await app.close(); app = null;
     app = await _electron.launch({ executablePath: require('electron'), args, env });
     page = await app.firstWindow(); await page.waitForSelector('.session-tile');

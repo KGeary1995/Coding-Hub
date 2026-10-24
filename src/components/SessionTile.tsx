@@ -1,8 +1,8 @@
 import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
-import { useEffect, useState } from 'react';
-import { ArrowUpRight, ChevronDown, Copy, FolderOpen, Folder, GripVertical, Maximize2, Minimize2, Settings2, TerminalSquare, X, Play, Square, LoaderCircle, OctagonPause, AlertCircle, Asterisk } from 'lucide-react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
+import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle } from 'lucide-react';
 import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -11,24 +11,36 @@ import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
-import { useHubStore, tokens, formatNumber, dollars } from '../state/hub-store';
+import { useHubStore, tokens, dollars } from '../state/hub-store';
+import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, limitRatio, usageFor } from '../state/channel-state';
+import { ScopeStrip } from './tile/ScopeStrip';
+import { compact } from './shell/StatusBar';
 
-export function SessionTile({ session, index }: { session: Session; index: number }) {
+const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
+
+/** One channel: header, scope strip, a detail row on hover or keyboard focus, notices and the terminal (docs/design/trace, sheet 08). */
+export function SessionTile({ session, index, dense = false }: { session: Session; index: number; dense?: boolean }) {
   const profiles = useAccountStore((s) => s.profiles);
   useEffect(() => { if (session.config.engine === 'claude') void refreshClaudeProfiles(); }, [session.config.engine]);
   const profileId = session.config.engine === 'claude' ? session.config.accountProfileId : undefined;
-  const profileName = profileId ? profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile' : 'Default';
+  const profileName = profileId ? profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile' : null;
   const [coachingSent, setCoachingSent] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const usage = useHubStore((s) => s.usage.find((u) => u.runId === session.runId));
+  const usage = useHubStore((s) => usageFor(session, s.usage));
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   const alerts = budgetAlerts(session.budget, usage);
-  const { engines, rootDirectory, sessions, focusedSessionId, toggleFocus, removeSession, addSession, updateConfig, updateBinding } = useWorkspaceStore();
+  const { engines, rootDirectory, sessions, focusedSessionId, toggleFocus, removeSession, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore();
   const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
-  const claude = session.config.engine === 'claude';
+  const engine = session.config.engine;
+  const claude = engine === 'claude';
+  const channel = index + 1;
   const setupView = !cwd || /working directory|absolute.*directory/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
   const busy = session.status === 'running' || session.status === 'starting';
+  const state = channelState(session, usage); const meta = CHANNEL_STATES[state];
+  const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
+  const ratio = context || session.budget ? limitRatio(session, usage) : null;
+  const hot = ratio !== null && ratio >= LIMIT_THRESHOLD;
   async function stop() {
     setStopping(true);
     try { return await stopSession(session.id); } finally { setStopping(false); }
@@ -36,20 +48,57 @@ export function SessionTile({ session, index }: { session: Session; index: numbe
   async function close() {
     if (session.status !== 'running' || await stop()) removeSession(session.id);
   }
+  const start = () => void startSession(session.id);
+  const openLog = () => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); };
+  // The tile is a focus target: Enter starts an idle channel, otherwise moves into its terminal.
+  const onTileKey = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget || event.key !== 'Enter') return;
+    event.preventDefault();
+    if (state === 'idle') start(); else focusTerminal(session.id);
+  };
+  const action = state === 'idle' ? <button className="tr-action start" aria-label="Start session" title="Start session (Enter on the tile)" onClick={start}><span aria-hidden="true">▶</span> Start<kbd aria-hidden="true">⏎</kbd></button>
+    : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
+    : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
+    : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out" onClick={() => setView('memory')}>Write handoff</button>
+    : state === 'finished' ? <button className="tr-action ghost" onClick={() => setView('diff')}>Review changes<kbd aria-hidden="true">G C</kbd></button>
+    : null;
+  const facts = [
+    stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
+    cwd ? `cwd ${folderName(cwd)}` : 'no working directory',
+    usage ? `cost ${dollars(usage.cost)}` : null,
+    context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : null,
+  ].filter(Boolean).join(' · ');
   return (
-    <article className={`session-tile ${claude ? 'claude' : 'codex'}`} aria-label={`${session.title} session ${index + 1}`}>
-      <header className="tile-header">
-        <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={16} /></span>
-        <span className="engine-mark">{claude ? <Asterisk size={20} /> : <TerminalSquare size={17} />}</span>
-        <strong title={session.title}>{session.title}</strong><span className="session-number">{String(index + 1).padStart(2, '0')}</span>
-        <span className="tile-actions">
-          <button className={`icon-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${index + 1}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={15} /></button>
-          <button className="icon-button" title="Duplicate session" aria-label={`Duplicate session ${index + 1}`} disabled={sessions.length >= 4} onClick={() => addSession(session.config.engine, session.id)}><Copy size={15} /></button>
-          <button className="icon-button" title={focusedSessionId ? 'Restore grid' : 'Isolate session'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${index + 1}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-          <button className="icon-button" title="Stop and close session (keep at least two)" aria-label={`Close session ${index + 1}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={15} /></button>
-        </span>
-      </header>
-      <div className="tile-model-row">{claude && <span className="account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}<span className={`process-dot ${session.status}`} /><span className="process-status">{session.status}</span><span className="model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${session.config.model || 'none'}.` : session.config.model ? `Next launch model override: ${session.config.model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || session.config.model || 'CLI default model'}</span><button className="quiet-button" onClick={() => setControlsOpen(!controlsOpen)}>{busy ? 'Settings' : 'Configure'} <ChevronDown size={12} /></button></div>
+    <article className={`session-tile tr-tile ${claude ? 'claude' : 'codex'} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
+      data-status={session.status} data-state={state} aria-label={`${session.title} session ${channel}`} tabIndex={0} onKeyDown={onTileKey}>
+      <div className="tr-tile-top">
+        <header className="tile-header tr-tile-head">
+          <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
+          <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={claude ? 'Claude Code' : 'Codex CLI'}>CH{channel}</span>
+          <strong className="tr-tile-name" title={session.title}>{session.title}</strong>
+          <span className="tr-tile-model model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${session.config.model || 'none'}.` : session.config.model ? `Next launch model override: ${session.config.model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || session.config.model || 'CLI default'}</span>
+          {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
+          <span className="tr-spacer" />
+          <span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>
+          <span className="tr-tile-metric tnum" title={usage ? 'Reported input + output tokens for this run' : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span>
+          {action}
+          <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
+            <span aria-hidden="true">{meta.glyph}</span>{meta.word}
+          </span>
+        </header>
+        <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={ratio} limitLabel={context ? `Context ${Math.round(context.used / context.limit * 100)}% (marker at 80%)` : 'Share of the session budget used (marker at 80%)'} />
+        <div className="tr-tile-detail">
+          <span className="tr-detail-facts" title={cwd ?? undefined}>{facts}</span>
+          {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${channel}`} onClick={() => void writeTerminal(session.id, '\x03')} disabled={stopping}><OctagonPause size={13} /></button>}
+          {session.status === 'running'
+            ? <button className="tr-detail-button stop" onClick={() => void stop()} disabled={stopping}>{stopping && <LoaderCircle size={12} className="spin" />}{stopping ? 'Stopping' : 'Stop'}</button>
+            : state === 'finished' && <button className="tr-detail-button" onClick={start}>Restart</button>}
+          <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}>Settings</button>
+          <button className="tr-detail-button" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= 4} onClick={() => addSession(engine, session.id)}>Duplicate</button>
+          <button className="tr-detail-button" aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? 'Restore' : 'Maximize'}</button>
+          <button className="tr-detail-button" title="Stop and close (keep at least two channels)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}>Close</button>
+        </div>
+      </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
         <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />
         <label className="binding-control">Working directory<select aria-label="Working directory" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
@@ -58,18 +107,12 @@ export function SessionTile({ session, index }: { session: Session; index: numbe
         <WorktreeControls session={session} />
         {busy && <p className="control-note">Stop the session to change its next launch settings.</p>}
       </fieldset>}
-      <div className="session-run-toolbar">
-        <span className="process-detail">{stopping ? 'Stopping CLI and child processes…' : session.pid ? <><span className="mono">PTY</span> PID {session.pid}</> : session.status === 'starting' ? 'Checking local CLI…' : session.exitCode !== null ? `Process exited · code ${session.exitCode}` : 'Ready to launch locally'}</span>
-        {session.status === 'running' ? <><button className="icon-button" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${index + 1}`} onClick={() => void writeTerminal(session.id, '\x03')} disabled={stopping}><OctagonPause size={14} /></button><button className="button stop-button" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={12} className="spin" /> : <Square size={11} />}{stopping ? 'Stopping' : 'Stop'}</button></> : <button className="button start-button" onClick={() => void startSession(session.id)} disabled={session.status === 'starting'}>{session.status === 'starting' ? <LoaderCircle size={12} className="spin" /> : <Play size={11} />}{session.status === 'starting' ? 'Starting' : session.status === 'exited' ? 'Restart' : 'Start session'}</button>}
-      </div>
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void writeTerminal(session.id, prompt + '\r').then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
-      {session.status === 'running' && session.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{session.attention.message}</span><button className="button secondary" onClick={() => focusTerminal(session.id)}>Answer in terminal</button></div>}
-      {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && !claude && <button className="quiet-button" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button" onClick={() => useWorkspaceStore.getState().setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
-      {!busy && !profileId && engines.find((engine) => engine.engine === session.config.engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
+      {session.status === 'running' && session.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{session.attention.message}</span></div>}
+      {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && !claude && <button className="quiet-button" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
+      {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
-      {session.error && !busy && <button className="quiet-button session-recovery-link" onClick={() => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); useWorkspaceStore.getState().setView('workflow'); }}>Open session recovery center</button>}
-      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''}`}><TerminalViewport session={session} />{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">SESSION {String(index + 1).padStart(2, '0')} · {session.config.resumeId ? 'RESUME CONVERSATION' : 'LOCAL CLI'}</span><h3>{claude ? 'Claude Code' : 'OpenAI Codex'}</h3><p>{session.config.resumeId ? 'Continue your saved conversation with its original context.' : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? cwd.split(/[\\/]/).filter(Boolean).at(-1) || cwd : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${index + 1}`} onClick={() => useWorkspaceStore.getState().setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${index + 1}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Use {session.config.resumeId ? 'Start session to resume' : 'Start session above to launch'}. CLI permissions and approvals apply.</small></div>}</div>
-      <footer className="tile-footer"><span className="cwd-label" title={cwd ?? 'No workspace selected'}><Folder size={12} />{cwd || 'Choose a working directory'}</span><span className="token-label" title={usage ? 'Reported CLI usage · estimated cost' : 'Waiting for structured CLI usage'}>Tokens <b>{usage ? formatNumber(tokens(usage)) : '—'}</b><span>Cost <b>{dollars(usage?.cost ?? null)}</b></span>{usage?.context && <span>Context <b>{Math.round(usage.context.used / usage.context.limit * 100)}%</b></span>}</span></footer>
+      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''}`}><TerminalViewport session={session} />{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">CH{channel} · {session.config.resumeId ? 'RESUME CONVERSATION' : 'LOCAL CLI'}</span><h3>{claude ? 'Claude Code' : 'OpenAI Codex'}</h3><p>{session.config.resumeId ? 'Continue your saved conversation with its original context.' : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? folderName(cwd) : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${channel}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Press Start in the channel header{session.config.resumeId ? ' to resume' : ''}. CLI permissions and approvals apply.</small></div>}</div>
     </article>
   );
 }
