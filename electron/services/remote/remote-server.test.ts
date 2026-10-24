@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { RemoteServer, type RemoteHost } from './remote-server';
-import { tailscaleState } from './tailscale';
+import { tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -144,6 +144,12 @@ describe('phone remote', () => {
 });
 
 describe('tailscale state', () => {
+  it('finds a Tailscale app installed after Trace started', () => {
+    const installed = new Set<string>(); const candidates = ['/Applications/Tailscale.app/Contents/MacOS/Tailscale', 'tailscale'];
+    expect(tailscaleExecutable((file) => installed.has(file), candidates)).toBe('tailscale');
+    installed.add(candidates[0]);
+    expect(tailscaleExecutable((file) => installed.has(file), candidates)).toBe(candidates[0]);
+  });
   const runner = (outputs: Record<string, string | Error>) => async (args: string[]) => { const value = outputs[args.join(' ')]; if (value instanceof Error) throw value; if (value === undefined) throw new Error('unexpected ' + args.join(' ')); return value; };
   it('reports not installed, stopped, serving and funnel', async () => {
     expect(await tailscaleState(runner({ 'status --json': Object.assign(new Error('spawn tailscale ENOENT'), { code: 'ENOENT' }) }), 47821)).toMatchObject({ installed: false });
