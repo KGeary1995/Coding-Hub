@@ -47,11 +47,17 @@ console.log('MODEL_OVERRIDE:' + (modelIndex >= 0 ? process.argv[modelIndex + 1] 
 const size = () => console.log(`SIZE:${process.stdout.columns}x${process.stdout.rows}`);
 size();
 process.stdout.on('resize', size);
-// On Windows Node only emits 'resize' while stdin is in raw mode; poll the console size instead.
-if (process.platform === 'win32' && process.stdout.isTTY) {
-  let last = `${process.stdout.columns}x${process.stdout.rows}`;
-  setInterval(() => { const [columns, rows] = process.stdout.getWindowSize(); const value = `${columns}x${rows}`; if (value !== last) { last = value; console.log(`SIZE:${value}`); } }, 200);
-}
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', (value) => { if (value.trim() === 'fail-launch') { process.stdout.write('\x1b[?1049hError: fixture invalid model\x1b[?1049l\n'); process.exit(1); } if (value.trim() === 'spawn-child') { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); console.log('CHILD:' + child.pid); return; } if (loginProvider && value.trim() === 'complete-login') { const directory = loginProvider === 'claude' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME; fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'fixture-authenticated'), 'fixture-only'); console.log('LOGIN COMPLETE'); process.exit(0); } console.log(`ECHO:${value.trim()}`); if (value.trim()) reportUsage(); });
+const handleLine = (value) => { if (value.trim() === 'fail-launch') { process.stdout.write('\x1b[?1049hError: fixture invalid model\x1b[?1049l\n'); process.exit(1); } if (value.trim() === 'spawn-child') { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); console.log('CHILD:' + child.pid); return; } if (loginProvider && value.trim() === 'complete-login') { const directory = loginProvider === 'claude' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME; fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'fixture-authenticated'), 'fixture-only'); console.log('LOGIN COMPLETE'); process.exit(0); } console.log(`ECHO:${value.trim()}`); if (value.trim()) reportUsage(); };
+if (process.platform === 'win32' && process.stdin.isTTY) {
+  // Like the real CLIs, read raw input: on Windows Node only reports console resizes in raw mode.
+  process.stdin.setRawMode(true); let pending = ''; let afterReturn = false;
+  process.stdin.on('data', (chunk) => {
+    for (const character of chunk) {
+      if (character === '\n' && afterReturn) { afterReturn = false; continue; }
+      afterReturn = character === '\r';
+      if (character === '\r' || character === '\n') { const line = pending; pending = ''; handleLine(line + '\n'); } else pending += character;
+    }
+  });
+} else process.stdin.on('data', handleLine);
 process.on('SIGTERM', () => { process.stdout.write('FINAL:fixture shutdown\n'); setTimeout(() => process.exit(0), 100); });
