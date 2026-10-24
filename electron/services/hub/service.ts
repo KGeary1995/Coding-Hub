@@ -49,7 +49,7 @@ export class HubService {
     this.rules = new RulesService(root);
     this.memory = new MemoryService(path.join(root, 'memory')); this.drive = new DriveMirror(this.memory, () => this.preferences());
     this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules, () => this.telemetry?.list() ?? []);
-    this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } this.devices.sync(); }, 30000);
+    this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } try { this.devices.sync(); } catch { /* Reported in Settings; the next tick retries. */ } }, 30000);
   }
   preferences(): HubPreferences {
     const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, prices: [] };
@@ -69,7 +69,7 @@ export class HubService {
       case 'memory-install': this.memory.install(request.directory, request.project, path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
-      case 'usage': return [...this.telemetry?.list() ?? [], ...this.devices.otherUsage()];
+      case 'usage': { const local = this.telemetry?.list() ?? []; const runs = new Set(local.map((record) => record.runId)); return [...local, ...this.devices.otherUsage().filter((record) => !runs.has(record.runId))]; }
       case 'device-sync-status': return this.devices.status();
       case 'device-sync-now': return this.devices.sync();
       case 'device-sync-resolve': return this.devices.resolve(request.document, request.keep);
