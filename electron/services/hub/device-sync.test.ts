@@ -106,6 +106,22 @@ describe('device sync', () => {
     fs.rmSync(path.join(a.root, 'device-sync.json')); expect(a.sync.sync()).toMatchObject({ error: null });
   });
 
+  it('keeps templates when sync moves to a different Drive folder, and publishes them there', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const item = template('Web app');
+    save(a.root, 'project-templates.json', [item]); a.sync.sync();
+    const moved = temporary(); a.preferences = { ...a.preferences, driveDirectory: moved }; a.sync.sync();
+    expect(templates(a.root).map((entry) => entry.id)).toEqual([item.id]);
+    expect(fs.existsSync(path.join(moved, SYNC_FOLDER, 'templates', item.id + '.json'))).toBe(true);
+  });
+
+  it('reports unreadable preferences instead of throwing, and lists a run seen twice only once', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop', [record('same-run')]); const c = computer(drive, 'restored', [record('same-run')]);
+    b.sync.sync(); c.sync.sync(); a.sync.sync();
+    expect(a.sync.otherUsage().map((item) => item.runId)).toEqual(['same-run']);
+    const broken = new DeviceSync(a.root, () => { throw new Error('preferences.json could not be read.'); }, () => {}, a.rules, () => []);
+    expect(() => broken.sync()).not.toThrow(); expect(broken.sync().error).toMatch(/could not be read/); expect(broken.otherUsage()).toEqual([]);
+  });
+
   it('merges templates as a set and passes deletions on', () => {
     const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop');
     const first = template('Web app'); const second = template('CLI');

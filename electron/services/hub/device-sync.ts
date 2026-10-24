@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { DeviceSyncStatus, HubPreferences, SyncedComputer, SyncedDocument, UsageRecord } from '../../../shared/hub';
+import { DEFAULT_PREFERENCES, type DeviceSyncStatus, type HubPreferences, type SyncedComputer, type SyncedDocument, type UsageRecord } from '../../../shared/hub';
 import type { ProjectTemplate } from '../../../shared/productivity';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -44,12 +44,14 @@ type Held = z.infer<typeof settingsDocument> | z.infer<typeof rulesDocument>;
 const stateSchema = z.object({
   base: z.object({ settings: z.string().nullable(), rules: z.string().nullable() }).strict(),
   lineage: z.object({ settings: hashes, rules: hashes }).strict().default({ settings: [], rules: [] }),
+  /** The sync folder the template baseline belongs to; a different folder starts a new baseline instead of implying deletions. */
+  folder: z.string().max(4096).nullable().default(null),
   templates: z.array(z.uuid()).max(500), usage: z.string().nullable(), lastSync: z.iso.datetime().nullable(),
   pending: z.object({ settings: settingsDocument.optional(), rules: rulesDocument.optional() }).strict(),
   rulesFrom: z.object({ name: z.string().max(100), at: z.iso.datetime() }).strict().nullable(),
 }).strict();
 type State = z.infer<typeof stateSchema>;
-const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
+const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, folder: null, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
 const extend = (lineage: string[], hash: string) => [...lineage.filter((item) => item !== hash), hash].slice(-LINEAGE);
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -128,6 +130,7 @@ export class DeviceSync {
       // A shared file that cannot be read (half-synced, damaged) still counts as present: it is never taken as a deletion.
       try { const item = readJson(path.join(directory, name), templateSchema) as ProjectTemplate | null; if (item && item.id === id) remote.set(id, item); else unreadable++; } catch { unreadable++; }
     }
+    if (state.folder !== folder) { state.folder = folder; state.templates = []; }
     const known = new Set(state.templates); const localIds = new Set(local.map((item) => item.id));
     // Removed here since the last sync: remove it for every computer.
     for (const id of known) if (!localIds.has(id) && present.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); present.delete(id); remote.delete(id); }
@@ -160,7 +163,12 @@ export class DeviceSync {
   }
   private seen(machine: Machine, updatedAt: string) { if (machine.id !== this.machine.id) this.computers.set(machine.id, { id: machine.id, name: machine.name, updatedAt }); }
   /** Usage recorded on the other computers, labelled with each computer's name. */
-  otherUsage(): UsageRecord[] { return this.preferences().syncDevices ? [...this.remoteUsage.values()].flatMap((item) => item.records) : []; }
+  otherUsage(): UsageRecord[] {
+    try { if (!this.preferences().syncDevices) return []; } catch { return []; }
+    // A run can appear twice (for example a backup restored here republishes it under this computer's new identity): keep one.
+    const seen = new Set<string>();
+    return [...this.remoteUsage.values()].flatMap((item) => item.records).filter((record) => !seen.has(record.runId) && Boolean(seen.add(record.runId)));
+  }
   sync() {
     if (this.syncing) return this.status();
     let folder: string | null; try { folder = this.folder(); } catch (error) { this.error = (error as Error).message; return this.status(); }
@@ -193,7 +201,8 @@ export class DeviceSync {
     return this.status();
   }
   status(): DeviceSyncStatus {
-    const preferences = this.preferences(); let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
+    let preferences: HubPreferences; try { preferences = this.preferences(); } catch (error) { preferences = { ...DEFAULT_PREFERENCES, syncDevices: false }; this.error ??= (error as Error).message; }
+    let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
     let connected = false; try { connected = Boolean(preferences.syncDevices) && path.isAbsolute(preferences.driveDirectory) && fs.statSync(preferences.driveDirectory).isDirectory(); } catch { /* Offline. */ }
     const conflicts = (['settings', 'rules'] as const).flatMap((document) => { const held = state.pending[document]; return held ? [{ document, from: held.machine.name, at: held.updatedAt }] : []; });
     return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: this.error, computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
