@@ -385,7 +385,7 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .design-review p { color: var(--muted); font-size: 11px; line-height: 1.7; }
 .annotation-image { position: relative; width: min(100%, 700px); cursor: crosshair; }
 .annotation-image img { width: 100%; display: block; }
-.annotation-image > span { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: var(--tr-fg); color: var(--tr-fg-strong); padding: 3px 7px; border: 1px solid var(--tr-fg); font-size: 11px; }
+.annotation-image > span { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: var(--tr-fg); color: var(--tr-on-light); padding: 3px 7px; border: 1px solid var(--tr-fg); font-size: 11px; }
 .experiment-summary { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
 @media (max-width: 1180px) { .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
