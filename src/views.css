@@ -1,0 +1,38 @@
+/*
+ * Trace type scale and surfaces for the remaining views (docs/design/trace, "Not yet designed": Projects, History,
+ * Tasks, Verification, Design, Coaching, and the Agent setup areas). Loaded last. Every selector is wrapped in :where()
+ * so it adds no specificity: it replaces the old generic element styles, and the screens built in phases 3–5 keep their
+ * own class rules.
+ */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) { font: var(--tr-t-control); color: var(--tr-fg); }
+
+/* Page heading: title and one line of description; the eyebrow label above it goes. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel, .history-panel, .repository-panel:not(.tr-repo)) { max-width: 1200px; padding: 20px 4px 32px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .feature-panel-heading { margin-bottom: 8px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading > div, .design-heading > div) > .eyebrow { display: none; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) h1 { gap: 10px; font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) h1 svg { width: 20px; height: 20px; color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) p { max-width: 90ch; margin: 4px 0 0; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+
+/* Text */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h1) { font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h2) { font: 600 16px/22px var(--tr-font-ui); color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h3) { font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(p, li, dd, dt) { font-size: 14px; line-height: 20px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(small, .control-note, .muted, .hub-feedback) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(code, pre, kbd) { font: var(--tr-t-meta); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .eyebrow { font: 600 11px/14px var(--tr-font-mono); letter-spacing: .06em; color: var(--tr-fg-dim); }
+
+/* Controls */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .button { min-height: 30px; padding: 0 12px; border-radius: var(--tr-r-control); font: 600 14px/1 var(--tr-font-ui); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .quiet-button { font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-muted); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .quiet-button:hover { color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label, .hub-toolbar label, .hub-form label, .field-label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) { min-height: 32px; padding: 5px 9px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-term); color: var(--tr-fg); font: 400 14px/20px var(--tr-font-ui); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input, select, textarea):focus-visible { outline: var(--tr-focus); outline-offset: 1px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input, textarea)::placeholder { color: var(--tr-fg-faint); }
+
+/* Surfaces: bordered panels instead of raised cards. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form, .server-card, .memory-connection, .hub-preview, .usage-chart) { padding: 16px 18px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); box-shadow: none; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form) h2 { margin-bottom: 6px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .hub-toolbar { gap: 10px; margin: 12px 0; }

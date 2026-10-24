@@ -44,3 +44,9 @@ The Claude Design handoff in this folder (`README.md`, `design/`, `tokens.css`) 
 - **Changes:** the diff stays unified; the split view and Revert hunk (see above) are not built. The "last touched by" footer is left out because file edits are not attributed to channels.
 - **Agent setup:** status lines are live for Accounts (signed-in count) and Shared memory (automatic or off); the others describe what the area holds rather than counting it.
 
+## Remaining views and QA (phase 6)
+
+- **Remaining views** (Projects, History, Tasks, Verification, Design, Coaching, Help, Files and the Agent setup areas) take the Trace type scale and surfaces from one stylesheet (`src/views.css`): page headings drop the eyebrow label and use 24 px titles with one line of description, text and controls use the 13–16 px scale, and cards become bordered panels. Their layouts are otherwise unchanged; the handoff did not design them.
+- **Type scale:** the old 8–13 px sizes in `styles.css` and `workbench.css` are mapped to 11–14 px (8→11, 9 and 10→12, 11→13, 12 and 13→14), ending the phase 1 exception.
+- **Faint text:** `--tr-fg-faint` is `#7b8c87` instead of `#6f807b`, so faint labels reach 4.5:1 on the surface and hover colours (5.0 and 4.7) as well as on the background. `--tr-fg-off` stays as designed; it is used only for icons, borders and traces, which need 3:1.
+- **Removed CSS:** rules for elements the redesign removed (the sidebar, old tile header, run toolbar and footer, workspace header and summary strip) are deleted. Rendered screens are unchanged by the removal (pixel comparison of every view).

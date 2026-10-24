@@ -17,6 +17,7 @@ import './workbench.css';
 import './shell.css';
 import './tile.css';
 import './screens.css';
+import './views.css';
 
 // Terminals measure their cell size when created, so load the terminal font first. The files are local.
 const terminalFont = ['400 13px "IBM Plex Mono"', '600 13px "IBM Plex Mono"'].map((font) => document.fonts.load(font));

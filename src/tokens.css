@@ -22,7 +22,7 @@
   --tr-fg: #d8e3df;
   --tr-fg-muted: #b6c4c0;
   --tr-fg-dim: #879692;
-  --tr-fg-faint: #6f807b;      /* ≥11px mono labels only */
+  --tr-fg-faint: #7b8c87;      /* ≥11px mono labels only; lighter than the handoff's #6f807b so it reaches 4.5:1 on surface and hover */
   --tr-fg-off: #4f625d;        /* idle trace, drag handle, ctx bar fill */
   --tr-on-light: #0b1010;      /* text on solid chips / primary buttons */
 
