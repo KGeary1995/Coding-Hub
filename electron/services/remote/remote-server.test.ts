@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { RemoteServer, type RemoteHost } from './remote-server';
-import { tailscaleExecutable, tailscaleState } from './tailscale';
+import { serveFailure, tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -215,6 +215,13 @@ describe('phone alerts', () => {
 });
 
 describe('tailscale state', () => {
+  it('explains a failed serve with Tailscale\'s own words, and returns its approval link', () => {
+    const waiting = serveFailure(Object.assign(new Error('Command failed'), { timedOut: true, output: 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nAbc123' }));
+    expect(waiting.url).toBe('https://login.tailscale.com/f/serve?node=nAbc123'); expect(waiting.message).toMatch(/allow HTTPS/);
+    expect(serveFailure(Object.assign(new Error('Command failed'), { timedOut: true, output: '' }))).toMatchObject({ url: null, message: expect.stringMatching(/HTTPS Certificates/) });
+    expect(serveFailure(Object.assign(new Error('Access denied: serve config denied'), { output: 'Access denied: serve config denied' })).message).toMatch(/administrator/);
+    expect(serveFailure(Object.assign(new Error('some other problem'), { output: 'see https://evil.example/x' }))).toEqual({ url: null, message: 'Tailscale could not set up HTTPS: some other problem' });
+  });
   it('finds a Tailscale app installed after Trace started', () => {
     const installed = new Set<string>(); const candidates = ['/Applications/Tailscale.app/Contents/MacOS/Tailscale', 'tailscale'];
     expect(tailscaleExecutable((file) => installed.has(file), candidates)).toBe('tailscale');

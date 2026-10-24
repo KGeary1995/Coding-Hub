@@ -11,11 +11,29 @@ const CANDIDATES = process.platform === 'win32'
 export const tailscaleExecutable = (exists: (file: string) => boolean = fs.existsSync, candidates: (string | undefined)[] = CANDIDATES) =>
   candidates.find((candidate): candidate is string => Boolean(candidate) && (!candidate!.includes('/') && !candidate!.includes('\\') || exists(candidate!))) ?? 'tailscale';
 
+/** A failed CLI call: Tailscale's own words (it often writes them to stdout), and whether it was stopped for taking too long. */
+export interface TailscaleError extends Error { code?: string; output?: string; timedOut?: boolean }
+
 /** Runs the tailscale CLI by fixed arguments only; nothing a phone or page sends reaches its command line. */
 export function tailscaleRunner(): RunTailscale {
   return (args) => new Promise((resolve, reject) => execFile(tailscaleExecutable(), args, { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-    if (error) reject(Object.assign(new Error(String(stderr || error.message).trim().split('\n')[0].slice(0, 300)), { code: (error as NodeJS.ErrnoException).code })); else resolve(stdout);
+    if (!error) { resolve(stdout); return; }
+    const output = `${stderr}\n${stdout}`.trim().slice(0, 4000);
+    const line = output.split('\n').map((text) => text.trim()).find(Boolean) ?? error.message.split('\n')[0];
+    reject(Object.assign(new Error(line.slice(0, 300)), { code: (error as NodeJS.ErrnoException).code, output, timedOut: Boolean(error.killed) }));
   }));
+}
+
+/**
+ * Explains a failed `tailscale serve`. When Serve is not yet allowed for the tailnet, Tailscale prints a link to
+ * approve it and waits; that link is returned so it can be opened, and only a login.tailscale.com link is accepted.
+ */
+export function serveFailure(error: TailscaleError): { message: string; url: string | null } {
+  const url = /https:\/\/login\.tailscale\.com\/[^\s"'<>]+/.exec(error.output ?? '')?.[0] ?? null;
+  if (url) return { url, message: 'Tailscale needs you to allow HTTPS (Serve) for your tailnet. Approve it on the page that just opened (or open ' + url + '), then click Set up Tailscale HTTPS again.' };
+  if (error.timedOut) return { url: null, message: 'Tailscale did not finish setting up HTTPS. In the Tailscale admin console (login.tailscale.com/admin/dns), turn on MagicDNS and HTTPS Certificates, then try again.' };
+  if (/access (is )?denied|permission denied|not permitted/i.test(error.message)) return { url: null, message: `Tailscale refused: ${error.message}. On Windows, run Trace once as administrator to set up HTTPS, or make your user the Tailscale operator.` };
+  return { url: null, message: `Tailscale could not set up HTTPS: ${error.message}` };
 }
 
 const proxies = (value: unknown, port: number) => typeof value === 'string' && new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${port}/?$`).test(value);

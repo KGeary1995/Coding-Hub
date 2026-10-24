@@ -41,7 +41,7 @@ import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
-import { serveRemote, tailscaleRunner, tailscaleState } from './services/remote/tailscale';
+import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
@@ -329,7 +329,10 @@ else app.whenReady().then(() => {
     if (request.action === 'remote-serve') {
       const confirmed = (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
         message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;
-      if (confirmed) { try { await serveRemote(runTailscale, phone.port); } catch (error) { throw new HubError('TAILSCALE_SERVE', `Tailscale could not set up HTTPS: ${(error as Error).message}. HTTPS certificates must be enabled for your tailnet in the Tailscale admin console.`); } }
+      if (confirmed) {
+        try { await serveRemote(runTailscale, phone.port); }
+        catch (error) { const failure = serveFailure(error as TailscaleError); if (failure.url) void shell.openExternal(failure.url); throw new HubError('TAILSCALE_SERVE', failure.message); }
+      }
     }
     await refreshTailscale().catch(() => {});
     return request.action === 'remote-pair' ? phone.pair() : phone.status();
