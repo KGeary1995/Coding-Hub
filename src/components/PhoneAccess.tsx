@@ -26,6 +26,14 @@ export function PhoneAccessCard() {
     const poll = setInterval(() => { void workbench<RemoteStatus>({ action: 'remote-status' }).then(setStatus).catch(() => {}); }, 3000);
     return () => { clearInterval(tick); clearInterval(poll); };
   }, [status?.pairing?.code]);
+  // While Tailscale setup is unfinished, keep checking (and on return to the window) so installing or signing in moves to the next step.
+  const settingUp = !!status?.enabled && !(status.tailscale.running && status.tailscale.serving);
+  useEffect(() => {
+    if (!settingUp) return;
+    const refresh = () => { void workbench<RemoteStatus>({ action: 'remote-status' }).then(setStatus).catch(() => {}); };
+    const poll = setInterval(refresh, 5000); window.addEventListener('focus', refresh);
+    return () => { clearInterval(poll); window.removeEventListener('focus', refresh); };
+  }, [settingUp]);
   if (!status) return error ? <p role="alert" className="error-message">{error}</p> : null;
   const { tailscale } = status; const ready = status.listening && tailscale.serving && !tailscale.funnel;
   return <article className="storage-card phone-access" aria-labelledby="phone-access-title">
