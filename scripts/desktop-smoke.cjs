@@ -414,6 +414,15 @@ const { _electron } = require('playwright-core');
       const windows = app ? app.windows() : [];
       for (const window of windows) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.account-terminal, .xterm-rows, [role="alert"], .session-error')].map((node) => `[${node.className || node.getAttribute('role')}] ${node.textContent.trim().slice(-1500)}`).join('\n')));
     } catch { /* The window may already be gone. */ }
+    // Compare how Electron-as-Node behaves inside a pseudoconsole with and without the launch bootstrap.
+    try {
+      const probe = path.join(root, 'pty-probe.cjs'); await writeFile(probe, 'process.stdout.write("PROBE-READY " + (process.env.ELECTRON_RUN_AS_NODE ?? "cleared") + "\\n"); setTimeout(() => process.exit(0), 300);');
+      console.error('PTY probe:', JSON.stringify(await app.evaluate(async (_electron, [file, appRoot]) => {
+        const pty = process.getBuiltinModule('node:module').createRequire(appRoot + '/package.json')('node-pty');
+        const run = (args) => new Promise((resolve) => { let out = ''; const term = pty.spawn(process.execPath, args, { cols: 80, rows: 24, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); term.onData((data) => { out += data; }); const timer = setTimeout(() => { try { term.kill(); } catch { /* Gone. */ } resolve({ out: out.slice(-400), timedOut: true }); }, 8000); term.onExit((event) => { clearTimeout(timer); resolve({ out: out.slice(-400), exitCode: event.exitCode }); }); });
+        return { plain: await run([file]), bootstrap: await run(['--import=data:text/javascript,delete%20process.env.ELECTRON_RUN_AS_NODE', file]) };
+      }, [probe, path.resolve(__dirname, '..')])));
+    } catch (probeError) { console.error('PTY probe failed:', probeError); }
     throw error;
   } finally {
     await app?.close().catch(() => {});
