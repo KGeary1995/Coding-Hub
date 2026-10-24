@@ -139,8 +139,19 @@ function renderChannel() {
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   // A restarted channel is a new process: its screen starts afresh, as on the desktop.
-  if (channel.runId && channel.runId !== run) { run = channel.runId; terminal?.reset(); }
-  if (terminal && channel.cols && channel.rows && (terminal.cols !== channel.cols || terminal.rows !== channel.rows)) { terminal.options.fontSize = fitFont(channel.cols); terminal.resize(channel.cols, channel.rows); }
+  if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); }
+  if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);
+}
+
+/**
+ * Applies a change to the terminal once everything written before it has been drawn (xterm draws writes later), and
+ * before anything written after: a resize or reset keeps its place among the output, as the CLI produced it.
+ */
+function inOrder(change: (screen: Terminal) => void) {
+  const screen = terminal; screen?.write('', () => { if (terminal === screen) change(screen); });
+}
+function resizeTo(cols: number, rows: number) {
+  inOrder((screen) => { if (screen.cols !== cols || screen.rows !== rows) { screen.options.fontSize = fitFont(cols); screen.resize(cols, rows); } });
 }
 
 /** Sends input to the channel being shown; true once the computer has taken it. */
@@ -158,12 +169,11 @@ function onEvent(event: StreamEvent) {
   if (event.data.sessionId !== current || !terminal) return;
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
-    if (event.data.runId === run) { terminal.options.fontSize = fitFont(event.data.cols); terminal.resize(event.data.cols, event.data.rows); }
+    if (event.data.runId === run) resizeTo(event.data.cols, event.data.rows);
     return;
   }
   if (event.type === 'replay') {
-    run = event.data.runId; terminal.reset();
-    if (terminal.cols !== event.data.cols || terminal.rows !== event.data.rows) { terminal.options.fontSize = fitFont(event.data.cols); terminal.resize(event.data.cols, event.data.rows); }
+    run = event.data.runId; inOrder((screen) => screen.reset()); resizeTo(event.data.cols, event.data.rows);
     terminal.write(event.data.data); return;
   }
   if (event.data.runId === run) terminal.write(event.data.data);
