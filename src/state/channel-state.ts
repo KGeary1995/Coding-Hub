@@ -64,6 +64,12 @@ export function channelAlerts(sessions: Session[], records: UsageRecord[]): Chan
   return alerts.sort((a, b) => order[a.state] - order[b.state] || a.channel - b.channel);
 }
 
+/**
+ * Input that was not read from cache. Codex counts cached input inside its input total; Claude reports cache reads
+ * separately. Same normalisation as the cost estimate (electron/services/hub/telemetry.ts, usageCost).
+ */
+export const freshInput = (record: UsageRecord) => record.engine === 'codex' ? Math.max(0, record.input - record.cached) : record.input;
+
 /** Today's reported input + output tokens (cache excluded) and cost, by local date. Cost is null when nothing is priced. */
 export function todayTotals(records: UsageRecord[], now = new Date()) {
   const day = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -71,7 +77,7 @@ export function todayTotals(records: UsageRecord[], now = new Date()) {
   for (const record of records) {
     const started = new Date(record.timestamp);
     if (Number.isNaN(started.getTime()) || day(started) !== today) continue;
-    tokens += record.input + record.output;
+    tokens += freshInput(record) + record.output;
     if (record.cost !== null) cost = (cost ?? 0) + record.cost;
   }
   return { tokens, cost };
