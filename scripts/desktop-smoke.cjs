@@ -408,6 +408,13 @@ const { _electron } = require('playwright-core');
     assert.equal(await readFile(blockedStorage, 'utf8'), 'Preserve this existing file.');
     assert.deepEqual(errors, []);
     console.log('PASS: desktop/preload, real PTYs, input/resize/retention/cleanup, SQLite restoration/history, unavailable storage, native file tree/preview/refresh, path rejection, staged/unstaged/untracked/binary Git review, independent repositories, an unchanged Git index, live structured usage/cost, MCP toggles, skill inspection, local handoffs, Drive folder sync, restored integration state, searchable AI help, shared rules for both engines, launch blocking for unapplied rules, update bridge/source edition status, isolated worktrees, recovery settings, project checks, memory revisions/search, usage provenance, accessibility controls, account login without a workspace, private login output excluded from history, typed folder selection, and new local project setup.');
+  } catch (error) {
+    // Print what the visible terminals and alerts said, so a CI failure shows the CLI's own error.
+    try {
+      const windows = app ? app.windows() : [];
+      for (const window of windows) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.account-terminal, .xterm-rows, [role="alert"], .session-error')].map((node) => `[${node.className || node.getAttribute('role')}] ${node.textContent.trim().slice(-1500)}`).join('\n')));
+    } catch { /* The window may already be gone. */ }
+    throw error;
   } finally {
     await app?.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
