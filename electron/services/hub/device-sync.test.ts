@@ -122,6 +122,21 @@ describe('device sync', () => {
     expect(() => broken.sync()).not.toThrow(); expect(broken.sync().error).toMatch(/could not be read/); expect(broken.otherUsage()).toEqual([]);
   });
 
+  it('keeps working with a damaged identity file: sync pauses and says why, and the file is left alone', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); fs.writeFileSync(path.join(a.root, 'machine.json'), '{broken');
+    let sync!: DeviceSync; expect(() => { sync = new DeviceSync(a.root, () => a.preferences, () => {}, a.rules, () => []); }).not.toThrow();
+    expect(sync.sync().error).toMatch(/machine\.json/); expect(fs.readFileSync(path.join(a.root, 'machine.json'), 'utf8')).toBe('{broken');
+    expect(fs.existsSync(path.join(drive, SYNC_FOLDER, 'settings.json'))).toBe(false);
+  });
+
+  it('drops another computer’s Claude account profile from a template it imports', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop'); const item = template('Profiles');
+    (item.workspace.sessions[0].config as { accountProfileId?: string }).accountProfileId = randomUUID();
+    save(a.root, 'project-templates.json', [item]); a.sync.sync(); b.sync.sync();
+    expect((templates(b.root)[0].workspace.sessions[0].config as { accountProfileId?: string }).accountProfileId).toBeUndefined();
+    expect((templates(a.root)[0].workspace.sessions[0].config as { accountProfileId?: string }).accountProfileId).toBeDefined();
+  });
+
   it('merges templates as a set and passes deletions on', () => {
     const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop');
     const first = template('Web app'); const second = template('CLI');
