@@ -1,5 +1,5 @@
 if (process.argv.includes('--version')) { console.log('2.1.296 (Coding Hub test fixture)'); process.exit(0); }
-if (process.argv.includes('--help')) { console.log('--model <model> --config <value> --session-id <uuid> --resume <uuid>\nresume Resume conversation\nauth Manage authentication\nlogin Sign in\nstatus Show authentication status'); process.exit(0); }
+if (process.argv.includes('--help')) { console.log('--model <model> --config <value> --session-id <uuid> --resume <uuid> --settings <file-or-json>\nresume Resume conversation\nauth Manage authentication\nlogin Sign in\nstatus Show authentication status'); process.exit(0); }
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -49,7 +49,15 @@ size();
 process.stdout.on('resize', size);
 process.stdin.setEncoding('utf8');
 // Terminal writes are asynchronous on Windows: exit only after the final message is written.
-const handleLine = (value) => { if (value.trim() === 'fail-launch') { process.stdout.write('\x1b[?1049hError: fixture invalid model\x1b[?1049l\n', () => process.exit(1)); return; } if (value.trim() === 'spawn-child') { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); console.log('CHILD:' + child.pid); return; } if (loginProvider && value.trim() === 'complete-login') { const directory = loginProvider === 'claude' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME; fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'fixture-authenticated'), 'fixture-only'); process.stdout.write('LOGIN COMPLETE\n', () => process.exit(0)); return; } console.log(`ECHO:${value.trim()}`); if (value.trim()) reportUsage(); };
+// Raise an approval request the way each real CLI does: Claude through its HTTP Notification hook, Codex as an OSC 9 notification.
+function requestApproval() {
+  const settingsIndex = process.argv.indexOf('--settings');
+  const hook = settingsIndex >= 0 ? JSON.parse(process.argv[settingsIndex + 1]).hooks?.Notification?.[0]?.hooks?.[0] : null;
+  if (hook?.type === 'http') { void fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }) }).then(() => console.log('APPROVAL:requested')).catch(() => console.log('APPROVAL:hook-failed')); return; }
+  if (process.argv.includes('tui.notification_method="osc9"')) { process.stdout.write('Allow command? [y/n]\x1b]9;Approval requested: npm test\x07\n'); return; }
+  console.log('APPROVAL:unsupported');
+}
+const handleLine = (value) => { if (value.trim() === 'need-approval') { requestApproval(); return; } if (value.trim() === 'fail-launch') { process.stdout.write('\x1b[?1049hError: fixture invalid model\x1b[?1049l\n', () => process.exit(1)); return; } if (value.trim() === 'spawn-child') { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); console.log('CHILD:' + child.pid); return; } if (loginProvider && value.trim() === 'complete-login') { const directory = loginProvider === 'claude' ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME; fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'fixture-authenticated'), 'fixture-only'); process.stdout.write('LOGIN COMPLETE\n', () => process.exit(0)); return; } console.log(`ECHO:${value.trim()}`); if (value.trim()) reportUsage(); };
 if (process.platform === 'win32' && process.stdin.isTTY) {
   // Like the real CLIs, read raw input: on Windows Node only reports console resizes in raw mode.
   process.stdin.setRawMode(true); let pending = ''; let afterReturn = false;

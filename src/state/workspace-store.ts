@@ -64,6 +64,8 @@ interface WorkspaceState {
   markStarting: (id: string) => void;
   setSessionError: (id: string, message: string, launchFailure?: boolean) => void;
   applyEvent: (event: SessionEvent) => void;
+  /** The person answered: input sent at `sentAt` reached the CLI. A request that arrived after it stays. */
+  clearAttention: (id: string, sentAt?: string) => void;
   setRootDirectory: (directory: string) => void;
   setView: (view: NavigationView) => void;
   restoreRun: (run: SessionHistoryRun) => boolean;
@@ -104,11 +106,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setDiscovery: (engines, discoveryError = null) => set({ engines, discovering: false, discoveryError }),
   markStarting: (id) => set((state) => ({ sessions: state.sessions.map((session) => session.id === id ? { ...session, status: 'starting', runId: null, pid: null, runningCwd: null, error: null, exitCode: null, endedAt: null } : session) })),
   setSessionError: (id, error, launchFailure = false) => set((state) => ({ sessions: state.sessions.map((session) => session.id === id ? { ...session, error, ...(launchFailure ? { status: 'error' as const, pid: null } : {}) } : session) })),
+  clearAttention: (id, sentAt) => set((state) => {
+    const answered = (session: Session) => session.id === id && session.attention && (!sentAt || session.attention.at <= sentAt);
+    return state.sessions.some(answered) ? { sessions: state.sessions.map((session) => answered(session) ? { ...session, attention: null } : session) } : state;
+  }),
   applyEvent: (event) => set((state) => event.type === 'data' ? state : ({ sessions: state.sessions.map((session) => {
     if (session.id !== event.sessionId) return session;
-    if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null } : session;
+    if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null } : session;
     if (event.runId !== session.runId) return session;
-    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, error: event.diagnostic ?? session.error, exitCode: event.exitCode, endedAt: new Date().toISOString() };
+    if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: new Date().toISOString() } } : session;
+    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, error: event.diagnostic ?? session.error, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
     if (event.type === 'error') return { ...session, error: event.message };
     return session;
   }) })),

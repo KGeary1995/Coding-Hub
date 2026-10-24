@@ -10,6 +10,7 @@ import type { RunningSession, SessionEvent, EngineInfo } from '../../../shared/i
 import { resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
+import { OscNotifications } from './attention';
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -24,6 +25,8 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
 type Spawn = (file: string, args: string[], options: IPtyForkOptions) => IPty;
 interface ManagedRun {
   owner: number;
+  /** Codex reports approval requests as OSC 9 notifications in its output. */
+  osc?: OscNotifications;
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -51,6 +54,14 @@ export class PtyManager {
     this.spawn = dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
     this.environment = dependencies.environment ?? hostEnvironment;
+  }
+
+  /** Tells the owning window that a run is waiting for the person, after the output that led to it. */
+  notifyAttention(runId: string, message: string) {
+    const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
+    if (!run || run.finished) return;
+    this.flush(run);
+    this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message });
   }
 
   private send(owner: number, event: SessionEvent) {
@@ -104,7 +115,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run);
       pty.onData((data) => {
         if (run.finished) return;
@@ -112,6 +123,7 @@ export class PtyManager {
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
+        if (run.osc) for (const message of run.osc.push(data)) this.notifyAttention(run.session.runId, message);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       this.dependencies.onStarted?.(session, request.config, owner);

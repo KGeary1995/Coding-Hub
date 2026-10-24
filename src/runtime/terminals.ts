@@ -6,6 +6,7 @@ import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
+import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 
 interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void> }
 const terminals = new Map<string, TerminalEntry>();
@@ -63,7 +64,7 @@ export function writeTerminal(id: string, data: string): Promise<boolean> {
   const run = entry?.run;
   if (!entry || !run || !window.codingHub) return Promise.resolve(false);
   // Serialize complete input events so typing cannot interleave with a large paste.
-  let succeeded = true;
+  let succeeded = true; const sentAt = new Date().toISOString();
   entry.inputQueue = entry.inputQueue.then(async () => {
     try {
       for (let offset = 0; offset < data.length;) {
@@ -77,7 +78,11 @@ export function writeTerminal(id: string, data: string): Promise<boolean> {
       }
     } catch { succeeded = false; reportInputError(id, 'The native terminal connection was lost.'); }
   });
-  return entry.inputQueue.then(() => succeeded);
+  return entry.inputQueue.then(() => {
+    // Any real keystroke means the person has answered whatever the CLI was waiting for.
+    if (succeeded && isPersonInput(data)) useWorkspaceStore.getState().clearAttention(id, sentAt);
+    return succeeded;
+  });
 }
 
 export function routeTerminalEvent(event: SessionEvent) {
@@ -86,6 +91,7 @@ export function routeTerminalEvent(event: SessionEvent) {
   const entry = getTerminal(session);
   if (event.type === 'started') {
     entry.terminal.reset();
+    forgetActivity(event.sessionId);
     entry.run = { sessionId: event.sessionId, runId: event.runId };
     entry.terminal.options.disableStdin = false;
     entry.terminal.options.cursorBlink = true;
@@ -93,6 +99,7 @@ export function routeTerminalEvent(event: SessionEvent) {
     try { entry.fit.fit(); } catch { /* Not attached to the page. */ }
     sendSize(event.sessionId, entry, entry.terminal.cols, entry.terminal.rows);
   } else if (event.type === 'data') {
+    recordActivity(event.sessionId, event.data.length);
     entry.terminal.write(event.data);
   } else if (event.type === 'exit') {
     entry.run = null;
@@ -111,5 +118,5 @@ export function terminalDimensions(id: string) {
 export function focusTerminal(id: string) { terminals.get(id)?.terminal.focus(); }
 export function releaseRemovedTerminals(ids: string[]) {
   const retained = new Set(ids);
-  for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); }
+  for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); }
 }

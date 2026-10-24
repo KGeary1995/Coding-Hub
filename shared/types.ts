@@ -46,6 +46,8 @@ export interface Session {
   endedAt: string | null;
   exitCode: number | null;
   logFile: string | null;
+  /** Set while the CLI waits for the person (for example a permission prompt); cleared by their next input. Never saved. */
+  attention?: { message: string; at: string } | null;
 }
 
 export interface GridTile {

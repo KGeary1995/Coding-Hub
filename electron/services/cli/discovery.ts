@@ -136,6 +136,7 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
     info.supportsSessionId = advertisesFlag(help, '--session-id');
     info.supportsAppendSystemPrompt = advertisesFlag(help, '--append-system-prompt');
     info.supportsMcpConfig = advertisesFlag(help, '--mcp-config');
+    info.supportsSettings = advertisesFlag(help, '--settings');
     info.authentication = await checkAuthentication(engine, executable, help, env);
     info.available = true;
     return { info, executable };

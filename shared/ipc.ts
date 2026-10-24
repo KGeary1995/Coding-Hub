@@ -23,6 +23,7 @@ export interface EngineInfo {
   supportsSessionId?: boolean;
   supportsAppendSystemPrompt?: boolean;
   supportsMcpConfig?: boolean;
+  supportsSettings?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;
@@ -40,7 +41,9 @@ export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
   | ({ type: 'data'; data: string } & RunReference)
   | ({ type: 'exit'; diagnostic?: string; exitCode: number; signal?: number } & RunReference)
-  | ({ type: 'error'; message: string } & RunReference);
+  | ({ type: 'error'; message: string } & RunReference)
+  /** The CLI is waiting for the person (for example a permission prompt). Cleared by their next input. */
+  | ({ type: 'attention'; message: string } & RunReference);
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {
