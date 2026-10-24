@@ -102,7 +102,7 @@ export function CommandMenu() {
     for (const hit of hits) {
       const memory = hit.kind !== 'file';
       all.push({ id: hit.id, group: memory ? 'memory' : 'files', label: hit.title, glyph: memory ? '#' : '/', meta: memory ? hit.kind : hit.location.replace(rootDirectory ?? '\0', '').replace(/^[\\/]/, ''), metaClass: hit.kind,
-        run: () => { if (hit.snapshotId) useWorkspaceStore.setState({ designSnapshotId: hit.snapshotId }); setView(hit.view); } });
+        run: () => { if (hit.snapshotId) useWorkspaceStore.setState({ designSnapshotId: hit.snapshotId }); if (hit.kind === 'file') useWorkspaceStore.setState({ openFilePath: hit.location }); setView(hit.view); } });
     }
     // Actions and channels match on their label; search hits already matched their content.
     return all.filter((item) => (scope === 'all' || scope === item.group) && (item.group === 'files' || item.group === 'memory' || !text || matchRange(item.label, text)));

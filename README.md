@@ -133,7 +133,7 @@ The installed program, its data folders (`~/.coding-hub`) and its update channel
 - **Command menu (Ctrl ⇧ P):** actions, live channels, project files and memory notes in one list. Start with `>` for actions, `@` for channels, `/` for files or `#` for memory, or press Tab to switch scope. ↑↓ move, Enter runs, Esc closes. File and memory results come from the same local search as Workflow center and wait for a pause in typing.
 - **Notices:** a channel that needs approval, or has failed, raises a notice bottom-right with **Answer** or **Retry** / **Open log**. It stays until the channel moves on or you dismiss it.
 - **Changes:** the changed files on the left, the diff in the middle and a **Delivery** stepper on the right: stage, commit, push and pull request. Each step still asks for native confirmation; there is no force push or discard.
-- **Usage:** pick a window (Today, 7, 14 or 30 days) and an engine. The strip totals input, output (with reasoning shown as part of it), cache reads, sessions and estimated cost, with the change from the previous window. The chart stacks each day's tokens by engine (cache excluded); the table lists each session with its context peak.
+- **Usage:** pick a window (Today, 7, 14 or 30 days) and an engine. The strip totals input, output (with reasoning shown as part of it), cache reads, sessions and estimated cost, with the change from the previous window. The chart stacks each day's tokens by engine (cache excluded); the table lists each session with its context at the last report.
 - **Agent setup:** Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings and Workflow center share one screen with a status line for each. Accounts lists Claude Code, Codex and GitHub as rows.
 
 ## Channel tiles

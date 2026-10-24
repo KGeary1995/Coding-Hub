@@ -23,3 +23,13 @@ export function matchRange(label: string, text: string): [number, number] | null
 
 /** Whether local file and memory search should run: it reads files, so it waits for a few characters. */
 export const searchesFiles = (scope: CommandScope, text: string) => (scope === 'files' || scope === 'memory') ? text.length >= 2 : scope === 'all' && text.length >= 3;
+
+/** A search hit's absolute file path as the repository-relative, slash-separated path Files uses; null when outside it. */
+export function repositoryRelative(file: string, directory: string): string | null {
+  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
+  const target = normalize(file); const root = normalize(directory);
+  // Windows paths compare without case; POSIX paths keep it.
+  const same = /^[a-z]:\//i.test(root) ? (a: string, b: string) => a.toLowerCase() === b.toLowerCase() : (a: string, b: string) => a === b;
+  if (!same(target.slice(0, root.length), root) || target[root.length] !== '/') return null;
+  return target.slice(root.length + 1) || null;
+}

@@ -2,11 +2,21 @@ import { useEffect, useState } from 'react';
 import { FileCode2, FileBox, FileSearch } from 'lucide-react';
 import type { FilePreview, RepositoryContext } from '../../shared/types';
 import { FileTree } from './FileTree';
+import { useWorkspaceStore } from '../state/workspace-store';
+import { repositoryRelative } from '../runtime/command-search';
 
 const MAX_SOURCE_LINES = 4000;
 
 export function FileBrowser({ repository, revision }: { repository: RepositoryContext; revision: number }) {
   const [selected, setSelected] = useState<string | null>(null);
+  // A file picked in the command menu opens here, whether Files was already open or not.
+  const openFilePath = useWorkspaceStore((state) => state.openFilePath);
+  useEffect(() => {
+    if (!openFilePath) return;
+    const relative = repositoryRelative(openFilePath, repository.directory);
+    if (relative) setSelected(relative);
+    useWorkspaceStore.setState({ openFilePath: null });
+  }, [openFilePath, repository.directory]);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {

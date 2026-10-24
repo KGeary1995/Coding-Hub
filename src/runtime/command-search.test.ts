@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchRange, parseQuery, searchesFiles } from './command-search';
+import { matchRange, parseQuery, repositoryRelative, searchesFiles } from './command-search';
 
 describe('command menu search', () => {
   it('picks a scope from a leading prefix character', () => {
@@ -21,5 +21,14 @@ describe('command menu search', () => {
     expect(searchesFiles('all', 'abc')).toBe(true);
     expect(searchesFiles('files', 'ab')).toBe(true);
     expect(searchesFiles('actions', 'abcdef')).toBe(false);
+  });
+
+  it('turns a search hit into the path Files selects', () => {
+    expect(repositoryRelative('/work/orbit/src/api/client.ts', '/work/orbit')).toBe('src/api/client.ts');
+    expect(repositoryRelative('/work/orbit/src/a.ts', '/work/orbit/')).toBe('src/a.ts');
+    expect(repositoryRelative('C:\\Code\\Orbit\\src\\a.ts', 'c:\\code\\orbit')).toBe('src/a.ts');
+    expect(repositoryRelative('/work/orbit-web/a.ts', '/work/orbit')).toBeNull();
+    expect(repositoryRelative('/work/Orbit/a.ts', '/work/orbit')).toBeNull();
+    expect(repositoryRelative('/work/orbit', '/work/orbit')).toBeNull();
   });
 });

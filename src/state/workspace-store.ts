@@ -58,6 +58,8 @@ interface WorkspaceState {
   recoverySessionId: string | null;
   /** The channel whose repository Changes should open on next; cleared once Changes reads it. */
   reviewSessionId: string | null;
+  /** An absolute file path Files should select next (from the command menu); cleared once Files reads it. */
+  openFilePath: string | null;
   engines: EngineInfo[];
   discovering: boolean;
   discoveryError: string | null;
@@ -100,7 +102,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, reviewSessionId: null,
+  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, reviewSessionId: null, openFilePath: null,
   engines: [],
   discovering: false,
   discoveryError: null,
