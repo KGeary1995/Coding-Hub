@@ -2,6 +2,7 @@ import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { TERMINAL_FONT, TERMINAL_THEME } from '../runtime/terminal-theme';
 import { CircleUserRound, RefreshCw, ExternalLink, Square, Check, CircleAlert, TerminalSquare } from 'lucide-react';
 import type { ClaudeAccountProfile, AccountConnection, AccountLogin, AccountProvider, AccountResponse, AccountRequest } from '../../shared/accounts';
 import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
@@ -35,7 +36,7 @@ export function AccountsPanel() {
   useEffect(() => {
     mounted.current = true;
     const host = window.codingHub; if (!host || !container.current) return;
-    const view = new Terminal({ disableStdin: true, cursorBlink: true, scrollback: 1000, fontSize: 13, fontFamily: 'Consolas, monospace', theme: { background: '#121517', foreground: '#d2ddd4', green: '#b4e88b' } });
+    const view = new Terminal({ disableStdin: true, cursorBlink: true, scrollback: 1000, fontSize: 13, fontFamily: TERMINAL_FONT, theme: TERMINAL_THEME });
     const addon = new FitAddon(); view.loadAddon(addon); view.open(container.current); terminal.current = view; fit.current = addon;
     view.writeln('Choose Connect on an installed CLI. Its official sign-in prompts appear here.');
     const resize = () => { try { addon.fit(); } catch { /* Initial mount can be hidden. */ } };

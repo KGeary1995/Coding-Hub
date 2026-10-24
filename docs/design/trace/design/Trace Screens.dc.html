@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#080b0b;color:#d8e3df;-webkit-font-smoothing:antialiased}
+a{color:oklch(0.80 0.11 215)}a:hover{color:#eef4f1}
+button{font:inherit;cursor:pointer}
+input,textarea{font:inherit}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:column;gap:48px;padding:64px;font-family:'IBM Plex Sans Condensed',sans-serif">
+  <div style="display:flex;flex-direction:column;gap:10px;max-width:1100px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#879692">direction 1b · trace · screen set · 1600 × 1000</div>
+    <div style="font-size:44px;font-weight:600;color:#eef4f1;line-height:1.05">Trace: screens</div>
+    <div style="font-size:17px;line-height:1.55;color:#b6c4c0;text-wrap:pretty">Eight screens in the chosen direction. Tiles are live: hover one to reveal its expanded header, click its state chip to cycle states. Tokens, components and rationale are in <a href="Trace System.dc.html">Trace System</a>.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:72px 80px;align-items:flex-start">
+
+    <!-- 01 -->
+    <div id="s1" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">01</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Workspace · 2 channels</span><span style="font-size:16px;color:#879692">CH1 working, CH2 waiting for approval</span></div>
+      <div data-screen-label="01 Workspace 2 channels" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden">
+        <dc-import name="TraceTopbar" active="workspace" show-layout="{{ true }}" layout="cols" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;padding:8px">
+          <dc-import name="TraceTile" engine="claude" ch="CH1" model="sonnet-4.5" profile="Default" state="working" script="stats" ctx="{{ 38 }}" tokens="48.2k" cost="$0.41" pid="623" rate="41" seed="{{ 7 }}" expanded="{{ true }}" focused="{{ true }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+          <dc-import name="TraceTile" engine="codex" ch="CH2" model="gpt-5-codex" state="waiting" script="hook" ctx="{{ 61 }}" tokens="31.7k" cost="$0.22" pid="661" seed="{{ 19 }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s1Chans }}" alerts="{{ s1Alerts }}" project="orbit-web" branch="⎇ main ↑2" tokens="79.9k" cost="$0.63" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 02 -->
+    <div id="s2" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">02</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Workspace · 4 channels, grid</span><span style="font-size:16px;color:#879692">CH2 failed, CH3 near its context limit</span></div>
+      <div data-screen-label="02 Workspace 4 grid" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden">
+        <dc-import name="TraceTopbar" active="workspace" show-layout="{{ true }}" layout="grid" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:8px;padding:8px">
+          <dc-import name="TraceTile" engine="claude" ch="CH1" model="sonnet-4.5" profile="Default" state="working" script="stats" ctx="{{ 38 }}" tokens="48.2k" cost="$0.41" pid="623" rate="41" seed="{{ 7 }}" dense="{{ true }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+          <dc-import name="TraceTile" engine="codex" ch="CH2" model="gpt-5-codex" state="failed" script="hook" ctx="{{ 61 }}" tokens="31.7k" cost="$0.22" pid="661" seed="{{ 19 }}" dense="{{ true }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+          <dc-import name="TraceTile" engine="claude" ch="CH3" model="opus-4.1" profile="Work" state="limit" script="docs" ctx="{{ 92 }}" tokens="171.4k" cost="$2.06" pid="702" rate="38" seed="{{ 31 }}" dense="{{ true }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+          <dc-import name="TraceTile" engine="codex" ch="CH4" model="gpt-5-codex" state="finished" script="lint" ctx="{{ 24 }}" tokens="12.9k" cost="$0.09" pid="718" seed="{{ 43 }}" dense="{{ true }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s2Chans }}" alerts="{{ s2Alerts }}" alert-color="oklch(0.68 0.19 25)" project="orbit-web" branch="⎇ main ↑2" tokens="264.2k" cost="$2.78" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 03 -->
+    <div id="s3" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">03</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Workspace · empty, no project</span><span style="font-size:16px;color:#879692">first run</span></div>
+      <div data-screen-label="03 Workspace empty" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <dc-import name="TraceTopbar" active="workspace" project="" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:flex;justify-content:center;padding:64px 48px 0;overflow:hidden">
+          <div style="width:1080px;display:flex;flex-direction:column;gap:36px">
+            <div style="height:112px;position:relative;background:#070a0a;border:1px solid #1f2b29;border-radius:4px;overflow:hidden">
+              <div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#16201e 0 1px,transparent 1px 5%),repeating-linear-gradient(0deg,#16201e 0 1px,transparent 1px 25%)"></div>
+              <div style="position:absolute;left:0;right:0;top:56px;height:2px;background:#4f625d"></div>
+              <div style="position:absolute;left:14px;top:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">CH— · no signal</div>
+              <div style="position:absolute;right:14px;bottom:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">open a project to arm a channel</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:40px;font-weight:600;color:#eef4f1;line-height:1.1">Open a project</div>
+              <div style="font-size:18px;color:#b6c4c0">Every channel runs inside a local folder.</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+              <button style="height:96px;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:14px 16px;background:#d8e3df;border:none;border-radius:4px;color:#0b1010;text-align:left">
+                <span style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px"><span>01</span><span>Ctrl O</span></span>
+                <span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:600">Open folder</span><span style="font-size:14px;color:#33413e">Any local folder · Git optional</span></span>
+              </button>
+              <button style="height:96px;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:14px 16px;background:#131a19;border:1px solid #2a3835;border-radius:4px;color:#eef4f1;text-align:left" style-hover="background:#18211f">
+                <span style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>02</span><span style="color:oklch(0.80 0.15 60)">▲ GitHub sign-in needed</span></span>
+                <span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:600">Clone from GitHub</span><span style="font-size:14px;color:#879692">Pick a repository or type owner/name</span></span>
+              </button>
+              <button style="height:96px;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;padding:14px 16px;background:#131a19;border:1px solid #2a3835;border-radius:4px;color:#eef4f1;text-align:left" style-hover="background:#18211f">
+                <span style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>03</span><span>Ctrl ⇧ N</span></span>
+                <span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:600">New project</span><span style="font-size:14px;color:#879692">Create a folder and run git init</span></span>
+              </button>
+            </div>
+            <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:40px">
+              <div style="display:flex;flex-direction:column">
+                <div style="display:flex;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>recent projects</span><span>last activity</span></div>
+                <sc-for list="{{ recent }}" as="r" hint-placeholder-count="4">
+                  <button style="display:grid;grid-template-columns:minmax(0,1fr) 140px 80px;gap:16px;align-items:center;padding:12px 0;background:transparent;border:none;border-bottom:1px solid #1a2422;color:#d8e3df;text-align:left" style-hover="background:#111817">
+                    <span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:17px;font-weight:600;color:#eef4f1">{{ r.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.path }} · {{ r.branch }}</span></span>
+                    <svg viewBox="0 0 400 40" preserveAspectRatio="none" style="width:140px;height:28px"><path d="{{ r.path2 }}" style="fill:none;stroke:{{ r.color }};stroke-width:1.4;vector-effect:non-scaling-stroke"></path></svg>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#b6c4c0;text-align:right">{{ r.when }}</span>
+                  </button>
+                </sc-for>
+              </div>
+              <div style="display:flex;flex-direction:column">
+                <div style="padding-bottom:8px;border-bottom:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">engines on this machine</div>
+                <div style="display:flex;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #1a2422"><span style="width:10px;height:10px;background:oklch(0.87 0.14 95)"></span><span style="font-size:17px;font-weight:600;color:#eef4f1">Claude Code</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">2.1.296</span><div style="flex:1"></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.82 0.13 155)">✓ signed in</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #1a2422"><span style="width:10px;height:10px;background:oklch(0.80 0.11 215)"></span><span style="font-size:17px;font-weight:600;color:#eef4f1">Codex</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">2.1.296</span><div style="flex:1"></div><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.82 0.13 155)">✓ signed in</span></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid #1a2422"><span style="width:10px;height:10px;border:1px solid #879692;box-sizing:border-box"></span><span style="font-size:17px;font-weight:600;color:#eef4f1">GitHub</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">gh 2.89.0</span><div style="flex:1"></div><button style="height:24px;padding:0 10px;border-radius:2px;background:transparent;border:1px solid oklch(0.80 0.15 60);color:oklch(0.80 0.15 60);font-size:13px">Sign in</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ empty }}" alerts="{{ empty }}" project="no project" branch="" tokens="0" cost="$0.00" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 04 -->
+    <div id="s4" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">04</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Changes</span><span style="font-size:16px;color:#879692">diff review and delivery · toggle split / unified</span></div>
+      <div data-screen-label="04 Changes" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <dc-import name="TraceTopbar" active="changes" hint-size="100%,40px"></dc-import>
+        <div style="height:48px;flex:none;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid #22302d">
+          <span style="font-size:20px;font-weight:600;color:#eef4f1">Changes</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">~/orbit-web · ⎇ main ↑2</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">3 files · <span style="color:oklch(0.82 0.13 155)">+43</span> <span style="color:oklch(0.72 0.16 25)">−4</span></span>
+          <div style="flex:1"></div>
+          <button style="height:28px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Workspace root ▾</button>
+          <button style="height:28px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Refresh  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">R</span></button>
+        </div>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) 320px">
+          <div style="display:flex;flex-direction:column;border-right:1px solid #22302d;background:#0d1312">
+            <div style="display:flex;justify-content:space-between;padding:14px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>unstaged</span><span>2</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;background:#18211f;border-left:2px solid #eef4f1">
+              <span style="width:16px;height:16px;border:1px solid #4f625d;border-radius:2px"></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.80 0.15 60);width:12px">M</span>
+              <span style="display:flex;flex-direction:column;min-width:0;flex:1"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#eef4f1">client.ts</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">src/api</span></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px"><span style="color:oklch(0.82 0.13 155)">+3</span> <span style="color:oklch(0.72 0.16 25)">−2</span></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-left:2px solid transparent">
+              <span style="width:16px;height:16px;border:1px solid #4f625d;border-radius:2px"></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.80 0.15 60);width:12px">M</span>
+              <span style="display:flex;flex-direction:column;min-width:0;flex:1"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#d8e3df">useStats.ts</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">src/hooks</span></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px"><span style="color:oklch(0.82 0.13 155)">+6</span> <span style="color:oklch(0.72 0.16 25)">−2</span></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:18px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>staged</span><span>0</span></div>
+            <div style="padding:4px 14px 6px;font-size:13px;color:#6f807b">Tick a file to stage it</div>
+            <div style="display:flex;justify-content:space-between;padding:18px 14px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span>untracked</span><span>1</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-left:2px solid transparent">
+              <span style="width:16px;height:16px;border:1px solid #4f625d;border-radius:2px"></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.82 0.13 155);width:12px">?</span>
+              <span style="display:flex;flex-direction:column;min-width:0;flex:1"><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#d8e3df">StatsSkeleton.tsx</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">src/components</span></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.82 0.13 155)">+34</span>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display:flex;gap:6px;padding:12px 14px;border-top:1px solid #22302d">
+              <button style="flex:1;height:28px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Stage all</button>
+              <button style="flex:1;height:28px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Discard…</button>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;min-width:0;background:#070a0a">
+            <div style="height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;background:#131a19;border-bottom:1px solid #22302d">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#eef4f1">src/api/client.ts</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px"><span style="color:oklch(0.82 0.13 155)">+3</span> <span style="color:oklch(0.72 0.16 25)">−2</span></span>
+              <div style="flex:1"></div>
+              <div style="display:flex;gap:2px;padding:2px;border:1px solid #2a3835;border-radius:3px">
+                <button onClick="{{ setSplit }}" style="height:22px;padding:0 10px;border:none;border-radius:2px;font-size:13px;background:{{ splitBg }};color:{{ splitFg }}">Split</button>
+                <button onClick="{{ setUnified }}" style="height:22px;padding:0 10px;border:none;border-radius:2px;font-size:13px;background:{{ uniBg }};color:{{ uniFg }}">Unified</button>
+              </div>
+              <button style="height:26px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:13px">Revert hunk</button>
+              <button style="height:26px;padding:0 10px;background:#d8e3df;border:none;border-radius:3px;color:#0b1010;font-size:13px;font-weight:600">Stage file <span style="font-family:'IBM Plex Mono',monospace;font-size:10px">S</span></button>
+            </div>
+            <div style="padding:8px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;background:#0d1312;border-bottom:1px solid #1a2422">@@ -1,13 +1,14 @@ · fetchStats</div>
+            <sc-if value="{{ isSplit }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column">
+                <sc-for list="{{ splitRows }}" as="r" hint-placeholder-count="14">
+                  <div style="display:grid;grid-template-columns:40px minmax(0,1fr) 40px minmax(0,1fr);font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:22px">
+                    <div style="text-align:right;padding-right:8px;color:#6f807b;background:{{ r.lbg }}">{{ r.ln }}</div>
+                    <div style="white-space:pre-wrap;word-break:break-word;padding-left:2ch;text-indent:-2ch;padding-right:8px;color:#d8e3df;background:{{ r.lbg }};border-right:1px solid #22302d"><span style="color:{{ r.lmc }}">{{ r.lm }}</span>{{ r.lt }}</div>
+                    <div style="text-align:right;padding-right:8px;color:#6f807b;background:{{ r.rbg }}">{{ r.rn }}</div>
+                    <div style="white-space:pre-wrap;word-break:break-word;padding-left:2ch;text-indent:-2ch;padding-right:8px;color:#d8e3df;background:{{ r.rbg }}"><span style="color:{{ r.rmc }}">{{ r.rm }}</span>{{ r.rt }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isUnified }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column">
+                <sc-for list="{{ uniRows }}" as="r" hint-placeholder-count="16">
+                  <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr);font-family:'IBM Plex Mono',monospace;font-size:13px;line-height:24px;background:{{ r.bg }}">
+                    <div style="text-align:right;padding-right:10px;color:#6f807b">{{ r.on }}</div>
+                    <div style="text-align:right;padding-right:10px;color:#6f807b">{{ r.nn }}</div>
+                    <div style="white-space:pre;color:#d8e3df"><span style="color:{{ r.mc }}">{{ r.m }}</span>{{ r.t }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692"><span style="width:8px;height:8px;background:oklch(0.87 0.14 95)"></span>last touched by CH1 · Claude Code · 3 min ago<div style="flex:1"></div>J / K next file · ] next hunk</div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;border-left:1px solid #22302d;background:#0d1312">
+            <div style="padding:14px 16px 10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">delivery</div>
+            <div style="display:flex;flex-direction:column;gap:0;padding:0 16px">
+              <div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;padding-bottom:18px">
+                <div style="display:flex;flex-direction:column;align-items:center"><span style="width:22px;height:22px;border-radius:50%;background:#d8e3df;color:#0b1010;font-family:'IBM Plex Mono',monospace;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600">1</span><span style="flex:1;width:1px;background:#2a3835;margin-top:4px"></span></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:16px;font-weight:600;color:#eef4f1">Stage</span><span style="font-size:14px;color:#b6c4c0">0 of 3 files staged</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;padding-bottom:18px">
+                <div style="display:flex;flex-direction:column;align-items:center"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #d8e3df;color:#d8e3df;font-family:'IBM Plex Mono',monospace;font-size:11px;display:flex;align-items:center;justify-content:center">2</span><span style="flex:1;width:1px;background:#2a3835;margin-top:4px"></span></div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <span style="font-size:16px;font-weight:600;color:#eef4f1">Commit</span>
+                  <div style="height:34px;display:flex;align-items:center;padding:0 10px;background:#070a0a;border:1px solid #3b4d49;border-radius:3px;font-size:14px;color:#eef4f1">Add abort signal to stats fetch</div>
+                  <div style="height:72px;padding:8px 10px;box-sizing:border-box;background:#070a0a;border:1px solid #2a3835;border-radius:3px;font-size:13px;color:#879692;line-height:1.4">Cancel the pending request on unmount. Adds StatsSkeleton while data loads.</div>
+                  <div style="display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.82 0.13 155)">✓ stats suite passed · 2 min ago</div>
+                  <div style="display:flex;gap:6px">
+                    <button style="flex:1;height:30px;background:#d8e3df;border:none;border-radius:3px;color:#0b1010;font-size:14px;font-weight:600">Stage all &amp; commit</button>
+                    <button style="height:30px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Commit &amp; push</button>
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;padding-bottom:18px">
+                <div style="display:flex;flex-direction:column;align-items:center"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #4f625d;color:#879692;font-family:'IBM Plex Mono',monospace;font-size:11px;display:flex;align-items:center;justify-content:center">3</span><span style="flex:1;width:1px;background:#2a3835;margin-top:4px"></span></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:16px;font-weight:600;color:#b6c4c0">Push</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">main → origin/main · 2 ahead</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px">
+                <div style="display:flex;flex-direction:column;align-items:center"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #4f625d;color:#879692;font-family:'IBM Plex Mono',monospace;font-size:11px;display:flex;align-items:center;justify-content:center">4</span></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:16px;font-weight:600;color:#b6c4c0">Pull request</span><span style="font-size:14px;color:#879692">Needs GitHub sign-in</span><button style="align-self:flex-start;height:26px;padding:0 10px;background:transparent;border:1px solid oklch(0.80 0.15 60);border-radius:3px;color:oklch(0.80 0.15 60);font-size:13px">Connect GitHub</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s1Chans }}" alerts="{{ s1Alerts }}" project="orbit-web" branch="⎇ main ↑2" tokens="79.9k" cost="$0.63" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 05 -->
+    <div id="s5" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">05</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Usage</span><span style="font-size:16px;color:#879692">hover a day to read it</span></div>
+      <div data-screen-label="05 Usage" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <dc-import name="TraceTopbar" active="insight" insight="Usage" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:16px;padding:16px 20px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:16px">
+            <span style="font-size:24px;font-weight:600;color:#eef4f1">Usage</span>
+            <div style="display:flex;gap:2px;padding:2px;border:1px solid #2a3835;border-radius:3px">
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:transparent;color:#879692;font-size:13px">Today</button>
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:transparent;color:#879692;font-size:13px">7 d</button>
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:#2a3835;color:#eef4f1;font-size:13px">14 d</button>
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:transparent;color:#879692;font-size:13px">30 d</button>
+            </div>
+            <div style="display:flex;gap:2px;padding:2px;border:1px solid #2a3835;border-radius:3px">
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:#2a3835;color:#eef4f1;font-size:13px">All engines</button>
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:transparent;color:#879692;font-size:13px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:oklch(0.87 0.14 95)"></span>Claude</button>
+              <button style="height:24px;padding:0 10px;border:none;border-radius:2px;background:transparent;color:#879692;font-size:13px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:oklch(0.80 0.11 215)"></span>Codex</button>
+            </div>
+            <div style="flex:1"></div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">CLI-reported · local · updated 03:52</span>
+            <button style="height:28px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Refresh</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid #22302d;border-radius:4px;background:#0d1312">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="5">
+              <div style="display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-right:1px solid #22302d">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ k.label }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:34px;font-weight:500;color:#eef4f1;font-variant-numeric:tabular-nums;line-height:1.1">{{ k.value }}</span>
+                <span style="font-size:13px;color:#879692">{{ k.sub }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:0;border:1px solid #22302d;border-radius:4px;background:#070a0a">
+            <div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px 10px">
+              <div style="display:flex;align-items:baseline;gap:14px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">
+                <span style="font-family:'IBM Plex Sans Condensed',sans-serif;font-size:16px;font-weight:600;color:#eef4f1">Daily tokens</span>
+                <span style="color:#eef4f1">{{ dayRead.date }}</span>
+                <span><b style="font-weight:500;color:#eef4f1">{{ dayRead.total }}</b> total</span>
+                <span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;background:oklch(0.87 0.14 95)"></span>{{ dayRead.cl }}</span>
+                <span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;background:oklch(0.80 0.11 215)"></span>{{ dayRead.cx }}</span>
+                <span>{{ dayRead.cost }}</span>
+                <div style="flex:1"></div><span>input + output · cache excluded</span>
+              </div>
+              <div style="position:relative;height:220px;display:grid;grid-template-columns:44px minmax(0,1fr)">
+                <div style="position:relative;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6f807b">
+                  <span style="position:absolute;right:8px;bottom:-6px">0</span><span style="position:absolute;right:8px;bottom:55px">50k</span><span style="position:absolute;right:8px;bottom:116px">100k</span><span style="position:absolute;right:8px;bottom:177px">150k</span>
+                </div>
+                <div style="position:relative;display:flex;align-items:flex-end;gap:10px;padding:0 6px;border-bottom:1px solid #3b4d49">
+                  <div style="position:absolute;left:0;right:0;bottom:61px;height:1px;background:#1a2422"></div>
+                  <div style="position:absolute;left:0;right:0;bottom:122px;height:1px;background:#1a2422"></div>
+                  <div style="position:absolute;left:0;right:0;bottom:183px;height:1px;background:#1a2422"></div>
+                  <sc-for list="{{ days }}" as="d" hint-placeholder-count="14">
+                    <div onMouseEnter="{{ d.onEnter }}" style="position:relative;flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch;background:{{ d.hoverBg }}">
+                      <div style="height:{{ d.xH }};background:oklch(0.80 0.11 215);opacity:{{ d.op }}"></div>
+                      <div style="height:{{ d.cH }};background:oklch(0.87 0.14 95);opacity:{{ d.op }};border-top:1px solid #070a0a"></div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:44px minmax(0,1fr)">
+                <div></div>
+                <div style="display:flex;gap:10px;padding:0 6px">
+                  <sc-for list="{{ days }}" as="d" hint-placeholder-count="14"><span style="flex:1;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ d.lc }}">{{ d.label }}</span></sc-for>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;padding:14px 16px;border-left:1px solid #22302d;background:#0d1312">
+              <span style="font-size:16px;font-weight:600;color:#eef4f1">By engine · 14 d</span>
+              <div style="display:flex;height:10px;border-radius:1px;overflow:hidden"><span style="width:65%;background:oklch(0.87 0.14 95)"></span><span style="width:35%;background:oklch(0.80 0.11 215)"></span></div>
+              <div style="display:flex;flex-direction:column;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;background:oklch(0.87 0.14 95)"></span><span style="color:#d8e3df;flex:1">Claude Code</span><span style="color:#eef4f1">768.2k</span><span style="width:52px;text-align:right">$27.10</span></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;background:oklch(0.80 0.11 215)"></span><span style="color:#d8e3df;flex:1">Codex</span><span style="color:#eef4f1">410.7k</span><span style="width:52px;text-align:right">$11.37</span></div>
+              </div>
+              <div style="height:1px;background:#22302d"></div>
+              <span style="font-size:16px;font-weight:600;color:#eef4f1">Context peaks</span>
+              <div style="display:flex;flex-direction:column;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">
+                <div style="display:flex;justify-content:space-between"><span>sessions over 80%</span><span style="color:oklch(0.80 0.15 60)">3 of 19</span></div>
+                <div style="display:flex;justify-content:space-between"><span>median peak</span><span style="color:#eef4f1">47%</span></div>
+                <div style="display:flex;justify-content:space-between"><span>handoffs written</span><span style="color:#eef4f1">5</span></div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid #22302d;border-radius:4px;overflow:hidden">
+            <div style="display:grid;grid-template-columns:{{ cols }};gap:12px;align-items:center;height:32px;padding:0 14px;background:#131a19;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">
+              <span>channel</span><span>session</span><span>model</span><span>started</span><span style="text-align:right">time</span><span style="text-align:right">input</span><span style="text-align:right">output</span><span style="text-align:right">cache</span><span>context peak</span><span style="text-align:right">cost</span><span>throughput</span>
+            </div>
+            <sc-for list="{{ sessions }}" as="r" hint-placeholder-count="8">
+              <div style="display:grid;grid-template-columns:{{ cols }};gap:12px;align-items:center;height:40px;padding:0 14px;border-top:1px solid #1a2422;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#d8e3df;font-variant-numeric:tabular-nums" style-hover="background:#111817">
+                <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:{{ r.ec }}"></span>{{ r.eng }}<span style="color:{{ r.sc }}">{{ r.sg }}</span></span>
+                <span style="font-family:'IBM Plex Sans Condensed',sans-serif;font-size:14px;color:#eef4f1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.task }}</span>
+                <span style="color:#879692">{{ r.model }}</span>
+                <span style="color:#879692">{{ r.start }}</span>
+                <span style="text-align:right">{{ r.dur }}</span>
+                <span style="text-align:right">{{ r.inp }}</span>
+                <span style="text-align:right">{{ r.out }}</span>
+                <span style="text-align:right;color:#879692">{{ r.cache }}</span>
+                <span style="display:flex;align-items:center;gap:8px"><span style="position:relative;flex:1;height:4px;background:#1a2422"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ r.ctx }};background:{{ r.ctxc }}"></span><span style="position:absolute;left:80%;top:-2px;width:1px;height:8px;background:oklch(0.80 0.15 60)"></span></span><span style="width:32px;text-align:right;color:{{ r.ctxt }}">{{ r.ctx }}</span></span>
+                <span style="text-align:right">{{ r.cost }}</span>
+                <svg viewBox="0 0 400 40" preserveAspectRatio="none" style="width:100%;height:22px"><path d="{{ r.path }}" style="fill:none;stroke:{{ r.ec }};stroke-width:1.3;vector-effect:non-scaling-stroke"></path></svg>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s1Chans }}" alerts="{{ s1Alerts }}" project="orbit-web" branch="⎇ main ↑2" tokens="79.9k" cost="$0.63" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 06 -->
+    <div id="s6" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">06</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Command menu</span><span style="font-size:16px;color:#879692">Ctrl ⇧ P over the workspace · hover rows</span></div>
+      <div data-screen-label="06 Command menu" style="position:relative;width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <dc-import name="TraceTopbar" active="workspace" show-layout="{{ true }}" layout="cols" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;padding:8px">
+          <dc-import name="TraceTile" engine="claude" ch="CH1" model="sonnet-4.5" profile="Default" state="working" script="stats" ctx="{{ 38 }}" tokens="48.2k" cost="$0.41" pid="623" rate="41" seed="{{ 7 }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+          <dc-import name="TraceTile" engine="codex" ch="CH2" model="gpt-5-codex" state="waiting" script="hook" ctx="{{ 61 }}" tokens="31.7k" cost="$0.22" pid="661" seed="{{ 19 }}" style="height:100%;min-height:0" hint-size="100%,100%"></dc-import>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s1Chans }}" alerts="{{ s1Alerts }}" project="orbit-web" branch="⎇ main ↑2" tokens="79.9k" cost="$0.63" hint-size="100%,32px"></dc-import>
+        <div style="position:absolute;inset:0;background:rgba(4,7,7,.78)"></div>
+        <div style="position:absolute;top:96px;left:50%;transform:translateX(-50%);width:760px;display:flex;flex-direction:column;background:#131a19;border:1px solid #3b4d49;border-radius:6px;box-shadow:0 24px 64px rgba(0,0,0,.6);overflow:hidden">
+          <div style="height:56px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #22302d">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;color:#879692">›</span>
+            <span style="font-size:20px;color:#eef4f1">stats<span style="display:inline-block;width:2px;height:22px;background:#eef4f1;vertical-align:middle;margin-left:2px"></span></span>
+            <div style="flex:1"></div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">10 results</span>
+          </div>
+          <div style="display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid #22302d">
+            <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;background:#2a3835;color:#eef4f1;font-size:13px">All</span>
+            <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;color:#879692;font-size:13px">Actions <span style="font-family:'IBM Plex Mono',monospace;margin-left:4px">&gt;</span></span>
+            <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;color:#879692;font-size:13px">Channels <span style="font-family:'IBM Plex Mono',monospace;margin-left:4px">@</span></span>
+            <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;color:#879692;font-size:13px">Files <span style="font-family:'IBM Plex Mono',monospace;margin-left:4px">/</span></span>
+            <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;color:#879692;font-size:13px">Memory <span style="font-family:'IBM Plex Mono',monospace;margin-left:4px">#</span></span>
+          </div>
+          <div style="display:flex;flex-direction:column;padding:6px 0">
+            <sc-for list="{{ cmd }}" as="c" hint-placeholder-count="12">
+              <sc-if value="{{ c.isHead }}" hint-placeholder-val="{{ false }}"><div style="padding:10px 16px 4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">{{ c.head }}</div></sc-if>
+              <sc-if value="{{ c.isItem }}" hint-placeholder-val="{{ true }}">
+                <div onMouseEnter="{{ c.onEnter }}" style="height:38px;display:flex;align-items:center;gap:12px;padding:0 16px;background:{{ c.bg }};border-left:2px solid {{ c.bar }}">
+                  <span style="width:18px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ c.ic }}">{{ c.icon }}</span>
+                  <span style="font-size:15px;color:#d8e3df;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.pre }}<b style="color:#eef4f1;font-weight:600;text-decoration:underline;text-decoration-color:#4f625d;text-underline-offset:3px">{{ c.mid }}</b>{{ c.post }}</span>
+                  <div style="flex:1"></div>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ c.metaC }};white-space:nowrap">{{ c.meta }}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692;min-width:54px;text-align:right">{{ c.kbd }}</span>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+          <div style="height:34px;display:flex;align-items:center;gap:18px;padding:0 16px;border-top:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">
+            <span>↑↓ move</span><span>⏎ run</span><span>Tab scope</span><span>Ctrl ⏎ open beside</span><div style="flex:1"></div><span>Esc close</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 07 -->
+    <div id="s7" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">07</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Agent setup</span><span style="font-size:16px;color:#879692">one area for configuration · Accounts open</span></div>
+      <div data-screen-label="07 Agent setup" style="width:1600px;height:1000px;background:#0b1010;display:flex;flex-direction:column;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <dc-import name="TraceTopbar" active="setup" hint-size="100%,40px"></dc-import>
+        <div style="flex:1;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr)">
+          <div style="display:flex;flex-direction:column;padding:16px 10px;border-right:1px solid #22302d;background:#0d1312">
+            <div style="padding:0 10px 12px;font-size:20px;font-weight:600;color:#eef4f1">Agent setup</div>
+            <sc-for list="{{ setupNav }}" as="n" hint-placeholder-count="6">
+              <button style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 10px;background:{{ n.bg }};border:none;border-left:2px solid {{ n.bar }};border-radius:0 3px 3px 0;text-align:left" style-hover="background:#18211f">
+                <span style="display:flex;width:100%;justify-content:space-between;align-items:center"><span style="font-size:16px;font-weight:{{ n.w }};color:#eef4f1">{{ n.label }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{ n.sc }}">{{ n.sg }}</span></span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">{{ n.meta }}</span>
+              </button>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="padding:10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692;line-height:1.6">Renderer v1.7.2 · Host v1.7.2<br>data · ~/.coding-hub</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:28px;padding:24px 32px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:16px">
+              <span style="font-size:28px;font-weight:600;color:#eef4f1">Accounts</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">login status from each local CLI · model access is checked at launch</span>
+              <div style="flex:1"></div>
+              <button style="height:28px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Refresh status</button>
+            </div>
+            <div style="display:flex;flex-direction:column;border-top:1px solid #22302d">
+              <sc-for list="{{ accounts }}" as="a" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:36px 220px 200px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px 0;border-bottom:1px solid #22302d">
+                  <span style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:{{ a.bg }};border:1px solid {{ a.bd }};color:#0b1010;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;border-radius:2px">{{ a.mark }}</span>
+                  <span style="display:flex;flex-direction:column;gap:2px"><span style="font-size:18px;font-weight:600;color:#eef4f1">{{ a.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ a.ver }}</span></span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:{{ a.sc }}">{{ a.status }}</span>
+                  <span style="font-size:14px;color:#b6c4c0">{{ a.detail }}</span>
+                  <div style="display:flex;gap:6px">
+                    <button style="height:28px;padding:0 12px;background:{{ a.pBg }};border:1px solid {{ a.pBd }};border-radius:3px;color:{{ a.pFg }};font-size:14px;font-weight:600">{{ a.primary }}</button>
+                    <button style="height:28px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:14px">Install guide ↗</button>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:baseline;gap:12px"><span style="font-size:20px;font-weight:600;color:#eef4f1">Claude profiles</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">separate logins on this machine · pick one per channel</span></div>
+              <div style="display:flex;flex-direction:column;border:1px solid #22302d;border-radius:4px;overflow:hidden">
+                <div style="display:grid;grid-template-columns:200px 260px minmax(0,1fr) 120px;gap:16px;align-items:center;height:32px;padding:0 14px;background:#131a19;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692"><span>profile</span><span>config directory</span><span>used by</span><span></span></div>
+                <div style="display:grid;grid-template-columns:200px 260px minmax(0,1fr) 120px;gap:16px;align-items:center;height:44px;padding:0 14px;border-top:1px solid #1a2422;font-size:15px">
+                  <span style="color:#eef4f1;font-weight:600">Default</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">existing CLI login</span>
+                  <span style="display:flex;gap:6px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px"><span style="background:oklch(0.87 0.14 95);color:#0b1010;padding:0 5px;border-radius:2px;font-weight:600">CH1</span><span style="color:#b6c4c0">running</span></span>
+                  <button style="justify-self:end;height:26px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:13px">Reconnect</button>
+                </div>
+                <div style="display:grid;grid-template-columns:200px 260px minmax(0,1fr) 120px;gap:16px;align-items:center;height:44px;padding:0 14px;border-top:1px solid #1a2422;font-size:15px">
+                  <span style="color:#eef4f1;font-weight:600">Work</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">~/.coding-hub/profiles/work</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">not in use</span>
+                  <button style="justify-self:end;height:26px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:13px">Reconnect</button>
+                </div>
+                <div style="display:grid;grid-template-columns:200px minmax(0,1fr) 120px;gap:16px;align-items:center;height:48px;padding:0 14px;border-top:1px solid #1a2422">
+                  <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:#070a0a;border:1px solid #2a3835;border-radius:3px;font-size:14px;color:#6f807b">New profile name</div>
+                  <span style="font-size:13px;color:#879692">Starts with an empty config: own settings, skills and MCP</span>
+                  <button style="justify-self:end;height:26px;padding:0 10px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#6f807b;font-size:13px">Add profile</button>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 14px;border:1px solid #22302d;border-radius:4px;background:#070a0a">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#879692">▸</span>
+              <span style="font-size:16px;font-weight:600;color:#eef4f1">Official CLI sign-in terminal</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">claude login · codex login · gh auth login</span>
+            </div>
+          </div>
+        </div>
+        <dc-import name="TraceStatusbar" channels="{{ s1Chans }}" alerts="{{ s1Alerts }}" project="orbit-web" branch="⎇ main ↑2" tokens="79.9k" cost="$0.63" hint-size="100%,32px"></dc-import>
+      </div>
+    </div>
+
+    <!-- 08 -->
+    <div id="s8" style="display:flex;flex-direction:column;gap:14px;width:1600px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#879692">08</span><span style="font-size:24px;font-weight:600;color:#eef4f1">Channel tile anatomy</span><span style="font-size:16px;color:#879692">expanded header, collapsed header, every state</span></div>
+      <div data-screen-label="08 Tile anatomy" style="width:1600px;height:1000px;background:#0b1010;display:grid;grid-template-columns:minmax(0,1fr) 620px;gap:40px;padding:40px;box-sizing:border-box;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif">
+        <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+          <div style="position:relative;height:430px;margin-top:14px">
+            <dc-import name="TraceTile" engine="codex" ch="CH2" model="gpt-5-codex" state="waiting" script="hook" ctx="{{ 61 }}" tokens="31.7k" cost="$0.22" pid="661" seed="{{ 19 }}" expanded="{{ true }}" style="height:100%" hint-size="100%,100%"></dc-import>
+            <sc-for list="{{ marks }}" as="m" hint-placeholder-count="10">
+              <span style="position:absolute;left:{{ m.x }};top:{{ m.y }};width:20px;height:20px;border-radius:50%;background:#eef4f1;color:#0b1010;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #0b1010;pointer-events:none">{{ m.n }}</span>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 32px">
+            <sc-for list="{{ marks }}" as="m" hint-placeholder-count="10">
+              <div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:baseline">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ m.n }}</span>
+                <span style="font-size:15px;line-height:1.4;color:#d8e3df"><b style="font-weight:600;color:#eef4f1">{{ m.t }}</b> {{ m.d }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">collapsed · default when not hovered or focused · 71 px</div>
+            <dc-import name="TraceTile" engine="claude" ch="CH1" model="sonnet-4.5" profile="Default" state="working" script="stats" ctx="{{ 38 }}" tokens="48.2k" pid="623" rate="41" seed="{{ 7 }}" header-only="{{ true }}" hint-size="100%,72px"></dc-import>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-bottom:4px"><span>states · glyph + word + trace shape + colour</span><span>never colour alone</span></div>
+          <sc-for list="{{ stateRows }}" as="s" hint-placeholder-count="7">
+            <dc-import name="TraceTile" engine="{{ s.engine }}" ch="{{ s.ch }}" model="{{ s.model }}" state="{{ s.state }}" script="{{ s.script }}" ctx="{{ s.ctx }}" tokens="{{ s.tok }}" seed="{{ s.seed }}" header-only="{{ true }}" dense="{{ true }}" compact="{{ true }}" hint-size="100%,62px"></dc-import>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const ENGC={claude:'oklch(0.87 0.14 95)',codex:'oklch(0.80 0.11 215)'};
+const ST={idle:'#879692',starting:'#d8e3df',waiting:'oklch(0.78 0.14 330)',finished:'#d8e3df',failed:'oklch(0.68 0.19 25)',limit:'oklch(0.80 0.15 60)'};
+const GLYPH={idle:'○',starting:'◌',working:'●',waiting:'◆',finished:'✓',failed:'✕',limit:'▲'};
+const ADDBG='oklch(0.82 0.13 155 / .13)',DELBG='oklch(0.72 0.16 25 / .15)',ADD='oklch(0.82 0.13 155)',DEL='oklch(0.72 0.16 25)',WARN='oklch(0.80 0.15 60)';
+function rng(s){return()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};}
+function spark(seed,len){const r=rng(seed),pts=[];const n=Math.max(8,Math.round(80*len));for(let i=0;i<=n;i++){const x=i*400/n,y=8+r()*26;pts.push((i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1));}return pts.join(' ');}
+const OLD=['import type { Stats } from "../types";','','const BASE = "/api";','','export async function fetchStats() {','  const response = await fetch(`${BASE}/stats`);','  return response.json() as Promise<Stats>;','}','','export async function fetchUser(id: string) {','  const response = await fetch(`${BASE}/users/${id}`);','  return response.json();','}'];
+const NEWL={5:'export async function fetchStats(signal?: AbortSignal) {',6:'  const response = await fetch(`${BASE}/stats`, { signal });',7:'  if (!response.ok) throw new Error(`Stats failed: ${response.status}`);'};
+const CL=[6,52,61,48,74,90,0,8,66,82,58,104,71,48.2],CX=[0,18,30,35,41,26,0,4,52,44,30,61,38,31.7];
+const DATES=['11','12','13','14','15','16','17','18','19','20','21','22','23','24'];
+class Component extends DCLogic {
+  state={mode:'split',day:13,cmdSel:2};
+  renderVals(){
+    const S=this.state;
+    // diff
+    const split=[];
+    for(let i=1;i<=4;i++)split.push({ln:i,lt:OLD[i-1],rn:i,rt:OLD[i-1],lbg:'transparent',rbg:'transparent',lm:'  ',rm:'  ',lmc:'',rmc:''});
+    split.push({ln:5,lt:OLD[4],lm:'− ',lmc:DEL,lbg:DELBG,rn:5,rt:NEWL[5],rm:'+ ',rmc:ADD,rbg:ADDBG});
+    split.push({ln:6,lt:OLD[5],lm:'− ',lmc:DEL,lbg:DELBG,rn:6,rt:NEWL[6],rm:'+ ',rmc:ADD,rbg:ADDBG});
+    split.push({ln:'',lt:'',lm:'',lmc:'',lbg:'#0d1312',rn:7,rt:NEWL[7],rm:'+ ',rmc:ADD,rbg:ADDBG});
+    for(let i=7;i<=13;i++)split.push({ln:i,lt:OLD[i-1],rn:i+1,rt:OLD[i-1],lbg:'transparent',rbg:'transparent',lm:'  ',rm:'  ',lmc:'',rmc:''});
+    const uni=[];
+    for(let i=1;i<=4;i++)uni.push({on:i,nn:i,t:OLD[i-1],m:'  ',mc:'',bg:'transparent'});
+    uni.push({on:5,nn:'',t:OLD[4],m:'− ',mc:DEL,bg:DELBG},{on:6,nn:'',t:OLD[5],m:'− ',mc:DEL,bg:DELBG});
+    for(const k of [5,6,7])uni.push({on:'',nn:k,t:NEWL[k],m:'+ ',mc:ADD,bg:ADDBG});
+    for(let i=7;i<=13;i++)uni.push({on:i,nn:i+1,t:OLD[i-1],m:'  ',mc:'',bg:'transparent'});
+    // usage
+    const k=220/180;
+    const days=DATES.map((d,i)=>({label:d,cH:Math.round(CL[i]*k)+'px',xH:Math.round(CX[i]*k)+'px',op:S.day===i?'1':'0.72',hoverBg:S.day===i?'#111817':'transparent',lc:S.day===i?'#eef4f1':'#6f807b',onEnter:()=>this.setState({day:i})}));
+    const di=S.day,tot=CL[di]+CX[di];
+    const dayRead={date:(di===13?'Today · ':'')+'Oct '+DATES[di],total:tot.toFixed(1)+'k',cl:CL[di].toFixed(1)+'k',cx:CX[di].toFixed(1)+'k',cost:'$'+(CL[di]*0.0353+CX[di]*0.0277).toFixed(2)};
+    const sess=[
+      ['claude','working','Add an abort signal to fetchStats, then a loading skeleton','sonnet-4.5','Today 03:46','6m','39.1k','9.1k','212k',38,'$0.41',0.15],
+      ['codex','waiting','Run the tests and fix failures in the stats hook','gpt-5-codex','Today 03:46','6m','26.0k','5.7k','88k',61,'$0.22',0.15],
+      ['claude','finished','Refactor dashboard layout grid','sonnet-4.5','Oct 23 21:10','42m','61.2k','9.8k','410k',84,'$2.31',0.6],
+      ['codex','finished','Migrate fetch wrapper to ky','gpt-5-codex','Oct 23 19:02','28m','33.0k','5.0k','120k',47,'$0.94',0.45],
+      ['claude','failed','Write Playwright smoke tests','opus-4.1','Oct 22 16:40','1h 12m','88.4k','16.0k','640k',91,'$3.88',1],
+      ['codex','finished','Fix flaky date test','gpt-5-codex','Oct 22 11:05','9m','12.1k','2.3k','40k',22,'$0.31',0.2],
+      ['claude','finished','Add stats endpoint caching','sonnet-4.5','Oct 21 15:20','35m','52.3k','8.9k','300k',66,'$1.72',0.5],
+      ['codex','finished','Bump deps and resolve type errors','gpt-5-codex','Oct 21 10:12','18m','21.7k','3.6k','75k',39,'$0.58',0.3]
+    ];
+    const sessions=sess.map((r,i)=>({ec:ENGC[r[0]],eng:r[0]==='claude'?'claude':'codex',sg:GLYPH[r[1]],sc:ST[r[1]]||ENGC[r[0]],task:r[2],model:r[3],start:r[4],dur:r[5],inp:r[6],out:r[7],cache:r[8],ctx:r[9]+'%',ctxc:r[9]>=80?WARN:'#4f625d',ctxt:r[9]>=80?WARN:'#d8e3df',cost:r[10],path:spark(11+i*13,r[11])}));
+    // command menu
+    const items=[
+      ['h','actions'],
+      ['i','▶','Run verification · stats suite','last pass 2 min ago','#879692','V',ADD],
+      ['i','▤','Open Usage · per-session stats','','#879692','G U','#879692'],
+      ['h','channels'],
+      ['i','●','CH1 Claude Code · Add an abort signal to fetchStats','run · 41 tok/s',ENGC.claude,'Alt 1',ENGC.claude],
+      ['i','◆','CH2 Codex · fix failures in the stats hook','hold · approval',ST.waiting,'Alt 2',ENGC.codex],
+      ['i','↺','History · Add stats endpoint caching','Oct 21 · 35m','#879692','','#879692'],
+      ['h','files'],
+      ['i','/','src/components/StatsGrid.tsx','','#879692','','#879692'],
+      ['i','/','src/components/StatsSkeleton.tsx','untracked',ADD,'',ADD],
+      ['i','/','src/hooks/useStats.ts','modified',WARN,'',WARN],
+      ['h','memory'],
+      ['i','#','Handoff · Stats abort signal: decisions and remaining work','Codex · 2h ago','#879692','','#879692'],
+      ['i','#','Rule · Run the stats tests before committing','shared rules','#879692','','#879692']
+    ];
+    let idx=0;
+    const cmd=items.map(it=>{
+      if(it[0]==='h')return {isHead:true,isItem:false,head:it[1]};
+      const my=idx++,label=it[2],p=label.toLowerCase().indexOf('stats'),sel=S.cmdSel===my;
+      return {isHead:false,isItem:true,icon:it[1],ic:it[6],pre:p<0?label:label.slice(0,p),mid:p<0?'':label.slice(p,p+5),post:p<0?'':label.slice(p+5),meta:it[3],metaC:it[4],kbd:it[5],
+        bg:sel?'#1f2a28':'transparent',bar:sel?'#eef4f1':'transparent',onEnter:()=>this.setState({cmdSel:my})};
+    });
+    // setup
+    const nav=[['Accounts','2 of 3 connected','▲',WARN,true],['Shared memory','3 handoffs · synced 2m ago','✓',ADD],['Shared rules','applied to 1 project','✓',ADD],['MCP servers','2 enabled · claude + codex','',''],['Skills & plugins','5 installed','',''],['Settings','backups, updates, storage','','']];
+    const setupNav=nav.map(n=>({label:n[0],meta:n[1],sg:n[2],sc:n[3],bg:n[4]?'#18211f':'transparent',bar:n[4]?'#eef4f1':'transparent',w:n[4]?'600':'500'}));
+    const accounts=[
+      {mark:'CL',bg:ENGC.claude,bd:ENGC.claude,name:'Claude Code',ver:'2.1.296',status:'✓ signed in',sc:ADD,detail:'2 profiles · Default in use by CH1',primary:'Reconnect',pBg:'transparent',pBd:'#2a3835',pFg:'#b6c4c0'},
+      {mark:'CX',bg:ENGC.codex,bd:ENGC.codex,name:'Codex',ver:'2.1.296',status:'✓ signed in',sc:ADD,detail:'In use by CH2',primary:'Reconnect',pBg:'transparent',pBd:'#2a3835',pFg:'#b6c4c0'},
+      {mark:'GH',bg:'transparent',bd:'#879692',name:'GitHub',ver:'gh 2.89.0',status:'▲ sign-in needed',sc:WARN,detail:'Required for cloning and pull requests',primary:'Connect GitHub',pBg:'#d8e3df',pBd:'#d8e3df',pFg:'#0b1010'}
+    ];
+    const recent=[['orbit-web','~/code/orbit-web','main','2 h ago',ENGC.claude,3,0.8],['coding-hub','~/code/Coding-Hub','main','yesterday',ENGC.codex,5,0.6],['billing-service','~/work/billing-service','feat/invoices','Oct 20',ENGC.claude,7,0.4],['dotfiles','~/dotfiles','main','Oct 12',ENGC.codex,9,0.2]]
+      .map(r=>({name:r[0],path:r[1],branch:'⎇ '+r[2],when:r[3],color:r[4],path2:spark(r[5],r[6])}));
+    const marks=[
+      {n:1,x:'40px',y:'-22px',t:'Channel badge.',d:'Engine colour plus number; Alt+1…4 jumps to it.'},
+      {n:2,x:'90px',y:'-22px',t:'Engine and model.',d:'Profile chip appears for named Claude profiles.'},
+      {n:3,x:'calc(100% - 420px)',y:'-22px',t:'Context and tokens.',d:'Tabular mono; context turns orange at 80%.'},
+      {n:4,x:'calc(100% - 290px)',y:'-22px',t:'Contextual action.',d:'Approve, Retry, Write handoff, Review or Start, with its key.'},
+      {n:5,x:'calc(100% - 70px)',y:'-22px',t:'State chip.',d:'Glyph + word; solid fill when it needs you.'},
+      {n:6,x:'45%',y:'40px',t:'Scope strip.',d:'Token throughput over the last 120 s. Its shape is the state.'},
+      {n:7,x:'-10px',y:'26px',t:'Limit line.',d:'Dashed rail; a clipping trace means the channel is near its limit.'},
+      {n:8,x:'30%',y:'64px',t:'Context bar.',d:'3 px fill along the strip edge, tick at 80%.'},
+      {n:9,x:'-10px',y:'76px',t:'Expanded row.',d:'PID, folder, cost and window actions; shown on hover or focus.'},
+      {n:10,x:'60%',y:'200px',t:'Terminal.',d:'Solid #070a0a, 13/20 mono, nothing layered behind text.'}
+    ];
+    const stateRows=['idle','starting','working','waiting','finished','failed','limit'].map((s,i)=>({state:s,engine:i%2?'codex':'claude',ch:'CH'+(i%2?2:1),model:i%2?'gpt-5-codex':'sonnet-4.5',script:i%2?'hook':'stats',ctx:s==='limit'?92:[12,8,38,61,44,61,92][i],tok:['0','0.2k','48.2k','31.7k','52.0k','31.7k','171.4k'][i],seed:7+i*6}));
+    return {
+      s1Chans:[{ch:'CH1',engine:'claude',state:'working',rate:'41 tok/s'},{ch:'CH2',engine:'codex',state:'waiting',rate:'0 tok/s'}],
+      s1Alerts:['CH2 needs approval'],
+      s2Chans:[{ch:'CH1',engine:'claude',state:'working',rate:'41'},{ch:'CH2',engine:'codex',state:'failed'},{ch:'CH3',engine:'claude',state:'limit',rate:'38'},{ch:'CH4',engine:'codex',state:'finished'}],
+      s2Alerts:['CH2 failed','CH3 ctx 92%'],
+      empty:[],recent,
+      isSplit:S.mode==='split',isUnified:S.mode==='unified',splitRows:split,uniRows:uni,
+      setSplit:()=>this.setState({mode:'split'}),setUnified:()=>this.setState({mode:'unified'}),
+      splitBg:S.mode==='split'?'#2a3835':'transparent',splitFg:S.mode==='split'?'#eef4f1':'#879692',
+      uniBg:S.mode==='unified'?'#2a3835':'transparent',uniFg:S.mode==='unified'?'#eef4f1':'#879692',
+      kpis:[{label:'input tokens',value:'978.4k',sub:'▲ 12% vs prior 14 d'},{label:'output tokens',value:'200.5k',sub:'incl. 41.3k reasoning'},{label:'cache reads',value:'3.62M',sub:'Claude only · not billed as input'},{label:'sessions',value:'19',sub:'3 hit 80% context'},{label:'estimated cost',value:'$38.47',sub:'local price table v2026-10'}],
+      days,dayRead,sessions,cols:'92px minmax(0,1fr) 96px 104px 56px 64px 64px 56px 140px 56px 120px',
+      cmd,setupNav,accounts,marks,stateRows
+    };
+  }
+}
+</script>
+</body>
+</html>

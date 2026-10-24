@@ -1,0 +1,96 @@
+/* Trace design tokens — drop into src/tokens.css and import once from main.tsx.
+   Values are final (hi-fi). Dark is the only theme specified so far. */
+:root {
+  /* surfaces */
+  --tr-bg: #0b1010;            /* app background */
+  --tr-term: #070a0a;          /* terminal, diff, chart wells — text sits on this, solid only */
+  --tr-panel: #0d1312;         /* side panels (file list, delivery, setup nav) */
+  --tr-surface: #131a19;       /* top bar, status bar, tile headers, menus */
+  --tr-hover: #18211f;         /* hover fill */
+  --tr-raised: #1f2a28;        /* active tab, selected row */
+  --tr-control-on: #2a3835;    /* selected segment */
+
+  /* lines */
+  --tr-line-faint: #1a2422;    /* row dividers, graticule */
+  --tr-line: #22302d;          /* dividers */
+  --tr-line-control: #2a3835;  /* control borders */
+  --tr-line-strong: #3b4d49;   /* overlay borders, limit rail */
+  --tr-tile-border: #1f2b29;
+
+  /* text */
+  --tr-fg-strong: #eef4f1;
+  --tr-fg: #d8e3df;
+  --tr-fg-muted: #b6c4c0;
+  --tr-fg-dim: #879692;
+  --tr-fg-faint: #6f807b;      /* ≥11px mono labels only */
+  --tr-fg-off: #4f625d;        /* idle trace, drag handle, ctx bar fill */
+  --tr-on-light: #0b1010;      /* text on solid chips / primary buttons */
+
+  /* engines (channel colours) */
+  --tr-ch-claude: oklch(0.87 0.14 95);
+  --tr-ch-codex: oklch(0.80 0.11 215);
+
+  /* states — "working" uses the engine colour */
+  --tr-st-idle: #879692;
+  --tr-st-starting: #d8e3df;
+  --tr-st-waiting: oklch(0.78 0.14 330);
+  --tr-st-finished: #d8e3df;
+  --tr-st-failed: oklch(0.68 0.19 25);
+  --tr-st-limit: oklch(0.80 0.15 60);
+  --tr-on-waiting: #120b10;
+
+  /* diff / success */
+  --tr-add: oklch(0.82 0.13 155);
+  --tr-del: oklch(0.72 0.16 25);
+  --tr-add-bg: oklch(0.82 0.13 155 / .13);
+  --tr-del-bg: oklch(0.72 0.16 25 / .15);
+  --tr-stop-fg: oklch(0.82 0.11 25);
+
+  /* type */
+  --tr-font-ui: "IBM Plex Sans Condensed", system-ui, sans-serif;
+  --tr-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --tr-t-display: 600 40px/44px var(--tr-font-ui);
+  --tr-t-title: 600 28px/32px var(--tr-font-ui);
+  --tr-t-heading: 600 20px/24px var(--tr-font-ui);
+  --tr-t-body: 400 16px/24px var(--tr-font-ui);
+  --tr-t-control: 400 15px/20px var(--tr-font-ui);
+  --tr-t-metric: 500 34px/38px var(--tr-font-mono);
+  --tr-t-term: 400 13px/20px var(--tr-font-mono);
+  --tr-t-meta: 400 12px/16px var(--tr-font-mono);
+  --tr-t-micro: 600 11px/14px var(--tr-font-mono);
+
+  /* spacing (4/8 grid) */
+  --tr-s-1: 4px; --tr-s-2: 8px; --tr-s-3: 12px; --tr-s-4: 16px;
+  --tr-s-6: 24px; --tr-s-8: 32px; --tr-s-12: 48px; --tr-s-16: 64px;
+
+  /* radii */
+  --tr-r-chip: 2px; --tr-r-control: 3px; --tr-r-panel: 4px; --tr-r-overlay: 6px;
+
+  /* elevation — tone + line; only overlays cast shadow */
+  --tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6);
+  --tr-shadow-toast: 0 12px 32px rgba(0,0,0,.5);
+  --tr-scrim: rgba(4,7,7,.78);  /* solid scrim, never blur */
+
+  /* motion */
+  --tr-d-instant: 80ms; --tr-d-fast: 160ms; --tr-d-base: 240ms; --tr-d-slow: 400ms;
+  --tr-ease: cubic-bezier(.2,.7,.2,1);
+  --tr-ease-exit: cubic-bezier(.4,0,1,1);
+
+  /* layout */
+  --tr-topbar-h: 40px;
+  --tr-statusbar-h: 32px;
+  --tr-tile-head-h: 30px;
+  --tr-strip-h: 40px;          /* 30px in 4-tile grid */
+  --tr-tile-detail-h: 30px;
+  --tr-focus: 2px solid var(--tr-fg-strong);
+}
+
+body { background: var(--tr-bg); color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+@keyframes tr-blink3 { 50% { opacity: .12; } }
+@keyframes tr-start-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

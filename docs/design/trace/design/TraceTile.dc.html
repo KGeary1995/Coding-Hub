@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+@keyframes blink3{50%{opacity:.12}}
+@keyframes startPulse{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+<div tabIndex="0" onMouseEnter="{{ enter }}" onMouseLeave="{{ leave }}" style="height:{{ rootH }};box-sizing:border-box;display:flex;flex-direction:column;min-height:0;min-width:0;background:#070a0a;border:{{ frame }};border-radius:4px;overflow:hidden;font-family:'IBM Plex Sans Condensed',sans-serif;color:#d8e3df" style-focus="outline:2px solid #eef4f1;outline-offset:2px">
+  <div style="flex:none;background:#131a19;border-bottom:1px solid #22302d">
+    <div style="height:30px;display:flex;align-items:center;gap:10px;padding:0 6px 0 8px">
+      <span style="color:#4f625d;font-size:12px;letter-spacing:-2px;cursor:grab">⋮⋮</span>
+      <span style="background:{{ ec }};color:#0b1010;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:11px;padding:1px 6px;border-radius:2px">{{ ch }}</span>
+      <span style="font-size:15px;font-weight:600;color:#eef4f1;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">{{ name }}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">{{ model }}</span>
+      <sc-if value="{{ hasProfile }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#b6c4c0;border:1px solid #2a3835;padding:0 5px;border-radius:2px">{{ profile }}</span></sc-if>
+      <div style="flex:1"></div>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;display:flex;gap:6px;white-space:nowrap">ctx<b style="font-weight:500;color:{{ ctxColor }};font-variant-numeric:tabular-nums">{{ ctxTxt }}</b></span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;display:flex;gap:6px;white-space:nowrap">tok<b style="font-weight:500;color:#d8e3df;font-variant-numeric:tabular-nums">{{ tokens }}</b></span>
+      <sc-if value="{{ showAct }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:4px;flex:none">
+          <button style="height:22px;padding:0 10px;border-radius:2px;border:none;background:{{ act.pBg }};color:{{ act.pFg }};font-family:'IBM Plex Sans Condensed',sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;white-space:nowrap">{{ act.p }}<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;opacity:.75">{{ act.pk }}</span></button>
+          <sc-if value="{{ act.hasS }}" hint-placeholder-val="{{ false }}"><button style="height:22px;padding:0 8px;border-radius:2px;background:transparent;border:1px solid #2a3835;color:#b6c4c0;font-family:'IBM Plex Sans Condensed',sans-serif;font-size:13px;white-space:nowrap">{{ act.s }}</button></sc-if>
+        </div>
+      </sc-if>
+      <button onClick="{{ cycle }}" title="State (click to cycle in this mock)" style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:2px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.06em;color:{{ chipFg }};background:{{ chipBg }};border:1px solid {{ col }};animation:{{ anim }};white-space:nowrap;flex:none"><span>{{ glyph }}</span><span>{{ scope }}</span></button>
+    </div>
+    <div style="height:{{ stripH }};position:relative;border-top:1px solid #1a2422">
+      <div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,#1a2422 0 1px,transparent 1px 10%)"></div>
+      <svg viewBox="0 0 400 40" preserveAspectRatio="none" style="position:absolute;left:0;right:0;top:0;bottom:3px;width:100%;height:calc(100% - 3px);overflow:visible">
+        <line x1="0" y1="6" x2="400" y2="6" style="stroke:#3b4d49;stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke"></line>
+        <path d="{{ path }}" style="fill:none;stroke:{{ traceColor }};stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round"></path>
+      </svg>
+      <div style="position:absolute;left:8px;bottom:5px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#6f807b">−120 s</div>
+      <div style="position:absolute;right:8px;top:4px;display:flex;gap:6px;align-items:baseline;padding:1px 6px;background:#131a19;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">rate<b style="font-weight:500;color:#eef4f1;font-variant-numeric:tabular-nums">{{ rate }}</b></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:3px;background:#1a2422">
+        <div style="height:3px;width:{{ ctxW }};background:{{ ctxBar }};transition:width .4s cubic-bezier(.2,.7,.2,1)"></div>
+        <div style="position:absolute;left:80%;top:-3px;width:1px;height:6px;background:oklch(0.80 0.15 60)"></div>
+      </div>
+    </div>
+  </div>
+  <sc-if value="{{ expanded }}" hint-placeholder-val="{{ false }}">
+    <div style="height:30px;flex:none;display:flex;align-items:center;gap:18px;padding:0 10px;background:#0f1514;border-bottom:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692;white-space:nowrap;overflow:hidden">
+      <span style="display:flex;gap:6px">pid<b style="color:#d8e3df;font-weight:400">{{ pid }}</b></span>
+      <span style="display:flex;gap:6px">cwd<b style="color:#d8e3df;font-weight:400">{{ cwd }}</b></span>
+      <span style="display:flex;gap:6px">cost<b style="color:#d8e3df;font-weight:400">{{ cost }}</b></span>
+      <span style="display:flex;gap:6px">ctx<b style="color:#d8e3df;font-weight:400">{{ ctxAbs }}</b></span>
+      <div style="flex:1"></div>
+      <div style="display:flex;gap:4px;font-family:'IBM Plex Sans Condensed',sans-serif;font-size:13px">
+        <button style="height:22px;padding:0 10px;border-radius:2px;background:transparent;border:1px solid oklch(0.68 0.19 25);color:oklch(0.82 0.11 25)">Stop</button>
+        <button style="height:22px;padding:0 8px;border-radius:2px;background:transparent;border:1px solid #2a3835;color:#b6c4c0">Settings</button>
+        <button style="height:22px;padding:0 8px;border-radius:2px;background:transparent;border:1px solid #2a3835;color:#b6c4c0">Duplicate</button>
+        <button style="height:22px;padding:0 8px;border-radius:2px;background:transparent;border:1px solid #2a3835;color:#b6c4c0">Maximize</button>
+        <button style="height:22px;padding:0 8px;border-radius:2px;background:transparent;border:1px solid #2a3835;color:#b6c4c0">Close</button>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showTerm }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;min-height:0;overflow:hidden;padding:12px 14px;font-family:'IBM Plex Mono',monospace;font-size:13px;line-height:20px">
+      <sc-for list="{{ lines }}" as="l" hint-placeholder-count="12"><div style="white-space:pre;min-height:20px;color:{{ l.c }};background:{{ l.bg }};font-weight:{{ l.w }}">{{ l.t }}</div></sc-for>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:800,&quot;height&quot;:520},&quot;engine&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;claude&quot;,&quot;codex&quot;],&quot;default&quot;:&quot;claude&quot;,&quot;tsType&quot;:&quot;'claude'|'codex'&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;starting&quot;,&quot;working&quot;,&quot;waiting&quot;,&quot;finished&quot;,&quot;failed&quot;,&quot;limit&quot;],&quot;default&quot;:&quot;working&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;ch&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;CH1&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;model&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;sonnet-4.5&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;ctx&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:38,&quot;tsType&quot;:&quot;number&quot;},&quot;expanded&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;dense&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;headerOnly&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const ENGC={claude:'oklch(0.87 0.14 95)',codex:'oklch(0.80 0.11 215)'};
+const ST={idle:'#879692',starting:'#d8e3df',waiting:'oklch(0.78 0.14 330)',finished:'#d8e3df',failed:'oklch(0.68 0.19 25)',limit:'oklch(0.80 0.15 60)'};
+const STATES=['idle','starting','working','waiting','finished','failed','limit'];
+const GLYPH={idle:'○',starting:'◌',working:'●',waiting:'◆',finished:'✓',failed:'✕',limit:'▲'};
+const SCOPE={idle:'IDLE',starting:'ARMING',working:'RUN',waiting:'HOLD',finished:'STOP',failed:'FAULT',limit:'CLIP'};
+const ADD='oklch(0.82 0.13 155)',DEL='oklch(0.72 0.16 25)',WARN='oklch(0.80 0.15 60)';
+const FILES={stats:'src/components/StatsGrid.tsx',hook:'src/hooks/useStats.ts',docs:'docs/api/stats.md',lint:'src/api/client.ts'};
+const SCRIPTS={
+ stats:[['in','› Add an abort signal to fetchStats, then a loading skeleton for the stats grid'],['dim',''],['tool','● Read src/api/client.ts'],['dim','  42 lines'],['tool','● Read src/components/StatsGrid.tsx'],['dim','  88 lines'],['tool','● Update src/api/client.ts'],['del','  5 − export async function fetchStats() {'],['add','  5 + export async function fetchStats(signal?: AbortSignal) {'],['del','  6 −   const response = await fetch(`${BASE}/stats`);'],['add','  6 +   const response = await fetch(`${BASE}/stats`, { signal });'],['add','  7 +   if (!response.ok) throw new Error(`Stats failed: ${response.status}`);'],['tool','● Create src/components/StatsSkeleton.tsx'],['dim','  +34 lines'],['tool','● Run npm test -- stats'],['ok','  PASS  src/api/client.test.ts (4)'],['ok','  PASS  src/components/StatsGrid.test.tsx (6)'],['dim',''],['tool','● Wiring StatsSkeleton into StatsGrid while data loads']],
+ hook:[['in','› Run the tests and fix failures in the stats hook'],['dim',''],['dim','  reasoning · scanning workspace'],['tool','$ rg "fetchStats" src'],['dim','  src/api/client.ts:5'],['dim','  src/hooks/useStats.ts:12'],['tool','$ npm test -- --run stats'],['err','  FAIL  src/hooks/useStats.test.ts'],['err','    ✕ cancels pending request on unmount'],['ok','  PASS  src/api/client.test.ts (4)'],['dim',''],['tool','plan'],['dim','  1. create an AbortController in useStats'],['dim','  2. abort it in the effect cleanup'],['dim',''],['tool','patch src/hooks/useStats.ts'],['add','  +   const controller = new AbortController();'],['add','  +   fetchStats(controller.signal).then(setStats);'],['add','  +   return () => controller.abort();'],['del','  -   fetchStats().then(setStats);']],
+ docs:[['in','› Document the stats API and update the README usage section'],['dim',''],['tool','● Read README.md'],['tool','● Read docs/architecture.md'],['dim','  412 lines'],['tool','● Read docs/api/*.md'],['dim','  14 files'],['tool','● Read src/hooks/useStats.ts'],['tool','● Update README.md'],['add','  + ## Stats API'],['add','  + `fetchStats(signal?)` returns the dashboard totals.'],['add','  + Pass an AbortSignal to cancel on unmount.'],['tool','● Update docs/api/stats.md']],
+ lint:[['in','› Run lint and typecheck across src/api'],['dim',''],['tool','$ npm run lint -- src/api'],['dim','  0 problems'],['tool','$ npx tsc --noEmit -p .'],['err','  src/api/client.ts:7:41  TS2339  Property "status" does not exist'],['tool','patch src/api/client.ts'],['del','  -   const response = await fetch(url);'],['add','  +   const response: Response = await fetch(url);'],['tool','$ npx tsc --noEmit -p .'],['ok','  done in 4.1s · 0 errors']]
+};
+function rng(s){return()=>{s=(s*1664525+1013904223)%4294967296;return s/4294967296;};}
+function trace(state,seed){
+  const r=rng(seed),pts=[];
+  for(let i=0;i<=80;i++){
+    const x=i*5,n=10+r()*20+Math.sin(i*0.7)*3;let y;
+    if(state==='idle') y=32;
+    else if(state==='starting') y=i<62?32:Math.max(16,32-(i-62)*0.9);
+    else if(state==='working') y=n;
+    else if(state==='waiting') y=i<56?n:12;
+    else if(state==='finished') y=i<40?n:32-(32-n)*Math.max(0,1-(i-40)/22);
+    else if(state==='failed'){ if(i>64)break; y=i<62?n:38; }
+    else y=Math.max(6,n-8);
+    pts.push((i?'L':'M')+x+' '+y.toFixed(1));
+  }
+  return pts.join(' ');
+}
+class Component extends DCLogic {
+  state={over:null,hov:false};
+  renderVals(){
+    const p=this.props,eng=p.engine||'claude',state=this.state.over||p.state||'working';
+    const ec=ENGC[eng],col=ST[state]||ec,loud=state==='waiting'||state==='failed';
+    const ctx=state==='limit'?Math.max(92,p.ctx||0):(p.ctx??40);
+    const script=p.script||(eng==='claude'?'stats':'hook'),file=FILES[script];
+    const col2={in:'#ffffff',tool:'#d8e3df',dim:'#879692',add:ADD,del:DEL,ok:ADD,err:DEL,warn:WARN};
+    let raw;
+    if(state==='idle') raw=[['dim','session idle · cwd '+(p.cwd||'~/orbit-web')],['dim','press Enter or Start to launch '+(eng==='claude'?'claude':'codex')]];
+    else if(state==='starting') raw=[['dim','spawning '+(eng==='claude'?'claude':'codex')+' · pid '+(p.pid||'—')],['dim','profile '+(p.profile||'Default')+' · cwd '+(p.cwd||'~/orbit-web')],['dim','loading 2 MCP servers…']];
+    else {
+      raw=SCRIPTS[script].slice();
+      if(state==='working') raw.push(['cur','▍']);
+      if(state==='waiting') raw.push(['dim',''],['ask','  Approve edit to '+file+'?  (+6 −2)  '],['ask','  [y] yes   [a] always this session   [n] no  ']);
+      if(state==='finished') raw.push(['dim',''],['ok','✓ Done · exit 0 · 1 file changed']);
+      if(state==='failed') raw.push(['dim',''],['err','✕ Process exited with code 1'],['dim','  stderr: ECONNRESET while streaming response'],['dim','  log saved · ~/.coding-hub/logs/'+(p.ch||'ch').toLowerCase()+'.log']);
+      if(state==='limit') raw.push(['dim',''],['warn','▲ Context '+ctx+'% · '+Math.round(ctx*2)+'k / 200k tokens'],['dim','  Write a handoff to shared memory before the window fills'],['cur','▍']);
+    }
+    const lines=raw.map(([k,t])=>({t,c:k==='ask'?'#120b10':k==='cur'?ec:col2[k],bg:k==='ask'?ST.waiting:'transparent',w:(k==='in'||k==='ask')?'600':'400'}));
+    const ACT={
+      waiting:{show:true,p:'Approve',pk:'Y',pBg:ST.waiting,pFg:'#120b10',hasS:true,s:'Deny'},
+      failed:{show:true,p:'Retry',pk:'R',pBg:'#d8e3df',pFg:'#0b1010',hasS:true,s:'Open log'},
+      limit:{show:true,p:'Write handoff',pk:'H',pBg:WARN,pFg:'#0b1010',hasS:false},
+      finished:{show:true,p:'Review changes',pk:'G C',pBg:'#d8e3df',pFg:'#0b1010',hasS:false},
+      idle:{show:true,p:'▶ Start',pk:'⏎',pBg:ec,pFg:'#0b1010',hasS:false}
+    };
+    const rates={idle:'0 tok/s',starting:'— tok/s',working:(p.rate||'41')+' tok/s',waiting:'0 tok/s',finished:'0 tok/s',failed:'— tok/s',limit:(p.rate||'38')+' tok/s'};
+    const dense=!!p.dense,headerOnly=!!p.headerOnly;
+    return {
+      ch:p.ch||'CH1',name:p.name||(eng==='claude'?'Claude Code':'Codex'),model:p.model||'',profile:p.profile||'',hasProfile:!!p.profile,
+      ec,col,glyph:GLYPH[state],scope:SCOPE[state],
+      chipBg:loud?col:'transparent',chipFg:loud?'#0b1010':col,
+      anim:loud?'blink3 .4s steps(1) 3':state==='starting'?'startPulse 1.2s ease-in-out infinite':'none',
+      frame:loud?'1px solid '+col:p.focused?'1px solid #3b4d49':'1px solid #1f2b29',
+      ctxTxt:ctx+'%',ctxW:ctx+'%',ctxBar:ctx>=80?WARN:'#4f625d',ctxColor:ctx>=80?WARN:'#d8e3df',ctxAbs:Math.round(ctx*2)+'k / 200k',
+      tokens:p.tokens||'0',cost:p.cost||'$0.00',pid:state==='idle'?'—':(p.pid||'—'),cwd:p.cwd||'~/orbit-web',
+      path:trace(state,p.seed||7),traceColor:state==='idle'?'#4f625d':col,rate:rates[state],
+      act:ACT[state]||{show:false,hasS:false},showAct:!!(ACT[state]&&!p.compact),
+      stripH:dense?'30px':'40px',rootH:headerOnly?'auto':'100%',
+      expanded:!!p.expanded||this.state.hov,showTerm:!headerOnly,lines,
+      enter:()=>this.setState({hov:true}),leave:()=>this.setState({hov:false}),
+      cycle:e=>{e.stopPropagation();this.setState({over:STATES[(STATES.indexOf(state)+1)%STATES.length]});}
+    };
+  }
+}
+</script>
+</body>
+</html>

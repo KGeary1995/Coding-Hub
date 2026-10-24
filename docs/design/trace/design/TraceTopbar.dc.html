@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+</helmet>
+<div style="height:40px;box-sizing:border-box;display:flex;align-items:center;gap:4px;padding:0 12px;background:#131a19;border-bottom:1px solid #22302d;font-family:'IBM Plex Sans Condensed',sans-serif">
+  <div style="display:flex;align-items:center;gap:8px;padding-right:10px;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:16px;color:#eef4f1">
+    <span style="display:flex;gap:2px;align-items:flex-end;height:14px"><span style="width:3px;height:6px;background:oklch(0.87 0.14 95)"></span><span style="width:3px;height:14px;background:oklch(0.87 0.14 95)"></span><span style="width:3px;height:9px;background:oklch(0.80 0.11 215)"></span><span style="width:3px;height:4px;background:oklch(0.80 0.11 215)"></span></span>trace
+  </div>
+  <button style="height:28px;padding:0 10px;margin-right:6px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:{{ projColor }};font-size:14px;display:flex;align-items:center;gap:8px;white-space:nowrap">{{ project }}<span style="color:#879692;font-size:11px">▾</span></button>
+  <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+    <button style="height:28px;padding:0 14px;background:{{ t.bg }};border:none;border-radius:3px;color:{{ t.fg }};font-size:15px;font-weight:{{ t.w }};display:flex;align-items:center;gap:6px" style-hover="background:#18211f">{{ t.label }}<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ t.count }}</span></button>
+  </sc-for>
+  <div style="width:1px;height:18px;background:#2a3835;margin:0 6px"></div>
+  <button style="height:28px;padding:0 12px;background:{{ insight.bg }};border:none;border-radius:3px;color:{{ insight.fg }};font-size:15px;font-weight:{{ insight.w }}" style-hover="background:#18211f">{{ insight.label }}</button>
+  <div style="flex:1"></div>
+  <sc-if value="{{ showLayout }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;gap:2px;padding:2px;margin-right:8px;border:1px solid #2a3835;border-radius:3px">
+      <sc-for list="{{ layouts }}" as="l" hint-placeholder-count="4"><button style="width:26px;height:22px;border:none;border-radius:2px;background:{{ l.bg }};color:{{ l.fg }};font-size:13px">{{ l.g }}</button></sc-for>
+    </div>
+  </sc-if>
+  <div style="display:flex;align-items:center;gap:12px;width:300px;height:28px;padding:0 10px;background:#0b1010;border:1px solid #2a3835;border-radius:3px;font-size:14px;color:#879692">Search or run a command<div style="flex:1"></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">Ctrl ⇧ P</span></div>
+  <button style="height:28px;padding:0 12px;margin-left:6px;background:{{ setup.bg }};border:1px solid {{ setup.bd }};border-radius:3px;color:{{ setup.fg }};font-size:15px">Agent setup</button>
+  <button style="height:28px;padding:0 12px;margin-left:6px;background:#d8e3df;border:none;border-radius:3px;color:#0b1010;font-size:15px;font-weight:600">+ Channel</button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:40},&quot;active&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;workspace&quot;,&quot;changes&quot;,&quot;projects&quot;,&quot;insight&quot;,&quot;setup&quot;],&quot;default&quot;:&quot;workspace&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;insight&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Insight&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;showLayout&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;single&quot;,&quot;cols&quot;,&quot;rows&quot;,&quot;grid&quot;],&quot;default&quot;:&quot;cols&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;project&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;orbit-web&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals(){
+    const a=this.props.active||'workspace',lay=this.props.layout||'cols';
+    const tab=(id,label,count)=>({label,count:count||'',bg:a===id?'#1f2a28':'transparent',fg:a===id?'#eef4f1':'#b6c4c0',w:a===id?'600':'400'});
+    const proj=this.props.project===undefined?'orbit-web':this.props.project;
+    return {
+      tabs:[tab('workspace','Workspace'),tab('changes','Changes','3'),tab('projects','Projects')],
+      insight:tab('insight',(this.props.insight||'Insight')+' ▾'),
+      setup:{bg:a==='setup'?'#1f2a28':'transparent',fg:a==='setup'?'#eef4f1':'#b6c4c0',bd:a==='setup'?'#3b4d49':'#2a3835'},
+      showLayout:!!this.props.showLayout,
+      layouts:[['single','▢'],['cols','▥'],['rows','▤'],['grid','▦']].map(([k,g])=>({g,bg:k===lay?'#2a3835':'transparent',fg:k===lay?'#eef4f1':'#879692'})),
+      project:proj||'No project',projColor:proj?'#eef4f1':'#879692'
+    };
+  }
+}
+</script>
+</body>
+</html>
