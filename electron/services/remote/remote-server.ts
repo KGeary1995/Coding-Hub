@@ -24,7 +24,8 @@ interface Stream { device: string; response: http.ServerResponse; sessionId: str
 const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(pushEndpoint, 'Not a push service.'), p256dh: z.string().regex(/^[A-Za-z0-9_-]{87}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/) }).strict();
 const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional() }).strict();
 const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
-const subscribeSchema = z.object({ endpoint: z.string().max(2048), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
+/** What a browser's `PushSubscription.toJSON()` gives (`expirationTime` is usually null and is not needed to send). */
+const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
 /** At most one alert per channel and kind in this window, so a CLI that keeps asking does not flood the phone. */
 const ALERT_INTERVAL = 20000;
 type Device = z.infer<typeof deviceSchema>;
@@ -74,7 +75,10 @@ export class RemoteServer {
     if (kind !== 'test') { if (now - (this.alerted.get(key) ?? 0) < ALERT_INTERVAL) return; this.alerted.set(key, now); }
     const targets = this.devices().filter((device) => device.push && (!only || device.id === only));
     await Promise.all(targets.map(async (device) => {
-      const result = await this.sender(device.push!, { title, body, sessionId, tag: key }, { topic: `trace-${kind}` });
+      // A newer alert replaces one still queued for the phone only for the same channel and kind (RFC 8030 topics, at
+      // most 32 URL-safe characters), so a phone that was offline still hears about every channel.
+      const topic = kind[0] + createHash('sha256').update(sessionId).digest('base64url').slice(0, 24);
+      const result = await this.sender(device.push!, { title, body, sessionId, tag: key }, { topic });
       if (result === 'gone') this.setPush(device.id, undefined);
     }));
   }

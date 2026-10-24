@@ -23,8 +23,8 @@ async function remote() {
   const phone = path.join(root, 'phone'); fs.mkdirSync(path.join(phone, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(phone, 'index.html'), '<h1>Pair this phone</h1>'); fs.writeFileSync(path.join(phone, 'assets', 'app-1a2b.js'), 'console.log(1)');
   fs.writeFileSync(path.join(root, 'secret.json'), '{"secret":true}');
-  const alerts: { device: string; message: Record<string, unknown> }[] = []; let result: 'sent' | 'gone' = 'sent';
-  const server = new RemoteServer(root, host, 0, phone, async (subscription, message) => { alerts.push({ device: subscription.endpoint, message: message as Record<string, unknown> }); return result; }); cleanup.push(() => server.stop());
+  const alerts: { device: string; message: Record<string, unknown>; topic: string }[] = []; let result: 'sent' | 'gone' = 'sent';
+  const server = new RemoteServer(root, host, 0, phone, async (subscription, message, { topic }) => { alerts.push({ device: subscription.endpoint, message: message as Record<string, unknown>, topic }); return result; }); cleanup.push(() => server.stop());
   return { root, server, writes, running, alerts, gone: () => { result = 'gone'; } };
 }
 const base = (server: RemoteServer) => `http://127.0.0.1:${server.address}`;
@@ -189,7 +189,8 @@ describe('phone alerts', () => {
     const { server } = await remote(); await server.setEnabled(true); const token = await paired(server);
     const key = await (await alertsApi(server, token, 'GET')).json() as { publicKey: string; on: boolean }; expect(key.publicKey).toMatch(/^[A-Za-z0-9_-]{87}$/); expect(key.on).toBe(false);
     expect((await alertsApi(server, token, 'POST', { ...subscription, endpoint: 'https://192.168.1.10/hook' })).status).toBe(400);
-    expect((await alertsApi(server, token, 'POST', subscription)).status).toBe(200); expect(server.status().devices[0].notifications).toBe(true);
+    // Exactly what a browser's PushSubscription.toJSON() posts, expirationTime included.
+    expect((await alertsApi(server, token, 'POST', { ...subscription, expirationTime: null })).status).toBe(200); expect(server.status().devices[0].notifications).toBe(true);
     expect((await alertsApi(server, token, 'DELETE')).status).toBe(200); expect(server.status().devices[0].notifications).toBe(false);
   });
   it('alerts phones when a channel needs the person or fails, at most once per 20 seconds, and forgets a gone subscription', async () => {
@@ -204,6 +205,10 @@ describe('phone alerts', () => {
       expect.objectContaining({ title: 'CH1 · Claude Code needs you', body: 'Approve npm test?', sessionId: 's1' }),
       expect.objectContaining({ title: 'CH1 · Claude Code stopped with an error', body: 'Error: model not found' }),
     ]);
+    // Topics are per channel and kind and fit RFC 8030 (32 URL-safe characters), so queued alerts for other channels stay.
+    server.onSessionEvent({ type: 'attention', sessionId: 's2', runId: 'r2', message: 'Approve?', at: new Date().toISOString() });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const topics = alerts.map((item) => item.topic); expect(new Set(topics).size).toBe(3); for (const topic of topics) expect(topic).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
     gone(); await server.testAlert(server.status().devices[0].id); expect(server.status().devices[0].notifications).toBe(false);
     await expect(server.testAlert(server.status().devices[0].id)).rejects.toThrow(/not on/);
   });

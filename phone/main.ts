@@ -33,6 +33,8 @@ let channels: RemoteChannel[] = []; let current: string | null = null; let run: 
 let stop: (() => void) | null = null; let terminal: Terminal | null = null; let connected = false;
 /** Unsent messages, by channel. */
 const drafts = new Map<string, string>();
+/** A channel an alert asked to open that the phone has not heard of yet: opened when the next channel list has it. */
+let opening: string | null = null;
 
 const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
 const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
@@ -188,7 +190,12 @@ async function type(data: string) {
 }
 
 function onEvent(event: StreamEvent) {
-  if (event.type === 'channels') { channels = event.data; renderList(); renderChannel(); return; }
+  if (event.type === 'channels') {
+    channels = event.data; renderList(); renderChannel();
+    // The list that arrives after an alert was tapped (on connecting, or just after) decides whether its channel opens.
+    if (opening) { const id = opening; opening = null; if (channels.some((item) => item.sessionId === id)) showChannel(id); }
+    return;
+  }
   if (event.data.sessionId !== current || !terminal) return;
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
@@ -206,9 +213,14 @@ window.addEventListener('resize', () => { const channel = channels.find((item) =
 // Alerts arrive through the service worker; tapping one opens its channel.
 if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch(() => {});
-  navigator.serviceWorker.addEventListener('message', (event) => { const id = (event.data as { open?: string }).open; if (id && token.get() && channels.some((item) => item.sessionId === id)) showChannel(id); });
+  navigator.serviceWorker.addEventListener('message', (event) => { const id = (event.data as { open?: string }).open; if (id && token.get()) openChannel(id); });
 }
-const opening = location.hash.startsWith('#channel=') ? decodeURIComponent(location.hash.slice(9)) : null;
+/** Opens the channel an alert was for: now if the phone knows it, otherwise once the next channel list includes it. */
+function openChannel(id: string) {
+  if (channels.some((item) => item.sessionId === id)) { opening = null; showChannel(id); return; }
+  // Reconnecting brings a fresh channel list straight away, even if this page was asleep with a dead connection.
+  opening = id; showList();
+}
+const linked = location.hash.startsWith('#channel=') ? decodeURIComponent(location.hash.slice(9)) : null;
 if (!token.get() || location.hash.startsWith(PAIRING_PREFIX)) showPair();
-else if (opening) { history.replaceState(null, '', '/'); showList(); const open = setInterval(() => { if (channels.some((item) => item.sessionId === opening)) { clearInterval(open); showChannel(opening); } }, 200); setTimeout(() => clearInterval(open), 10000); }
-else showList();
+else { if (linked) history.replaceState(null, '', '/'); showList(); if (linked) openChannel(linked); }
