@@ -2,7 +2,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle } from 'lucide-react';
+import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, X } from 'lucide-react';
 import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -39,8 +39,11 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const busy = session.status === 'running' || session.status === 'starting';
   const state = channelState(session, usage); const meta = CHANNEL_STATES[state];
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
-  const ratio = context || session.budget ? limitRatio(session, usage) : null;
-  const hot = ratio !== null && ratio >= LIMIT_THRESHOLD;
+  // The bar and ctx readout show the context window when the CLI reports one; the budget fills the bar only otherwise.
+  // The channel state still uses the larger of the two (limitRatio).
+  const contextRatio = context ? context.used / context.limit : null;
+  const barRatio = contextRatio ?? (session.budget ? limitRatio(session, usage) : null);
+  const hot = contextRatio !== null && contextRatio >= LIMIT_THRESHOLD;
   async function stop() {
     setStopping(true);
     try { return await stopSession(session.id); } finally { setStopping(false); }
@@ -86,17 +89,17 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
             <span aria-hidden="true">{meta.glyph}</span>{meta.word}
           </span>
         </header>
-        <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={ratio} limitLabel={context ? `Context ${Math.round(context.used / context.limit * 100)}% (marker at 80%)` : 'Share of the session budget used (marker at 80%)'} />
+        <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (marker at 80%)` : `Session budget ${Math.round((barRatio ?? 0) * 100)}% used (marker at 80%)`} />
         <div className="tr-tile-detail">
           <span className="tr-detail-facts" title={cwd ?? undefined}>{facts}</span>
           {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${channel}`} onClick={() => void writeTerminal(session.id, '\x03')} disabled={stopping}><OctagonPause size={13} /></button>}
           {session.status === 'running'
-            ? <button className="tr-detail-button stop" onClick={() => void stop()} disabled={stopping}>{stopping && <LoaderCircle size={12} className="spin" />}{stopping ? 'Stopping' : 'Stop'}</button>
-            : state === 'finished' && <button className="tr-detail-button" onClick={start}>Restart</button>}
-          <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}>Settings</button>
-          <button className="tr-detail-button" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= 4} onClick={() => addSession(engine, session.id)}>Duplicate</button>
-          <button className="tr-detail-button" aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? 'Restore' : 'Maximize'}</button>
-          <button className="tr-detail-button" title="Stop and close (keep at least two channels)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}>Close</button>
+            ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
+            : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
+          <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
+          <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= 4} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
+          <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
+          <button className="tr-detail-button" title="Stop and close (keep at least two channels)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>

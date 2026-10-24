@@ -66,6 +66,14 @@
 .tr-detail-facts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .tr-detail-button { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
 .tr-detail-button.icon { padding: 0 5px; }
+.tr-detail-icon { display: none; }
+/* Narrow tiles (four channels at 125%, or beside the explorer): icon buttons, so every control stays in the row.
+   The label stays in the accessibility tree as the button's name. */
+@container (max-width: 560px) {
+  .tr-detail-button { padding: 0 5px; }
+  .tr-detail-icon { display: block; }
+  .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 .tr-detail-button:hover:not(:disabled), .tr-detail-button.selected { background: var(--tr-hover); color: var(--tr-fg-strong); }
 .tr-detail-button.stop { border-color: var(--tr-st-failed); color: var(--tr-stop-fg); }
 .tr-detail-button:disabled { opacity: .45; }
