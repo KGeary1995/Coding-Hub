@@ -1,4 +1,5 @@
 import type { UsageRecord } from '../../shared/hub';
+import { freshInput } from './channel-state';
 
 /** Usage windows on the Usage screen, in days ("Today" is the current local day). */
 export const USAGE_WINDOWS = [{ id: 1, label: 'Today' }, { id: 7, label: '7 d' }, { id: 14, label: '14 d' }, { id: 30, label: '30 d' }] as const;
@@ -25,6 +26,7 @@ export function inWindow(records: UsageRecord[], days: number, now = new Date(),
  */
 export const lastContext = (record: UsageRecord) => record.context && record.context.limit > 0 ? record.context.used / record.context.limit : null;
 
+/** `input` is fresh input: Codex cache reads are moved out of it into `cached`, as Claude already reports them. */
 export interface UsageTotals { input: number; output: number; cached: number; reasoning: number | null; sessions: number; overContext: number; cost: number | null; unpriced: number }
 
 /** Totals for the KPI strip. Reasoning is reported inside output, so it is shown as part of it and never added again. */
@@ -32,7 +34,7 @@ export function usageTotals(records: UsageRecord[]): UsageTotals {
   let reasoning: number | null = null; let cost: number | null = null; let unpriced = 0;
   const totals = { input: 0, output: 0, cached: 0, sessions: records.length, overContext: 0 };
   for (const record of records) {
-    totals.input += record.input; totals.output += record.output; totals.cached += record.cached;
+    totals.input += freshInput(record); totals.output += record.output; totals.cached += record.cached;
     if (record.reasoning !== null) reasoning = (reasoning ?? 0) + record.reasoning;
     if (record.cost === null) unpriced++; else cost = (cost ?? 0) + record.cost;
     if ((lastContext(record) ?? 0) >= 0.8) totals.overContext++;
@@ -53,7 +55,7 @@ export function dailySeries(records: UsageRecord[], days: number, now = new Date
   const byKey = new Map(series.map((day) => [day.key, day]));
   for (const record of records) {
     const day = byKey.get(dayKey(new Date(record.timestamp))); if (!day) continue;
-    day[record.engine] += record.input + record.output;
+    day[record.engine] += freshInput(record) + record.output;
     if (record.cost !== null) day.cost = (day.cost ?? 0) + record.cost;
   }
   return series;

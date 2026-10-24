@@ -41,7 +41,9 @@ describe('alerts and totals', () => {
   });
   it("sums today's input and output tokens, excluding cache, and leaves cost null when nothing is priced", () => {
     const now = new Date(2026, 9, 24, 15); const yesterday = new Date(2026, 9, 23, 23);
-    expect(todayTotals([usage({ timestamp: now.toISOString(), cached: 9999 }), usage({ timestamp: yesterday.toISOString() })], now)).toEqual({ tokens: 120, cost: null });
+    // Claude reports cache reads apart from input; Codex counts them inside input, so they are taken out.
+    expect(todayTotals([usage({ engine: 'claude', timestamp: now.toISOString(), cached: 9999 }), usage({ timestamp: yesterday.toISOString() })], now)).toEqual({ tokens: 120, cost: null });
+    expect(todayTotals([usage({ timestamp: now.toISOString(), input: 100, cached: 40, output: 20 })], now)).toEqual({ tokens: 80, cost: null });
     expect(todayTotals([usage({ timestamp: now.toISOString(), cost: 0.25 }), usage({ timestamp: now.toISOString(), cost: 0.5 })], now)).toEqual({ tokens: 240, cost: 0.75 });
   });
 });

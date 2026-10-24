@@ -21,15 +21,16 @@ describe('usage summary', () => {
       record({ engine: 'codex', output: 500, reasoning: 200, cost: 0.5, context: { used: 900, limit: 1000 } }),
       record({ output: 50, cost: null }),
     ]);
-    expect(totals).toMatchObject({ input: 200, output: 550, cached: 20, reasoning: 200, sessions: 2, overContext: 1, cost: 0.5, unpriced: 1 });
+    // Codex input 100 includes its 10 cached tokens, so fresh input is 90 + Claude's 100.
+    expect(totals).toMatchObject({ input: 190, output: 550, cached: 20, reasoning: 200, sessions: 2, overContext: 1, cost: 0.5, unpriced: 1 });
     expect(usageTotals([record({})]).reasoning).toBeNull();
     expect(usageTotals([]).cost).toBeNull();
   });
 
   it('builds one bar per day split by engine, cache excluded', () => {
-    const series = dailySeries([record({ timestamp: at(24), input: 100, output: 50 }), record({ engine: 'codex', timestamp: at(23), input: 10, output: 5, cost: 1 }), record({ timestamp: at(1) })], 3, now);
+    const series = dailySeries([record({ timestamp: at(24), input: 100, output: 50 }), record({ engine: 'codex', timestamp: at(23), input: 10, cached: 4, output: 5, cost: 1 }), record({ timestamp: at(1) })], 3, now);
     expect(series.map((day) => day.date.getDate())).toEqual([22, 23, 24]);
-    expect(series[1]).toMatchObject({ claude: 0, codex: 15, cost: 1 });
+    expect(series[1]).toMatchObject({ claude: 0, codex: 11, cost: 1 });
     expect(series[2]).toMatchObject({ claude: 150, codex: 0, cost: null });
   });
 

@@ -16,6 +16,9 @@ export function WorkflowCenter() {
 function Recovery() {
  const {sessions,rootDirectory,setView,restoreRun,resetCodexConfig}=useWorkspaceStore();
  const [id,setId]=useState(useWorkspaceStore.getState().recoverySessionId??sessions.find((session)=>session.error)?.id??sessions[0]?.id??''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false); const [report,setReport]=useState<DiagnosticReport|null>(null); const [failures,setFailures]=useState<(SessionHistoryRun&{diagnostic:string})[]>([]);
+ // Open log on a channel selects it here even when Recovery is already open, and drops the previous channel's report.
+ const requested=useWorkspaceStore((state)=>state.recoverySessionId);
+ useEffect(()=>{if(!requested)return;setId(requested);setReport(null);setError('');useWorkspaceStore.setState({recoverySessionId:null});},[requested]);
  const session=sessions.find((item)=>item.id===id)??sessions[0]; const cwd=session?.binding.mode==='independent'?session.binding.cwd:rootDirectory;
  useEffect(()=>{void workbench<(SessionHistoryRun&{diagnostic:string})[]>({action:'flow-failures'}).then(setFailures).catch((e)=>setError(e.message));},[]);
  const advice=recoveryAdvice(session?.error??'',session?.exitCode??null,Boolean(cwd));
