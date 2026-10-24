@@ -9,8 +9,9 @@ import { projectMemoryKey } from './auto-memory';
 import { HubError } from '../cli/engine-adapter';
 import type { TelemetryService } from './telemetry';
 import { RulesService } from './rules';
+import { preferencesSchema } from './preferences';
+import { DeviceSync } from './device-sync';
 const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
-export const preferencesSchema = z.object({ folderId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/), driveDirectory: z.string().max(4096), terminalFontSize: z.number().int().min(10).max(22), terminalWebGL: z.boolean().optional(), automaticMemory: z.boolean().optional(), prices: z.array(z.object({ model: z.string().min(1).max(120), input: z.number().finite().min(0).max(10000), output: z.number().finite().min(0).max(10000), cacheRead: z.number().finite().min(0).max(10000), cacheWrite: z.number().finite().min(0).max(10000) }).strict()).max(100) }).strict();
 export const hubRequestSchema = z.discriminatedUnion('action', [
   // The registry holds up to 200 folders (100 projects plus prepared coaching folders) and the panel adds workspace folders.
   z.object({ action: z.literal('rules-read'), directories: z.array(dir).max(250) }).strict(),
@@ -27,7 +28,8 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
   z.object({ action: z.literal('memory-install'), project: projectSchema, directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
-  ...(['usage', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
+  z.object({ action: z.literal('device-sync-resolve'), document: z.enum(['settings', 'rules']), keep: z.enum(['local', 'remote']) }).strict(),
+  ...(['usage', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
   z.object({ action: z.literal('drive-sync'), project: projectSchema }).strict(),
 ]);
 export class HubService {
@@ -35,6 +37,7 @@ export class HubService {
   readonly rules: RulesService;
   readonly memory: MemoryService;
   readonly drive: DriveMirror;
+  readonly devices: DeviceSync;
   readonly preferencesPath: string;
   private projects = new Set<string>();
   /** Keeps a project's notes in the 30-second Drive sync and syncs it now (offline folders retry later). */
@@ -45,7 +48,8 @@ export class HubService {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.preferencesPath = path.join(root, 'preferences.json');
     this.rules = new RulesService(root);
     this.memory = new MemoryService(path.join(root, 'memory')); this.drive = new DriveMirror(this.memory, () => this.preferences());
-    this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } }, 30000);
+    this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules, () => this.telemetry?.list() ?? []);
+    this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } this.devices.sync(); }, 30000);
   }
   preferences(): HubPreferences {
     const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, prices: [] };
@@ -65,7 +69,10 @@ export class HubService {
       case 'memory-install': this.memory.install(request.directory, request.project, path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
-      case 'usage': return this.telemetry?.list() ?? [];
+      case 'usage': return [...this.telemetry?.list() ?? [], ...this.devices.otherUsage()];
+      case 'device-sync-status': return this.devices.status();
+      case 'device-sync-now': return this.devices.sync();
+      case 'device-sync-resolve': return this.devices.resolve(request.document, request.keep);
       case 'drive-status': return this.drive.status();
       case 'drive-conflicts': return this.drive.conflicts(request.project);
       case 'drive-resolve': this.drive.resolve(request.project, request.id, request.localHash, request.remoteHash); return null;

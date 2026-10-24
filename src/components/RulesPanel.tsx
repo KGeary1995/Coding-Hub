@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ProjectValidation } from './ProjectValidation';
 import { Check, FolderOpen, RefreshCw, Save, ShieldCheck } from 'lucide-react';
-import type { SharedRules } from '../../shared/hub';
+import type { DeviceSyncStatus, SharedRules } from '../../shared/hub';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { hubCall } from '../state/hub-store';
 
@@ -16,6 +16,9 @@ export function RulesPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Rules that arrived from another computer are saved but not yet applied to this computer's projects.
+  const [syncedFrom, setSyncedFrom] = useState<DeviceSyncStatus['rulesFrom']>(null);
+  useEffect(() => { void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then((status) => setSyncedFrom(status.enabled ? status.rulesFrom : null)).catch(() => {}); }, [snapshot?.revision]);
   const [confirmReload, setConfirmReload] = useState(false);
   const dirty = snapshot !== null && content !== snapshot.content;
 
@@ -63,6 +66,7 @@ export function RulesPanel() {
     <div className="hub-toolbar"><span className="rules-state">{dirty ? 'Unsaved changes' : snapshot ? 'Saved rules loaded' : 'Loading rules…'}</span><button className="button secondary" disabled={busy} onClick={() => dirty ? setConfirmReload(true) : void reload()}><RefreshCw size={14} />Reload saved rules</button><button className="button secondary" disabled={busy || !snapshot} onClick={() => void addProject()}><FolderOpen size={14} />Add project</button><button className="button primary" disabled={busy || !snapshot} onClick={() => void save()}><Save size={14} />Save and apply</button></div>
     {confirmReload && <div className="hub-warning">Reloading replaces your unsaved draft. <button className="button secondary" onClick={() => void reload()} disabled={busy}>Discard draft and reload</button><button className="quiet-button" onClick={() => setConfirmReload(false)}>Keep editing</button></div>}
     {error && <div className="hub-feedback error-message" role="alert">{error}</div>}{notice && <div className="hub-feedback success" role="status"><Check size={15} />{notice}</div>}
+    {syncedFrom && snapshot?.targets.some((target) => !target.applied) && <div className="hub-warning" role="status">These rules came from {syncedFrom.name} ({new Date(syncedFrom.at).toLocaleString()}). Apply them to this computer’s projects below; until then those projects’ sessions do not start.</div>}
     <div className="rules-columns"><article className="hub-form"><header className="rules-editor-header"><div><h2>Your shared instructions</h2><span className="muted">Stable expectations for all selected projects</span></div><button className="quiet-button" disabled={busy || !!content.trim()} onClick={() => setContent(EXAMPLE)}>Use example rules</button></header><label htmlFor="shared-rules-editor">Rules for both engines</label><textarea id="shared-rules-editor" className="rules-editor" rows={18} maxLength={60000} value={content} disabled={busy || !snapshot} onChange={(e) => setContent(e.target.value)} placeholder={'Describe coding conventions, test requirements, approval boundaries, and handoff expectations.\n\nExample: Run relevant tests and report anything you could not verify.'} /><span className="muted">{content.length.toLocaleString()} / 60,000 characters · Markdown text</span><p>Save and apply replaces only Trace’s marked shared-rules section. Clearing the editor removes that section from selected projects.</p></article>
       <div><article className="hub-form rules-targets"><h2>Apply to projects</h2><p>Each selected directory receives the same rules in both <code>CLAUDE.md</code> and <code>AGENTS.md</code>. Existing text and shared-memory instructions stay intact.</p>{snapshot?.targets.length ? snapshot.targets.map((target) => <label className="rules-target" key={target.directory}><input type="checkbox" checked={selected.includes(target.directory)} disabled={busy || !!target.error} onChange={(e) => setSelected(e.target.checked ? [...selected, target.directory] : selected.filter((d) => d !== target.directory))} /><span><code>{target.directory}</code><small className={target.error ? 'error-message' : ''}>{target.error ?? (target.applied && !dirty ? 'Current rules applied to both engines' : 'Needs current rules applied')}</small></span></label>) : <p>No project selected. Open a workspace or add a project. You can save a local rule draft first.</p>}</article>
       <article className="hub-form"><h2>When they take effect</h2><p>Restart running sessions after applying changes. When rules are set, the app checks that both engines’ instruction files contain the current version before starting a session.</p><p>Rules guide the agents; tests, CLI permissions, hooks, and CI enforce conditions mechanically. Higher-priority and more specific engine instructions still affect behavior.</p><button className="button secondary" onClick={() => useWorkspaceStore.setState({ activeView: 'help', helpTopicId: 'rules' })}>Read the rules guide</button></article></div></div>

@@ -237,6 +237,19 @@ Notes are stored locally at `~/.coding-hub/memory/<project-key>/<uuid>.json` and
 
 The app reports folder synchronization, not Google's cloud upload completion. Check Drive for desktop's own status when moving between machines. The existing Drive folder URL is a reference; the app uses the local folder, not a website connector. Terminal logs, SQLite databases, and credentials do not sync. Conversations are not automatically copied between agents; curated notes are read as project data. The memory server uses the app's current executable and compiled source paths; reinstall its project entries if you move the app directory or switch to a packaged executable.
 
+## Sync between computers
+
+Turn on **Settings → Sync settings, rules, templates and usage between computers** on each computer, with the same Drive folder. Every 30 seconds (or with **Sync now**) Trace exchanges these through `AI-Coding-Hub-Sync\` in that folder:
+
+| Item | How it merges |
+|---|---|
+| Settings (price rates, terminal font size and rendering, automatic memory) | A change on one computer is taken by the others. The Drive folder and the sync switch stay per computer. |
+| Shared rules (the text) | Same as settings. Rules that arrive from another computer are saved but not applied to this computer's projects; Shared rules says where they came from, and those projects' sessions do not start until you apply them. |
+| Project templates | Merged as a set; deleting one deletes it everywhere. |
+| Usage history | Each computer writes only its own file. Usage shows other computers' sessions with the computer's name; the status bar's today total counts this computer only. |
+
+If settings or rules change on two computers before they sync, nothing is overwritten: **Settings → Sync between computers** shows the conflict and lets you keep this computer's version or take the other one. Running sessions, recorded output, the project list, verification profiles and account sign-ins stay on each computer. Usage records include project folder paths, so they are visible to anyone with access to the Drive folder.
+
 ## Workspace
 
 - Open a local project and launch each engine independently. CLIs inherit local authentication, environment, Git context, hooks, and tools. There are no direct model API requests or approval-bypass flags.
@@ -284,7 +297,8 @@ All runtime data is outside the source folder, normally `C:\Users\<you>\.coding-
 | `storage.db` | Workspace settings and session run metadata |
 | `logs/<run-id>.log` | Terminal output, up to 5 MiB per run |
 | `telemetry/usage.db` | Deduplicated usage records and run metadata |
-| `preferences.json` | Drive directory, terminal font size, price rates |
+| `preferences.json` | Drive directory, terminal font size, price rates, sync switch |
+| `machine.json`, `device-sync.json` | This computer's sync identity and name, and what was last synced between computers |
 | `worktrees.json`, `worktrees/<uuid>/` | Managed isolated branches and working directories |
 | `updates.json` | Automatic update-check preference |
 | `shared-rules.json` | Canonical shared rules and registered project directories |

@@ -13,6 +13,13 @@ export async function refreshEngines() {
   } catch { useWorkspaceStore.getState().setDiscovery([], 'The native host connection is unavailable.'); }
 }
 
+/** Reloads settings and the other computers' usage after a device sync; this computer's own usage arrives live. */
+export async function refreshSynced() {
+  const [preferences, usage] = await Promise.all([hubCall<HubPreferences>({ action: 'preferences' }), hubCall<UsageRecord[]>({ action: 'usage' })]);
+  const store = useHubStore.getState(); store.setPreferences(preferences);
+  store.setUsage([...store.usage.filter((record) => !record.machine), ...usage.filter((record) => record.machine)]);
+}
+
 export function useNativeHost() {
   const sessions = useWorkspaceStore((state) => state.sessions);
   useEffect(() => {
@@ -27,6 +34,8 @@ export function useNativeHost() {
     });
     void hubCall<UsageRecord[]>({ action: 'usage' }).then((usage) => { if (!cancelled) { const live = useHubStore.getState().usage; useHubStore.getState().setUsage([...live, ...usage.filter((u) => !live.some((l) => l.runId === u.runId))]); } }).catch(() => {});
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
+    // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
+    const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
     const unsubscribe = host.onSessionEvent((event) => {
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
@@ -61,7 +70,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
