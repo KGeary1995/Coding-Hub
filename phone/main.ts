@@ -118,7 +118,14 @@ function showChannel(sessionId: string) {
   // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
   // Drafts are kept per channel, so going back to the list and returning finds the message still there.
   text.value = drafts.get(sessionId) ?? ''; text.addEventListener('input', () => { if (text.value) drafts.set(sessionId, text.value); else drafts.delete(sessionId); });
-  form.onsubmit = async (event) => { event.preventDefault(); const value = text.value; if (!value) return; if (await type(value + '\r') && text.value === value) { text.value = ''; drafts.delete(sessionId); } };
+  form.onsubmit = async (event) => {
+    event.preventDefault(); const value = text.value; if (!value) return;
+    if (!await type(value + '\r')) return;
+    // The channel may have been left and reopened while sending: clear only what still holds this message.
+    const field = document.getElementById('text') as HTMLInputElement | null;
+    if (field && current === sessionId && field.value === value) field.value = '';
+    if (drafts.get(sessionId) === value) drafts.delete(sessionId);
+  };
   const keys = h('div', { className: 'keys', aria: { label: 'Keys' } }, ...KEYS.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)));
   const size = [h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
   app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view' }, waiting, output, problem, keys, form));
