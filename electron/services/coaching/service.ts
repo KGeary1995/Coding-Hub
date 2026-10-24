@@ -9,7 +9,15 @@ const example = z.object({ id: z.uuid(), text: z.string().trim().min(1).max(2000
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('list') }).strict(), z.object({ action: z.literal('add'), text: example.shape.text, outcome: example.shape.outcome, notes: example.shape.notes }).strict(), z.object({ action: z.literal('remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('prepare'), report: z.string().min(1).max(30000).refine((text) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) }).strict()]);
 export class CoachingService {
   private root: string;
-  constructor(storageRoot: string, private rules: RulesService) { this.root = path.join(storageRoot, 'coaching'); }
+  constructor(storageRoot: string, private rules: RulesService, private inUse: (directory: string) => boolean = () => false) { this.root = path.join(storageRoot, 'coaching'); }
+  /** Keeps the newest prepared folders: removes the oldest ones no session uses until a new one fits. */
+  private evict(limit: number) {
+    const reports = fs.readdirSync(this.root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name))
+      .map((entry) => { const directory = path.join(this.root, entry.name); return { directory, modified: fs.statSync(directory).mtimeMs }; }).sort((a, b) => a.modified - b.modified);
+    let count = reports.length;
+    for (const report of reports) { if (count < limit) break; if (this.inUse(report.directory)) continue; fs.rmSync(report.directory, { recursive: true, force: true }); count--; }
+    return count;
+  }
   private ensure() { fs.mkdirSync(this.root, { recursive: true, mode: 0o700 }); if (fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('COACHING_STORAGE', 'Coaching storage must not be a link.'); }
   private list() {
     this.ensure(); const file = path.join(this.root, 'examples.json'); if (!fs.existsSync(file)) return [];
@@ -21,7 +29,7 @@ export class CoachingService {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_COACHING_REQUEST', 'Invalid coaching request.'); const request = parsed.data;
     if (request.action === 'list') return this.list();
     if (request.action === 'prepare') {
-      this.ensure(); const reports = fs.readdirSync(this.root).filter((name) => /^[0-9a-f-]{36}$/.test(name)); if (reports.length >= 100) throw new HubError('COACHING_LIMIT', 'Up to 100 prepared coaching reports are supported.');
+      this.ensure(); if (this.evict(100) >= 100) throw new HubError('COACHING_LIMIT', 'All 100 prepared coaching and design-feedback folders are used by session tiles. Remove some of those tiles, then retry.');
       const directory = path.join(this.root, randomUUID()); fs.mkdirSync(directory, { mode: 0o700 });
       try {
         fs.writeFileSync(path.join(directory, 'COACHING_REPORT.md'), request.report, { mode: 0o600, flag: 'wx' });

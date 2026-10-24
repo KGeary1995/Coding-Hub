@@ -228,7 +228,16 @@ else app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0] ?? null;
   }, (bytes) => { const image = nativeImage.createFromBuffer(bytes); const size = image.getSize(); return !image.isEmpty() && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 40000000; });
   handle(IPC_CHANNELS.designs, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return designs.execute(payload); });
-  const coaching = hub ? new CoachingService(storageRoot, hub.rules) : null;
+  // A folder is in use while a session runs in it or a saved tile is bound to it.
+  const directoryInUse = (directory: string) => {
+    if (manager.usesDirectory(directory)) return true;
+    const workspace = storage?.load();
+    return Boolean(workspace?.sessions.some((session) => {
+      const binding = session.binding.mode === 'independent' ? session.binding.cwd : workspace.rootDirectory;
+      return Boolean(binding && isWithinDirectory(directory, binding));
+    }));
+  };
+  const coaching = hub ? new CoachingService(storageRoot, hub.rules, directoryInUse) : null;
   handle(IPC_CHANNELS.coaching, (_owner, payload) => { if (!coaching) throw new HubError('COACHING_STORAGE', 'Local coaching storage is unavailable.'); if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return coaching.execute(payload); });
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
@@ -298,14 +307,7 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.accounts, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing an update.'); return accounts.execute(owner, payload); });
   projectChecks = new ProjectChecks((directory) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Shared rules storage is unavailable.'); hub.rules.verifyLaunch(directory); });
   handle(IPC_CHANNELS.projectChecks, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return projectChecks!.execute(payload, async () => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run project code', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run project check', message: 'Run this project’s npm script?', detail: 'Tests, typecheck, or lint scripts and their npm pre/post hooks execute project code with your local permissions. Only run checks in projects you trust. Output is capped and the check stops after 60 seconds.' })).response === 0 && !updateRestart); });
-  worktrees = new WorktreeService(storageRoot, (directory) => {
-    if (manager.usesDirectory(directory)) return true;
-    const workspace = storage?.load();
-    return Boolean(workspace?.sessions.some((session) => {
-      const binding = session.binding.mode === 'independent' ? session.binding.cwd : workspace.rootDirectory;
-      return Boolean(binding && isWithinDirectory(directory, binding));
-    }));
-  });
+  worktrees = new WorktreeService(storageRoot, directoryInUse);
   handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees!.execute(payload); });
   updates = new UpdateService({
     version: app.getVersion(),
