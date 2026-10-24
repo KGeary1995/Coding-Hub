@@ -60,6 +60,8 @@ interface WorkspaceState {
   reviewSessionId: string | null;
   /** An absolute file path Files should select next (from the command menu); cleared once Files reads it. */
   openFilePath: string | null;
+  /** A memory note Shared memory should show next (from the command menu); cleared once Shared memory reads it. */
+  openMemoryNote: { project: string; id: string } | null;
   engines: EngineInfo[];
   discovering: boolean;
   discoveryError: string | null;
@@ -102,7 +104,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, reviewSessionId: null, openFilePath: null,
+  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
   engines: [],
   discovering: false,
   discoveryError: null,
