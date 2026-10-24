@@ -8,7 +8,9 @@ import { DiffViewer } from './DiffViewer';
 
 export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
   const { rootDirectory, sessions, setView, setRootDirectory } = useWorkspaceStore();
-  const [selection, setSelection] = useState('workspace');
+  // Review changes on a channel opens that channel's repository; otherwise Changes starts at the workspace root.
+  const [selection, setSelection] = useState(() => { const id = useWorkspaceStore.getState().reviewSessionId; return id && sessions.some((session) => session.id === id) ? id : 'workspace'; });
+  useEffect(() => { if (useWorkspaceStore.getState().reviewSessionId) useWorkspaceStore.setState({ reviewSessionId: null }); }, []);
   const [repository, setRepository] = useState<RepositoryContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);

@@ -56,6 +56,8 @@ interface WorkspaceState {
   workflowTab: 'recovery' | 'search' | 'templates' | 'support';
   designSnapshotId: string | null;
   recoverySessionId: string | null;
+  /** The channel whose repository Changes should open on next; cleared once Changes reads it. */
+  reviewSessionId: string | null;
   engines: EngineInfo[];
   discovering: boolean;
   discoveryError: string | null;
@@ -98,7 +100,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null,
+  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, reviewSessionId: null,
   engines: [],
   discovering: false,
   discoveryError: null,

@@ -284,6 +284,11 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.waitForFunction((runId) => window.testEvents.some((event) => event.type === 'exit' && event.runId === runId), stoppedRun.runId);
     assert.throws(() => process.kill(stoppedRun.pid, 0));
     assert.throws(() => process.kill(childPid, 0));
+    // A stopped channel's Review changes opens Changes on that channel's own repository context.
+    await first.getByRole('button', { name: /^Review changes/ }).click();
+    await page.getByLabel('Repository context', { exact: true }).waitFor();
+    assert.match(await page.getByLabel('Repository context', { exact: true }).locator('option:checked').textContent(), /^Session 1 · /);
+    await openView(page, 'Workspace');
     await (await tileControl(first, 'Restart')).click();
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'started').length === 3);
     pids.push(...await page.evaluate(() => window.testEvents.filter((event) => event.type === 'started').slice(2).map((event) => event.pid)));
