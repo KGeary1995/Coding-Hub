@@ -8,14 +8,15 @@ import { RemoteServer, type RemoteHost } from './remote-server';
 import { tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
-afterEach(async () => { for (const item of cleanup.splice(0).reverse()) await item(); });
+const titles = ['Claude Code', 'Codex'];
+afterEach(async () => { for (const item of cleanup.splice(0).reverse()) await item(); titles.splice(0, 2, 'Claude Code', 'Codex'); });
 
 async function remote() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
   const running: RunningSession[] = [{ sessionId: 's1', runId: 'r1', pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = [];
   const host: RemoteHost = {
-    sessions: () => [{ id: 's1', title: 'Claude Code', engine: 'claude' }, { id: 's2', title: 'Codex', engine: 'codex' }],
+    sessions: () => [{ id: 's1', title: titles[0], engine: 'claude' }, { id: 's2', title: titles[1], engine: 'codex' }],
     running: () => running,
     write: (reference, data) => { if (!running.some((run) => run.runId === reference.runId)) throw new Error('stale'); writes.push({ reference, data }); },
   };
@@ -118,6 +119,12 @@ describe('phone remote', () => {
       setTimeout(() => { server.revoke(server.status().devices[0].id); req.end('"data":"y"}'); }, 100);
     });
     expect(await result).toBe(401); expect(writes).toEqual([]);
+  });
+
+  it('tells connected phones when the saved channels change, and only when the list they see is different', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    const seen = await events(server, token, null, 2, () => { titles[0] = 'Renamed'; server.channelsChanged(); });
+    expect((seen[1].data as { title: string }[])[0].title).toBe('Renamed');
   });
 
   it('clears a waiting prompt when the person answers on the desktop, but not for focus reports', async () => {
