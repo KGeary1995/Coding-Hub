@@ -32,6 +32,7 @@ import { discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
+import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, supportsHttpHooks, withLoopbackNoProxy } from './services/cli/attention';
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
@@ -74,6 +75,8 @@ const nativeSessions = new NativeSessions(claudeProfiles);
 const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
+// Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
+const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message));
 const manager = new PtyManager((owner, event) => {
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
@@ -81,6 +84,7 @@ const manager = new PtyManager((owner, event) => {
     if (event.type === 'data') storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
+  if (event.type === 'exit') attention.unregister(event.runId);
   if (event.type === 'exit') {
     // Read the transcript location before telemetry forgets the run.
     const transcript = hub?.telemetry?.transcript(event.runId) ?? null;
@@ -93,6 +97,12 @@ const manager = new PtyManager((owner, event) => {
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
+  // Let the agent say when it is waiting for the person. Older CLIs run without it.
+  if (config.engine === 'claude' && info.supportsSettings && supportsHttpHooks(info.version)) {
+    const url = attention.register(run.runId);
+    if (url) { launch.args.push('--settings', claudeAttentionSettings(url)); Object.assign(launch.env, withLoopbackNoProxy({ ...process.env, ...launch.env })); }
+  }
+  if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch);
 }, onStarted: (run, config, owner) => {
@@ -223,6 +233,7 @@ function createWindow() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
+  void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   hostHealth = new HostHealth(storageRoot);
   try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); }
   catch { hostHealth.record('crash-dump-setup-unavailable'); }
@@ -426,6 +437,6 @@ app.on('before-quit', (event) => {
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()]))
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     .then(() => autoMemory?.drain(10000)).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
-    try { modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

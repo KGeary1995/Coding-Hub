@@ -51,6 +51,9 @@ const { _electron } = require('playwright-core');
     await page.waitForFunction((id) => window.events.some((e) => e.runId === id && e.data?.includes('READY')), original.runId);
     await native(page, 'writeSession', { sessionId: original.sessionId, runId: original.runId, data: 'first task\r' });
     await page.waitForFunction((id) => window.usages.some((u) => u.runId === id && u.input === 100), original.runId);
+    // Codex reports an approval request as an OSC 9 notification in its output.
+    await native(page, 'writeSession', { sessionId: original.sessionId, runId: original.runId, data: 'need-approval\r' });
+    await page.waitForFunction((id) => window.events.some((e) => e.runId === id && e.type === 'attention' && e.message === 'Approval requested: npm test'), original.runId);
     await native(page, 'stopSession', { sessionId: original.sessionId, runId: original.runId });
     const conversations = await wb(page, { action: 'native-list' }); const conversation = conversations.find((c) => c.engine === 'codex'); assert.ok(conversation); assert.equal(conversation.directory, project);
     assert.equal((await wb(page, { action: 'native-resume', key: conversation.key })).directory, project);
@@ -65,6 +68,9 @@ const { _electron } = require('playwright-core');
     await page.waitForFunction((id) => window.events.some((e) => e.runId === id && e.data?.includes('READY')), claudeRun.runId);
     await native(page, 'writeSession', { sessionId: claudeRun.sessionId, runId: claudeRun.runId, data: 'claude task\r' });
     await page.waitForFunction((id) => window.usages.some((u) => u.runId === id && u.input === 100), claudeRun.runId);
+    // Claude reports a permission prompt through the HTTP Notification hook the app adds at launch.
+    await native(page, 'writeSession', { sessionId: claudeRun.sessionId, runId: claudeRun.runId, data: 'need-approval\r' });
+    await page.waitForFunction((id) => window.events.some((e) => e.runId === id && e.type === 'attention' && e.message === 'Claude needs your permission to use Bash'), claudeRun.runId);
     await native(page, 'stopSession', { sessionId: claudeRun.sessionId, runId: claudeRun.runId });
     assert.ok((await wb(page, { action: 'native-list' })).some((c) => c.engine === 'claude' && c.id === claudeRun.runId));
     const claudeResume = await native(page, 'startSession', { sessionId: randomUUID(), cwd: project, config: { ...claudeConfig, resumeId: claudeRun.runId }, cols: 80, rows: 24 });
@@ -122,6 +128,6 @@ const { _electron } = require('playwright-core');
     assert.equal((await wb(page, { action: 'annotation-list', snapshotId: capture.snapshot.id })).length, 1);
     assert.equal((await native(page, 'designs', { action: 'list' })).length, 1);
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: native diagnostics and redaction, real Claude/Codex resume and delta-only token accounting, duplicate resume guard, approved npm verification, task overlap audit and completion evidence, measured A/B trials, isolated live preview and blocked remote requests, screenshot capture, annotations and feedback, local backup restore across app restart, and new navigation. Fixture CLIs; no provider request or Windows installation measured.');
+    console.log('PASS: native diagnostics and redaction, approval requests from both CLIs, real Claude/Codex resume and delta-only token accounting, duplicate resume guard, approved npm verification, task overlap audit and completion evidence, measured A/B trials, isolated live preview and blocked remote requests, screenshot capture, annotations and feedback, local backup restore across app restart, and new navigation. Fixture CLIs; no provider request or Windows installation measured.');
   } finally { if (app) await app.close(); await new Promise((resolve) => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

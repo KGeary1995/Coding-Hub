@@ -444,3 +444,8 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .search-results header strong, .template-list h3 { min-width: 0; overflow-wrap: anywhere; }
 .search-results header .quiet-button, .template-list header > span { flex-shrink: 0; }
 .hub-form .update-checkbox { flex-direction: row; align-items: center; }
+
+/* A channel waiting for the person (Trace HOLD). Answering happens in the CLI's own prompt. */
+.session-attention { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--tr-st-waiting); border-bottom: 1px solid var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 12%, transparent); color: var(--tr-fg-strong); font-size: 12px; }
+.session-attention > span:first-child { color: var(--tr-st-waiting); font-family: var(--tr-font-mono); }
+.session-attention > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -109,6 +109,15 @@ Open **Projects** to browse an existing folder, enter its absolute path, create 
 
 Windows packaging uses a fresh staging folder for every attempt, avoiding the locked `release/win-unpacked` rename failure. Verified installers/update metadata are then copied to `release/`; prior staging directories remain intact. `npm run verify:win` follows the last successful build manifest. A Windows workflow additionally installs two package versions, checks retained data, and uninstalls in an isolated runner.
 
+## Approval alerts
+
+When Claude Code or Codex stops to ask for your approval, its tile shows the request and an **Answer in terminal** button that focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.
+
+- **Claude Code 2.1.63 or later:** the app adds an HTTP notification hook that reports to a local endpoint (127.0.0.1) only the app knows.
+- **Codex:** the app turns on its approval notifications and reads them from the terminal output.
+
+Older Claude Code versions, `--bare`, or organisation settings that disable hooks leave a tile without alerts.
+
 ## Continuous integration
 
 Every pull request runs **CI** (`.github/workflows/ci.yml`) on Linux: unit tests, release-path tests, the production build with type checks, and the seven desktop smoke tests against fixture CLIs on a virtual display. Pull requests that are ready for review (not drafts) also run the full **Windows release candidate** workflow, including the installer build and install, upgrade and uninstall test; its installers are uploaded only for `main` and manual runs.

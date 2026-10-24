@@ -83,6 +83,11 @@ const { _electron } = require('playwright-core');
     assert.equal(await page.evaluate(() => window.events.filter((event) => event.type === 'data').some((event) => event.data.includes('ECHO:'))), false, 'Start must not auto-answer trust prompts or send coaching');
     await tile.getByRole('button', { name: 'Send coaching request', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));
+    // An approval request shows on the tile until the person answers in the terminal.
+    await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
+    await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
+    await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
+    await tile.locator('.session-attention').waitFor({ state: 'detached' });
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
     // A short tile can push the repeated error into scrollback (the Windows console repaints the main screen
@@ -94,7 +99,7 @@ const { _electron } = require('playwright-core');
     await app.close(); app = null;
     app = await _electron.launch({ executablePath: require('electron'), args, env }); page = await app.firstWindow(); await page.waitForSelector('.session-tile');
     assert.equal(await page.locator('.workspace-setup').count(), 0); assert.equal((await native(page, 'designs', { action: 'list' })).length, 3); assert.equal((await native(page, 'coaching', { action: 'list' })).length, 1);
-    console.log('PASS: immutable design comparison and isolated static HTML, preview sizes, coding tiles, curated coaching selection/review/consent, separate idle report session, explicit request delivery, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
+    console.log('PASS: immutable design comparison and isolated static HTML, preview sizes, coding tiles, curated coaching selection/review/consent, separate idle report session, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
   } catch (error) {
     // Print what each tile showed, so a CI failure includes the CLI's own output and the app's diagnostic.
     try { for (const window of app ? app.windows() : []) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.session-tile')].map((tile, index) => `tile ${index}: error=${JSON.stringify(tile.querySelector('.session-error')?.textContent ?? null)} terminal=${JSON.stringify((tile.querySelector('.xterm-rows')?.textContent ?? '').slice(-600))}`).join('\n') + '\nevents=' + JSON.stringify((window.events ?? []).filter((event) => event.type !== 'data' || /Error|fixture/.test(event.data)).slice(-12)))); } catch { /* The window may be gone. */ }
