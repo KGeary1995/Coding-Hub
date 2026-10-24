@@ -75,7 +75,8 @@ async function nativeResult(page, method, request) {
       usage: await nativeResult(page, 'hub', { action: 'usage' }),
       history: await nativeResult(page, 'listHistory'),
     };
-    assert.equal(before.history.length, 2); assert.equal(before.usage.length, 2);
+    const counts = JSON.stringify({ history: before.history.map(({ runId, engine, exitCode }) => ({ runId, engine, exitCode })), usage: before.usage.map(({ runId, engine, input, output, eventCount }) => ({ runId, engine, input, output, eventCount })) });
+    assert.equal(before.history.length, 2, counts); assert.equal(before.usage.length, 2, counts);
     const logs = await Promise.all(before.history.map((run) => nativeResult(page, 'readRunLog', { runId: run.runId })));
     for (const log of logs) assert.ok(log.text.includes('upgrade-data'));
     const instructions = await Promise.all(['CLAUDE.md', 'AGENTS.md', '.mcp.json', '.codex/config.toml'].map((file) => fs.readFile(path.join(project, file))));
