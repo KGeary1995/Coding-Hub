@@ -97,7 +97,7 @@ describe('phone remote', () => {
     server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: 'earlier output\r\n' });
     const seen = await events(server, token, 's1', 4, () => {
       server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: 'Allow command? [y/n]' });
-      server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approval requested: npm test' });
+      server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approval requested: npm test', at: new Date().toISOString() });
     });
     expect(seen.map((item) => item.type)).toEqual(['channels', 'replay', 'output', 'channels']);
     expect(seen[1].data).toMatchObject({ data: 'earlier output\r\n' });
@@ -110,9 +110,19 @@ describe('phone remote', () => {
     expect((await send({ sessionId: 's1', runId: 'r1', data: 'x'.repeat(5000) })).status).toBe(400);
   });
 
+  it('refuses input from a phone removed while its request was still arriving', async () => {
+    const { server, writes } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    const result = new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: server.address!, path: '/api/input', method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }, (response) => { response.resume(); resolve(response.statusCode!); });
+      req.on('error', reject); req.write('{"sessionId":"s1","runId":"r1",');
+      setTimeout(() => { server.revoke(server.status().devices[0].id); req.end('"data":"y"}'); }, 100);
+    });
+    expect(await result).toBe(401); expect(writes).toEqual([]);
+  });
+
   it('clears a waiting prompt when the person answers on the desktop, but not for focus reports', async () => {
     const { server } = await remote(); await server.setEnabled(true);
-    server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve?' });
+    server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve?', at: new Date().toISOString() });
     server.personInput('s1', '\x1b[I'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', 'y'); expect(server.channels()[0].attention).toBeNull();
   });
@@ -129,5 +139,7 @@ describe('tailscale state', () => {
     expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }), 'serve status --json': JSON.stringify({ ...serving, AllowFunnel: { 'desk.example.ts.net:443': true } }) }), 47821))
       .toMatchObject({ serving: true, funnel: true });
     expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }), 'serve status --json': '' }), 47821)).toMatchObject({ serving: false });
+    // HTTPS on another port is not the address the pairing link uses.
+    expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }), 'serve status --json': JSON.stringify({ Web: { 'desk.example.ts.net:8443': serving.Web['desk.example.ts.net:443'] } }) }), 47821)).toMatchObject({ serving: false });
   });
 });

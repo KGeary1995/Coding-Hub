@@ -32,8 +32,9 @@ export async function tailscaleState(run: RunTailscale, port: number): Promise<T
   if (!state.running) return { ...state, error: `Tailscale is ${status.BackendState?.toLowerCase() ?? 'not connected'}. Open Tailscale and sign in.` };
   try {
     const serve = JSON.parse((await run(['serve', 'status', '--json'])).trim() || '{}') as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>; AllowFunnel?: Record<string, boolean> };
+    // Only HTTPS on this computer's tailnet name at port 443 counts: that is the address the pairing link names.
     for (const [hostPort, web] of Object.entries(serve.Web ?? {})) {
-      if (!proxies(web.Handlers?.['/']?.Proxy, port)) continue;
+      if (hostPort.toLowerCase() !== `${state.host?.toLowerCase()}:443` || !proxies(web.Handlers?.['/']?.Proxy, port)) continue;
       state.serving = true; if (serve.AllowFunnel?.[hostPort]) state.funnel = true;
     }
   } catch (error) { state.error = (error as Error).message; }
