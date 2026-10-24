@@ -21,6 +21,8 @@ export interface EngineInfo {
   supportsConfig: boolean;
   supportsNoDaemon: boolean;
   supportsSessionId?: boolean;
+  supportsAppendSystemPrompt?: boolean;
+  supportsMcpConfig?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;
