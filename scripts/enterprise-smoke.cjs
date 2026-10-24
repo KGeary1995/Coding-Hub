@@ -34,7 +34,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
   const wb = (page, request) => native(page, 'workbench', request);
   async function launch() {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); const page = await app.firstWindow(); page.setDefaultTimeout(20000); page.on('pageerror', (e) => errors.push(e.message));
-    await page.waitForSelector('.session-tile');
+    await page.waitForSelector('.tr-empty, .session-tile');
     await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
     await page.evaluate(() => { window.events = []; window.usages = []; window.codingHub.onSessionEvent((e) => window.events.push(e)); window.codingHub.onUsage((e) => window.usages.push(e)); });
     return page;

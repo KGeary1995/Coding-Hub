@@ -34,3 +34,13 @@ The Claude Design handoff in this folder (`README.md`, `design/`, `tokens.css`) 
 - **Scope readout:** shows terminal output (`out 1.2k/s`, characters per second), matching the trace, instead of `rate … tok/s`.
 - **Context bar:** for Claude, which does not report a context window, the bar shows the session budget used when a budget is set, and is hidden otherwise.
 - **Grid spacing:** tiles are 8 px apart, as in the handoff, so a 2 × 2 grid fits a 1100 × 800 window at 125% without scrolling.
+
+## Screens (phase 5)
+
+- **Empty workspace:** recent projects come from session history, so they list folders channels have run in. They show the folder and last activity, without the handoff's branch and throughput sparkline, which are not recorded per project. Engines come from the account status the Accounts screen uses. **Use channels without a project** keeps the old way to give channels their own folders before choosing a project.
+- **Command menu:** files and memory come from the existing local search (`flow-search`), which reads file contents, so it waits 300 ms after typing and, in All, for three characters. Ctrl ⏎ "open beside" is left out; nothing opens side by side yet.
+- **Notices:** needs-you and failed notices are built; success notices (for example after a commit) are left for when delivery reports back through the renderer.
+- **Usage:** the session table has no time or throughput sparkline columns, because usage records hold one timestamp and no activity history. "Handoffs written" is not shown in Context peaks, since memory notes are not linked to runs.
+- **Changes:** the diff stays unified; the split view and Revert hunk (see above) are not built. The "last touched by" footer is left out because file edits are not attributed to channels.
+- **Agent setup:** status lines are live for Accounts (signed-in count) and Shared memory (automatic or off); the others describe what the area holds rather than counting it.
+

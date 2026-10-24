@@ -9,8 +9,17 @@ import { ProjectsPanel } from './ProjectsPanel';
 import { AccountsPanel } from './AccountsPanel';
 import { RulesPanel } from './RulesPanel';
 import { HelpPanel } from './HelpPanel';
-import { ConfigurationPanel, MemoryPanel, SettingsPanel, UsagePanel } from './HubPanels';
+import { ConfigurationPanel, MemoryPanel, SettingsPanel } from './HubPanels';
+import { UsageScreen } from './screens/UsageScreen';
+import { AgentSetup } from './screens/AgentSetup';
+import { SETUP_VIEWS } from './shell/Topbar';
 export function FeaturePanel() {
+  const view = useWorkspaceStore((s) => s.activeView);
+  const panel = <Panel />;
+  return SETUP_VIEWS.some((item) => item.view === view) ? <AgentSetup>{panel}</AgentSetup> : panel;
+}
+
+function Panel() {
   const view = useWorkspaceStore((s) => s.activeView);
   if (view === 'workflow') return <Suspense fallback={<p className="control-note">Opening workflow tools…</p>}><WorkflowCenter /></Suspense>;
   if (view === 'tasks') return <TasksPanel />;
@@ -22,7 +31,7 @@ export function FeaturePanel() {
   if (view === 'connectors') return <ConfigurationPanel />;
   if (view === 'skills') return <ConfigurationPanel skills />;
   if (view === 'memory') return <MemoryPanel />;
-  if (view === 'usage') return <UsagePanel />;
+  if (view === 'usage') return <UsageScreen />;
   if (view === 'rules') return <RulesPanel />;
   if (view === 'help') return <HelpPanel />;
   if (view === 'settings') return <SettingsPanel />;

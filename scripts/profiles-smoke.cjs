@@ -28,7 +28,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
   };
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env });
-    let page = await app.firstWindow(); await page.waitForSelector('.session-tile');
+    let page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     await openView(page, 'Accounts & connections');
     for (const name of ['Personal', 'Work']) {
       await page.getByLabel('New Claude profile name', { exact: true }).fill(name);
@@ -93,7 +93,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile[data-status="running"]').length === 0);
     await app.close(); app = null;
     app = await _electron.launch({ executablePath: require('electron'), args, env });
-    page = await app.firstWindow(); await page.waitForSelector('.session-tile');
+    page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     const saved = await native(page, 'loadWorkspace');
     assert.deepEqual(saved.workspace.sessions.filter((item) => item.config.engine === 'claude').map((item) => item.config.accountProfileId).sort(), profiles.map((profile) => profile.id).sort());
     assert.equal(await page.locator('.account-profile-chip').count(), 2);

@@ -61,7 +61,10 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     const page = await app.firstWindow();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.stack));
-    await page.waitForFunction(() => window.codingHub && document.querySelectorAll('.session-tile').length === 2);
+    // With no project the workspace shows the empty screen instead of channels.
+    await page.waitForFunction(() => window.codingHub && document.querySelector('.tr-empty'));
+    await page.getByRole('heading', { name: 'Open a project', exact: true }).waitFor();
+    await page.locator('.tr-engine-row').first().waitFor();
     assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
     await page.evaluate(() => {
       window.testEvents = [];
@@ -184,7 +187,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
     await page.getByRole('status').filter({ hasText: 'Preferences saved locally.' }).waitFor();
     await openView(page, 'Usage');
-    await page.getByRole('button', { name: 'Refresh history', exact: true }).click();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.usage-table tbody tr').length === 2);
     const usage = await page.evaluate(() => window.codingHub.hub({ action: 'usage' }));
     assert.equal(usage.ok, true);
