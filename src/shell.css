@@ -1,0 +1,61 @@
+/* Trace shell: top bar, status bar and menus (docs/design/trace/README.md, "Navigation structure"). */
+.app-shell { display: flex; flex-direction: column; height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; background: var(--tr-bg); }
+.main-shell { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; background: var(--tr-bg); }
+.app-shell[data-view="workspace"] .main-shell { padding: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.workspace-canvas { gap: 8px; }
+.tr-spacer { flex: 1; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Top bar */
+.tr-topbar { height: var(--tr-topbar-h); flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: var(--tr-surface); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); color: var(--tr-fg-muted); }
+.tr-wordmark { display: flex; align-items: center; gap: 8px; margin-right: 10px; color: var(--tr-fg-strong); text-decoration: none; font: 600 16px/1 var(--tr-font-mono); letter-spacing: .02em; }
+.tr-wordmark-bars { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+.tr-wordmark-bars i { width: 3px; background: var(--tr-ch-claude); }
+.tr-wordmark-bars i:nth-child(n + 3) { background: var(--tr-ch-codex); }
+.tr-tabs { display: flex; gap: 2px; }
+.tr-tabs > button, .tr-menu-button, .tr-icon { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: inherit; white-space: nowrap; }
+.tr-tabs > button:hover, .tr-menu-button:hover, .tr-icon:hover { background: var(--tr-hover); color: var(--tr-fg-strong); }
+.tr-tabs > button.active, .tr-menu-button.active { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
+.tr-icon { padding: 0 8px; }
+.tr-project.tr-menu-button, .tr-project .tr-menu-button { border: 1px solid var(--tr-line-control); padding: 0 10px; max-width: 220px; color: var(--tr-fg); }
+.tr-project-name { overflow: hidden; text-overflow: ellipsis; }
+.tr-caret { font-size: 10px; color: var(--tr-fg-dim); }
+.tr-divider { width: 1px; height: 18px; background: var(--tr-line-control); margin: 0 6px; }
+.tr-segmented { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); margin-right: 4px; }
+.tr-segmented > button { width: 26px; height: 22px; display: grid; place-items: center; border: 0; border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-dim); }
+.tr-segmented > button:hover { color: var(--tr-fg-strong); background: var(--tr-hover); }
+.tr-segmented > button.active { background: var(--tr-control-on); color: var(--tr-fg-strong); }
+.tr-topbar .command-trigger { margin: 0 4px; width: 300px; min-width: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; background: var(--tr-bg); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); color: var(--tr-fg-dim); font: var(--tr-t-control); }
+.tr-topbar .command-trigger:hover { border-color: var(--tr-line-strong); color: var(--tr-fg); }
+.tr-topbar .command-trigger kbd { margin: 0; border: 0; background: none; padding: 0; font: var(--tr-t-meta); color: var(--tr-fg-faint); }
+.tr-menu { position: relative; }
+.tr-menu-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 4px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); box-shadow: var(--tr-shadow-overlay); }
+.tr-topbar > .tr-menu:nth-last-child(-n + 2) .tr-menu-list { left: auto; right: 0; }
+.tr-menu-list [role="menuitem"] { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg); font: var(--tr-t-control); text-align: left; }
+.tr-menu-list [role="menuitem"]:hover, .tr-menu-list [role="menuitem"]:focus-visible { background: var(--tr-raised); color: var(--tr-fg-strong); outline: none; box-shadow: inset 2px 0 var(--tr-fg-strong); }
+.tr-menu-list [role="menuitem"].current { color: var(--tr-fg-strong); font-weight: 600; }
+.tr-menu-list small { font: var(--tr-t-meta); color: var(--tr-fg-dim); }
+.tr-new-channel .tr-menu-button { background: var(--tr-fg); color: var(--tr-on-light); font-weight: 600; }
+.tr-new-channel .tr-menu-button:hover { background: var(--tr-fg-strong); color: var(--tr-on-light); }
+.tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-on-light); }
+
+/* Status bar */
+.app-statusbar.tr-statusbar { height: var(--tr-statusbar-h); min-height: 0; flex: none; display: flex; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; margin: 0; background: var(--tr-surface); border-top: 1px solid var(--tr-line); font: var(--tr-t-meta); color: var(--tr-fg-dim); }
+.tr-sb-cell { display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-right: 1px solid var(--tr-line); background: none; color: inherit; font: inherit; white-space: nowrap; }
+.tr-spacer + .tr-sb-cell, .tr-statusbar .tr-spacer ~ .tr-sb-cell { border-right: 0; border-left: 1px solid var(--tr-line); }
+button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
+.tr-sb-channel { color: var(--tr-fg-muted); }
+.tr-engine-square { width: 8px; height: 8px; display: inline-block; }
+.tr-sb-project { color: var(--tr-fg); }
+.tr-sb-alert.waiting { color: var(--tr-st-waiting); }
+.tr-sb-alert.failed { color: var(--tr-st-failed); }
+.tr-sb-alert.limit { color: var(--tr-st-limit); }
+.tr-sb-quiet { color: var(--tr-fg-faint); }
+.tr-sb-host i { width: 6px; height: 6px; border-radius: 50%; background: var(--tr-fg-off); }
+.tr-sb-host i.online { background: var(--tr-add); }
+.tr-statusbar .storage-status { color: var(--tr-fg-faint); text-transform: none; }
+.tr-statusbar .storage-status.error { color: var(--tr-st-failed); }
+
+/* Narrow windows (and 125% zoom): the command field shrinks, then hides its text. */
+@media (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } }
+@media (max-width: 1180px) { .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-tabs > button, .tr-menu-button { padding: 0 9px; } }

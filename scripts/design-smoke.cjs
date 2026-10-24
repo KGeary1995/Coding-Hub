@@ -4,6 +4,7 @@ const { realpath, mkdtemp, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
+const { openView, addChannel } = require('./lib/navigate.cjs');
 (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'hub-design-')));
   const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') };
@@ -18,8 +19,7 @@ const { _electron } = require('playwright-core');
     await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [process.cwd()] }); });
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     for (let i = 0; i < 2; i++) {
-      await page.getByRole('button', { name: 'New session', exact: true }).click();
-      await page.locator('.dropdown button').first().click();
+      await addChannel(page, 'Claude Code');
     }
     for (const [width, height, scale] of [[1440, 960, 100], [1100, 800, 100], [900, 700, 100], [1100, 800, 125]]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width, height]);
@@ -45,7 +45,13 @@ const { _electron } = require('playwright-core');
     await page.waitForSelector('.workspace-explorer');
     await page.getByRole('button', { name: 'Hide explorer', exact: true }).click();
     assert.equal(await page.locator('.workspace-explorer').count(), 0);
-    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, and explorer toggle.');
+    // G then a letter opens a view; keys typed into fields are left alone.
+    await page.evaluate(() => (document.activeElement)?.blur());
+    await page.keyboard.press('g'); await page.keyboard.press('u');
+    await page.getByRole('heading', { name: 'Usage & telemetry', exact: true }).waitFor();
+    await page.keyboard.press('g'); await page.keyboard.press('w');
+    await page.locator('.session-tile').first().waitFor();
+    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, and G-letter view shortcuts.');
   } finally {
     if (app) await app.close();
     await rm(root, { recursive: true, force: true });

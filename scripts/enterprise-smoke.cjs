@@ -6,6 +6,7 @@ const http = require('node:http');
 const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
+const { openView, addChannel } = require('./lib/navigate.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
@@ -97,18 +98,18 @@ const { _electron } = require('playwright-core');
     const feedbackRules = await page.evaluate((directory) => window.codingHub.hub({ action: 'rules-read', directories: [directory] }), feedback.directory);
     assert.equal(feedbackRules.ok, true); assert.equal(feedbackRules.value.targets[0].applied, true); assert.ok(feedbackRules.value.directories.includes(feedbackRules.value.targets[0].directory));
     await wb(page, { action: 'preview-close' });
-    await page.getByRole('button', { name: 'Design workspace', exact: true }).click();
+    await openView(page, 'Design workspace');
     await page.getByRole('button', { name: 'Live dashboard version 1', exact: true }).click();
     await page.getByText('Live preview, annotations, and agent feedback', { exact: true }).click();
     await page.getByRole('button', { name: 'Prepare Codex design feedback', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.process-dot.running').count(), 0, 'Preparing design feedback must not launch a provider');
-    await page.getByRole('button', { name: 'Session history', exact: true }).click();
+    await openView(page, 'Session history');
     await page.getByRole('button', { name: 'View native CLI conversations', exact: true }).click();
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
     await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(3).waitFor();
     assert.equal(await page.locator('.process-dot.running').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Task coordination', 'Verification profiles', 'AI coaching', 'Settings']) {
-      await page.getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(150);
+      await openView(page, name); await page.waitForTimeout(150);
       if (process.env.CODING_HUB_REVIEW_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_REVIEW_SCREENSHOTS, 'AI-Coding-Hub-v' + runtime.version + '-' + name.toLowerCase().replaceAll(' ', '-') + '.png') });
     }
     await page.getByRole('heading', { name: 'Running application', exact: true }).waitFor();

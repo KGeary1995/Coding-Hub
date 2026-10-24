@@ -1,6 +1,6 @@
-# AI Coding Hub
+# Trace
 
-A local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
+Trace (formerly AI Coding Hub) is a local Electron desktop workspace for running **Claude Code and OpenAI Codex CLI side by side**. This source release includes the multi-session terminal grid, engine-specific settings, local persistence, file explorer, Git diff review, MCP management, skills/plugins inspection, usage history, shared handoff memory through Google Drive for desktop, a searchable AI help guide, and shared project rules for both engines.
 
 ## Codex model catalog and application stability (v1.7.2)
 
@@ -66,7 +66,7 @@ The setup guide dismisses automatically after a shared or independent project fo
 
 ## Codex launch troubleshooting
 
-Accounts & connections reports local login status, not verified model access or a successful interactive launch. On Windows, Coding Hub prefers the native Codex binary inside official npm packages so ConPTY attaches directly to the console program; older JavaScript launchers remain a fallback and run with the installed Node.js (`node.exe` on PATH), because Electron's own executable shows no output in a Windows pseudoconsole. Native package executable entries are launched directly rather than interpreted as JavaScript. Failed coding runs preserve a bounded terminal diagnostic even when the CLI clears its alternate screen. A failed Codex tile offers **Use Codex CLI defaults**, clearing model and reasoning overrides before you retry.
+Accounts & connections reports local login status, not verified model access or a successful interactive launch. On Windows, Trace prefers the native Codex binary inside official npm packages so ConPTY attaches directly to the console program; older JavaScript launchers remain a fallback and run with the installed Node.js (`node.exe` on PATH), because Electron's own executable shows no output in a Windows pseudoconsole. Native package executable entries are launched directly rather than interpreted as JavaScript. Failed coding runs preserve a bounded terminal diagnostic even when the CLI clears its alternate screen. A failed Codex tile offers **Use Codex CLI defaults**, clearing model and reasoning overrides before you retry.
 
 If Codex still exits with code 1, read the error printed above the exit marker and shown in the session tile. In PowerShell, change to the same project directory and test `codex.cmd --version`, `codex.cmd login status`, and `codex.cmd` (use `codex` for native installations). Resolve the CLI's actual error, such as invalid local configuration, unavailable model, missing dependency, terminal compatibility, or provider access. Cloud fixture tests do not prove that a specific Windows/provider installation is fixed.
 
@@ -76,7 +76,7 @@ Open **Accounts & connections → Claude account profiles**. Add a name such as 
 
 In each Claude session, open **Configure → Claude account profile**, select a profile, and start the session. Connect a named profile before launching; the host verifies its CLI login and blocks unverified or signed-out profiles. Different profiles can run at the same time, within the existing four-session limit. Stop a session before changing its account. Reconnecting a named profile requires stopping sessions using it; other profiles can continue. Labels can be renamed without changing login storage or saved session assignments.
 
-Named profiles use separate `CLAUDE_CONFIG_DIR` directories under `~/.coding-hub/claude-profiles/<profile-id>/`. The registry stores only profile IDs, labels, and creation dates. Claude Code handles credential storage and refresh; Coding Hub does not copy, read, or export credential files. Authentication environment overrides inherited from the host are cleared for named profiles. The default login and other host environment variables are preserved. Project settings can still explicitly configure authentication helpers or environment values; review those if the CLI reports an unexpected account. Named profiles start with independent user settings, skills, and user MCP configuration; project-level instructions and integrations remain shared. Profile credentials are not included in curated Drive memory or source archives. Usage follows each profile's structured session logs, and profile choices are retained in local workspace/history settings.
+Named profiles use separate `CLAUDE_CONFIG_DIR` directories under `~/.coding-hub/claude-profiles/<profile-id>/`. The registry stores only profile IDs, labels, and creation dates. Claude Code handles credential storage and refresh; Trace does not copy, read, or export credential files. Authentication environment overrides inherited from the host are cleared for named profiles. The default login and other host environment variables are preserved. Project settings can still explicitly configure authentication helpers or environment values; review those if the CLI reports an unexpected account. Named profiles start with independent user settings, skills, and user MCP configuration; project-level instructions and integrations remain shared. Profile credentials are not included in curated Drive memory or source archives. Usage follows each profile's structured session logs, and profile choices are retained in local workspace/history settings.
 
 Profile tests use isolated fixture CLIs to exercise separate logins, simultaneous PTYs, telemetry, reconnect protection, and restart persistence. Real subscription login and model completion must be verified on your desktop with your own accounts. Credential-directory behavior was inspected in Anthropic's published Claude Code 2.1.29 CLI; use a current official CLI.
 
@@ -108,6 +108,24 @@ Open **Projects** to browse an existing folder, enter its absolute path, create 
 **Stop** now terminates a Windows session’s process tree before closing ConPTY, verifies its launcher exited, and gives cleanup more time. Unix stops its process group with TERM/KILL escalation. A missing PTY exit event is recovered only after the process is verified gone. Account-login cancellation shares these safeguards. The terminal exits its alternate screen and disables input after exit; Stop failures keep the PID available and surface an error.
 
 Windows packaging uses a fresh staging folder for every attempt, avoiding the locked `release/win-unpacked` rename failure. Verified installers/update metadata are then copied to `release/`; prior staging directories remain intact. `npm run verify:win` follows the last successful build manifest. A Windows workflow additionally installs two package versions, checks retained data, and uninstalls in an isolated runner.
+
+## Navigation
+
+Trace replaces the sidebar with a top bar and a status bar:
+- **Top bar:**
+  - the project switcher;
+  - the **Workspace**, **Changes** and **Projects** tabs;
+  - the **Insight** menu: Usage, Session history, Files, Task coordination, Verification profiles, Design workspace and AI coaching;
+  - the layout controls (Workspace only) and the command field (**Ctrl+Shift+P**);
+  - Help, and the **Agent setup** menu: Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings and Workflow center;
+  - **+ Channel** to add a Claude Code or Codex tile.
+- **Status bar:** every channel's state and tokens, the project, today's reported tokens and cost, alerts, save status and the host connection. Click a channel or an alert to jump to its terminal.
+- **Keyboard:** **Alt+1…4** focuses a channel. **G** then a letter opens a view:
+  - W Workspace, C Changes, P Projects;
+  - U Usage, H History, F Files, T Tasks, V Verification, D Design, O Coaching;
+  - A Accounts, M Memory, R Rules, S Settings.
+
+The installed program, its data folders (`~/.coding-hub`) and its update channel keep their original names, so existing installs upgrade in place.
 
 ## Approval alerts
 
@@ -151,7 +169,7 @@ A public stable GitHub release with its installer, `latest.yml`, and blockmap is
 3. Choose **Save and apply**. The identical managed section is written into each selected project's `CLAUDE.md` and `AGENTS.md`. Existing text and shared-memory sections are preserved; private backups are created.
 4. Restart running sessions to load the new instructions. When nonempty shared rules exist, the native host refuses new launches in a directory unless both engine files contain the current saved version. Apply the rules to a new project before starting its sessions.
 
-The rule source is local at `~/.coding-hub/shared-rules.json`; it is separate from Drive handoff notes. Updating the rules applies them to selected projects. Unselected projects with an older version must be updated before their next launch through Coding Hub. CLI sessions started outside this app use their own normal instruction discovery.
+The rule source is local at `~/.coding-hub/shared-rules.json`; it is separate from Drive handoff notes. Updating the rules applies them to selected projects. Unselected projects with an older version must be updated before their next launch through Trace. CLI sessions started outside this app use their own normal instruction discovery.
 
 Saving with no projects selected stores the rule draft locally. Clearing the editor and saving removes only the managed rules section from selected projects. Refresh/reload explicitly replaces an unsaved draft. Stale project files and stale saved-rule revisions are rejected rather than overwritten; failed multi-file saves roll back completed replacements when no external edit or file lock prevents restoration.
 
@@ -159,12 +177,12 @@ These rules are real project instructions, not a guarantee of model compliance. 
 
 ## Automatic shared memory
 
-Every Claude Code and Codex session started in Coding Hub gets shared project memory automatically, in every project, with no changes to project files. Turn it off in **Settings → Automatic shared memory for every project**.
+Every Claude Code and Codex session started in Trace gets shared project memory automatically, in every project, with no changes to project files. Turn it off in **Settings → Automatic shared memory for every project**.
 
 - **At launch** the session receives the project's most recent handoff notes (up to about 6,000 characters, newest first, labelled as history rather than instructions) and the `coding-hub-memory` tools **read_memory** and **write_handoff**. Claude Code gets them through `--append-system-prompt` and `--mcp-config`; Codex through `--config developer_instructions` and `--config mcp_servers.…`. Any `developer_instructions` already set in your Codex configuration are kept and come first.
-- **When the session ends** Coding Hub writes a summary note: the files that changed during the session (from `git status`), commits made, and the agent's last message. Sessions that changed nothing and produced no reply are skipped. Agents can still write fuller handoffs with **write_handoff**.
+- **When the session ends** Trace writes a summary note: the files that changed during the session (from `git status`), commits made, and the agent's last message. Sessions that changed nothing and produced no reply are skipped. Agents can still write fuller handoffs with **write_handoff**.
 - **Project keys are automatic.** Clones and worktrees of the same Git remote share one key on every computer (for example `app-1a2b3c4d5e`); unrelated folders with the same name stay separate. **Shared memory** shows the key for the selected project.
-- Applies only to sessions started in Coding Hub. For CLIs run from other terminals, or for teammates who clone the repository, use the project installation below. When a project already has `coding-hub-memory` installed, sessions use that server instead of adding a second copy.
+- Applies only to sessions started in Trace. For CLIs run from other terminals, or for teammates who clone the repository, use the project installation below. When a project already has `coding-hub-memory` installed, sessions use that server instead of adding a second copy.
 
 ## Claude Design
 
@@ -174,15 +192,15 @@ Claude Design runs on claude.ai; Claude Code connects it to a project. **Design 
 - **Sync design system** sends `/design-sync`, so Claude Design builds with the project's real components.
 - **Import handoff bundle (.zip)** or **Import handoff folder** takes a bundle downloaded with Claude Design's *Send to local coding agent*. It is copied into `design-handoff/<name>/` in the project (never overwriting an earlier import), its main HTML or screenshot is saved in the design archive with local stylesheets inlined, and a Claude tile is prepared with a request to build it. ZIP64 and encrypted archives are not supported; extract them and import the folder.
 
-These commands need Claude Code signed in with a claude.ai Pro, Max, Team or Enterprise account (not an API key); the first use opens the browser to authorize Claude Design. Coding Hub does not call Claude Design itself.
+These commands need Claude Code signed in with a claude.ai Pro, Max, Team or Enterprise account (not an API key); the first use opens the browser to authorize Claude Design. Trace does not call Claude Design itself.
 
 ## Shared Google Drive memory
 
-The default shared folder is **`G:\My Drive\Coding Hub`**, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Coding Hub.
+The default shared folder is **`G:\My Drive\Coding Hub`**, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Trace.
 
 1. Confirm **Settings → Local Drive folder** points to the actual synced/mounted folder. Save preferences if you change it.
 2. Open your project, then open **Shared memory**. Use the same **shared project key** on every desktop participating in that project's handoffs. Different project keys keep notes separate.
-3. Optional (automatic memory covers sessions started in Coding Hub): use **Enable memory for both CLIs** and review the changes, then **Install local memory server**. This adds a `coding-hub-memory` entry to project `.mcp.json` and `.codex/config.toml`, and appends marked instructions to `CLAUDE.md` and `AGENTS.md`. Existing files receive private backups. Existing server entries with that name are never silently replaced.
+3. Optional (automatic memory covers sessions started in Trace): use **Enable memory for both CLIs** and review the changes, then **Install local memory server**. This adds a `coding-hub-memory` entry to project `.mcp.json` and `.codex/config.toml`, and appends marked instructions to `CLAUDE.md` and `AGENTS.md`. Existing files receive private backups. Existing server entries with that name are never silently replaced.
 4. Restart the CLI sessions. Approve the MCP server / project trust through the CLI's normal controls. The local server exposes **read_memory** and **write_handoff**.
 5. Save a manual handoff or ask the agent to record its decisions, changed files, checks, remaining work, and blockers. The next agent can read those notes through MCP.
 
