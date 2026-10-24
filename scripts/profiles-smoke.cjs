@@ -53,6 +53,7 @@ const { _electron } = require('playwright-core');
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     await page.getByRole('button', { name: 'New session', exact: true }).click(); await page.locator('.dropdown button').first().click();
+    await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     for (const [tileIndex, profileIndex] of [[0, 0], [2, 1]]) {
       const tile = page.locator('.session-tile').nth(tileIndex);
       await tile.getByRole('button', { name: `Engine settings for session ${tileIndex + 1}`, exact: true }).click();
@@ -61,7 +62,8 @@ const { _electron } = require('playwright-core');
       await tile.getByRole('button', { name: 'Start session', exact: true }).click();
     }
     await page.waitForFunction(() => document.querySelectorAll('.process-dot.running').length === 2);
-    await page.waitForFunction(() => [...document.querySelectorAll('.session-tile')].filter((tile) => tile.querySelector('.process-dot.running')).every((tile) => tile.querySelector('.xterm')?.textContent.includes('READY')));
+    // READY can scroll out of a short tile in the four-tile grid; check the startup output each run received.
+    await page.waitForFunction(() => { const runs = window.events.filter((event) => event.type === 'started').map((event) => event.runId); return runs.length === 2 && runs.every((runId) => window.events.some((event) => event.type === 'data' && event.runId === runId && event.data.includes('READY'))); });
     for (const index of [0, 2]) {
       const tile = page.locator('.session-tile').nth(index); await tile.locator('.xterm-helper-textarea').focus();
       await page.keyboard.type('profile-session-' + index); await page.keyboard.press('Enter');

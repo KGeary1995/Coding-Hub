@@ -80,7 +80,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 550; }
 .engine-mark { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 4px; background: var(--tr-control-on); color: var(--tr-st-limit); font-size: 22px; }
 .codex .engine-mark { background: var(--tr-control-on); color: var(--tr-fg-muted); }
 .tile-header strong { font-size: 11px; font-weight: 550; white-space: nowrap; }
-.session-number { color: var(--tr-fg-off); font-family: var(--tr-font-mono); font-size: 10px; }
+.session-number { color: var(--tr-fg-faint); font-family: var(--tr-font-mono); font-size: 10px; }
 .tile-actions { margin-left: auto; display: flex; gap: 1px; }
 .tile-actions .icon-button { width: 23px; }
 .tile-model-row { display: flex; align-items: center; gap: 6px; min-height: 35px; padding: 0 15px; border-bottom: 1px solid var(--tr-line-faint); font-size: 9px; color: var(--tr-fg-dim); }
@@ -251,7 +251,7 @@ kbd { font-family: inherit; font-size: 8px; color: var(--tr-fg-dim); margin-left
 .repository-empty.error-message { color: var(--tr-st-limit); }
 .source-code, .diff-code { flex: 1; min-height: 0; overflow: auto; padding: 15px 0; font-family: var(--tr-font-mono); font-size: 12px; line-height: 1.9; tab-size: 4; }
 .source-line, .diff-line { display: flex; min-width: max-content; min-height: 23px; }
-.line-number { color: var(--tr-fg-off); min-width: 46px; padding: 0 12px; flex-shrink: 0; text-align: right; font-size: 10px; user-select: none; }
+.line-number { color: var(--tr-fg-faint); min-width: 46px; padding: 0 12px; flex-shrink: 0; text-align: right; font-size: 10px; user-select: none; }
 .source-line code, .diff-line code { white-space: pre; padding-right: 20px; color: var(--tr-fg-muted); }
 .source-line code { padding-left: 12px; }
 .source-line:hover { background: var(--tr-raised); }
