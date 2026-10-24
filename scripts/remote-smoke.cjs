@@ -72,6 +72,12 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
+    assert.equal(await phone.locator('#text').inputValue(), '', 'a delivered message leaves the field');
+    // A message that cannot be delivered stays in the field instead of being lost.
+    const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
+    assert.equal(await phone.locator('#text').inputValue(), long, 'an undelivered message stays in the field');
+    await phone.locator('#text').fill('');
 
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');

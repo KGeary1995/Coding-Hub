@@ -82,16 +82,21 @@ const JS = String.raw`(() => {
     $('state').textContent = 'reconnecting…'; if (stream === controller) setTimeout(() => { if (stream === controller && token) listen(); }, 2000);
   }
   function open(sessionId) { current = sessionId; run = null; $('output').textContent = ''; show('channel'); renderChannels(); listen(); }
-  async function send(data) {
+  // Input goes out one request at a time, in the order it was typed, so "y" then Enter can never arrive reversed.
+  let queue = Promise.resolve();
+  function send(data) {
     const channel = channels.find((item) => item.sessionId === current); $('send-error').textContent = '';
-    if (!channel || !channel.runId || channel.runId !== run) { $('send-error').textContent = 'This channel is not running. Start it in Trace on your computer.'; return; }
-    try { await api('/api/input', { method: 'POST', body: JSON.stringify({ sessionId: channel.sessionId, runId: run, data }) }); }
-    catch (error) { $('send-error').textContent = error.message; }
+    if (!channel || !channel.runId || channel.runId !== run) { $('send-error').textContent = 'This channel is not running. Start it in Trace on your computer.'; return Promise.resolve(false); }
+    if (data.length > 4096) { $('send-error').textContent = 'Messages sent from the phone can be at most 4,095 characters.'; return Promise.resolve(false); }
+    const body = JSON.stringify({ sessionId: channel.sessionId, runId: run, data });
+    const delivery = queue.then(() => api('/api/input', { method: 'POST', body })); queue = delivery.catch(() => {});
+    return delivery.then(() => true, (error) => { $('send-error').textContent = error.message; return false; });
   }
   $('back').onclick = () => { current = null; show('channels'); listen(); };
   const KEYS = { y: 'y', n: 'n', enter: '\r', escape: '\x1b', up: '\x1b[A', down: '\x1b[B', interrupt: '\x03' };
   for (const button of document.querySelectorAll('[data-key]')) button.onclick = () => send(KEYS[button.dataset.key]);
-  $('send').onsubmit = (event) => { event.preventDefault(); const text = $('text').value; if (!text) return; $('text').value = ''; send(text + '\r'); };
+  // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
+  $('send').onsubmit = async (event) => { event.preventDefault(); const text = $('text').value; if (!text) return; if (await send(text + '\r') && $('text').value === text) $('text').value = ''; };
   $('pair-button').onclick = async () => {
     $('pair-error').textContent = '';
     try {
