@@ -22,18 +22,18 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
   let app;
   const native = async (page, method, request) => { const result = await page.evaluate(({ method, request }) => window.codingHub[method](request), { method, request }); assert.equal(result.ok, true, result.error?.message); return result.value; };
   try {
-    app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.session-tile');
-    await page.getByRole('button', { name: 'Dismiss workspace setup', exact: true }).click(); assert.equal(await page.locator('.workspace-setup').count(), 0);
+    app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
+    await page.getByRole('button', { name: 'Use channels without a project', exact: true }).click(); assert.equal(await page.locator('.tr-empty').count(), 0);
     await (await tileControl(page, 'Engine settings for session 1')).click();
     await page.locator('.session-tile').first().getByLabel('Working directory', { exact: true }).selectOption('independent');
     await page.locator('.session-tile').first().getByLabel('Repository path', { exact: true }).fill(project);
     await (await tileControl(page, 'Engine settings for session 1')).click();
-    assert.equal(await page.locator('.workspace-setup').count(), 0);
+    assert.equal(await page.locator('.tr-empty').count(), 0);
     await page.evaluate(() => localStorage.removeItem('coding-hub-setup-complete'));
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await page.waitForFunction(() => localStorage.getItem('coding-hub-setup-complete') === 'true');
-    assert.equal(await page.locator('.workspace-setup').count(), 0, 'An independent repository also completes project setup');
+    assert.equal(await page.locator('.tr-empty').count(), 0, 'An independent repository also completes project setup');
     await openView(page, 'Design workspace');
     const file = path.join(root, 'preview.html');
     await fs.writeFile(file, '<h1>Design first</h1><style>body{background:#eef2ff;color:#22315a;font:24px sans-serif;padding:40px}</style><script>window.evilRan=true;parent.document.body.dataset.unsafe="yes"</script><img src="https://example.invalid/tracker.png"><a href="https://example.invalid/">Remote link</a>');
@@ -102,6 +102,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     assert.equal(await tile.getByRole('status', { name: 'Channel 3 hold', exact: true }).textContent(), '◆HOLD');
     assert.equal(await tile.getAttribute('data-state'), 'waiting');
+    const toast = page.locator('.tr-toast.waiting');
+    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
     // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
     await (await tileControl(page, 'Isolate session 1')).click();
@@ -113,8 +115,18 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 3);
     await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').waitFor({ state: 'detached' });
+    await toast.waitFor({ state: 'detached' });
+    // The command menu: a leading @ limits results to channels, and Enter jumps into that channel's terminal.
+    await page.mouse.click(2, 300); await page.keyboard.press('Control+Shift+P');
+    await page.getByLabel('Search commands', { exact: true }).fill('@CH3');
+    assert.equal(await page.getByRole('button', { name: 'Channels', exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(await page.getByRole('option').allTextContents(), [await page.getByRole('option').first().textContent()]);
+    assert.match(await page.getByRole('option').first().textContent(), /^●CH3 · /);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile') === document.querySelectorAll('.session-tile')[2]);
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
+    await page.getByRole('button', { name: 'Retry CH3', exact: true }).waitFor();
     // A short tile can push the repeated error into scrollback (the Windows console repaints the main screen
     // first), so scroll back a line at a time until it is in view, as a user would.
     await tile.locator('.xterm-screen').hover();
@@ -122,8 +134,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await tile.getByRole('button', { name: 'Use Codex CLI defaults', exact: true }).click();
     assert.ok((await tile.textContent()).includes('Model and reasoning overrides cleared'));
     await app.close(); app = null;
-    app = await _electron.launch({ executablePath: require('electron'), args, env }); page = await app.firstWindow(); await page.waitForSelector('.session-tile');
-    assert.equal(await page.locator('.workspace-setup').count(), 0); assert.equal((await native(page, 'designs', { action: 'list' })).length, 3); assert.equal((await native(page, 'coaching', { action: 'list' })).length, 1);
+    app = await _electron.launch({ executablePath: require('electron'), args, env }); page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
+    assert.equal(await page.locator('.tr-empty').count(), 0); assert.equal((await native(page, 'designs', { action: 'list' })).length, 3); assert.equal((await native(page, 'coaching', { action: 'list' })).length, 1);
     console.log('PASS: immutable design comparison and isolated static HTML, preview sizes, coding tiles, curated coaching selection/review/consent, separate idle report session, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
   } catch (error) {
     // Print what each tile showed, so a CI failure includes the CLI's own output and the app's diagnostic.

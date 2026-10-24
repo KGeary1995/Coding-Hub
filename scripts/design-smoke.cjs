@@ -15,7 +15,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env });
     const page = await app.firstWindow();
-    await page.waitForSelector('.session-tile');
+    await page.waitForSelector('.tr-empty, .session-tile');
     await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [process.cwd()] }); });
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     for (let i = 0; i < 2; i++) {
@@ -51,7 +51,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     // G then a letter opens a view; keys typed into fields are left alone.
     await page.evaluate(() => (document.activeElement)?.blur());
     await page.keyboard.press('g'); await page.keyboard.press('u');
-    await page.getByRole('heading', { name: 'Usage & telemetry', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
     console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, and G-letter view shortcuts.');

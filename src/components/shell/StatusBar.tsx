@@ -6,19 +6,22 @@ import { focusTerminal } from '../../runtime/terminals';
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
 
+/** Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–4 does). */
+export function jumpToChannel(id: string) {
+  const state = useWorkspaceStore.getState();
+  // Only the isolated tile's terminal is mounted; isolate the requested one instead.
+  if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
+  state.setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
+}
+
 /** The one global status layer: every channel's state, the project, today's usage, alerts and the host. */
 export function StatusBar() {
-  const { sessions, rootDirectory, persistenceStatus, setView } = useWorkspaceStore();
+  const { sessions, rootDirectory, persistenceStatus } = useWorkspaceStore();
   const usage = useHubStore((state) => state.usage);
   const today = todayTotals(usage);
   const alerts = channelAlerts(sessions, usage);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'no project';
-  const jump = (id: string) => {
-    const state = useWorkspaceStore.getState();
-    // Only the isolated tile's terminal is mounted; isolate the requested one instead, as Alt+1–4 does.
-    if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
-    setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
-  };
+  const jump = jumpToChannel;
   return <footer className="app-statusbar tr-statusbar">
     {sessions.map((session, index) => {
       const record = usageFor(session, usage); const state = channelState(session, record); const meta = CHANNEL_STATES[state];

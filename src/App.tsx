@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAccessibility } from './components/AccessibilityControls';
-import { WorkspaceHeader } from './components/WorkspaceHeader';
+import { EmptyWorkspace, useProjectSetup } from './components/workspace/EmptyWorkspace';
 import { SessionGrid } from './components/SessionGrid';
 import { FeaturePanel } from './components/FeaturePanel';
 import { useWorkspaceStore } from './state/workspace-store';
@@ -11,6 +11,19 @@ import { RepositoryPanel } from './components/RepositoryPanel';
 import { WorkspaceExplorer } from './components/WorkspaceExplorer';
 import { Topbar } from './components/shell/Topbar';
 import { StatusBar } from './components/shell/StatusBar';
+import { Toasts } from './components/shell/Toasts';
+
+/** Channels, or the empty screen until a project is chosen. Mounted per visit, so setup state is re-read each time. */
+function WorkspaceView({ explorer, onCloseExplorer }: { explorer: boolean; onCloseExplorer: () => void }) {
+  const { needsProject, skip } = useProjectSetup();
+  if (needsProject) return <EmptyWorkspace onSkip={skip} />;
+  return <section className="workspace-page">
+    <div className="workspace-canvas">
+      {explorer && <WorkspaceExplorer onClose={onCloseExplorer} />}
+      <SessionGrid />
+    </div>
+  </section>;
+}
 
 export function App() {
   useAccessibility();
@@ -25,19 +38,13 @@ export function App() {
       <main id="main-content" tabIndex={-1} className="main-shell">
         {(persistenceError || logError) && <div className="persistence-alert" role="alert">{persistenceError || logError}</div>}
         {!persistenceReady ? <div className="history-empty">Restoring local workspace…</div>
-          : activeView === 'workspace' ? (
-            <section className="workspace-page">
-              <WorkspaceHeader />
-              <div className="workspace-canvas">
-                {explorer && <WorkspaceExplorer onClose={() => setExplorer(false)} />}
-                <SessionGrid />
-              </div>
-            </section>
-          ) : activeView === 'history' ? <SessionHistory />
+          : activeView === 'workspace' ? <WorkspaceView explorer={explorer} onCloseExplorer={() => setExplorer(false)} />
+          : activeView === 'history' ? <SessionHistory />
             : activeView === 'files' || activeView === 'diff' ? <RepositoryPanel mode={activeView} />
               : <FeaturePanel />}
       </main>
       <StatusBar />
+      <Toasts />
     </div>
   );
 }

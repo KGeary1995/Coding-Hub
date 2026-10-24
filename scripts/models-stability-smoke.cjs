@@ -17,7 +17,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
  let app;const errors=[];let claude;
  const native=async(page,method,request)=>{const result=await page.evaluate(({method,request})=>window.codingHub[method](request),{method,request});assert.equal(result.ok,true,result.error?.message);return result.value;};
  const wb=(page,request)=>native(page,'workbench',request);
- async function launch(){app=await _electron.launch({executablePath:require('electron'),args,env});const page=await app.firstWindow();page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.waitForSelector('.session-tile');await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0,checkboxChecked:false});});return page;}
+ async function launch(){app=await _electron.launch({executablePath:require('electron'),args,env});const page=await app.firstWindow();page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.waitForSelector('.tr-empty, .session-tile');await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0,checkboxChecked:false});});return page;}
  try{
   let page=await launch();await page.evaluate(()=>{window.events=[];window.codingHub.onSessionEvent(event=>window.events.push(event));});
   await app.evaluate(({dialog},project)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[project]});},project);await page.getByRole('button',{name:'Open project',exact:true}).click();
