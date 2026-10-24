@@ -17,3 +17,15 @@ describe('explicit local coaching reports', () => {
     expect(() => service.execute({ action: 'prepare', report: 'bad\x1b[200~' })).toThrow('Invalid');
   });
 });
+describe('prepared folder limit', () => {
+  it('replaces the oldest unused folder instead of refusing after 100 requests', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-coaching-')); roots.push(root); const rules = new RulesService(root);
+    let protectedFolder = ''; const service = new CoachingService(root, rules, (directory) => directory === protectedFolder);
+    const folders: string[] = [];
+    for (let index = 0; index < 100; index++) { const { directory } = service.execute({ action: 'prepare', report: `Report ${index}` }) as { directory: string }; const time = new Date(Date.UTC(2026, 0, 1, 0, index)); fs.utimesSync(directory, time, time); folders.push(directory); }
+    protectedFolder = folders[0];
+    const next = service.execute({ action: 'prepare', report: 'Report 100' }) as { directory: string };
+    expect(fs.existsSync(next.directory)).toBe(true); expect(fs.existsSync(folders[0])).toBe(true); expect(fs.existsSync(folders[1])).toBe(false); expect(fs.existsSync(folders[2])).toBe(true);
+    expect(rules.read([]).directories).not.toContain(folders[1]); expect(() => rules.verifyLaunch(next.directory)).not.toThrow();
+  });
+});
