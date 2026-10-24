@@ -53,6 +53,12 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     // Alerts: the phone app installs its service worker and offers the switch (push services are not reachable here).
     await phone.locator('#alerts-switch').waitFor();
     assert.match(await phone.evaluate(async () => (await navigator.serviceWorker.ready).active.scriptURL), /\/sw\.js$/);
+    // Tapping an alert opens the app at its channel (the service worker's /#channel= link) once the channel list arrives.
+    const codexId = await page.evaluate(async () => (await window.codingHub.loadWorkspace()).value.workspace.sessions[1].id);
+    await phone.evaluate((id) => { location.hash = 'channel=' + encodeURIComponent(id); location.reload(); }, codexId);
+    await phone.locator('#channel-title').filter({ hasText: 'CH2' }).waitFor();
+    assert.equal(new URL(phone.url()).hash, '', 'the alert link is cleared once used');
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
 
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.
     const tile = page.locator('.session-tile').nth(1);
