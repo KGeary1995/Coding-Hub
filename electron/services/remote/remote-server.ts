@@ -10,6 +10,7 @@ import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { phoneFile } from './phone-files';
 import { ScreenMirror } from './screen-mirror';
+import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } from './web-push';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 export interface RemoteHost {
@@ -20,7 +21,12 @@ export interface RemoteHost {
 /** `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. */
 interface Stream { device: string; response: http.ServerResponse; sessionId: string | null; held?: string[] }
 
-const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable() }).strict();
+const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(pushEndpoint, 'Not a push service.'), p256dh: z.string().regex(/^[A-Za-z0-9_-]{87}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/) }).strict();
+const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional() }).strict();
+const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
+const subscribeSchema = z.object({ endpoint: z.string().max(2048), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
+/** At most one alert per channel and kind in this window, so a CLI that keeps asking does not flood the phone. */
+const ALERT_INTERVAL = 20000;
 type Device = z.infer<typeof deviceSchema>;
 const settingsSchema = z.object({ enabled: z.boolean() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200) }).strict();
@@ -49,7 +55,37 @@ export class RemoteServer {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
-  constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '') {}
+  private alerted = new Map<string, number>();
+  private sender: PushSender;
+  constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
+
+  /** This computer's VAPID key pair, made the first time a phone asks to turn on alerts. */
+  private vapid(): VapidKeys {
+    const existing = load(this.root, 'remote-push.json', vapidSchema.nullable(), null); if (existing) return existing;
+    const keys = vapidKeys(); save(this.root, 'remote-push.json', keys); return keys;
+  }
+  private setPush(id: string, push: z.infer<typeof subscriptionSchema> | undefined) {
+    const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) return false;
+    if (push) device.push = push; else delete device.push; save(this.root, 'remote-devices.json', devices); return true;
+  }
+  /** Sends an alert to every phone that turned alerts on; a subscription the push service reports gone is forgotten. */
+  private async alert(sessionId: string, kind: 'waiting' | 'failed' | 'test', title: string, body: string, only?: string) {
+    const key = `${sessionId}:${kind}`; const now = Date.now();
+    if (kind !== 'test') { if (now - (this.alerted.get(key) ?? 0) < ALERT_INTERVAL) return; this.alerted.set(key, now); }
+    const targets = this.devices().filter((device) => device.push && (!only || device.id === only));
+    await Promise.all(targets.map(async (device) => {
+      const result = await this.sender(device.push!, { title, body, sessionId, tag: key }, { topic: `trace-${kind}` });
+      if (result === 'gone') this.setPush(device.id, undefined);
+    }));
+  }
+  private channelLabel(sessionId: string) { const channel = this.channels().find((item) => item.sessionId === sessionId); return channel ? `CH${channel.channel} · ${channel.title}` : 'A channel'; }
+  /** A test alert to one phone, from Settings on the computer. */
+  async testAlert(id: string) {
+    const device = this.devices().find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
+    if (!device.push) throw new HubError('REMOTE_ALERTS_OFF', `Alerts are not on for ${device.name}. Turn them on in Trace on the phone.`);
+    await this.alert('test', 'test', 'Trace alerts are on', `${device.name} will be told when a channel needs you.`, id);
+    return this.status();
+  }
 
   private devices(): Device[] { return load(this.root, 'remote-devices.json', z.array(deviceSchema).max(20), []); }
   private settings() { return load(this.root, 'remote.json', settingsSchema, { enabled: false }); }
@@ -96,7 +132,7 @@ export class RemoteServer {
     const base = this.tailscale.serving && this.tailscale.host ? `https://${this.tailscale.host}/` : null;
     const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString() } : null;
     return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing,
-      devices: this.devices().map(({ id, name, createdAt, lastSeen }): RemoteDevice => ({ id, name, createdAt, lastSeen })) };
+      devices: this.devices().map(({ id, name, createdAt, lastSeen, push }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push) })) };
   }
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
@@ -106,9 +142,15 @@ export class RemoteServer {
       this.attention.delete(event.sessionId); this.broadcastChannels(); return;
     }
     if (event.type === 'data') { this.output(event.sessionId, event.runId, event.data); return; }
-    if (event.type === 'attention') { this.attention.set(event.sessionId, { runId: event.runId, message: event.message }); this.broadcastChannels(); return; }
+    if (event.type === 'attention') {
+      this.attention.set(event.sessionId, { runId: event.runId, message: event.message }); this.broadcastChannels();
+      if (this.server) void this.alert(event.sessionId, 'waiting', `${this.channelLabel(event.sessionId)} needs you`, event.message).catch(() => {});
+      return;
+    }
     // The phone shows why a CLI stopped the way the desktop does.
     if (event.type === 'exit') this.output(event.sessionId, event.runId, exitNotice(event.exitCode, event.signal, event.diagnostic));
+    // A run that failed carries a diagnostic; a run the person stopped does not.
+    if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic && this.server) void this.alert(event.sessionId, 'failed', `${this.channelLabel(event.sessionId)} stopped with an error`, event.diagnostic.split('\n')[0].slice(0, 160)).catch(() => {});
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
   private output(sessionId: string, runId: string, data: string) {
@@ -132,6 +174,7 @@ export class RemoteServer {
     const current = new Set(this.host.sessions().map((session) => session.id));
     for (const id of [...this.replay.keys()]) if (!current.has(id)) this.forget(id);
     for (const id of [...this.attention.keys()]) if (!current.has(id)) this.attention.delete(id);
+    for (const key of [...this.alerted.keys()]) if (!current.has(key.slice(0, key.lastIndexOf(':')))) this.alerted.delete(key);
     if (this.channelsTimer || !this.streams.size) return;
     this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
   }
@@ -243,6 +286,15 @@ export class RemoteServer {
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/unpair') { this.revoke(device.id); return this.send(response, 200, { ok: true }); }
+    if (request.method === 'GET' && url.pathname === '/api/alerts') return this.send(response, 200, { publicKey: this.vapid().publicKey, on: Boolean(device.push) });
+    if (request.method === 'POST' && url.pathname === '/api/alerts') {
+      const parsed = subscribeSchema.safeParse(await this.body(request));
+      const push = parsed.success ? subscriptionSchema.safeParse({ endpoint: parsed.data.endpoint, p256dh: parsed.data.keys.p256dh, auth: parsed.data.keys.auth }) : null;
+      if (!push?.success) return this.send(response, 400, { error: 'This browser’s push service is not supported.' });
+      if (!this.setPush(device.id, push.data)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
+      return this.send(response, 200, { on: true });
+    }
+    if (request.method === 'DELETE' && url.pathname === '/api/alerts') { this.setPush(device.id, undefined); return this.send(response, 200, { on: false }); }
     return this.send(response, 404, { error: 'Not found.' });
   }
 }

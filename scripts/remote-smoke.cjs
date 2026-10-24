@@ -50,6 +50,9 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await phone.locator('#channel-list button').first().waitFor();
     assert.match(await phone.locator('#channel-list').textContent(), /CH1.*Claude Code.*CH2.*Codex/);
     await card.getByRole('list', { name: 'Paired phones' }).getByText('Phone', { exact: true }).waitFor();
+    // Alerts: the phone app installs its service worker and offers the switch (push services are not reachable here).
+    await phone.locator('#alerts-switch').waitFor();
+    assert.match(await phone.evaluate(async () => (await navigator.serviceWorker.ready).active.scriptURL), /\/sw\.js$/);
 
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.
     const tile = page.locator('.session-tile').nth(1);

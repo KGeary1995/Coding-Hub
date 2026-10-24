@@ -320,10 +320,12 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
       z.object({ action: z.literal('remote-pair') }).strict(), z.object({ action: z.literal('remote-cancel-pairing') }).strict(),
       z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve') }).strict(),
+      z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
     ]).parse(payload);
     if (request.action === 'remote-enable') await phone.setEnabled(request.enabled);
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
+    if (request.action === 'remote-test-alert') return phone.testAlert(request.id);
     if (request.action === 'remote-serve') {
       const confirmed = (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
         message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;

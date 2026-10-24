@@ -59,3 +59,8 @@ footer { padding: 16px; text-align: center; }
 .compose input { flex: 1; }
 .terminal, .terminal .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--tr-line-control) transparent; }
 .terminal .xterm-viewport { background: var(--tr-term) !important; }
+
+.alerts { margin-top: 24px; padding: 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); }
+.alerts h2 { margin: 0 0 6px; font: 600 16px/22px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.alerts p { margin: 0 0 10px; font-size: 14px; }
+.alerts button { width: 100%; }

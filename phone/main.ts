@@ -8,7 +8,7 @@ import { Terminal } from '@xterm/xterm';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
 import { withoutTerminalReplies } from '../shared/terminal-input';
-import { follow, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent } from './api';
+import { alertsOn, alertsSupported, disableAlerts, enableAlerts, follow, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 const KEYS: { label: string; name?: string; data: string }[] = [
@@ -74,8 +74,24 @@ function showList() {
   disposeTerminal(); current = null; run = null;
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.')), h('footer', {}, remove));
+  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
   renderList(); listen(null);
+}
+
+/** Alerts: a switch that subscribes this phone to the computer's Web Push alerts, or why it cannot. */
+function alertsPanel() {
+  const panel = h('section', { className: 'alerts', aria: { labelledby: 'alerts-title' } });
+  const render = (on: boolean | null, note = '') => {
+    const ios = /iPhone|iPad/.test(navigator.userAgent) && !(navigator as Navigator & { standalone?: boolean }).standalone;
+    const button = h('button', { id: 'alerts-switch', type: 'button', className: on ? '' : 'primary', disabled: on === null || !alertsSupported(), aria: { pressed: String(Boolean(on)) },
+      onclick: async () => { render(null, ''); try { if (on) await disableAlerts(); else await enableAlerts(); render(await alertsOn()); } catch (e) { render(on, (e as Error).message); } } }, on ? 'Turn off alerts' : 'Turn on alerts');
+    panel.replaceChildren(h('h2', { id: 'alerts-title' }, 'Alerts'),
+      h('p', { className: 'dim' }, on ? 'This phone is told when a channel needs you or stops with an error.' : 'Get a notification when a channel needs you or stops with an error, even with Trace closed.'),
+      !alertsSupported() ? h('p', { className: 'dim' }, ios ? 'On iPhone and iPad, add Trace to your Home Screen first (Share → Add to Home Screen), then open it from there.' : 'This browser cannot receive alerts.') : button,
+      h('p', { className: 'error', aria: { role: 'alert' } }, note));
+  };
+  render(null); if (alertsSupported()) void alertsOn().then((on) => render(on)).catch(() => render(false)); else render(false);
+  return panel;
 }
 
 function renderList() {
@@ -187,4 +203,12 @@ function onEvent(event: StreamEvent) {
 }
 
 window.addEventListener('resize', () => { const channel = channels.find((item) => item.sessionId === current); if (terminal && channel?.cols) terminal.options.fontSize = fitFont(channel.cols); });
-if (!token.get() || location.hash.startsWith(PAIRING_PREFIX)) showPair(); else showList();
+// Alerts arrive through the service worker; tapping one opens its channel.
+if ('serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (event) => { const id = (event.data as { open?: string }).open; if (id && token.get() && channels.some((item) => item.sessionId === id)) showChannel(id); });
+}
+const opening = location.hash.startsWith('#channel=') ? decodeURIComponent(location.hash.slice(9)) : null;
+if (!token.get() || location.hash.startsWith(PAIRING_PREFIX)) showPair();
+else if (opening) { history.replaceState(null, '', '/'); showList(); const open = setInterval(() => { if (channels.some((item) => item.sessionId === opening)) { clearInterval(open); showChannel(opening); } }, 200); setTimeout(() => clearInterval(open), 10000); }
+else showList();

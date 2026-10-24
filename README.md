@@ -263,6 +263,9 @@ On the phone:
 - **Channels** lists every channel with its state; one that needs you is outlined and shows the request.
 - **A channel** shows its terminal exactly as the CLI draws it, at the CLI's own width. **A− / A+** change the text size (larger text scrolls sideways). Tap the terminal to type straight into it, use the key row (Enter, Esc, arrows, 1–3, y, n, Tab, Ctrl C) for prompts, or type a line and press **Send**.
 - A restarted channel starts its screen afresh. **Remove this phone** at the bottom of the list unpairs it.
+- **Alerts:** **Turn on alerts** under the channel list, and the phone gets a notification when a channel needs you or stops with an error, even with Trace closed. Tapping it opens that channel. On iPhone and iPad this works once Trace is added to the Home Screen and opened from there (iOS 16.4 or later). Settings on the computer shows which phones have alerts on and can **Send test alert**.
+
+Alerts use Web Push. Trace encrypts each alert on the computer for that phone only (RFC 8291) and signs the request with a key of its own (VAPID, `remote-push.json`); the browser's push service (Google, Apple, Mozilla or Microsoft) carries it but cannot read it. The computer only ever sends to those push services, at most one alert per channel every 20 seconds.
 
 How it is protected:
 

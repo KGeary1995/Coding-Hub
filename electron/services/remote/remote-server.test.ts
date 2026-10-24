@@ -23,8 +23,9 @@ async function remote() {
   const phone = path.join(root, 'phone'); fs.mkdirSync(path.join(phone, 'assets'), { recursive: true });
   fs.writeFileSync(path.join(phone, 'index.html'), '<h1>Pair this phone</h1>'); fs.writeFileSync(path.join(phone, 'assets', 'app-1a2b.js'), 'console.log(1)');
   fs.writeFileSync(path.join(root, 'secret.json'), '{"secret":true}');
-  const server = new RemoteServer(root, host, 0, phone); cleanup.push(() => server.stop());
-  return { root, server, writes, running };
+  const alerts: { device: string; message: Record<string, unknown> }[] = []; let result: 'sent' | 'gone' = 'sent';
+  const server = new RemoteServer(root, host, 0, phone, async (subscription, message) => { alerts.push({ device: subscription.endpoint, message: message as Record<string, unknown> }); return result; }); cleanup.push(() => server.stop());
+  return { root, server, writes, running, alerts, gone: () => { result = 'gone'; } };
 }
 const base = (server: RemoteServer) => `http://127.0.0.1:${server.address}`;
 const request = (server: RemoteServer, pathname: string, headers: Record<string, string> = {}) => new Promise<{ status: number; body: string }>((resolve, reject) => {
@@ -178,6 +179,33 @@ describe('phone remote', () => {
     server.personInput('s1', '\x1b[I'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', '\x1b[12;40R\x1b[?1;2c'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', 'y'); expect(server.channels()[0].attention).toBeNull();
+  });
+});
+
+describe('phone alerts', () => {
+  const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'B'.padEnd(87, 'A'), auth: 'A'.repeat(22) } };
+  const alertsApi = (server: RemoteServer, token: string, method: string, body?: unknown) => fetch(base(server) + '/api/alerts', { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  it('lets a paired phone turn alerts on only with a real push service, and off again', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    const key = await (await alertsApi(server, token, 'GET')).json() as { publicKey: string; on: boolean }; expect(key.publicKey).toMatch(/^[A-Za-z0-9_-]{87}$/); expect(key.on).toBe(false);
+    expect((await alertsApi(server, token, 'POST', { ...subscription, endpoint: 'https://192.168.1.10/hook' })).status).toBe(400);
+    expect((await alertsApi(server, token, 'POST', subscription)).status).toBe(200); expect(server.status().devices[0].notifications).toBe(true);
+    expect((await alertsApi(server, token, 'DELETE')).status).toBe(200); expect(server.status().devices[0].notifications).toBe(false);
+  });
+  it('alerts phones when a channel needs the person or fails, at most once per 20 seconds, and forgets a gone subscription', async () => {
+    const { server, alerts, gone } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    await alertsApi(server, token, 'POST', subscription);
+    server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve npm test?', at: new Date().toISOString() });
+    server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Again?', at: new Date().toISOString() });
+    server.onSessionEvent({ type: 'exit', sessionId: 's1', runId: 'r1', exitCode: 1 });
+    server.onSessionEvent({ type: 'exit', sessionId: 's1', runId: 'r1', exitCode: 1, diagnostic: 'Error: model not found\nmore' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(alerts.map((item) => item.message)).toEqual([
+      expect.objectContaining({ title: 'CH1 · Claude Code needs you', body: 'Approve npm test?', sessionId: 's1' }),
+      expect.objectContaining({ title: 'CH1 · Claude Code stopped with an error', body: 'Error: model not found' }),
+    ]);
+    gone(); await server.testAlert(server.status().devices[0].id); expect(server.status().devices[0].notifications).toBe(false);
+    await expect(server.testAlert(server.status().devices[0].id)).rejects.toThrow(/not on/);
   });
 });
 
