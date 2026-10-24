@@ -3,7 +3,8 @@ import type { CLIEngine } from './types';
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
 export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: CLIEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null }
-export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null }
+/** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
+export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean }
 export interface TailscaleState {
   /** The tailscale CLI was found. */
   installed: boolean;
@@ -34,6 +35,7 @@ export type RemoteRequest =
   | { action: 'remote-pair' }
   | { action: 'remote-cancel-pairing' }
   | { action: 'remote-revoke'; id: string }
+  | { action: 'remote-test-alert'; id: string }
   | { action: 'remote-serve' };
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';

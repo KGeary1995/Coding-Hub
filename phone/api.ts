@@ -31,6 +31,26 @@ export function send(sessionId: string, runId: string, data: string) {
 }
 export const unpair = () => api('/api/unpair', { method: 'POST' }).finally(() => token.clear());
 
+/** Whether this browser can receive alerts here; on iPhone and iPad that needs Trace added to the Home Screen first. */
+export function alertsSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+export async function alertsOn() { return ((await (await api('/api/alerts')).json()) as { on: boolean }).on; }
+/** Asks for permission, subscribes with the computer's key and hands the subscription to the computer. */
+export async function enableAlerts() {
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Alerts are blocked for Trace in this browser’s settings.');
+  const { publicKey } = await (await api('/api/alerts')).json() as { publicKey: string };
+  const registration = await navigator.serviceWorker.ready;
+  const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (char) => char.charCodeAt(0));
+  const existing = await registration.pushManager.getSubscription();
+  // A subscription made for another computer's key cannot carry this one's alerts.
+  if (existing && existing.options.applicationServerKey && new Uint8Array(existing.options.applicationServerKey).join() !== key.join()) await existing.unsubscribe();
+  const subscription = (await registration.pushManager.getSubscription()) ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  await api('/api/alerts', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+}
+export async function disableAlerts() {
+  await api('/api/alerts', { method: 'DELETE' });
+  await (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.unsubscribe();
+}
+
 export type StreamEvent =
   | { type: 'channels'; data: RemoteChannel[] }
   | { type: 'output'; data: { sessionId: string; runId: string; data: string } }

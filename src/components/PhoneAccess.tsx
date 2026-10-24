@@ -38,7 +38,7 @@ export function PhoneAccessCard() {
   const { tailscale } = status; const ready = status.listening && tailscale.serving && !tailscale.funnel;
   return <article className="storage-card phone-access" aria-labelledby="phone-access-title">
     <header><h2 id="phone-access-title"><Smartphone size={16} aria-hidden="true" />Phone access</h2><span className={`storage-status ${ready ? 'saved' : ''}`}>{!status.enabled ? 'Off' : ready ? 'Ready' : status.listening ? 'Needs Tailscale' : 'Not running'}</span></header>
-    <p>Read and type into running channels from your phone, including answering approval prompts. Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
+    <p>Read and type into running channels from your phone, including answering approval prompts, and get an alert when one needs you. Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
     <label className="update-checkbox"><input type="checkbox" checked={status.enabled} disabled={busy} onChange={(event) => { const enabled = event.target.checked; setStatus({ ...status, enabled }); void run({ action: 'remote-enable', enabled }); }} />Allow paired phones to read and type into channels</label>
     {status.error && <p role="alert" className="error-message">{status.error}</p>}
     {status.enabled && <>
@@ -62,7 +62,8 @@ export function PhoneAccessCard() {
         </div>
       </div>}
       {status.devices.length > 0 && <ul className="hub-list phone-devices" aria-label="Paired phones">{status.devices.map((device) => <li key={device.id} className="extension-row">
-        <strong>{device.name}</strong><span className="muted">Paired {new Date(device.createdAt).toLocaleDateString()} · {device.lastSeen ? `last used ${new Date(device.lastSeen).toLocaleString()}` : 'not used yet'}</span>
+        <strong>{device.name}</strong><span className="muted">Paired {new Date(device.createdAt).toLocaleDateString()} · {device.lastSeen ? `last used ${new Date(device.lastSeen).toLocaleString()}` : 'not used yet'} · {device.notifications ? 'alerts on' : 'alerts off'}</span>
+        {device.notifications && <button className="quiet-button" disabled={busy} onClick={() => void run({ action: 'remote-test-alert', id: device.id })}>Send test alert</button>}
         <button className="quiet-button" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void run({ action: 'remote-revoke', id: device.id })}><X size={14} />Remove</button>
       </li>)}</ul>}
     </>}
