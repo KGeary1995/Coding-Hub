@@ -138,6 +138,16 @@ describe('phone remote', () => {
     expect((seen[1].data as { title: string }[])[0].title).toBe('Renamed');
   });
 
+  it('sends a new terminal size ahead of the output drawn at that size', async () => {
+    const { server, running } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    Object.assign(running[0], { cols: 80, rows: 24 });
+    const seen = await events(server, token, 's1', 3, () => {
+      Object.assign(running[0], { cols: 120, rows: 40 }); server.resized('s1');
+      server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: 'redrawn' });
+    });
+    expect(seen.slice(1)).toEqual([{ type: 'resize', data: { sessionId: 's1', runId: 'r1', cols: 120, rows: 40 } }, { type: 'output', data: { sessionId: 's1', runId: 'r1', data: 'redrawn' } }]);
+  });
+
   it('drops the screens of channels that left the workspace, and keeps at most 32', async () => {
     const { server } = await remote();
     for (let i = 0; i < 40; i++) server.onSessionEvent({ type: 'started', sessionId: `old-${i}`, runId: `r${i}`, pid: 1, cwd: '/p', engine: 'claude' });
@@ -150,6 +160,7 @@ describe('phone remote', () => {
     const { server } = await remote(); await server.setEnabled(true);
     server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve?', at: new Date().toISOString() });
     server.personInput('s1', '\x1b[I'); expect(server.channels()[0].attention).toBe('Approve?');
+    server.personInput('s1', '\x1b[12;40R\x1b[?1;2c'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', 'y'); expect(server.channels()[0].attention).toBeNull();
   });
 });

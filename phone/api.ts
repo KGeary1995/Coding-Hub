@@ -33,7 +33,8 @@ export const unpair = () => api('/api/unpair', { method: 'POST' }).finally(() =>
 
 export type StreamEvent =
   | { type: 'channels'; data: RemoteChannel[] }
-  | { type: 'replay' | 'output'; data: { sessionId: string; runId: string; data: string } };
+  | { type: 'replay' | 'output'; data: { sessionId: string; runId: string; data: string } }
+  | { type: 'resize'; data: { sessionId: string; runId: string; cols: number; rows: number } };
 
 /**
  * Follows the computer's event stream (server-sent events read through fetch, which can send the device key). It

@@ -119,6 +119,15 @@ export class RemoteServer {
     if (this.channelsTimer || !this.streams.size) return;
     this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
   }
+  /**
+   * A terminal was resized. Phones watching it get the new size at once, ahead of any output the CLI draws at that
+   * size (output is batched for a few milliseconds before it is sent), so the phone's screen lays it out the same way.
+   */
+  resized(sessionId: string) {
+    const run = this.host.running().find((item) => item.sessionId === sessionId);
+    if (run?.cols && run.rows) { const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload); }
+    this.channelsChanged();
+  }
   /** The person typed on the desktop: a waiting prompt is answered there. */
   personInput(sessionId: string, data: string) { if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels(); }
 

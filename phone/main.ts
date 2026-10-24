@@ -7,6 +7,7 @@ import './phone.css';
 import { Terminal } from '@xterm/xterm';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
+import { withoutTerminalReplies } from '../shared/terminal-input';
 import { follow, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
@@ -30,6 +31,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: { dataset?: Rec
 const app = document.getElementById('app')!;
 let channels: RemoteChannel[] = []; let current: string | null = null; let run: string | null = null;
 let stop: (() => void) | null = null; let terminal: Terminal | null = null; let connected = false;
+/** Unsent messages, by channel. */
+const drafts = new Map<string, string>();
 
 const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
 const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
@@ -113,15 +116,19 @@ function showChannel(sessionId: string) {
   const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type to the CLI', enterKeyHint: 'send', aria: { label: 'Message' } });
   const form = h('form', { className: 'compose' }, text, h('button', { className: 'primary', type: 'submit' }, 'Send'));
   // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
-  form.onsubmit = async (event) => { event.preventDefault(); const value = text.value; if (!value) return; if (await type(value + '\r') && text.value === value) text.value = ''; };
+  // Drafts are kept per channel, so going back to the list and returning finds the message still there.
+  text.value = drafts.get(sessionId) ?? ''; text.addEventListener('input', () => { if (text.value) drafts.set(sessionId, text.value); else drafts.delete(sessionId); });
+  form.onsubmit = async (event) => { event.preventDefault(); const value = text.value; if (!value) return; if (await type(value + '\r') && text.value === value) { text.value = ''; drafts.delete(sessionId); } };
   const keys = h('div', { className: 'keys', aria: { label: 'Keys' } }, ...KEYS.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)));
   const size = [h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
   app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view' }, waiting, output, problem, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: fitFont(channel?.cols ?? 80), lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   terminal.open(output);
-  // Typing straight into the terminal (tap it to bring up the keyboard) goes to the CLI as it is typed.
-  terminal.onData((data) => void type(data));
+  // Typing straight into the terminal (tap it to bring up the keyboard) goes to the CLI as it is typed. The terminal's
+  // own replies to the CLI's queries (cursor position and the like, also raised by replayed output) are left out: the
+  // desktop's terminal already answers them, and they are not the person answering a prompt.
+  terminal.onData((data) => { const typed = withoutTerminalReplies(data); if (typed) void type(typed); });
   renderChannel(); listen(sessionId);
 }
 
@@ -149,6 +156,11 @@ async function type(data: string) {
 function onEvent(event: StreamEvent) {
   if (event.type === 'channels') { channels = event.data; renderList(); renderChannel(); return; }
   if (event.data.sessionId !== current || !terminal) return;
+  if (event.type === 'resize') {
+    const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
+    if (event.data.runId === run) { terminal.options.fontSize = fitFont(event.data.cols); terminal.resize(event.data.cols, event.data.rows); }
+    return;
+  }
   if (event.type === 'replay') { run = event.data.runId; terminal.reset(); terminal.write(event.data.data); return; }
   if (event.data.runId === run) terminal.write(event.data.data);
 }

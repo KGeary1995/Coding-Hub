@@ -77,6 +77,10 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), long, 'an undelivered message stays in the field');
+    // So does a draft left while looking at another screen.
+    await phone.getByRole('button', { name: 'Back to channels' }).click();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
+    assert.equal(await phone.locator('#text').inputValue(), long, 'a draft survives going back to the channel list');
     await phone.locator('#text').fill('');
 
     // Removing the phone on the computer locks it out at once.
