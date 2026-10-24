@@ -64,6 +64,11 @@ const html = fs.readFileSync(path.join(resources, 'dist/index.html'), 'utf8');
 for (const match of html.matchAll(/(?:src|href)="(\.\/assets\/[^"?#]+)"/g)) {
   assert.ok(fs.existsSync(path.join(resources, 'dist', match[1])), `Missing renderer asset: ${match[1]}`);
 }
+// The phone app served to paired phones (Settings → Phone access).
+const phone = fs.readFileSync(path.join(resources, 'dist/phone/index.html'), 'utf8');
+for (const match of phone.matchAll(/(?:src|href)="\/([^"?#]+)"/g)) {
+  assert.ok(fs.existsSync(path.join(resources, 'dist/phone', match[1])), `Missing phone app file: ${match[1]}`);
+}
 const artifact = `AI-Coding-Hub-${expectedVersion}-Windows-x64-Portable.exe`;
 assert.ok(fs.existsSync(path.join(output, artifact)), 'Current-version portable Windows executable is missing');
 const artifactBuffer = fs.readFileSync(path.join(output, artifact));

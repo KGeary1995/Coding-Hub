@@ -48,7 +48,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     assert.equal(await phone.locator('#code').inputValue(), code);
     await phone.getByRole('button', { name: 'Pair', exact: true }).click();
     await phone.locator('#channel-list button').first().waitFor();
-    assert.match(await phone.locator('#channel-list').textContent(), /CH1 · Claude Code.*CH2 · Codex/);
+    assert.match(await phone.locator('#channel-list').textContent(), /CH1.*Claude Code.*CH2.*Codex/);
     await card.getByRole('list', { name: 'Paired phones' }).getByText('Phone', { exact: true }).waitFor();
 
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.

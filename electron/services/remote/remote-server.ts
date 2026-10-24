@@ -8,12 +8,12 @@ import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, typ
 import { isPersonInput } from '../../../shared/terminal-input';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
-import { PHONE_FILES } from './phone-page';
+import { phoneFile } from './phone-files';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 export interface RemoteHost {
   sessions(): { id: string; title: string; engine: CLIEngine }[];
-  running(): RunningSession[];
+  running(): (RunningSession & { cols?: number; rows?: number })[];
   write(reference: RunReference, data: string): void;
 }
 interface Stream { device: string; response: http.ServerResponse; sessionId: string | null }
@@ -47,7 +47,7 @@ export class RemoteServer {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
-  constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT) {}
+  constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '') {}
 
   private devices(): Device[] { return load(this.root, 'remote-devices.json', z.array(deviceSchema).max(20), []); }
   private settings() { return load(this.root, 'remote.json', settingsSchema, { enabled: false }); }
@@ -108,8 +108,8 @@ export class RemoteServer {
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
   /**
-   * The saved workspace changed (channels added, removed, renamed or reordered). Saves come often, so phones are told
-   * shortly after, and only when the channel list they see is different.
+   * The saved workspace changed (channels added, removed, renamed or reordered) or a terminal was resized. Both come
+   * often, so phones are told shortly after, and only when the channel list they see is different.
    */
   channelsChanged() {
     // Channels that left the workspace keep no screen or prompt here, whether or not a phone is connected.
@@ -126,7 +126,7 @@ export class RemoteServer {
     const running = new Map(this.host.running().map((run) => [run.sessionId, run]));
     return this.host.sessions().map((session, index) => {
       const run = running.get(session.id); const waiting = this.attention.get(session.id);
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, cols: run?.cols ?? null, rows: run?.rows ?? null };
     });
   }
   private broadcastChannels() { if (!this.streams.size) return; this.sentChannels = JSON.stringify(this.channels()); const payload = `event: channels\ndata: ${this.sentChannels}\n\n`; for (const stream of this.streams) this.write(stream, payload); }
@@ -168,10 +168,11 @@ export class RemoteServer {
     if (request.headers['tailscale-funnel-request'] !== undefined) return this.send(response, 403, { error: 'The phone remote is not available through Tailscale Funnel.' });
     const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return this.send(response, 403, { error: 'Cross-site request refused.' });
     const url = new URL(request.url ?? '/', 'http://remote');
-    if (request.method === 'GET' && url.pathname in PHONE_FILES) {
-      const file = PHONE_FILES[url.pathname];
-      response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+    const file = request.method === 'GET' && !url.pathname.startsWith('/api/') ? phoneFile(this.phoneRoot, url.pathname) : null;
+    if (file) {
+      response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': file.immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+        // xterm.js sets inline styles for its rows and cursor; scripts stay limited to the app's own files.
+        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
       return void response.end(file.body);
     }
     if (request.method === 'POST' && url.pathname === '/api/pair') {

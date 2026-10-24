@@ -310,7 +310,7 @@ else app.whenReady().then(() => {
     sessions: () => (storage?.load()?.sessions ?? []).map((session) => ({ id: session.id, title: session.title, engine: session.config.engine })),
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
-  });
+  }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote;
   const refreshTailscale = async () => { if (phone.enabled) phone.tailscale = await tailscaleState(runTailscale, phone.port); };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
@@ -457,7 +457,7 @@ else app.whenReady().then(() => {
     const input = payload as { sessionId?: unknown; data?: unknown }; if (typeof input.sessionId === 'string' && typeof input.data === 'string') remote?.personInput(input.sessionId, input.data);
     return null;
   });
-  handle(IPC_CHANNELS.resizeSession, (owner, payload) => { manager.resize(owner, payload); return null; });
+  handle(IPC_CHANNELS.resizeSession, (owner, payload) => { manager.resize(owner, payload); remote?.channelsChanged(); return null; });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   createWindow();
   updates.start();

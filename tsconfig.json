@@ -14,5 +14,5 @@
     "noUnusedParameters": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "shared", "vite.config.ts"]
+  "include": ["src", "shared", "phone", "vite.config.ts", "vite.phone.config.ts"]
 }
