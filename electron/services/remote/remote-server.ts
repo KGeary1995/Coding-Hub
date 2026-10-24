@@ -5,10 +5,11 @@ import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { CLIEngine } from '../../../shared/types';
 import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, type RemoteStatus, type TailscaleState } from '../../../shared/remote';
-import { isPersonInput } from '../../../shared/terminal-input';
+import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { phoneFile } from './phone-files';
+import { ScreenMirror } from './screen-mirror';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 export interface RemoteHost {
@@ -16,7 +17,8 @@ export interface RemoteHost {
   running(): (RunningSession & { cols?: number; rows?: number })[];
   write(reference: RunReference, data: string): void;
 }
-interface Stream { device: string; response: http.ServerResponse; sessionId: string | null }
+/** `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. */
+interface Stream { device: string; response: http.ServerResponse; sessionId: string | null; held?: string[] }
 
 const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable() }).strict();
 type Device = z.infer<typeof deviceSchema>;
@@ -27,7 +29,7 @@ const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.s
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 /** Screens kept for replay: one per channel, and no more than this many in all (oldest started first out). */
 const REPLAY_CHANNELS = 32;
-const PAIRING_MINUTES = 5; const PAIRING_ATTEMPTS = 10; const REPLAY_BYTES = 256 * 1024; const STREAM_BUFFER = 2 * 1024 * 1024;
+const PAIRING_MINUTES = 5; const PAIRING_ATTEMPTS = 10; const STREAM_BUFFER = 2 * 1024 * 1024;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -41,7 +43,7 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
 export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
-  private replay = new Map<string, { runId: string; text: string }>();
+  private replay = new Map<string, ScreenMirror>();
   private attention = new Map<string, { runId: string; message: string }>();
   private pairing: { code: string; expires: number; attempts: number } | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -60,6 +62,7 @@ export class RemoteServer {
     try {
       await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
       this.server = server; this.error = null;
+      for (const run of this.host.running()) if (!this.replay.has(run.sessionId)) this.mirror(run.sessionId, run.runId);
       this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); }, 25000);
     } catch (error) {
       this.error = (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ? `Port ${this.port} on this computer is in use by another program.` : 'The phone remote could not start.';
@@ -68,6 +71,7 @@ export class RemoteServer {
   async stop() {
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
+    for (const id of [...this.replay.keys()]) this.forget(id);
     const server = this.server; this.server = null; this.pairing = null;
     if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   }
@@ -97,16 +101,28 @@ export class RemoteServer {
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
   onSessionEvent(event: SessionEvent) {
-    if (event.type === 'started') { this.replay.delete(event.sessionId); this.replay.set(event.sessionId, { runId: event.runId, text: '' }); while (this.replay.size > REPLAY_CHANNELS) this.replay.delete(this.replay.keys().next().value!); this.attention.delete(event.sessionId); this.broadcastChannels(); return; }
-    if (event.type === 'data') {
-      const held = this.replay.get(event.sessionId); if (held?.runId === event.runId) { held.text = (held.text + event.data).slice(-REPLAY_BYTES); }
-      const payload = `event: output\ndata: ${JSON.stringify({ sessionId: event.sessionId, runId: event.runId, data: event.data })}\n\n`;
-      for (const stream of this.streams) if (stream.sessionId === event.sessionId) this.write(stream, payload);
-      return;
+    if (event.type === 'started') {
+      this.forget(event.sessionId); if (this.server) this.mirror(event.sessionId, event.runId);
+      this.attention.delete(event.sessionId); this.broadcastChannels(); return;
     }
+    if (event.type === 'data') { this.output(event.sessionId, event.runId, event.data); return; }
     if (event.type === 'attention') { this.attention.set(event.sessionId, { runId: event.runId, message: event.message }); this.broadcastChannels(); return; }
+    // The phone shows why a CLI stopped the way the desktop does.
+    if (event.type === 'exit') this.output(event.sessionId, event.runId, exitNotice(event.exitCode, event.signal, event.diagnostic));
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
+  private output(sessionId: string, runId: string, data: string) {
+    const mirror = this.replay.get(sessionId); if (mirror?.runId === runId) mirror.write(data);
+    const payload = `event: output\ndata: ${JSON.stringify({ sessionId, runId, data })}\n\n`;
+    for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload);
+  }
+  /** Screens are kept only while phone access is on; turned on mid-run, a channel's screen starts from that point. */
+  private mirror(sessionId: string, runId: string) {
+    const run = this.host.running().find((item) => item.runId === runId);
+    this.replay.set(sessionId, new ScreenMirror(runId, run?.cols ?? 80, run?.rows ?? 24));
+    while (this.replay.size > REPLAY_CHANNELS) this.forget(this.replay.keys().next().value!);
+  }
+  private forget(sessionId: string) { this.replay.get(sessionId)?.dispose(); this.replay.delete(sessionId); }
   /**
    * The saved workspace changed (channels added, removed, renamed or reordered) or a terminal was resized. Both come
    * often, so phones are told shortly after, and only when the channel list they see is different.
@@ -114,7 +130,7 @@ export class RemoteServer {
   channelsChanged() {
     // Channels that left the workspace keep no screen or prompt here, whether or not a phone is connected.
     const current = new Set(this.host.sessions().map((session) => session.id));
-    for (const id of [...this.replay.keys()]) if (!current.has(id)) this.replay.delete(id);
+    for (const id of [...this.replay.keys()]) if (!current.has(id)) this.forget(id);
     for (const id of [...this.attention.keys()]) if (!current.has(id)) this.attention.delete(id);
     if (this.channelsTimer || !this.streams.size) return;
     this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
@@ -125,7 +141,7 @@ export class RemoteServer {
    */
   resized(sessionId: string) {
     const run = this.host.running().find((item) => item.sessionId === sessionId);
-    if (run?.cols && run.rows) { const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload); }
+    if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload); }
     this.channelsChanged();
   }
   /** The person typed on the desktop: a waiting prompt is answered there. */
@@ -140,6 +156,7 @@ export class RemoteServer {
   }
   private broadcastChannels() { if (!this.streams.size) return; this.sentChannels = JSON.stringify(this.channels()); const payload = `event: channels\ndata: ${this.sentChannels}\n\n`; for (const stream of this.streams) this.write(stream, payload); }
   private write(stream: Stream, text: string) {
+    if (stream.held) { stream.held.push(text); return; }
     // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay.
     if (stream.response.writableLength > STREAM_BUFFER) { stream.response.destroy(); this.streams.delete(stream); return; }
     stream.response.write(text);
@@ -204,8 +221,16 @@ export class RemoteServer {
       const stream: Stream = { device: device.id, response, sessionId }; this.streams.add(stream);
       request.on('close', () => this.streams.delete(stream));
       this.write(stream, `event: channels\ndata: ${JSON.stringify(this.channels())}\n\n`);
-      const held = sessionId ? this.replay.get(sessionId) : undefined;
-      if (held) this.write(stream, `event: replay\ndata: ${JSON.stringify({ sessionId, runId: held.runId, data: held.text })}\n\n`);
+      // The channel's screen as it is now, then everything that came after it.
+      const mirror = sessionId ? this.replay.get(sessionId) : undefined;
+      if (mirror) {
+        stream.held = [];
+        mirror.snapshot((screen) => {
+          const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return;
+          this.write(stream, `event: replay\ndata: ${JSON.stringify({ sessionId, runId: mirror.runId, ...screen })}\n\n`);
+          for (const text of later) this.write(stream, text);
+        });
+      }
       return;
     }
     if (request.method === 'POST' && url.pathname === '/api/input') {

@@ -161,7 +161,11 @@ function onEvent(event: StreamEvent) {
     if (event.data.runId === run) { terminal.options.fontSize = fitFont(event.data.cols); terminal.resize(event.data.cols, event.data.rows); }
     return;
   }
-  if (event.type === 'replay') { run = event.data.runId; terminal.reset(); terminal.write(event.data.data); return; }
+  if (event.type === 'replay') {
+    run = event.data.runId; terminal.reset();
+    if (terminal.cols !== event.data.cols || terminal.rows !== event.data.rows) { terminal.options.fontSize = fitFont(event.data.cols); terminal.resize(event.data.cols, event.data.rows); }
+    terminal.write(event.data.data); return;
+  }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 

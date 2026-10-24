@@ -55,6 +55,7 @@ for (const relative of [
 assert.ok(packageRequire.resolve('node-pty').startsWith(resources));
 assert.ok(packageRequire.resolve('zod').startsWith(resources));
 assert.ok(packageRequire.resolve('electron-updater').startsWith(resources));
+for (const name of ['@xterm/headless', '@xterm/addon-serialize']) assert.ok(packageRequire.resolve(name).startsWith(resources), `${name} is not packaged`);
 const feed = load(fs.readFileSync(path.join(app, 'resources/app-update.yml'), 'utf8'));
 assert.equal(feed.provider, 'github');
 assert.equal(feed.owner, 'KGeary1995');

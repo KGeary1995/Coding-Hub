@@ -112,7 +112,7 @@ describe('phone remote', () => {
       server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approval requested: npm test', at: new Date().toISOString() });
     });
     expect(seen.map((item) => item.type)).toEqual(['channels', 'replay', 'output', 'channels']);
-    expect(seen[1].data).toMatchObject({ data: 'earlier output\r\n' });
+    expect(seen[1].data).toMatchObject({ sessionId: 's1', runId: 'r1', cols: 80, rows: 24 }); expect((seen[1].data as { data: string }).data).toContain('earlier output');
     expect((seen[3].data as { attention: string | null }[])[0].attention).toBe('Approval requested: npm test');
     const send = (body: unknown) => fetch(base(server) + '/api/input', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     expect((await send({ sessionId: 's1', runId: 'r1', data: 'y' })).status).toBe(200);
@@ -141,15 +141,31 @@ describe('phone remote', () => {
   it('sends a new terminal size ahead of the output drawn at that size', async () => {
     const { server, running } = await remote(); await server.setEnabled(true); const token = await paired(server);
     Object.assign(running[0], { cols: 80, rows: 24 });
-    const seen = await events(server, token, 's1', 3, () => {
+    const seen = await events(server, token, 's1', 4, () => {
       Object.assign(running[0], { cols: 120, rows: 40 }); server.resized('s1');
       server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: 'redrawn' });
     });
-    expect(seen.slice(1)).toEqual([{ type: 'resize', data: { sessionId: 's1', runId: 'r1', cols: 120, rows: 40 } }, { type: 'output', data: { sessionId: 's1', runId: 'r1', data: 'redrawn' } }]);
+    expect(seen[1].type).toBe('replay');
+    expect(seen.slice(2)).toEqual([{ type: 'resize', data: { sessionId: 's1', runId: 'r1', cols: 120, rows: 40 } }, { type: 'output', data: { sessionId: 's1', runId: 'r1', data: 'redrawn' } }]);
+  });
+
+  it('replays the screen as it is now: full-screen mode kept however long ago it began, and why a CLI stopped', async () => {
+    const { server, running } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    Object.assign(running[0], { cols: 40, rows: 10 });
+    server.onSessionEvent({ type: 'started', sessionId: 's1', runId: 'r1', pid: 1, cwd: '/p', engine: 'codex' });
+    server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: '\x1b[?1049h' + 'x'.repeat(400 * 1024) + '\x1b[2J\x1b[HWorking' });
+    Object.assign(running[0], { cols: 60, rows: 12 }); server.resized('s1');
+    const [, replay] = await events(server, token, 's1', 2) as { data: { data: string; cols: number; rows: number } }[];
+    expect(replay.data).toMatchObject({ cols: 60, rows: 12 }); expect(replay.data.data).toContain('\x1b[?1049h'); expect(replay.data.data).toContain('Working'); expect(replay.data.data.length).toBeLessThan(10000);
+    const exited = await events(server, token, 's1', 3, () => {
+      server.onSessionEvent({ type: 'data', sessionId: 's1', runId: 'r1', data: 'Error: model not available' });
+      server.onSessionEvent({ type: 'exit', sessionId: 's1', runId: 'r1', exitCode: 1, diagnostic: 'Error: model not available' });
+    }) as { type: string; data: { data: string } }[];
+    expect(exited.filter((item) => item.type === 'output').at(-1)?.data.data).toMatch(/^\x1b\[\?1049l[\s\S]*Process exited · code 1[\s\S]*Error: model not available/);
   });
 
   it('drops the screens of channels that left the workspace, and keeps at most 32', async () => {
-    const { server } = await remote();
+    const { server } = await remote(); await server.setEnabled(true);
     for (let i = 0; i < 40; i++) server.onSessionEvent({ type: 'started', sessionId: `old-${i}`, runId: `r${i}`, pid: 1, cwd: '/p', engine: 'claude' });
     const replay = (server as unknown as { replay: Map<string, unknown> }).replay; expect(replay.size).toBe(32);
     server.onSessionEvent({ type: 'started', sessionId: 's1', runId: 'r1', pid: 1, cwd: '/p', engine: 'claude' });
