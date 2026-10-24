@@ -1,4 +1,4 @@
-import { CircleHelp, Columns2, Grid2X2, PanelLeft, Rows2 } from 'lucide-react';
+import { CircleHelp, Columns2, Grid2X2, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
@@ -25,7 +25,7 @@ export async function openProjectFolder() {
 /** Four bars in the channel colours: two for Claude (CH1 yellow), two for Codex (CH2 cyan). */
 function Wordmark() {
   return <a className="tr-wordmark" href="#workspace" aria-label="Trace home" onClick={(event) => { event.preventDefault(); useWorkspaceStore.getState().setView('workspace'); }}>
-    <span className="tr-wordmark-bars" aria-hidden="true"><i style={{ height: 6 }} /><i style={{ height: 14 }} /><i style={{ height: 9 }} /><i style={{ height: 4 }} /></span>trace
+    <span className="tr-wordmark-bars" aria-hidden="true"><i style={{ height: 6 }} /><i style={{ height: 14 }} /><i style={{ height: 9 }} /><i style={{ height: 4 }} /></span><span className="tr-wordmark-text">trace</span>
   </a>;
 }
 
@@ -44,7 +44,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
       {PRIMARY_VIEWS.map(({ view, label }) => <button key={view} className={activeView === view ? 'active' : ''} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>{label}</button>)}
     </nav>
     <span className="tr-divider" aria-hidden="true" />
-    <MenuButton ariaLabel="Insight views" active={Boolean(insight)} label={insight?.label ?? 'Insight'} items={toItems(INSIGHT_VIEWS)} />
+    <MenuButton ariaLabel="Insight views" active={Boolean(insight)} label={<span className="tr-menu-label">{insight?.label ?? 'Insight'}</span>} items={toItems(INSIGHT_VIEWS)} />
     <span className="tr-spacer" />
     {activeView === 'workspace' && <div className="tr-segmented" role="group" aria-label="Grid arrangement">
       <button className={explorer ? 'active' : ''} aria-label={explorer ? 'Hide explorer' : 'Show explorer'} title={explorer ? 'Hide explorer' : 'Show explorer'} aria-pressed={explorer} onClick={onToggleExplorer}><PanelLeft size={14} /></button>
@@ -53,7 +53,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     </div>}
     <CommandMenu />
     <button className="tr-icon" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
-    <MenuButton ariaLabel="Agent setup" active={setupActive} label="Agent setup" items={toItems(SETUP_VIEWS)} />
-    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= 4} label="+ Channel" items={[{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }]} />
+    <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal className="tr-narrow-icon" size={14} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
+    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= 4} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }]} />
   </header>;
 }

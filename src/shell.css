@@ -1,5 +1,6 @@
 /* Trace shell: top bar, status bar and menus (docs/design/trace/README.md, "Navigation structure"). */
-.app-shell { display: flex; flex-direction: column; height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; background: var(--tr-bg); }
+/* `shell` sizes the narrow-window rules by the space the app really has, so they also apply at 110–125% display scale. */
+.app-shell { container: shell / inline-size; display: flex; flex-direction: column; height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; background: var(--tr-bg); }
 .main-shell { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; background: var(--tr-bg); }
 .app-shell[data-view="workspace"] .main-shell { padding: 8px; overflow: hidden; display: flex; flex-direction: column; }
 .workspace-canvas { gap: 8px; }
@@ -17,8 +18,17 @@
 .tr-tabs > button:hover, .tr-menu-button:hover, .tr-icon:hover { background: var(--tr-hover); color: var(--tr-fg-strong); }
 .tr-tabs > button.active, .tr-menu-button.active { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
 .tr-icon { padding: 0 8px; }
-.tr-project.tr-menu-button, .tr-project .tr-menu-button { border: 1px solid var(--tr-line-control); padding: 0 10px; max-width: 220px; color: var(--tr-fg); }
-.tr-project-name { overflow: hidden; text-overflow: ellipsis; }
+.tr-project.tr-menu-button, .tr-project .tr-menu-button { border: 1px solid var(--tr-line-control); padding: 0 10px; max-width: 100%; min-width: 0; color: var(--tr-fg); }
+.tr-topbar > .tr-project { max-width: 220px; }
+.tr-project-name, .tr-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tr-menu-label { max-width: 160px; }
+.tr-narrow-icon { display: none; }
+/* Controls keep their size; if the bar still runs out of room, the project name and then the tabs give way,
+   so the menus and + Channel stay reachable (every tab view is also in the command menu and on G shortcuts). */
+.tr-topbar > * { flex: none; }
+.tr-topbar > .tr-spacer { flex: 1 1 0; min-width: 0; }
+.tr-topbar > .tr-project { flex: 0 1 auto; min-width: 64px; }
+.tr-topbar > .tr-tabs { flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .tr-caret { font-size: 10px; color: var(--tr-fg-dim); }
 .tr-divider { width: 1px; height: 18px; background: var(--tr-line-control); margin: 0 6px; }
 .tr-segmented { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); margin-right: 4px; }
@@ -69,7 +79,14 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-statusbar .storage-status { color: var(--tr-fg-faint); text-transform: none; }
 .tr-statusbar .storage-status.error { color: var(--tr-st-failed); }
 
-/* Narrow windows (and 125% zoom): the command field shrinks, then hides its text. */
-@media (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } .tr-topbar .command-trigger kbd { display: none; } }
-@media (max-width: 1366px) { .tr-statusbar .tr-sb-host { display: none; } }
-@media (max-width: 1180px) { .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-topbar .command-trigger-icon { display: block; } .tr-tabs > button, .tr-menu-button { padding: 0 9px; } }
+/* Narrow windows (or a higher display scale): the command field, menu labels and wordmark collapse in steps. */
+@container shell (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } .tr-topbar .command-trigger kbd { display: none; } }
+@container shell (max-width: 1366px) { .tr-statusbar .tr-sb-host { display: none; } }
+@container shell (max-width: 1180px) {
+  .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-topbar .command-trigger-icon { display: block; }
+  .tr-tabs > button, .tr-menu-button { padding: 0 9px; }
+  .tr-topbar > .tr-project { max-width: 150px; }
+  .tr-menu-label { max-width: 110px; }
+  .tr-narrow-icon { display: block; } .tr-wide-label { display: none; }
+}
+@container shell (max-width: 1024px) { .tr-wordmark-text, .tr-divider { display: none; } .tr-wordmark { margin-right: 4px; } .tr-tabs > button, .tr-menu-button { padding: 0 7px; } }
