@@ -249,6 +249,20 @@ Turn on **Settings → Sync settings, rules, templates and usage between compute
 | Usage history | Each computer writes only its own file. Usage shows other computers' sessions with the computer's name; the status bar's today total counts this computer only. |
 
 If settings or rules change on two computers before they sync, nothing is overwritten: **Settings → Sync between computers** shows the conflict and lets you keep this computer's version or take the other one. Running sessions, recorded output, the project list, verification profiles and account sign-ins stay on each computer. Usage records include project folder paths, so they are visible to anyone with access to the Drive folder.
+## Phone access
+
+Read and type into running channels from your phone, including answering approval prompts. It is off until you turn it on in **Settings → Phone access**.
+
+1. **Install Tailscale** on this computer and your phone (tailscale.com/download), signed in to the same account. Tailscale is a private network between your own devices; nothing is opened to the internet.
+2. **Set up Tailscale HTTPS.** Trace asks for confirmation, then runs `tailscale serve --bg --https=443 http://127.0.0.1:47821`. Your tailnet must have HTTPS certificates turned on (Tailscale admin console → DNS). Remove it later with `tailscale serve reset`.
+3. **Pair a phone.** Scan the QR code with the phone's camera, or open the address shown and type the code. A code works once, for five minutes and ten tries.
+
+How it is protected:
+
+- Trace listens only on this computer (`127.0.0.1:47821`); the phone reaches it through Tailscale, which encrypts the connection and admits only your devices.
+- Every request also needs the key a phone received when it paired. Only a hash of each key is stored (`remote-devices.json`), and **Remove** in Settings locks a phone out at once. Turning phone access off closes the listener.
+- Requests must name this computer or its tailnet address, and Tailscale Funnel (public internet) requests are refused.
+- A paired phone can read channel output and type into channels that are already running, the same as typing at the desktop. It cannot start, stop or reconfigure channels, or reach any other part of Trace. Treat a paired phone like an unlocked keyboard on this computer, and remove phones you no longer use.
 
 ## Workspace
 
