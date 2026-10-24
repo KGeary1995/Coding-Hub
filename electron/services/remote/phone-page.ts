@@ -77,7 +77,9 @@ const JS = String.raw`(() => {
         }
       }
     } catch (error) { if (controller.signal.aborted) return; }
-    $('state').textContent = 'reconnecting…'; if (stream === controller) setTimeout(() => { if (stream === controller) listen(); }, 2000);
+    // Without a key (the phone was removed) there is nothing to reconnect to until it pairs again.
+    if (!token) { stream = null; return; }
+    $('state').textContent = 'reconnecting…'; if (stream === controller) setTimeout(() => { if (stream === controller && token) listen(); }, 2000);
   }
   function open(sessionId) { current = sessionId; run = null; $('output').textContent = ''; show('channel'); renderChannels(); listen(); }
   async function send(data) {
