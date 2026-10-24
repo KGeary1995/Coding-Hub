@@ -32,15 +32,16 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
       const bounds = await page.evaluate(() => {
         const canvas = document.querySelector('.workspace-canvas').getBoundingClientRect();
         const footer = document.querySelector('.app-statusbar').getBoundingClientRect();
-        return { overflow: document.body.scrollWidth > innerWidth + 1, footer: footer.bottom, height: innerHeight, canvas: canvas.height, tiles: [...document.querySelectorAll('.session-tile')].map((tile) => ({ width: tile.clientWidth, height: tile.clientHeight })), gridBottom: Math.max(...[...document.querySelectorAll('.session-tile')].map((tile) => tile.getBoundingClientRect().bottom)), canvasBottom: canvas.bottom };
+        return { overflow: document.body.scrollWidth > innerWidth + 1, footer: footer.bottom, height: innerHeight, canvas: canvas.height, tiles: [...document.querySelectorAll('.session-tile')].map((tile) => ({ width: tile.clientWidth, height: tile.clientHeight, share: tile.getBoundingClientRect().height / canvas.height })), gridBottom: Math.max(...[...document.querySelectorAll('.session-tile')].map((tile) => tile.getBoundingClientRect().bottom)), canvasBottom: canvas.bottom };
       });
       assert.equal(bounds.overflow, false, `horizontal overflow at ${width}px / ${scale}%`);
       assert.ok(bounds.footer <= bounds.height + 1, `status bar below viewport at ${scale}%`);
       assert.ok(bounds.canvas > 200);
       assert.equal(bounds.tiles.length, 4);
-      // The 2 × 2 grid fits the canvas without scrolling, down to 1100 × 800 at 125% (about 266 px a tile).
+      // The 2 × 2 grid fills the canvas without scrolling: each row takes about half of it. At 1100 × 800 / 125% a
+      // tile is about 266 px under xvfb and 254 px on Windows, whose window frame takes part of the 800 px.
       assert.ok(bounds.gridBottom <= bounds.canvasBottom + 1, `grid overflows the canvas at ${width}px / ${scale}%`);
-      assert.ok(bounds.tiles.every((tile) => tile.width > 200 && tile.height >= 260), `tiles at ${width}px / ${scale}%: ${JSON.stringify(bounds.tiles)}`);
+      assert.ok(bounds.tiles.every((tile) => tile.width > 200 && tile.height >= 220 && tile.share >= 0.45), `tiles at ${width}px / ${scale}%: ${JSON.stringify(bounds.tiles)}`);
       if (process.env.CODING_HUB_DESIGN_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_DESIGN_SCREENSHOTS, `hub-${width}-${scale}.png`) });
     }
     await page.getByRole('button', { name: 'Show explorer', exact: true }).click();
