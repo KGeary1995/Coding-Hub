@@ -3,6 +3,7 @@ import type { Session } from '../../shared/types';
 import type { UsageRecord } from '../../shared/hub';
 import { CHANNEL_STATES, channelAlerts, channelState, todayTotals } from './channel-state';
 import { ACTIVITY_WINDOW, activitySamples, forgetActivity, isPersonInput, recordActivity, tickActivity, useActivityStore } from './activity-store';
+import { withoutTerminalReplies } from '../../shared/terminal-input';
 import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
 
 const session = (patch: Partial<Session> = {}): Session => ({ ...createSession('codex'), runId: 'run-1', status: 'running', ...patch });
@@ -60,6 +61,9 @@ describe('terminal activity', () => {
   it('ignores focus and mouse reports as answers', () => {
     expect(isPersonInput('\x1b[I')).toBe(false); expect(isPersonInput('\x1b[O\x1b[<0;10;5M\x1b[<0;10;5m')).toBe(false);
     expect(isPersonInput('y')).toBe(true); expect(isPersonInput('\r')).toBe(true); expect(isPersonInput('\x1b[I1')).toBe(true);
+    // Replies to the CLI's own queries (cursor position, device attributes, OSC colours) are not the person either.
+    expect(isPersonInput('\x1b[12;40R')).toBe(false); expect(isPersonInput('\x1b[?1;2c\x1b[>0;276;0c')).toBe(false); expect(isPersonInput('\x1b]11;rgb:0b0b/1010/1010\x1b\\')).toBe(false);
+    expect(withoutTerminalReplies('\x1b[12;40Ry\x1b[A')).toBe('y\x1b[A'); expect(withoutTerminalReplies('\x1b[B\r')).toBe('\x1b[B\r');
   });
 });
 

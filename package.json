@@ -5,10 +5,11 @@
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/main.js",
   "scripts": {
-    "dev": "npm run build:host && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "dev": "npm run build:host && npm run build:phone && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "dev:web": "vite --host 127.0.0.1",
     "build:host": "tsc -p tsconfig.electron.json",
-    "build": "npm run typecheck && vite build && vite build -c vite.phone.config.ts && npm run build:host",
+    "build:phone": "vite build -c vite.phone.config.ts",
+    "build": "npm run typecheck && vite build && npm run build:phone && npm run build:host",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:pty": "npm run build:host && node scripts/run-pty-smoke.cjs",
