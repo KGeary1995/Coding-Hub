@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#080b0b;color:#d8e3df;-webkit-font-smoothing:antialiased}
+a{color:oklch(0.80 0.11 215)}a:hover{color:#eef4f1}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:column;gap:64px;padding:64px;max-width:1600px;font-family:'IBM Plex Sans Condensed',sans-serif">
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#879692">direction 1b · trace · system</div>
+    <div style="font-size:44px;font-weight:600;color:#eef4f1;line-height:1.05">Trace: tokens, components, rationale</div>
+    <div style="font-size:17px;color:#b6c4c0">Screens are in <a href="Trace Screens.dc.html">Trace Screens</a>. Every value below maps to a CSS custom property for React 18 + plain CSS.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:48px">
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">rationale · signature</div>
+      <div style="font-size:24px;font-weight:600;color:#eef4f1">The scope strip</div>
+      <div style="font-size:17px;line-height:1.55;color:#c4d1cd;text-wrap:pretty">Each agent is a channel on an instrument. A 40 px strip under the tile name plots the agent's token throughput over the last 120 seconds, read from the CLI's usage events. The shape of the trace encodes state, so you can tell working (busy noise), waiting (held high), finished (decay to flat), failed (cut off) and near-limit (clipping the dashed rail) from across the room, before reading a word. Glyph, word and colour repeat the same state, so none of the three is load-bearing alone. Engine identity is the channel colour, the way CH1 and CH2 are coloured on a bench scope: it borrows from instruments, not from either vendor's brand.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">rationale · navigation</div>
+      <div style="font-size:24px;font-weight:600;color:#eef4f1">Three tiers, one status line</div>
+      <div style="font-size:17px;line-height:1.55;color:#c4d1cd;text-wrap:pretty">The top bar holds the daily loop as tabs: Workspace, Changes, Projects. The Insight menu holds Usage, History, Tasks, Verification, Design and Coaching, one click away and labelled with the current view when open. Agent setup is a separate button that opens one area for Accounts, Memory, Rules, MCP, Skills and Settings. Workflow center is removed: Recovery moves into the failed tile (Retry, Open log), Search and Templates into the command menu, Support into Help. The bottom bar is the only status layer: per-channel state and rate, project and branch, today's tokens and cost, alerts.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:28px;font-weight:600;color:#eef4f1">Colour</div>
+    <sc-for list="{{ colorGroups }}" as="g" hint-placeholder-count="5">
+      <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">{{ g.name }}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <sc-for list="{{ g.items }}" as="c" hint-placeholder-count="5">
+            <div style="width:196px;display:flex;flex-direction:column;border:1px solid #22302d;border-radius:4px;overflow:hidden">
+              <div style="height:56px;background:{{ c.v }};display:flex;align-items:flex-end;padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ c.on }};font-weight:600">{{ c.g }}</div>
+              <div style="display:flex;flex-direction:column;gap:2px;padding:8px;background:#0d1312">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#eef4f1">{{ c.t }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">{{ c.v }}</span>
+                <span style="font-size:13px;color:#b6c4c0">{{ c.u }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:48px">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="font-size:28px;font-weight:600;color:#eef4f1">Type</div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #22302d">
+        <sc-for list="{{ typeScale }}" as="t" hint-placeholder-count="9">
+          <div style="display:grid;grid-template-columns:150px minmax(0,1fr) 150px;gap:16px;align-items:baseline;padding:12px 0;border-bottom:1px solid #1a2422">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ t.token }}</span>
+            <span style="font-family:{{ t.fam }};font-size:{{ t.size }};font-weight:{{ t.w }};line-height:{{ t.lh }};color:#eef4f1;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden">{{ t.sample }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;text-align:right">{{ t.spec }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:14px;color:#879692">IBM Plex Sans Condensed for UI, IBM Plex Mono for terminals and every number (tabular-nums). Both on Google Fonts, OFL.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:28px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:28px;font-weight:600;color:#eef4f1">Spacing</div>
+        <sc-for list="{{ space }}" as="s" hint-placeholder-count="8">
+          <div style="display:grid;grid-template-columns:90px 50px minmax(0,1fr);gap:12px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">
+            <span>{{ s.t }}</span><span style="color:#eef4f1">{{ s.v }}</span><span style="height:10px;width:{{ s.v }};background:#4f625d"></span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:28px;font-weight:600;color:#eef4f1">Radii &amp; elevation</div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1;height:72px;border:1px solid #3b4d49;border-radius:2px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">r-chip 2</div>
+          <div style="flex:1;height:72px;border:1px solid #3b4d49;border-radius:3px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">r-control 3</div>
+          <div style="flex:1;height:72px;border:1px solid #3b4d49;border-radius:4px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">r-panel 4</div>
+          <div style="flex:1;height:72px;border:1px solid #3b4d49;border-radius:6px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">r-overlay 6</div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1;height:72px;background:#0b1010;border:1px solid #22302d;border-radius:4px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">e0 · bg + line</div>
+          <div style="flex:1;height:72px;background:#131a19;border:1px solid #22302d;border-radius:4px;display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">e1 · surface</div>
+          <div style="flex:1;height:72px;background:#131a19;border:1px solid #3b4d49;border-radius:6px;box-shadow:0 24px 64px rgba(0,0,0,.6);display:flex;align-items:flex-end;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">e2 · overlay</div>
+        </div>
+        <div style="font-size:14px;color:#879692">Elevation is tone and line, not shadow. Only overlays (command menu, toasts, menus) cast one, over a solid 78% scrim; no blur anywhere.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div style="font-size:28px;font-weight:600;color:#eef4f1">Motion</div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:48px">
+      <div style="display:flex;flex-direction:column;border-top:1px solid #22302d">
+        <sc-for list="{{ motionTokens }}" as="m" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:150px 150px minmax(0,1fr);gap:16px;padding:10px 0;border-bottom:1px solid #1a2422;font-size:15px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">{{ m.t }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#eef4f1">{{ m.v }}</span><span style="color:#b6c4c0">{{ m.u }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #22302d">
+        <sc-for list="{{ motionStates }}" as="m" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:16px;padding:10px 0;border-bottom:1px solid #1a2422;font-size:15px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ m.c }}">{{ m.t }}</span><span style="color:#b6c4c0">{{ m.u }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:28px">
+    <div style="font-size:28px;font-weight:600;color:#eef4f1">Components</div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:center">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">buttons</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <button style="height:28px;padding:0 12px;background:#d8e3df;border:none;border-radius:3px;color:#0b1010;font-size:15px;font-weight:600" style-hover="background:#eef4f1">Primary</button>
+        <button style="height:28px;padding:0 12px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:15px" style-hover="background:#18211f;color:#eef4f1">Secondary</button>
+        <button style="height:28px;padding:0 12px;background:transparent;border:none;border-radius:3px;color:#b6c4c0;font-size:15px" style-hover="background:#18211f">Ghost</button>
+        <button style="height:28px;padding:0 12px;background:transparent;border:1px solid oklch(0.68 0.19 25);border-radius:3px;color:oklch(0.82 0.11 25);font-size:15px">Stop</button>
+        <button style="height:28px;padding:0 12px;background:oklch(0.78 0.14 330);border:none;border-radius:3px;color:#120b10;font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px">Approve <span style="font-family:'IBM Plex Mono',monospace;font-size:10px">Y</span></button>
+        <button style="height:28px;padding:0 12px;background:transparent;border:1px solid #2a3835;border-radius:3px;color:#b6c4c0;font-size:15px;outline:2px solid #eef4f1;outline-offset:2px">Focused</button>
+        <button style="height:28px;padding:0 12px;background:transparent;border:1px solid #1f2b29;border-radius:3px;color:#4f625d;font-size:15px">Disabled</button>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">h 28 · tile actions h 22 · large keys h 96</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:center">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">inputs · select</span>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        <div style="width:240px;height:32px;display:flex;align-items:center;padding:0 10px;background:#070a0a;border:1px solid #2a3835;border-radius:3px;font-size:14px;color:#6f807b">Placeholder</div>
+        <div style="width:240px;height:32px;display:flex;align-items:center;padding:0 10px;background:#070a0a;border:1px solid #d8e3df;border-radius:3px;font-size:14px;color:#eef4f1">Focused value<span style="width:1px;height:16px;background:#eef4f1;margin-left:2px"></span></div>
+        <div style="width:240px;height:32px;display:flex;align-items:center;padding:0 10px;background:#070a0a;border:1px solid oklch(0.68 0.19 25);border-radius:3px;font-size:14px;color:#eef4f1">Invalid path</div>
+        <div style="width:200px;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;background:#131a19;border:1px solid #2a3835;border-radius:3px;font-size:14px;color:#d8e3df">Workspace root<span style="color:#879692;font-size:11px">▾</span></div>
+        <div style="width:18px;height:18px;border:1px solid #d8e3df;border-radius:2px;background:#d8e3df;color:#0b1010;font-size:12px;display:flex;align-items:center;justify-content:center">✓</div>
+        <div style="width:18px;height:18px;border:1px solid #4f625d;border-radius:2px"></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:center">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">tabs · segmented</span>
+      <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:center">
+        <div style="display:flex;gap:4px;padding:6px;background:#131a19;border-radius:3px">
+          <span style="height:28px;padding:0 14px;display:flex;align-items:center;background:#1f2a28;border-radius:3px;color:#eef4f1;font-size:15px;font-weight:600">Workspace</span>
+          <span style="height:28px;padding:0 14px;display:flex;align-items:center;color:#b6c4c0;font-size:15px;gap:6px">Changes<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">3</span></span>
+          <span style="height:28px;padding:0 14px;display:flex;align-items:center;color:#b6c4c0;font-size:15px">Projects</span>
+          <span style="height:28px;padding:0 12px;display:flex;align-items:center;color:#b6c4c0;font-size:15px">Insight ▾</span>
+        </div>
+        <div style="display:flex;gap:2px;padding:2px;border:1px solid #2a3835;border-radius:3px">
+          <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;background:#2a3835;color:#eef4f1;font-size:13px">Split</span>
+          <span style="height:24px;padding:0 10px;display:flex;align-items:center;border-radius:2px;color:#879692;font-size:13px">Unified</span>
+        </div>
+        <div style="display:flex;gap:2px;padding:2px;border:1px solid #2a3835;border-radius:3px">
+          <span style="width:26px;height:22px;display:flex;align-items:center;justify-content:center;color:#879692">▢</span><span style="width:26px;height:22px;display:flex;align-items:center;justify-content:center;background:#2a3835;border-radius:2px;color:#eef4f1">▥</span><span style="width:26px;height:22px;display:flex;align-items:center;justify-content:center;color:#879692">▤</span><span style="width:26px;height:22px;display:flex;align-items:center;justify-content:center;color:#879692">▦</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:center">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">badges</span>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-family:'IBM Plex Mono',monospace">
+        <span style="background:oklch(0.87 0.14 95);color:#0b1010;font-weight:600;font-size:11px;padding:1px 6px;border-radius:2px">CH1</span>
+        <span style="background:oklch(0.80 0.11 215);color:#0b1010;font-weight:600;font-size:11px;padding:1px 6px;border-radius:2px">CH2</span>
+        <span style="font-size:11px;color:#b6c4c0;border:1px solid #2a3835;padding:0 5px;border-radius:2px">Work</span>
+        <span style="font-size:11px;color:oklch(0.80 0.15 60)">M</span><span style="font-size:11px;color:oklch(0.82 0.13 155)">?</span><span style="font-size:11px;color:oklch(0.72 0.16 25)">D</span>
+        <span style="font-size:11px;background:#2a3835;color:#eef4f1;padding:0 6px;border-radius:2px">3</span>
+        <span style="font-size:12px"><span style="color:oklch(0.82 0.13 155)">+43</span> <span style="color:oklch(0.72 0.16 25)">−4</span></span>
+        <span style="font-size:11px;color:#879692;border:1px solid #2a3835;padding:0 5px;border-radius:2px">Ctrl ⇧ P</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:center">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">state chips</span>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="7">
+          <span style="height:22px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:2px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.06em;color:{{ c.fg }};background:{{ c.bg }};border:1px solid {{ c.c }}"><span>{{ c.g }}</span><span>{{ c.w }}</span></span>
+        </sc-for>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">outlined = informational · solid = needs you</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">tile header</span>
+      <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+        <dc-import name="TraceTile" engine="claude" ch="CH3" model="opus-4.1" profile="Work" state="limit" script="docs" ctx="{{ 92 }}" tokens="171.4k" seed="{{ 31 }}" rate="38" header-only="{{ true }}" hint-size="100%,72px"></dc-import>
+        <dc-import name="TraceTile" engine="codex" ch="CH2" model="gpt-5-codex" state="waiting" script="hook" ctx="{{ 61 }}" tokens="31.7k" cost="$0.22" pid="661" seed="{{ 19 }}" header-only="{{ true }}" expanded="{{ true }}" hint-size="100%,102px"></dc-import>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">nav items</span>
+      <div style="display:flex;gap:32px;align-items:flex-start">
+        <div style="width:260px;display:flex;flex-direction:column;background:#0d1312;padding:6px 0">
+          <div style="display:flex;flex-direction:column;gap:2px;padding:10px;background:#18211f;border-left:2px solid #eef4f1"><span style="display:flex;justify-content:space-between"><span style="font-size:16px;font-weight:600;color:#eef4f1">Accounts</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.80 0.15 60)">▲</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">2 of 3 connected</span></div>
+          <div style="display:flex;flex-direction:column;gap:2px;padding:10px;border-left:2px solid transparent"><span style="display:flex;justify-content:space-between"><span style="font-size:16px;color:#eef4f1">Shared memory</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.82 0.13 155)">✓</span></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">3 handoffs · synced 2m ago</span></div>
+        </div>
+        <div style="width:240px;display:flex;flex-direction:column;gap:2px;padding:6px;background:#131a19;border:1px solid #3b4d49;border-radius:4px;box-shadow:0 12px 32px rgba(0,0,0,.5)">
+          <span style="padding:4px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">insight</span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;border-radius:2px;background:#1f2a28;color:#eef4f1;font-size:15px">Usage<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G U</span></span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:#d8e3df;font-size:15px">History<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G H</span></span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:#d8e3df;font-size:15px">Tasks<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G T</span></span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:#d8e3df;font-size:15px">Verification<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G V</span></span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:#d8e3df;font-size:15px">Design<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G D</span></span>
+          <span style="height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:#d8e3df;font-size:15px">Coaching<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">G O</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">table · chart</span>
+      <div style="display:flex;gap:32px;align-items:flex-start">
+        <div style="width:640px;display:flex;flex-direction:column;border:1px solid #22302d;border-radius:4px;overflow:hidden;font-family:'IBM Plex Mono',monospace;font-size:12px">
+          <div style="display:grid;grid-template-columns:80px minmax(0,1fr) 70px 70px 60px;gap:12px;height:30px;align-items:center;padding:0 12px;background:#131a19;color:#879692;font-size:11px"><span>channel</span><span>session</span><span style="text-align:right">input</span><span style="text-align:right">output</span><span style="text-align:right">cost</span></div>
+          <div style="display:grid;grid-template-columns:80px minmax(0,1fr) 70px 70px 60px;gap:12px;height:40px;align-items:center;padding:0 12px;border-top:1px solid #1a2422;color:#d8e3df;font-variant-numeric:tabular-nums"><span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;background:oklch(0.87 0.14 95)"></span>claude</span><span style="font-family:'IBM Plex Sans Condensed',sans-serif;font-size:14px;color:#eef4f1">Refactor dashboard layout grid</span><span style="text-align:right">61.2k</span><span style="text-align:right">9.8k</span><span style="text-align:right">$2.31</span></div>
+          <div style="display:grid;grid-template-columns:80px minmax(0,1fr) 70px 70px 60px;gap:12px;height:40px;align-items:center;padding:0 12px;border-top:1px solid #1a2422;background:#111817;color:#d8e3df;font-variant-numeric:tabular-nums"><span style="display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;background:oklch(0.80 0.11 215)"></span>codex</span><span style="font-family:'IBM Plex Sans Condensed',sans-serif;font-size:14px;color:#eef4f1">Migrate fetch wrapper to ky</span><span style="text-align:right">33.0k</span><span style="text-align:right">5.0k</span><span style="text-align:right">$0.94</span></div>
+        </div>
+        <div style="width:300px;display:flex;flex-direction:column;gap:8px">
+          <div style="height:120px;display:flex;align-items:flex-end;gap:6px;border-bottom:1px solid #3b4d49;padding:0 4px">
+            <sc-for list="{{ bars }}" as="b" hint-placeholder-count="7"><div style="flex:1;display:flex;flex-direction:column"><div style="height:{{ b.x }};background:oklch(0.80 0.11 215)"></div><div style="height:{{ b.c }};background:oklch(0.87 0.14 95);border-top:1px solid #080b0b"></div></div></sc-for>
+          </div>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">stacked by engine · Codex on Claude · hover = readout row</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">toasts</span>
+      <div style="display:flex;flex-direction:column;gap:8px;width:420px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#131a19;border:1px solid oklch(0.78 0.14 330);border-radius:4px;box-shadow:0 12px 32px rgba(0,0,0,.5)">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.78 0.14 330)">◆</span>
+          <span style="display:flex;flex-direction:column;flex:1"><span style="font-size:15px;font-weight:600;color:#eef4f1">CH2 needs approval</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">edit src/hooks/useStats.ts (+6 −2)</span></span>
+          <button style="height:24px;padding:0 10px;background:oklch(0.78 0.14 330);border:none;border-radius:2px;color:#120b10;font-size:13px;font-weight:600">Approve Y</button>
+          <button style="height:24px;padding:0 8px;background:transparent;border:1px solid #2a3835;border-radius:2px;color:#b6c4c0;font-size:13px">Jump Alt 2</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#131a19;border:1px solid oklch(0.68 0.19 25);border-radius:4px;box-shadow:0 12px 32px rgba(0,0,0,.5)">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.68 0.19 25)">✕</span>
+          <span style="display:flex;flex-direction:column;flex:1"><span style="font-size:15px;font-weight:600;color:#eef4f1">CH2 exited with code 1</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">ECONNRESET while streaming response</span></span>
+          <button style="height:24px;padding:0 10px;background:#d8e3df;border:none;border-radius:2px;color:#0b1010;font-size:13px;font-weight:600">Retry</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#131a19;border:1px solid #3b4d49;border-radius:4px">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.82 0.13 155)">✓</span>
+          <span style="font-size:15px;color:#eef4f1;flex:1">Committed 3 files to main</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">a41c9e2</span>
+        </div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">bottom-right · needs-you toasts persist until handled; others auto-dismiss after 6 s</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:24px;align-items:start">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;padding-top:8px">command menu rows</span>
+      <div style="width:640px;display:flex;flex-direction:column;background:#131a19;border:1px solid #3b4d49;border-radius:6px;padding:6px 0">
+        <div style="padding:6px 16px 4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">channels</div>
+        <div style="height:38px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#1f2a28;border-left:2px solid #eef4f1"><span style="width:18px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:oklch(0.87 0.14 95)">●</span><span style="font-size:15px;color:#d8e3df">CH1 Claude Code · Add an abort signal to fetch<b style="color:#eef4f1;text-decoration:underline;text-decoration-color:#4f625d;text-underline-offset:3px">Stats</b></span><div style="flex:1"></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#879692">Alt 1</span></div>
+        <div style="height:38px;display:flex;align-items:center;gap:12px;padding:0 16px;border-left:2px solid transparent"><span style="width:18px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692">/</span><span style="font-size:15px;color:#d8e3df">src/hooks/use<b style="color:#eef4f1;text-decoration:underline;text-decoration-color:#4f625d;text-underline-offset:3px">Stats</b>.ts</span><div style="flex:1"></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:oklch(0.80 0.15 60)">modified</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:48px">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:28px;font-weight:600;color:#eef4f1">Accessibility</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:16px;line-height:1.5;color:#c4d1cd">
+        <span>Text on #0b1010: fg #d8e3df 14.6:1 · dim #879692 6.2:1 · faint #6f807b 4.5:1 (labels only, ≥ 11 px mono).</span>
+        <span>Every state colour clears 4.5:1 on the terminal surface; solid chips use #0b1010 text.</span>
+        <span>Focus: 2 px #eef4f1 outline, 2 px offset, on every control and tile. Tiles are focus targets; Enter focuses the terminal, Esc returns focus to the tile.</span>
+        <span>Keys: Alt 1–4 channels, G then letter for views, Y / N approve and deny on the focused tile, R retry, H handoff.</span>
+        <span>125% zoom: top bar search collapses to an icon below 1440 px effective width; grid tiles drop to columns.</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:28px;font-weight:600;color:#eef4f1">CSS custom properties</div>
+      <div style="padding:16px;background:#070a0a;border:1px solid #22302d;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:20px;color:#d8e3df;white-space:pre">{{ cssVars }}</div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals(){
+    const D='#0b1010',L='#eef4f1';
+    const colorGroups=[
+      {name:'surface',items:[{t:'--tr-bg',v:'#0b1010',u:'App background',on:L,g:''},{t:'--tr-term',v:'#070a0a',u:'Terminal, diff, charts',on:L,g:''},{t:'--tr-panel',v:'#0d1312',u:'Side panels',on:L,g:''},{t:'--tr-surface',v:'#131a19',u:'Bars, tile headers',on:L,g:''},{t:'--tr-raised',v:'#1f2a28',u:'Active tab, selected row',on:L,g:''}]},
+      {name:'line · text',items:[{t:'--tr-line',v:'#22302d',u:'Dividers',on:L,g:''},{t:'--tr-line-strong',v:'#3b4d49',u:'Overlay borders',on:L,g:''},{t:'--tr-fg',v:'#d8e3df',u:'Body text',on:D,g:''},{t:'--tr-fg-strong',v:'#eef4f1',u:'Titles, values',on:D,g:''},{t:'--tr-fg-dim',v:'#879692',u:'Labels, meta',on:D,g:''}]},
+      {name:'engine',items:[{t:'--tr-ch-claude',v:'oklch(0.87 0.14 95)',u:'Claude Code channel',on:D,g:'CH1'},{t:'--tr-ch-codex',v:'oklch(0.80 0.11 215)',u:'Codex channel',on:D,g:'CH2'}]},
+      {name:'state',items:[{t:'--tr-st-idle',v:'#879692',u:'Idle · flat trace',on:D,g:'○ IDLE'},{t:'--tr-st-starting',v:'#d8e3df',u:'Starting · ramp, pulse',on:D,g:'◌ ARMING'},{t:'working',v:'engine colour',u:'Working · busy trace',on:D,g:'● RUN'},{t:'--tr-st-waiting',v:'oklch(0.78 0.14 330)',u:'Needs you · held high',on:D,g:'◆ HOLD'},{t:'--tr-st-finished',v:'#d8e3df',u:'Finished · decay',on:D,g:'✓ STOP'},{t:'--tr-st-failed',v:'oklch(0.68 0.19 25)',u:'Failed · cut off',on:D,g:'✕ FAULT'},{t:'--tr-st-limit',v:'oklch(0.80 0.15 60)',u:'Near limit · clipping',on:D,g:'▲ CLIP'}]},
+      {name:'diff',items:[{t:'--tr-add',v:'oklch(0.82 0.13 155)',u:'Additions, success',on:D,g:'+'},{t:'--tr-del',v:'oklch(0.72 0.16 25)',u:'Deletions',on:D,g:'−'}]}
+    ];
+    colorGroups[2].items.forEach(i=>i.v=i.v);
+    const P="'IBM Plex Sans Condensed',sans-serif",M="'IBM Plex Mono',monospace";
+    const typeScale=[
+      {token:'--tr-t-display',fam:P,size:'40px',w:'600',lh:'1.1',sample:'Open a project',spec:'40 / 44 · 600'},
+      {token:'--tr-t-title',fam:P,size:'28px',w:'600',lh:'1.15',sample:'Accounts',spec:'28 / 32 · 600'},
+      {token:'--tr-t-heading',fam:P,size:'20px',w:'600',lh:'1.2',sample:'Claude profiles',spec:'20 / 24 · 600'},
+      {token:'--tr-t-body',fam:P,size:'16px',w:'400',lh:'1.5',sample:'Every channel runs inside a local folder.',spec:'16 / 24 · 400'},
+      {token:'--tr-t-control',fam:P,size:'15px',w:'500',lh:'1.2',sample:'Workspace  Changes  Projects',spec:'15 / 20 · 400–600'},
+      {token:'--tr-t-metric',fam:M,size:'34px',w:'500',lh:'1.1',sample:'978.4k  $38.47',spec:'34 / 38 · 500 · tnum'},
+      {token:'--tr-t-term',fam:M,size:'13px',w:'400',lh:'20px',sample:'● Update src/api/client.ts',spec:'13 / 20 · 400'},
+      {token:'--tr-t-meta',fam:M,size:'12px',w:'400',lh:'16px',sample:'ctx 38%  tok 48.2k  ⎇ main ↑2',spec:'12 / 16 · tnum'},
+      {token:'--tr-t-micro',fam:M,size:'11px',w:'600',lh:'14px',sample:'CH1  HOLD  Ctrl ⇧ P',spec:'11 / 14 · chips'}
+    ];
+    const space=[['--tr-s-1','4px'],['--tr-s-2','8px'],['--tr-s-3','12px'],['--tr-s-4','16px'],['--tr-s-6','24px'],['--tr-s-8','32px'],['--tr-s-12','48px'],['--tr-s-16','64px']].map(([t,v])=>({t,v}));
+    const motionTokens=[
+      {t:'--tr-d-instant',v:'80ms',u:'Hover, press'},
+      {t:'--tr-d-fast',v:'160ms',u:'Chip and tab changes'},
+      {t:'--tr-d-base',v:'240ms',u:'Expanded header, menus, toasts in'},
+      {t:'--tr-d-slow',v:'400ms',u:'Context bar, trace redraw, layout change'},
+      {t:'--tr-ease',v:'cubic-bezier(.2,.7,.2,1)',u:'Default, entering'},
+      {t:'--tr-ease-exit',v:'cubic-bezier(.4,0,1,1)',u:'Leaving, dismiss'}
+    ];
+    const W='oklch(0.78 0.14 330)';
+    const motionStates=[
+      {t:'○ idle',c:'#879692',u:'No motion. Trace flat.'},
+      {t:'◌ starting',c:'#d8e3df',u:'Chip pulses at 1.2 s until the first output; trace ramps in.'},
+      {t:'● working',c:'oklch(0.87 0.14 95)',u:'Trace scrolls left one sample per second. Nothing else moves.'},
+      {t:'◆ needs you',c:W,u:'Chip and frame blink 3× at 400 ms, then hold solid. Toast slides in 240 ms.'},
+      {t:'✓ finished',c:'#d8e3df',u:'Trace decays to flat over 400 ms. No flash.'},
+      {t:'✕ failed',c:'oklch(0.68 0.19 25)',u:'Trace cuts; chip blinks 3× then holds. Toast persists.'},
+      {t:'reduced motion',c:'#879692',u:'All of the above become instant swaps; trace updates in place.'}
+    ];
+    const chips=[['○','IDLE','#879692',false],['◌','ARMING','#d8e3df',false],['●','RUN','oklch(0.87 0.14 95)',false],['◆','HOLD',W,true],['✓','STOP','#d8e3df',false],['✕','FAULT','oklch(0.68 0.19 25)',true],['▲','CLIP','oklch(0.80 0.15 60)',false]]
+      .map(([g,w,c,s])=>({g,w,c,bg:s?c:'transparent',fg:s?'#0b1010':c}));
+    const bars=[[30,12],[52,18],[61,30],[48,35],[74,41],[90,26],[48,32]].map(([c,x])=>({c:Math.round(c*0.75)+'px',x:Math.round(x*0.75)+'px'}));
+    const cssVars=[':root {','  --tr-bg: #0b1010;          --tr-term: #070a0a;','  --tr-surface: #131a19;     --tr-raised: #1f2a28;','  --tr-line: #22302d;        --tr-fg: #d8e3df;','  --tr-fg-dim: #879692;','  --tr-ch-claude: oklch(0.87 0.14 95);','  --tr-ch-codex:  oklch(0.80 0.11 215);','  --tr-st-waiting: oklch(0.78 0.14 330);','  --tr-st-failed:  oklch(0.68 0.19 25);','  --tr-st-limit:   oklch(0.80 0.15 60);','  --tr-font-ui: "IBM Plex Sans Condensed", sans-serif;','  --tr-font-mono: "IBM Plex Mono", monospace;','  --tr-r-control: 3px;  --tr-r-panel: 4px;','  --tr-d-base: 240ms;   --tr-ease: cubic-bezier(.2,.7,.2,1);','}','[data-state="waiting"] { --tile-accent: var(--tr-st-waiting); }'].join('\n');
+    return {colorGroups,typeScale,space,motionTokens,motionStates,chips,bars,cssVars};
+  }
+}
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import type { Session } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
+import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 
 interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void> }
 const terminals = new Map<string, TerminalEntry>();
@@ -24,9 +25,9 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   container?.appendChild(element);
   const terminal = new Terminal({
     disableStdin: true, cursorBlink: false, scrollback: 5000,
-    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    fontFamily: TERMINAL_FONT,
     fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.45,
-    theme: { background: '#0c1017', foreground: '#c9d3e1', black: '#141b27', brightBlack: '#69778e', red: '#f18c93', green: '#8ed9b4', yellow: '#e6bf8a', blue: '#7baaff', magenta: '#b7a0ed', cyan: '#8acddd', white: '#dce4ef', selectionBackground: '#283e61', cursor: '#a8c8ff' },
+    theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[session.config.engine] },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
@@ -42,7 +43,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   terminals.set(session.id, entry);
   terminal.onData((data) => { void writeTerminal(session.id, data); });
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
-  terminal.writeln(`\x1b[${session.config.engine === 'claude' ? '33' : '32'}m${session.title}\x1b[0m  ·  local interactive terminal`);
+  terminal.writeln(`\x1b[38;2;${session.config.engine === 'claude' ? '241;211;93' : '92;208;234'}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
   terminal.writeln('Choose a project, then start this session.');
   terminal.writeln('Your local CLI manages authentication and approvals.');

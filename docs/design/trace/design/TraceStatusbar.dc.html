@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+</helmet>
+<div style="height:32px;box-sizing:border-box;display:flex;align-items:center;background:#131a19;border-top:1px solid #22302d;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#879692;white-space:nowrap;overflow:hidden">
+  <sc-if value="{{ noChans }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;height:100%;padding:0 14px;border-right:1px solid #22302d">○ no channels</div></sc-if>
+  <sc-for list="{{ chans }}" as="c" hint-placeholder-count="2">
+    <div style="display:flex;align-items:center;gap:8px;height:100%;padding:0 14px;border-right:1px solid #22302d">
+      <span style="width:8px;height:8px;background:{{ c.eng }}"></span>
+      <span style="color:#d8e3df">{{ c.ch }}</span>
+      <span style="color:{{ c.col }}">{{ c.glyph }} {{ c.text }}</span>
+      <span>{{ c.rate }}</span>
+    </div>
+  </sc-for>
+  <div style="display:flex;align-items:center;gap:8px;height:100%;padding:0 14px;border-right:1px solid #22302d"><span style="color:#d8e3df">{{ project }}</span><span>{{ branch }}</span></div>
+  <div style="flex:1"></div>
+  <div style="display:flex;align-items:center;gap:8px;height:100%;padding:0 14px;border-left:1px solid #22302d">Σ today<span style="color:#d8e3df;font-variant-numeric:tabular-nums">{{ tok }} tok</span><span style="color:#d8e3df;font-variant-numeric:tabular-nums">{{ cost }}</span></div>
+  <div style="display:flex;align-items:center;gap:8px;height:100%;padding:0 14px;border-left:1px solid #22302d;color:{{ alertColor }}">{{ alertText }}</div>
+  <div style="display:flex;align-items:center;gap:6px;height:100%;padding:0 14px;border-left:1px solid #22302d"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.82 0.13 155)"></span>host · local</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:32},&quot;channels&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;{ch:string,engine:string,state:string,rate?:string}[]&quot;},&quot;alerts&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string[]&quot;},&quot;project&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;orbit-web&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;branch&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;⎇ main ↑2&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;tokens&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;79.9k&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;cost&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;$0.63&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;alertColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const ENGC={claude:'oklch(0.87 0.14 95)',codex:'oklch(0.80 0.11 215)'};
+const ST={idle:'#879692',starting:'#d8e3df',waiting:'oklch(0.78 0.14 330)',finished:'#d8e3df',failed:'oklch(0.68 0.19 25)',limit:'oklch(0.80 0.15 60)'};
+const GLYPH={idle:'○',starting:'◌',working:'●',waiting:'◆',finished:'✓',failed:'✕',limit:'▲'};
+const SCOPE={idle:'idle',starting:'arming',working:'run',waiting:'hold',finished:'stop',failed:'fault',limit:'clip'};
+class Component extends DCLogic {
+  renderVals(){
+    const p=this.props,chans=(p.channels||[]).map(c=>({ch:c.ch,eng:ENGC[c.engine],col:ST[c.state]||ENGC[c.engine],glyph:GLYPH[c.state],text:SCOPE[c.state],rate:c.rate||''}));
+    const al=p.alerts||[];
+    return {chans,noChans:chans.length===0,project:p.project||'no project',branch:p.branch||'',tok:p.tokens||'0',cost:p.cost||'$0.00',
+      alertText:al.length?'◆ '+al.join(' · '):'no alerts',alertColor:al.length?(p.alertColor||ST.waiting):'#879692'};
+  }
+}
+</script>
+</body>
+</html>
