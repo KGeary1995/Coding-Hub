@@ -62,8 +62,10 @@ export function CommandMenu() {
   }, [open]);
   // Project files and memory come from the local search; it reads files, so it waits for a pause in typing. A memory
   // search skips the project folder, so a large project cannot use up the search's limits before the notes are read.
+  // Hits from the previous query are cleared at once, so Enter cannot open one while the new search is pending.
   useEffect(() => {
-    if (!open || !window.codingHub || !searchesFiles(scope, text)) { setHits([]); return; }
+    setHits([]);
+    if (!open || !window.codingHub || !searchesFiles(scope, text)) return;
     let live = true;
     const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: scope === 'memory' ? null : rootDirectory, includeOutput: false }).then((result) => { if (live) setHits(result.hits); }).catch(() => { if (live) setHits([]); }); }, 300);
     return () => { live = false; clearTimeout(timer); };
