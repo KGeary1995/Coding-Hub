@@ -6,6 +6,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { _electron } = require('playwright-core');
 const { artifactNames, installBaselineVersion } = require('./release-paths.cjs');
+const { waitForPage } = require('./lib/wait.cjs');
 const command = promisify(execFile);
 const version = require('../package.json').version;
 
@@ -54,7 +55,7 @@ async function nativeResult(page, method, request) {
     await nativeResult(page, 'updates', { action: 'automatic', enabled: false });
     await app.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
-    await page.waitForFunction(async (directory) => { const loaded = await window.codingHub.loadWorkspace(); return loaded.ok && loaded.value.workspace?.rootDirectory === directory; }, project);
+    await waitForPage(page, async (directory) => { const loaded = await window.codingHub.loadWorkspace(); return loaded.ok && loaded.value.workspace?.rootDirectory === directory; }, project, 'The opened project was not saved as the workspace.');
     const initial = await nativeResult(page, 'loadWorkspace'); assert.ok(initial.workspace);
     const rules = await nativeResult(page, 'hub', { action: 'rules-read', directories: [project] });
     await nativeResult(page, 'hub', { action: 'rules-save', content: 'Run project checks. Preserve APIs. Save a handoff.', revision: rules.revision, targets: rules.targets.map(({ directory, claudeHash, codexHash }) => ({ directory, claudeHash, codexHash })) });
@@ -65,7 +66,7 @@ async function nativeResult(page, method, request) {
     for (const session of initial.workspace.sessions) {
       const run = await nativeResult(page, 'startSession', { sessionId: session.id, cwd: project, config: session.config, cols: 90, rows: 24 });
       await nativeResult(page, 'writeSession', { sessionId: run.sessionId, runId: run.runId, data: 'upgrade-data\r' });
-      await page.waitForFunction(async (runId) => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.some((record) => record.runId === runId); }, run.runId);
+      await waitForPage(page, async (runId) => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.some((record) => record.runId === runId); }, run.runId, `The ${session.config.engine} run's usage was not recorded.`);
       await nativeResult(page, 'stopSession', { sessionId: run.sessionId, runId: run.runId });
     }
     const before = {
