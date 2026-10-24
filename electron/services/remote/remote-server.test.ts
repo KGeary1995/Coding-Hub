@@ -20,7 +20,10 @@ async function remote() {
     running: () => running,
     write: (reference, data) => { if (!running.some((run) => run.runId === reference.runId)) throw new Error('stale'); writes.push({ reference, data }); },
   };
-  const server = new RemoteServer(root, host, 0); cleanup.push(() => server.stop());
+  const phone = path.join(root, 'phone'); fs.mkdirSync(path.join(phone, 'assets'), { recursive: true });
+  fs.writeFileSync(path.join(phone, 'index.html'), '<h1>Pair this phone</h1>'); fs.writeFileSync(path.join(phone, 'assets', 'app-1a2b.js'), 'console.log(1)');
+  fs.writeFileSync(path.join(root, 'secret.json'), '{"secret":true}');
+  const server = new RemoteServer(root, host, 0, phone); cleanup.push(() => server.stop());
   return { root, server, writes, running };
 }
 const base = (server: RemoteServer) => `http://127.0.0.1:${server.address}`;
@@ -52,6 +55,14 @@ describe('phone remote', () => {
     await server.setEnabled(true); expect(server.status()).toMatchObject({ enabled: true, listening: true });
     const page = await request(server, '/'); expect(page.status).toBe(200); expect(page.body).toContain('Pair this phone');
     expect((server as unknown as { server: http.Server }).server.address()).toMatchObject({ address: '127.0.0.1' });
+  });
+
+  it('serves only the phone app build: its page, top-level files and assets, never anything outside it', async () => {
+    const { server } = await remote(); await server.setEnabled(true);
+    const asset = await fetch(base(server) + '/assets/app-1a2b.js');
+    expect(asset.status).toBe(200); expect(asset.headers.get('content-type')).toMatch(/javascript/); expect(asset.headers.get('cache-control')).toMatch(/immutable/);
+    expect((await fetch(base(server) + '/')).headers.get('content-security-policy')).toMatch(/script-src 'self';/);
+    for (const pathname of ['/../secret.json', '/assets/../../secret.json', '/%2e%2e/secret.json', '/missing.js', '/assets/', '/.hidden.js', '/index.txt']) expect((await request(server, pathname)).status, pathname).toBe(404);
   });
 
   it('refuses unknown host names, cross-site requests and Tailscale Funnel traffic', async () => {

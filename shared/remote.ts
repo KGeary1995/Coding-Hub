@@ -1,7 +1,8 @@
 import type { CLIEngine } from './types';
 
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
-export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: CLIEngine; runId: string | null; running: boolean; attention: string | null }
+/** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
+export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: CLIEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null }
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null }
 export interface TailscaleState {
   /** The tailscale CLI was found. */

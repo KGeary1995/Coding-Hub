@@ -257,6 +257,13 @@ Read and type into running channels from your phone, including answering approva
 2. **Set up Tailscale HTTPS.** Trace asks for confirmation, then runs `tailscale serve --bg --https=443 http://127.0.0.1:47821`. Your tailnet must have HTTPS certificates turned on (Tailscale admin console → DNS). Remove it later with `tailscale serve reset`.
 3. **Pair a phone.** Scan the QR code with the phone's camera, or open the address shown and type the code. A code works once, for five minutes and ten tries.
 
+On the phone:
+
+- **Add it to your home screen** (Share → Add to Home Screen on iPhone, or Install app on Android) so it opens like an app.
+- **Channels** lists every channel with its state; one that needs you is outlined and shows the request.
+- **A channel** shows its terminal exactly as the CLI draws it, at the CLI's own width. **A− / A+** change the text size (larger text scrolls sideways). Tap the terminal to type straight into it, use the key row (Enter, Esc, arrows, 1–3, y, n, Tab, Ctrl C) for prompts, or type a line and press **Send**.
+- A restarted channel starts its screen afresh. **Remove this phone** at the bottom of the list unpairs it.
+
 How it is protected:
 
 - Trace listens only on this computer (`127.0.0.1:47821`); the phone reaches it through Tailscale, which encrypts the connection and admits only your devices.

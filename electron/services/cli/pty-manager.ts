@@ -66,7 +66,7 @@ export class PtyManager {
   }
 
   /** Runs still going, for the phone remote. */
-  running(): RunningSession[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session })); }
+  running(): (RunningSession & { cols: number; rows: number })[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session, cols: run.pty.cols, rows: run.pty.rows })); }
 
   /**
    * Input typed on a paired phone. It reaches the run by its reference rather than through the owning window, and tells
