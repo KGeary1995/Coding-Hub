@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { waitForPage } = require('./lib/wait.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -69,7 +70,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
       const tile = page.locator('.session-tile').nth(index); await tile.locator('.xterm-helper-textarea').focus();
       await page.keyboard.type('profile-session-' + index); await page.keyboard.press('Enter');
     }
-    await page.waitForFunction(async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; });
+    await waitForPage(page, async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; }, undefined, 'Usage was not recorded for both profile sessions.');
     const history = await native(page, 'listHistory'); assert.equal(history.length, 2);
     assert.deepEqual(history.map((run) => run.config.accountProfileId).sort(), profiles.map((profile) => profile.id).sort());
     const reconnect = await page.evaluate((profileId) => window.codingHub.accounts({ action: 'login', provider: 'claude', profileId, cols: 80, rows: 24 }), profiles[0].id);
