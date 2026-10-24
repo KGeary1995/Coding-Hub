@@ -68,6 +68,44 @@ describe('device sync', () => {
     b.sync.resolve('rules', 'remote'); expect(b.rules.content()).toBe('Desk again.');
   });
 
+  it('treats edits made on both computers while Drive was offline as a conflict, but takes a run of edits made on one', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop');
+    setRules(a.rules, 'Start.'); a.sync.sync(); b.sync.sync();
+    // The laptop edits twice in a row; the desk, which changed nothing, takes the newest without asking.
+    setRules(b.rules, 'Laptop 1.'); b.sync.sync(); setRules(b.rules, 'Laptop 2.'); b.sync.sync();
+    expect(a.sync.sync().conflicts).toEqual([]); expect(a.rules.content()).toBe('Laptop 2.');
+    // Now both publish to their own copy of the Drive folder before Drive catches up.
+    const offline = temporary(); fs.cpSync(path.join(drive, SYNC_FOLDER), path.join(offline, SYNC_FOLDER), { recursive: true });
+    b.preferences = { ...b.preferences, driveDirectory: offline };
+    setRules(a.rules, 'Desk offline.'); a.sync.sync(); setRules(b.rules, 'Laptop offline.'); b.sync.sync();
+    // Drive keeps the laptop's file.
+    fs.copyFileSync(path.join(offline, SYNC_FOLDER, 'rules.json'), path.join(drive, SYNC_FOLDER, 'rules.json'));
+    expect(a.sync.sync().conflicts).toEqual([expect.objectContaining({ document: 'rules', from: 'laptop' })]);
+    expect(a.rules.content()).toBe('Desk offline.');
+    // Keeping the desk's version publishes it as a successor, which the laptop then takes without a conflict.
+    a.sync.resolve('rules', 'local'); b.preferences = { ...b.preferences, driveDirectory: drive };
+    expect(b.sync.sync().conflicts).toEqual([]); expect(b.rules.content()).toBe('Desk offline.');
+  });
+
+  it('keeps a template whose shared file cannot be read, and repairs the shared copy', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const item = template('Web app');
+    save(a.root, 'project-templates.json', [item]); a.sync.sync();
+    const file = path.join(drive, SYNC_FOLDER, 'templates', item.id + '.json'); fs.writeFileSync(file, '{"half": ');
+    expect(a.sync.sync().error).toMatch(/could not be read/);
+    expect(templates(a.root).map((entry) => entry.id)).toEqual([item.id]);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).id).toBe(item.id);
+  });
+
+  it('publishes usage again to a new Drive folder or after its file was deleted, and survives an unreadable state file', () => {
+    const drive = temporary(); const a = computer(drive, 'desk', [record('run-a')]); a.sync.sync();
+    const own = (folder: string) => path.join(folder, SYNC_FOLDER, 'usage', JSON.parse(fs.readFileSync(path.join(a.root, 'machine.json'), 'utf8')).id + '.json');
+    fs.unlinkSync(own(drive)); a.sync.sync(); expect(fs.existsSync(own(drive))).toBe(true);
+    const moved = temporary(); a.preferences = { ...a.preferences, driveDirectory: moved }; a.sync.sync(); expect(fs.existsSync(own(moved))).toBe(true);
+    fs.writeFileSync(path.join(a.root, 'device-sync.json'), 'not json');
+    expect(a.sync.sync().error).toBeTruthy();
+    fs.rmSync(path.join(a.root, 'device-sync.json')); expect(a.sync.sync()).toMatchObject({ error: null });
+  });
+
   it('merges templates as a set and passes deletions on', () => {
     const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop');
     const first = template('Web app'); const second = template('CLI');

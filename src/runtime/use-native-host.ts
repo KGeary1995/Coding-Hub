@@ -16,7 +16,7 @@ export async function refreshEngines() {
 /** Reloads settings and the other computers' usage after a device sync; this computer's own usage arrives live. */
 export async function refreshSynced() {
   const [preferences, usage] = await Promise.all([hubCall<HubPreferences>({ action: 'preferences' }), hubCall<UsageRecord[]>({ action: 'usage' })]);
-  const store = useHubStore.getState(); store.setPreferences(preferences);
+  const store = useHubStore.getState(); if (JSON.stringify(preferences) !== JSON.stringify(store.preferences)) store.setPreferences(preferences);
   store.setUsage([...store.usage.filter((record) => !record.machine), ...usage.filter((record) => record.machine)]);
 }
 
