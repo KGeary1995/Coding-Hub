@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -16,6 +16,10 @@ import { budgetAlerts, recoveryAdvice, redactDiagnostic } from '../../../shared/
 import type { SavedWorkspace } from '../../../shared/types';
 const roots:string[]=[];
 afterEach(()=>roots.splice(0).forEach((root)=>fs.rmSync(root,{recursive:true,force:true})));
+// Delivery runs git with the user's environment; CI runners have no commit identity configured.
+const identity={GIT_AUTHOR_NAME:'Fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'Fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'};const savedIdentity:Record<string,string|undefined>={};
+beforeAll(()=>{for(const [key,value] of Object.entries(identity)){savedIdentity[key]=process.env[key];process.env[key]=value;}});
+afterAll(()=>{for(const [key,value] of Object.entries(savedIdentity)){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
 function root(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hub-productivity-'));roots.push(dir);return dir;}
 const git=(cwd:string,...args:string[])=>execFileSync('git',['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false',...args],{cwd,encoding:'utf8',stdio:'pipe'}).trim();
 function workspace(cwd:string):SavedWorkspace {const ids=[randomUUID(),randomUUID()];return {version:1,rootDirectory:cwd,sessions:ids.map((id,index)=>({id,title:index?'Codex':'Claude',createdAt:new Date().toISOString(),config:index?{engine:'codex',model:'',reasoningEffort:null,resumeId:randomUUID()}:{engine:'claude',model:'',thinking:{budget_tokens:null},tokenLimits:{maxOutputTokens:null,maxSessionTokens:null}},binding:{mode:'workspace'},budget:{tokens:100,costUSD:null,contextPercent:85},preparedRequest:{label:'Send request',prompt:'Private prepared request'}})),tiles:ids.map((sessionId,index)=>({sessionId,x:index*6,y:0,w:6,h:12,minW:3,minH:10})),layoutMode:'columns',focusedSessionId:null};}

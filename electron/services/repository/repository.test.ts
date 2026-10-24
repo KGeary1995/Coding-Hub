@@ -2,13 +2,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { FILE_PREVIEW_LIMIT, RepositoryFiles } from './filesystem';
 import { RepositoryGit } from './git';
 
 const roots: string[] = [];
 async function fixture(withGit = false) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'hub-repository-')); roots.push(directory);
+  // Windows temp paths can use 8.3 short names (RUNNER~1); Git reports the long form.
+  const directory = realpathSync.native(await mkdtemp(path.join(tmpdir(), 'hub-repository-'))); roots.push(directory);
   const files = new RepositoryFiles(); const context = await files.open(10, { directory });
   const request = { repositoryId: context.id };
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: directory, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }).toString();
@@ -96,7 +98,8 @@ describe('local read-only Git review', () => {
   it('handles unborn branches, literal pathspec characters and untracked files with newlines', async () => {
     const { directory, request, git, changes } = await fixture(true);
     expect(await changes.status(10, request)).toMatchObject({ branch: 'main', head: null, changes: [] });
-    const filename = 'odd [name]\n雪.txt'; await writeFile(path.join(directory, filename), 'new content');
+    // Windows file names cannot contain newlines.
+    const filename = process.platform === 'win32' ? 'odd [name] 雪.txt' : 'odd [name]\n雪.txt'; await writeFile(path.join(directory, filename), 'new content');
     const status = await changes.status(10, request);
     expect(status.changes[0]).toMatchObject({ path: filename, untracked: true });
     expect((await changes.diff(10, { ...request, path: filename, area: 'untracked' })).patch).toContain('+new content');
