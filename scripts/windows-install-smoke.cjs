@@ -48,7 +48,8 @@ async function nativeResult(page, method, request) {
     await command(baseline, ['/S', '/D=' + install], { timeout: 120_000 }); await waitFor(() => exists(installedExecutable), 'Baseline installer did not produce its executable.');
     report.checks.push('baseline-install');
     app = await _electron.launch({ executablePath: installedExecutable, args, env }); let page = await app.firstWindow();
-    await page.waitForFunction(() => window.codingHub && document.querySelectorAll('.session-tile').length === 2);
+    // No project is open yet, so the workspace shows the "Open a project" screen instead of channel tiles.
+    await page.waitForFunction(() => window.codingHub && document.querySelector('.tr-empty'));
     const status = await nativeResult(page, 'updates', { action: 'status' }); assert.equal(status.version, baselineVersion); assert.notEqual(status.phase, 'disabled');
     await nativeResult(page, 'updates', { action: 'automatic', enabled: false });
     await app.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }); }, project);
