@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
+const { openView, addChannel } = require('./lib/navigate.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -28,7 +29,7 @@ const { _electron } = require('playwright-core');
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env });
     let page = await app.firstWindow(); await page.waitForSelector('.session-tile');
-    await page.getByRole('button', { name: 'Accounts & connections', exact: true }).click();
+    await openView(page, 'Accounts & connections');
     for (const name of ['Personal', 'Work']) {
       await page.getByLabel('New Claude profile name', { exact: true }).fill(name);
       await page.getByRole('button', { name: 'Add Claude profile', exact: true }).click();
@@ -52,7 +53,7 @@ const { _electron } = require('playwright-core');
     await page.getByRole('button', { name: 'Go to workspace', exact: true }).click();
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
-    await page.getByRole('button', { name: 'New session', exact: true }).click(); await page.locator('.dropdown button').first().click();
+    await addChannel(page, 'Claude Code');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     for (const [tileIndex, profileIndex] of [[0, 0], [2, 1]]) {
       const tile = page.locator('.session-tile').nth(tileIndex);

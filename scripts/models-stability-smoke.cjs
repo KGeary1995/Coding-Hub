@@ -3,6 +3,7 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {_electron}=require('playwright-core');
+const { openView, addChannel } = require('./lib/navigate.cjs');
 (async()=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-')));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
  const fixture=await fs.readFile(path.join(__dirname,'fixtures/interactive-cli.cjs'),'utf8');
@@ -26,7 +27,7 @@ const {_electron}=require('playwright-core');
   await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('none');await tile.getByLabel('codex model',{exact:true}).fill('fixture-hidden-model');assert.equal(await tile.getByLabel('Reasoning effort',{exact:true}).inputValue(),'');assert.ok((await tile.textContent()).includes('reasoning has been reset') || (await tile.textContent()).includes('Reasoning has been reset'));await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('ultra');
   await page.getByRole('button',{name:'Engine settings for session 2',exact:true}).click();await tile.getByRole('button',{name:'Start session',exact:true}).click();
   await page.waitForFunction(()=>window.events.some(event=>event.data?.includes('MODEL_OVERRIDE:fixture-hidden-model')));await tile.getByRole('button',{name:'Stop',exact:true}).click();
-  await page.locator('.navigation').getByRole('button',{name:'Settings',exact:true}).click();await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);
+  await openView(page, 'Settings');await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);
   await page.getByRole('button',{name:'Workspace',exact:true}).click();const first=page.locator('.session-tile').first();await first.getByRole('button',{name:'Start session',exact:true}).click();await page.waitForFunction(()=>window.events.some(event=>event.type==='started'&&event.engine==='claude'));
   claude=await page.evaluate(()=>window.events.find(event=>event.type==='started'&&event.engine==='claude'));
   // Exercise physical Enter through Xterm, the serialized renderer input queue,
@@ -39,15 +40,15 @@ const {_electron}=require('playwright-core');
    assert.equal(await page.evaluate(runId=>window.events.some(event=>event.runId===runId&&event.type==='exit'),claude.runId),false,'Submitting a prompt must keep the Claude session running');
   }
   assert.doesNotThrow(()=>process.kill(claude.pid,0));
-  await page.getByRole('link',{name:'AI Coding Hub home',exact:true}).click();assert.equal(await first.getByRole('button',{name:'Stop',exact:true}).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));
+  await page.getByRole('link',{name:'Trace home',exact:true}).click();assert.equal(await first.getByRole('button',{name:'Stop',exact:true}).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));
   const child=app.process();await app.evaluate(async({BrowserWindow})=>{
-   const window=BrowserWindow.getAllWindows().find(window=>window.getTitle()==='AI Coding Hub');
+   const window=BrowserWindow.getAllWindows().find(window=>window.getTitle()==='Trace');
    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Renderer recovery did not reload')),15000);window.webContents.once('did-finish-load',()=>{clearTimeout(timer);resolve();});window.webContents.forcefullyCrashRenderer();});
    const deadline=Date.now()+10000;while(Date.now()<deadline){if(await window.webContents.executeJavaScript('document.querySelectorAll(\'.session-tile\').length === 2'))return;await new Promise(resolve=>setTimeout(resolve,20));}throw Error('Recovered workspace did not render');
   });assert.equal(child.exitCode,null,'The native host must survive renderer failure');assert.throws(()=>process.kill(claude.pid,0));
   // Playwright marks the original Page crashed. Verify the recovered renderer
   // through Electron instead of reusing that permanently cancelled Page scope.
-  const result=await app.evaluate(async({BrowserWindow})=>BrowserWindow.getAllWindows().find(window=>window.getTitle()==='AI Coding Hub').webContents.executeJavaScript('window.codingHub.workbench({action:\"host-health\"})'));assert.equal(result.ok,true);const health=result.value;assert.ok(health.events.some(event=>event.event==='renderer-process-gone'&&event.reason==='crashed'));assert.ok(!JSON.stringify(health).includes('MODEL_OVERRIDE'));
+  const result=await app.evaluate(async({BrowserWindow})=>BrowserWindow.getAllWindows().find(window=>window.getTitle()==='Trace').webContents.executeJavaScript('window.codingHub.workbench({action:\"host-health\"})'));assert.equal(result.ok,true);const health=result.value;assert.ok(health.events.some(event=>event.event==='renderer-process-gone'&&event.reason==='crashed'));assert.ok(!JSON.stringify(health).includes('MODEL_OVERRIDE'));
   await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'host-health'})).previousShutdown,'clean');assert.equal((await native(page,'loadWorkspace')).workspace.sessions[1].config.model,'fixture-hidden-model');
   assert.deepEqual(errors,[]);console.log('PASS: full paginated/hidden CLI model catalog, exact selected model and raw effort delivery, repeated Claude prompt submission using physical Enter through Xterm/IPC/native PTY, software terminal default, private lifecycle diagnostics, renderer crash recovery with Claude process cleanup, saved model persistence and clean restart. Fixture CLIs; the reported Windows host crash cause is not reproduced.');
  }finally{if(app)await app.close().catch(()=>{});await fs.rm(root,{recursive:true,force:true});}

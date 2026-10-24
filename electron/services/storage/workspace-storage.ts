@@ -25,7 +25,7 @@ export class WorkspaceStorage {
     this.database = new DatabaseSync(this.info.databasePath);
     try {
       const version = Number(this.database.prepare('PRAGMA user_version').get()?.user_version);
-      if (version > 1) throw new HubError('STORAGE_VERSION', 'This database requires a newer version of AI Coding Hub. Existing data was preserved.');
+      if (version > 1) throw new HubError('STORAGE_VERSION', 'This database requires a newer version of Trace. Existing data was preserved.');
       this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; PRAGMA synchronous=FULL;');
       if (version === 0) this.database.exec(`BEGIN;
         CREATE TABLE workspace (id INTEGER PRIMARY KEY CHECK(id=1), snapshot TEXT NOT NULL);

@@ -91,7 +91,7 @@ export async function findExecutable(engine: CLIEngine, env = hostEnvironment())
     }
   }
   if (shimError) throw shimError;
-  throw new HubError('CLI_NOT_FOUND', `${engine === 'claude' ? 'Claude Code' : 'Codex'} was not found on PATH. Install the official CLI and restart Coding Hub from a terminal where it runs.`);
+  throw new HubError('CLI_NOT_FOUND', `${engine === 'claude' ? 'Claude Code' : 'Codex'} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
 }
 
 export function probeCLI(executable: Executable, args: string[], env: Record<string, string>): Promise<ProbeResult> {

@@ -17,7 +17,7 @@ function git(directory: string, args: string[]): Promise<Buffer> {
     }, (error, stdout) => {
       if (!error) { resolve(stdout); return; }
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') reject(new HubError('GIT_NOT_FOUND', 'Git was not found on PATH. Install Git and restart Coding Hub.'));
+      if (code === 'ENOENT') reject(new HubError('GIT_NOT_FOUND', 'Git was not found on PATH. Install Git and restart Trace.'));
       else if (code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reject(new HubError('GIT_OUTPUT_LIMIT', 'This Git result exceeds the 2 MiB preview limit. Inspect it with your local Git tools.'));
       else reject(new HubError('GIT_FAILED', 'Git could not read this repository. Check repository access, Git trust settings, and whether it was moved.'));
     });
