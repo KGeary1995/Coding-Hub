@@ -1,0 +1,82 @@
+/* Trace channel tile (docs/design/trace/README.md, "08 Channel tile anatomy"). Loaded after shell.css. */
+.session-tile.tr-tile { position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-panel); background: var(--tr-term); box-shadow: none; }
+.session-tile.tr-tile.claude, .session-tile.tr-tile.codex { border-top: 1px solid var(--tr-tile-border); }
+.session-tile.tr-tile:focus-within, .session-tile.tr-tile.selected { border-color: var(--tr-line-strong); }
+.session-tile.tr-tile:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
+.session-tile.tr-tile.state-waiting { border-color: var(--tr-st-waiting); }
+.session-tile.tr-tile.state-failed { border-color: var(--tr-st-failed); }
+/* Only the frame blinks; the terminal inside stays readable. */
+@keyframes tr-frame-blink3 { 50% { border-color: var(--tr-tile-border); } }
+.session-tile.tr-tile.state-waiting, .session-tile.tr-tile.state-failed { animation: tr-frame-blink3 .4s steps(1) 3; }
+
+/* The top block holds the header and scope strip, and anchors the detail row that floats over the terminal. */
+.tr-tile-top { position: relative; z-index: 4; flex: none; }
+.tr-tile .tr-tile-head { height: var(--tr-tile-head-h); display: flex; align-items: center; gap: 10px; padding: 0 6px 0 8px; border: 0; background: var(--tr-surface); min-width: 0; }
+.tr-tile .tile-drag-handle { flex: none; display: grid; place-items: center; color: var(--tr-fg-off); cursor: grab; }
+.tr-ch-badge { flex: none; padding: 1px 6px; border-radius: var(--tr-r-chip); color: var(--tr-on-light); font: var(--tr-t-micro); }
+.tr-tile .tr-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.tr-tile .tr-tile-model { margin: 0; padding: 0; border: 0; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.tr-profile-chip.account-profile-chip { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 5px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-muted); font: 400 11px/16px var(--tr-font-mono); }
+.tr-tile-head .tr-spacer { flex: 1 1 0; min-width: 0; }
+.tr-tile-metric { flex: none; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); white-space: nowrap; }
+.tr-tile-metric b { font-weight: 400; color: var(--tr-fg); }
+.tr-tile-metric b.hot { color: var(--tr-st-limit); }
+
+/* Contextual action: one per state, before the chip. */
+.tr-action { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-control); font: 600 13px/1 var(--tr-font-ui); color: var(--tr-on-light); white-space: nowrap; }
+.tr-action kbd { margin: 0; padding: 0; border: 0; background: none; font: 400 10px/1 var(--tr-font-mono); color: inherit; opacity: .7; }
+.tr-action.start { background: var(--tr-ch-codex); }
+.claude .tr-action.start { background: var(--tr-ch-claude); }
+.tr-action.waiting { background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
+.tr-action.retry { background: var(--tr-fg); }
+.tr-action.limit { background: var(--tr-st-limit); }
+.tr-action.ghost { background: none; border-color: var(--tr-line-control); color: var(--tr-fg); font-weight: 400; }
+.tr-action:hover { filter: brightness(1.08); }
+.tr-action.ghost:hover { background: var(--tr-hover); filter: none; }
+
+/* State chip: outlined in the state colour, filled for waiting and failed. */
+.tr-state-chip { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--chip); border-radius: var(--tr-r-chip); color: var(--chip); font: 600 11px/1 var(--tr-font-mono); letter-spacing: .06em; }
+.tr-state-chip.solid { background: var(--chip); color: var(--tr-on-waiting); }
+.state-failed .tr-state-chip.solid { color: var(--tr-on-light); }
+.state-idle .tr-state-chip { color: var(--tr-fg-dim); border-color: var(--tr-line-control); }
+.state-waiting .tr-state-chip, .state-failed .tr-state-chip { animation: tr-blink3 .4s steps(1) 3; }
+.state-starting .tr-state-chip { animation: tr-start-pulse 1.2s ease-in-out infinite; }
+
+/* Scope strip: graticule every 10%, a dashed limit rail at 15%, the trace and the context bar. */
+.tr-scope { position: relative; height: var(--tr-strip-h); background: var(--tr-surface) repeating-linear-gradient(90deg, var(--tr-line-faint) 0 1px, transparent 1px 10%); border-top: 1px solid var(--tr-line-faint); overflow: hidden; }
+.dense .tr-scope { height: 30px; }
+.tr-scope-plot { position: absolute; inset: 0 0 3px; width: 100%; height: calc(100% - 3px); display: block; }
+.tr-scope-rail { stroke: var(--tr-line-strong); stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.tr-scope-trace { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.state-idle .tr-scope-trace { stroke: var(--tr-fg-off) !important; }
+.tr-scope-window { position: absolute; left: 6px; bottom: 5px; padding: 0 3px; background: var(--tr-surface); font: 400 10px/1 var(--tr-font-mono); color: var(--tr-fg-faint); }
+.tr-scope-rate { position: absolute; right: 6px; top: 3px; padding: 1px 4px; background: var(--tr-surface); font: 400 11px/14px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.dense .tr-scope-window { display: none; }
+.dense .tr-scope-rate { top: 2px; }
+.tr-scope-limit { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: none; }
+.tr-scope-limit i { display: block; height: 100%; background: var(--tr-fg-off); transition: width var(--tr-d-slow) var(--tr-ease); }
+.tr-scope-limit.hot i { background: var(--tr-st-limit); }
+.tr-scope-limit::after { content: ""; position: absolute; left: 80%; bottom: 0; width: 1px; height: 6px; background: var(--tr-st-limit); }
+
+/* Detail row: takes the scope strip's place while the header is pointed at or a control has keyboard focus, so the
+   terminal never resizes for it and it never covers a notice. With settings open it sits in the flow instead. */
+.tr-tile-detail { position: absolute; left: 0; right: 0; top: var(--tr-tile-head-h); bottom: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; background: #0f1514; border-bottom: 1px solid var(--tr-line); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--tr-d-base) var(--tr-ease), transform var(--tr-d-base) var(--tr-ease); }
+.tr-tile-head:hover ~ .tr-tile-detail, .tr-tile-detail:hover, .tr-tile-top:focus-within .tr-tile-detail, .config-open .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
+.config-open .tr-tile-detail { position: static; height: var(--tr-tile-detail-h); }
+.tr-detail-facts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.tr-detail-button { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
+.tr-detail-button.icon { padding: 0 5px; }
+.tr-detail-button:hover:not(:disabled), .tr-detail-button.selected { background: var(--tr-hover); color: var(--tr-fg-strong); }
+.tr-detail-button.stop { border-color: var(--tr-st-failed); color: var(--tr-stop-fg); }
+.tr-detail-button:disabled { opacity: .45; }
+.tr-tile .terminal-frame { background: var(--tr-term); padding: 12px 14px 8px; }
+.tr-tile .session-config { border-top: 1px solid var(--tr-line); }
+
+/* Narrow tiles: drop the model, then the metrics, so the action and chip never clip. */
+@container (max-width: 520px) { .tr-tile-model, .tr-profile-chip.account-profile-chip { display: none; } }
+@container (max-width: 420px) { .tr-tile-metric { display: none; } .tr-action kbd { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-tile-detail, .tr-scope-limit i { transition: none; }
+  .session-tile.tr-tile, .tr-state-chip { animation: none !important; }
+}

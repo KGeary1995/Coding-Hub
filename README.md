@@ -82,7 +82,7 @@ Profile tests use isolated fixture CLIs to exercise separate logins, simultaneou
 
 ## Workbench layout (v1.3.0)
 
-Navigation is grouped into Workbench, Review & insights, Agent configuration, and Resources. The active project and local CLI health sit above a compact session toolbar. The terminal canvas fills the remaining window; columns, rows, and a four-session grid adapt to its height. Larger custom tiles scroll within the canvas. Toggle the file explorer beside the layout controls, or isolate a session using its expand button. Project setup remains visible until a root folder is selected.
+Navigation is grouped into Workbench, Review & insights, Agent configuration, and Resources. The active project and local CLI health sit above a compact session toolbar. The terminal canvas fills the remaining window; columns, rows, and a four-session grid adapt to its height. Larger custom tiles scroll within the canvas. Toggle the file explorer beside the layout controls, or isolate a session with **Maximize** in its detail row. Project setup remains visible until a root folder is selected.
 
 Accounts shows connection actions first, with executable paths and login commands under **CLI details & login command**. The temporary sign-in terminal expands while a login is active. The shared visual system uses neutral surfaces, blue navigation/actions, amber Claude accents, and green for Git additions and running/authenticated states. Existing compact density, zoom, contrast, keyboard shortcuts, and saved layouts remain available.
 
@@ -127,9 +127,29 @@ Trace replaces the sidebar with a top bar and a status bar:
 
 The installed program, its data folders (`~/.coding-hub`) and its update channel keep their original names, so existing installs upgrade in place.
 
+## Channel tiles
+
+Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile shows:
+- **Header:** the channel badge in the engine's colour, the name, the model, a named Claude profile, `ctx` (context used; Codex only, since Claude Code does not report its window) and `tok` (input + output tokens). Then the action for the current state, and the state chip.
+- **Scope strip:** the terminal's output per second over the last two minutes, a dashed limit rail and, along the bottom, a bar for the context or session budget used, with a marker at 80%. The trace only ever shows real output.
+- **Detail row:** point at the header, or tab into it, to swap the strip for the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Settings, Duplicate, Maximize and Close buttons.
+- **The terminal.**
+
+| State | Chip | Action |
+|---|---|---|
+| idle | ○ IDLE | **▶ Start** (or Enter on the tile) |
+| starting | ◌ ARMING (pulses) | — |
+| working | ● RUN | — |
+| waiting | ◆ HOLD (frame turns magenta) | **Answer** jumps to the terminal |
+| finished | ✓ STOP | **Review changes** (G C) |
+| failed | ✕ FAULT (frame turns red) | **Retry** and **Open log** |
+| limit | ▲ CLIP (context or budget ≥ 80%) | **Write handoff** opens Shared memory |
+
+With the tile focused, Enter starts an idle channel or moves into its terminal.
+
 ## Approval alerts
 
-When Claude Code or Codex stops to ask for your approval, its tile shows the request and an **Answer in terminal** button that focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.
+When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.
 
 - **Claude Code 2.1.63 or later:** the app adds an HTTP notification hook that reports to a local endpoint (127.0.0.1) only the app knows.
 - **Codex:** the app turns on its approval notifications and reads them from the terminal output.
