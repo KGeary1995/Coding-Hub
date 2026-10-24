@@ -6,7 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WorktreeService } from './worktrees';
 import type { ManagedWorktree } from '../../../shared/project-tools';
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+// Deleting thousands of files is slow on Windows.
+afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })), 120_000);
 it('isolates two agents from uncommitted files and blocks removing changed or bound worktrees', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });
@@ -40,6 +41,7 @@ it('drops a record whose worktree was removed outside the app and refuses large 
   const gone = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
   git('worktree', 'remove', gone.directory); await service.execute({ action: 'worktree-remove', id: gone.id }); expect(service.list()).toHaveLength(0);
   const big = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree; const modules = path.join(big.directory, 'node_modules'); mkdirSync(modules);
-  for (let index = 0; index < 20000; index++) writeFileSync(path.join(modules, `package-file-${index}.js`), '');
+  // About 1.2 MB of `git status --untracked-files=all` output: more than the helper's 1 MB buffer.
+  for (let index = 0; index < 12000; index++) writeFileSync(path.join(modules, `package-file-${index}-${'x'.repeat(60)}.js`), '');
   await expect(service.execute({ action: 'worktree-remove', id: big.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
 }, 60_000);
