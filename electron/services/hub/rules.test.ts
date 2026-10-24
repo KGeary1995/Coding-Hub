@@ -19,6 +19,13 @@ describe('one shared rules source for both engine instructions', () => {
   it('rejects stale project files or a stale saved-rule revision without modifying either engine', () => {
     const { project, rules } = setup(); const initial = rules.read([project]); fs.writeFileSync(path.join(project, 'AGENTS.md'), '# New external convention\n'); expect(() => rules.save('Draft', initial.revision, initial.targets)).toThrow('changed'); expect(fs.existsSync(path.join(project, 'CLAUDE.md'))).toBe(false); const fresh = rules.read([project]); rules.save('First version', fresh.revision, fresh.targets); expect(() => rules.save('Stale version', fresh.revision, [])).toThrow('changed'); expect(rules.read([]).content).toBe('First version');
   });
+  it('rules cleared on another computer block launches until their removal is applied here', () => {
+    const { project, rules } = setup(); const initial = rules.read([project]); const saved = rules.save('Shared instructions', initial.revision, initial.targets);
+    rules.adopt(''); expect(rules.content()).toBe('');
+    expect(() => rules.verifyLaunch(project)).toThrow('Shared rules were cleared');
+    const current = rules.read([project]); expect(current.targets[0].applied).toBe(false); rules.save('', current.revision, current.targets);
+    expect(() => rules.verifyLaunch(project)).not.toThrow(); expect(saved.targets[0].applied).toBe(true);
+  });
   it('clearing rules removes only managed sections and releases launch requirements', () => {
     const { project, rules } = setup(); fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Original\n'); const initial = rules.read([project]); const saved = rules.save('Temporary shared instructions', initial.revision, initial.targets); rules.save('', saved.revision, saved.targets); expect(fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toContain('# Original\n'); expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).not.toContain('coding-hub-rules'); expect(() => rules.verifyLaunch(project)).not.toThrow();
   });

@@ -70,7 +70,15 @@ export class RulesService {
   }
   verifyLaunch(directory: string) {
     const { state } = this.state();
-    if (!state.content.trim()) return;
+    if (!state.content.trim()) {
+      // No shared rules now, but a project can still carry an old block (for example after rules were cleared on another
+      // computer); its removal must be applied first so both engines start from the same instructions.
+      for (const name of ['CLAUDE.md', 'AGENTS.md']) {
+        let text: string | null = null; try { text = this.readFile(path.join(directory, name)).text; } catch { continue; }
+        if (text?.includes(START) || text?.includes(END)) throw new HubError('RULES_NOT_APPLIED', 'Shared rules were cleared, but this project still has the old rules. Apply the change in Shared rules before starting a session.');
+      }
+      return;
+    }
     const target = this.read([directory]).targets[0];
     if (!target.applied) throw new HubError('RULES_NOT_APPLIED', 'Apply the current Shared rules to this project before starting a session. Both engines must receive the same saved rules.');
   }

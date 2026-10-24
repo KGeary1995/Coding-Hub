@@ -18,6 +18,7 @@ import type { RulesService } from './rules';
  * are saved, so they merge as a set (deletions included). Each computer writes only its own usage file.
  */
 export const SYNC_FOLDER = 'AI-Coding-Hub-Sync';
+const LINEAGE = 50;
 const PORTABLE = ['prices', 'terminalFontSize', 'terminalWebGL', 'automaticMemory'] as const;
 const settingsSchema = preferencesSchema.pick({ prices: true, terminalFontSize: true, terminalWebGL: true, automaticMemory: true });
 const rulesSchema = z.object({ content: z.string().max(60000) }).strict();
@@ -28,19 +29,28 @@ const usageSchema = z.object({
   engine: z.enum(['claude', 'codex']), model: z.string().max(200), cwd: z.string().max(4096), timestamp: z.iso.datetime(), input: z.number().min(0), output: z.number().min(0), cached: z.number().min(0),
   cacheWrite: z.number().min(0), reasoning: z.number().min(0).nullable(), context: z.object({ used: z.number().min(0), limit: z.number().min(0) }).strict().nullable(), cost: z.number().min(0).nullable(),
 }).strict();
+const hashes = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(LINEAGE);
 const documentSchema = <T extends z.ZodType>(value: T) => z.object({ version: z.literal(1), machine: machineSchema, updatedAt: z.iso.datetime(), value }).strict();
-const settingsDocument = documentSchema(settingsSchema); const rulesDocument = documentSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
+/**
+ * Settings and rules carry their lineage: the hashes of the versions they were built on, oldest first, ending with their
+ * own. A version from another computer is only taken without asking when it descends from what this computer last
+ * synced; two computers that each published while Drive was offline therefore show as a conflict, not a silent overwrite.
+ */
+const versionedSchema = <T extends z.ZodType>(value: T) => documentSchema(value).extend({ history: hashes.default([]) });
+const settingsDocument = versionedSchema(settingsSchema); const rulesDocument = versionedSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
 type Machine = z.infer<typeof machineSchema>;
 type SyncedValue = { settings: z.infer<typeof settingsSchema>; rules: z.infer<typeof rulesSchema> };
 type Held = z.infer<typeof settingsDocument> | z.infer<typeof rulesDocument>;
 const stateSchema = z.object({
   base: z.object({ settings: z.string().nullable(), rules: z.string().nullable() }).strict(),
+  lineage: z.object({ settings: hashes, rules: hashes }).strict().default({ settings: [], rules: [] }),
   templates: z.array(z.uuid()).max(500), usage: z.string().nullable(), lastSync: z.iso.datetime().nullable(),
   pending: z.object({ settings: settingsDocument.optional(), rules: rulesDocument.optional() }).strict(),
   rulesFrom: z.object({ name: z.string().max(100), at: z.iso.datetime() }).strict().nullable(),
 }).strict();
 type State = z.infer<typeof stateSchema>;
-const EMPTY: State = { base: { settings: null, rules: null }, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
+const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
+const extend = (lineage: string[], hash: string) => [...lineage.filter((item) => item !== hash), hash].slice(-LINEAGE);
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function readJson<T>(file: string, schema: z.ZodType<T>): T | null {
@@ -86,7 +96,7 @@ export class DeviceSync {
     // Optional settings the other computer left unset go back to their defaults here too.
     this.savePreferences({ ...this.preferences(), terminalWebGL: undefined, automaticMemory: undefined, ...(held.value as SyncedValue['settings']) });
   }
-  private publish(folder: string, document: SyncedDocument, value: unknown) { writeJson(path.join(folder, document + '.json'), { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value }); }
+  private publish(folder: string, document: SyncedDocument, value: unknown, history: string[]) { writeJson(path.join(folder, document + '.json'), { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value, history }); }
   /** A first sync on a computer that never changed the item takes the other computer's version instead of a conflict. */
   private untouched(document: SyncedDocument, value: unknown) {
     if (document === 'rules') return !(value as SyncedValue['rules']).content.trim();
@@ -97,36 +107,44 @@ export class DeviceSync {
     const local = this.value(document); const localHash = digest(local);
     const remote = readJson<Held>(path.join(folder, document + '.json'), document === 'rules' ? rulesDocument : settingsDocument);
     if (remote) this.seen(remote.machine, remote.updatedAt);
-    const settled = (hash: string) => { state.base[document] = hash; delete state.pending[document]; };
-    if (!remote) { this.publish(folder, document, local); return settled(localHash); }
-    const remoteHash = digest(remote.value);
-    if (remoteHash === localHash) return settled(localHash);
-    const base = state.base[document];
-    if (base === remoteHash) { this.publish(folder, document, local); if (document === 'rules') state.rulesFrom = null; return settled(localHash); }
-    if (base === localHash || (base === null && this.untouched(document, local))) { this.apply(document, remote, state); return settled(remoteHash); }
+    const settled = (hash: string, lineage: string[]) => { state.base[document] = hash; state.lineage[document] = lineage; delete state.pending[document]; };
+    const publish = (lineage: string[]) => { this.publish(folder, document, local, lineage); if (document === 'rules') state.rulesFrom = null; settled(localHash, lineage); };
+    if (!remote) return publish(extend(state.lineage[document], localHash));
+    const remoteHash = digest(remote.value); const base = state.base[document];
+    if (remoteHash === localHash) return settled(localHash, remote.history);
+    // Only this computer changed it since the last sync.
+    if (base === remoteHash) return publish(extend(remote.history, localHash));
+    // Only the other computer changed it, building on what this computer last synced (or this computer never changed it).
+    if ((localHash === base && remote.history.includes(base)) || (base === null && this.untouched(document, local))) { this.apply(document, remote, state); return settled(remoteHash, remote.history); }
+    // Both changed, or the other version does not descend from this one: hold it for the person to choose.
     (state.pending as Record<SyncedDocument, Held>)[document] = remote;
   }
   private templates(folder: string, state: State) {
     const local = load(this.root, 'project-templates.json', z.array(templateSchema).max(50), []) as ProjectTemplate[];
-    const directory = path.join(folder, 'templates'); const remote = new Map<string, ProjectTemplate>();
+    const directory = path.join(folder, 'templates'); const remote = new Map<string, ProjectTemplate>(); const present = new Set<string>(); let unreadable = 0;
     for (const name of fs.readdirSync(directory)) {
       if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
-      try { const item = readJson(path.join(directory, name), templateSchema) as ProjectTemplate | null; if (item && item.id + '.json' === name) remote.set(item.id, item); } catch { /* One unreadable template does not stop the others. */ }
+      const id = name.slice(0, 36); present.add(id);
+      // A shared file that cannot be read (half-synced, damaged) still counts as present: it is never taken as a deletion.
+      try { const item = readJson(path.join(directory, name), templateSchema) as ProjectTemplate | null; if (item && item.id === id) remote.set(id, item); else unreadable++; } catch { unreadable++; }
     }
     const known = new Set(state.templates); const localIds = new Set(local.map((item) => item.id));
     // Removed here since the last sync: remove it for every computer.
-    for (const id of known) if (!localIds.has(id) && remote.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); remote.delete(id); }
+    for (const id of known) if (!localIds.has(id) && present.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); present.delete(id); remote.delete(id); }
     // Removed on another computer, or new there.
-    let next = local.filter((item) => !known.has(item.id) || remote.has(item.id));
+    let next = local.filter((item) => !known.has(item.id) || present.has(item.id));
     for (const item of remote.values()) if (!next.some((other) => other.id === item.id) && next.length < 50) next = [...next, item];
+    // New here, or a shared copy that could not be read: this computer's copy is written (templates never change once saved).
     for (const item of next) if (!remote.has(item.id)) writeJson(path.join(directory, item.id + '.json'), item);
     if (next.length !== local.length || next.some((item, index) => item.id !== local[index].id)) save(this.root, 'project-templates.json', next);
     state.templates = next.map((item) => item.id);
+    if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared template file${unreadable === 1 ? '' : 's'} could not be read; copies on this computer were kept.`);
   }
   private usage(folder: string, state: State) {
     const records = this.localUsage().filter((record) => !record.machine).slice(0, 2000).flatMap((record) => { const parsed = usageSchema.safeParse(record); return parsed.success ? [parsed.data] : []; });
-    const hash = digest(records);
-    if (hash !== state.usage) { writeJson(path.join(folder, 'usage', this.machine.id + '.json'), { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: records }); state.usage = hash; }
+    // The cache names the folder too, so a new Drive folder (or a deleted usage file) gets this computer's history again.
+    const own = path.join(folder, 'usage', this.machine.id + '.json'); const hash = digest([folder, records]);
+    if (hash !== state.usage || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: records }); state.usage = hash; }
     const directory = path.join(folder, 'usage'); const present = new Set<string>();
     for (const name of fs.readdirSync(directory)) {
       const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match || match[1] === this.machine.id) continue;
@@ -147,14 +165,16 @@ export class DeviceSync {
     if (this.syncing) return this.status();
     let folder: string | null; try { folder = this.folder(); } catch (error) { this.error = (error as Error).message; return this.status(); }
     if (!folder) return this.status();
-    this.syncing = true; const state = this.state(); this.error = null;
+    this.syncing = true; this.error = null;
     try {
+      const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
       for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state)]) {
         try { step(); } catch (error) { this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);
-    } finally { this.syncing = false; }
+    } catch (error) { this.error = error instanceof HubError ? error.message : 'Sync failed. It will retry.'; }
+    finally { this.syncing = false; }
     return this.status();
   }
   /** Settles a conflict by keeping this computer's version or taking the other computer's. */
@@ -163,13 +183,17 @@ export class DeviceSync {
     const state = this.state(); const held = state.pending[document]; if (!held) throw new HubError('SYNC_RESOLVED', 'This conflict was already settled.');
     const current = readJson<Held>(path.join(folder, document + '.json'), document === 'rules' ? rulesDocument : settingsDocument);
     if (!current || digest(current) !== digest(held)) { delete state.pending[document]; save(this.root, 'device-sync.json', state); throw new HubError('SYNC_CHANGED', 'The other computer changed it again. Sync to review the newest version.'); }
-    if (keep === 'remote') { this.apply(document, held, state); state.base[document] = digest(held.value); }
-    else { const local = this.value(document); this.publish(folder, document, local); state.base[document] = digest(local); }
+    if (keep === 'remote') { this.apply(document, held, state); state.base[document] = digest(held.value); state.lineage[document] = held.history; }
+    else {
+      // This computer's version is published as a successor of the other one, so the other computer takes it without asking.
+      const local = this.value(document); const lineage = extend(held.history, digest(local)); this.publish(folder, document, local, lineage);
+      state.base[document] = digest(local); state.lineage[document] = lineage; if (document === 'rules') state.rulesFrom = null;
+    }
     delete state.pending[document]; save(this.root, 'device-sync.json', state);
     return this.status();
   }
   status(): DeviceSyncStatus {
-    const preferences = this.preferences(); const state = this.state();
+    const preferences = this.preferences(); let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
     let connected = false; try { connected = Boolean(preferences.syncDevices) && path.isAbsolute(preferences.driveDirectory) && fs.statSync(preferences.driveDirectory).isDirectory(); } catch { /* Offline. */ }
     const conflicts = (['settings', 'rules'] as const).flatMap((document) => { const held = state.pending[document]; return held ? [{ document, from: held.machine.name, at: held.updatedAt }] : []; });
     return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: this.error, computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
