@@ -76,8 +76,15 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     assert.equal(reconnect.ok, false); assert.equal(reconnect.error.code, 'PROFILE_BUSY');
     for (const profile of profiles) {
       const run = history.find((item) => item.config.accountProfileId === profile.id);
-      const log = await native(page, 'readRunLog', { runId: run.runId });
-      assert.ok(log.text.includes('profile-session-'));
+      // Usage arrives through the CLI's own report, which can beat the terminal output to the
+      // run log (ConPTY on Windows delivers output later), so wait for the echoed line.
+      let log;
+      for (let attempt = 0; ; attempt++) {
+        log = await native(page, 'readRunLog', { runId: run.runId });
+        if (log.text.includes('profile-session-')) break;
+        assert.ok(attempt < 75, 'The typed line never reached the run log');
+        await page.waitForTimeout(200);
+      }
       assert.ok(!log.text.includes('fixture-inherited-key') && !log.text.includes('fixture-inherited-token'));
       const projectLogs = path.join(root, 'storage/claude-profiles', profile.id, 'projects/-fixture');
       assert.deepEqual(await fs.readdir(projectLogs), [run.runId + '.jsonl']);
