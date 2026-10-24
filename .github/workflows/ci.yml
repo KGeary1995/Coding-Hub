@@ -1,0 +1,37 @@
+name: CI
+# Fast checks on every pull request push. The full Windows build and install test is in windows-release.yml.
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Hosted Linux runners have no user namespace sandbox for Electron.
+      CODING_HUB_TEST_NO_SANDBOX: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:release
+      # `npm run build` includes the type checks; the smoke scripts below reuse its output.
+      - run: npm run build
+      - name: Desktop smoke tests (fixture CLIs, virtual display)
+        run: |
+          for test in desktop design profiles workbench enterprise productivity models-stability; do
+            echo "::group::$test"
+            xvfb-run -a node "scripts/$test-smoke.cjs"
+            echo "::endgroup::"
+          done

@@ -109,6 +109,10 @@ Open **Projects** to browse an existing folder, enter its absolute path, create 
 
 Windows packaging uses a fresh staging folder for every attempt, avoiding the locked `release/win-unpacked` rename failure. Verified installers/update metadata are then copied to `release/`; prior staging directories remain intact. `npm run verify:win` follows the last successful build manifest. A Windows workflow additionally installs two package versions, checks retained data, and uninstalls in an isolated runner.
 
+## Continuous integration
+
+Every pull request runs **CI** (`.github/workflows/ci.yml`) on Linux: unit tests, release-path tests, the production build with type checks, and the seven desktop smoke tests against fixture CLIs on a virtual display. Pull requests that are ready for review (not drafts) also run the full **Windows release candidate** workflow, including the installer build and install, upgrade and uninstall test; its installers are uploaded only for `main` and manual runs.
+
 ## Windows installer and updates (v1.2)
 
 The per-user installer creates Start Menu and desktop shortcuts and does not require administrator access. Installed editions provide **Settings → Application updates**, with automatic stable-release checks, explicit downloads, progress, and a confirmed restart. Checks contact GitHub; project contents and terminal output are not sent. Source and portable editions use manual upgrades.
