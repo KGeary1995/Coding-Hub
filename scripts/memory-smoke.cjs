@@ -5,7 +5,7 @@ const os = require('node:os');
 const readline = require('node:readline');
 const { spawn } = require('node:child_process');
 (async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'coding-hub-memory-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'coding-hub-memory-')));
   const children = new Set();
   async function connect() {
     const child = spawn(require('electron'), [path.resolve(__dirname, '../dist-electron/electron/services/hub/memory-server.js'), root, 'shared-project'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] }); children.add(child);

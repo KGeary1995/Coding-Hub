@@ -4,7 +4,7 @@ const os=require('node:os');
 const path=require('node:path');
 const {_electron}=require('playwright-core');
 (async()=>{
- const root=await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-'));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-')));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
  const fixture=await fs.readFile(path.join(__dirname,'fixtures/interactive-cli.cjs'),'utf8');
  for(const engine of ['claude','codex']){
   if(process.platform==='win32'){const folder=path.join(bin,'node_modules',...(engine==='claude'?'@anthropic-ai/claude-code':'@openai/codex').split('/'));await fs.mkdir(folder,{recursive:true});await fs.writeFile(path.join(folder,'package.json'),JSON.stringify({bin:{[engine]:'fixture.cjs'}}));await fs.writeFile(path.join(folder,'fixture.cjs'),fixture);await fs.writeFile(path.join(bin,engine+'.cmd'),'@echo off\r\n');}

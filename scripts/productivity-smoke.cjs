@@ -7,7 +7,7 @@ const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 (async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
   const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');

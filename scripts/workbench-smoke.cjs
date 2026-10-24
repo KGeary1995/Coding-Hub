@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 (async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-workbench-')); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-workbench-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
   const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
   for (const engine of ['claude', 'codex']) {

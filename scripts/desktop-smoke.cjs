@@ -1,12 +1,13 @@
 const assert = require('node:assert/strict');
-const { mkdtemp, mkdir, readFile, writeFile, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, mkdir, readFile, writeFile, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 
 (async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'coding-hub-desktop-'));
+  // Canonical long form: Windows temp paths can use 8.3 short names (RUNNER~1) that the app resolves.
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'coding-hub-desktop-')));
   const bin = path.join(root, 'bin');
   const projects = [path.join(root, 'claude-project'), path.join(root, 'codex-project')];
   await Promise.all([bin, ...projects].map((directory) => mkdir(directory)));

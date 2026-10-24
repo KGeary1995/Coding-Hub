@@ -1,11 +1,11 @@
 // Validate the production layout in an isolated profile without starting agent CLIs.
 const assert = require('node:assert/strict');
-const { mkdtemp, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 (async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'hub-design-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'hub-design-')));
   const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') };
   delete env.ELECTRON_RUN_AS_NODE;
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];

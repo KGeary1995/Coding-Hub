@@ -1,11 +1,11 @@
 const assert = require('node:assert/strict');
-const { mkdtemp, mkdir, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, mkdir, rm } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { PtyManager } = require('../dist-electron/electron/services/cli/pty-manager');
 
 (async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'coding-hub-pty-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'coding-hub-pty-')));
   const directories = [path.join(root, 'claude-project'), path.join(root, 'codex-project')];
   await Promise.all(directories.map((directory) => mkdir(directory)));
   const outputs = new Map();

@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 (async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
   await Promise.all([bin, project, legacy].map((folder) => fs.mkdir(folder)));
   await fs.writeFile(path.join(legacy, 'fixture-authenticated'), 'default-login-preserved');
