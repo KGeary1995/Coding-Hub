@@ -52,6 +52,10 @@ const stateSchema = z.object({
 }).strict();
 type State = z.infer<typeof stateSchema>;
 const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, folder: null, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
+/** Claude account profiles belong to the computer that made a template; an imported template uses this computer's default account. */
+function portable(template: ProjectTemplate): ProjectTemplate {
+  const copy = structuredClone(template); for (const session of copy.workspace.sessions) delete (session.config as { accountProfileId?: string }).accountProfileId; return copy;
+}
 const extend = (lineage: string[], hash: string) => [...lineage.filter((item) => item !== hash), hash].slice(-LINEAGE);
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -71,17 +75,23 @@ function writeJson(file: string, value: unknown) {
 
 export class DeviceSync {
   readonly machine: Machine;
-  private syncing = false; private error: string | null = null;
+  private syncing = false; private error: string | null = null; private identityError: string | null = null;
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
   constructor(private root: string, private preferences: () => HubPreferences, private savePreferences: (preferences: HubPreferences) => void, private rules: RulesService, private localUsage: () => UsageRecord[]) {
-    const existing = load(root, 'machine.json', machineSchema.nullable(), null);
-    this.machine = existing ?? { id: randomUUID(), name: (os.hostname() || 'This computer').slice(0, 100) };
-    if (!existing) save(root, 'machine.json', this.machine);
+    const name = (os.hostname() || 'This computer').slice(0, 100);
+    // A damaged identity file must not stop the rest of the hub: keep the file, report it, and leave sync off. A
+    // stand-in identity would publish this computer's history a second time under another name.
+    let existing: Machine | null = null;
+    try { existing = load(root, 'machine.json', machineSchema.nullable(), null); }
+    catch { this.identityError = 'This computer’s sync identity (machine.json) could not be read, so sync between computers is paused. Remove that file to start a new identity.'; }
+    this.machine = existing ?? { id: randomUUID(), name };
+    if (!existing && !this.identityError) save(root, 'machine.json', this.machine);
   }
   private state(): State { return load(this.root, 'device-sync.json', stateSchema.nullable(), null) ?? structuredClone(EMPTY); }
   private folder() {
     const preferences = this.preferences(); if (!preferences.syncDevices || !path.isAbsolute(preferences.driveDirectory)) return null;
+    if (this.identityError) throw new HubError('SYNC_IDENTITY', this.identityError);
     let drive: string; try { drive = fs.realpathSync(preferences.driveDirectory); if (!fs.statSync(drive).isDirectory()) return null; } catch { return null; }
     const folder = path.join(drive, SYNC_FOLDER);
     for (const sub of ['', 'templates', 'usage']) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
@@ -136,7 +146,7 @@ export class DeviceSync {
     for (const id of known) if (!localIds.has(id) && present.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); present.delete(id); remote.delete(id); }
     // Removed on another computer, or new there.
     let next = local.filter((item) => !known.has(item.id) || present.has(item.id));
-    for (const item of remote.values()) if (!next.some((other) => other.id === item.id) && next.length < 50) next = [...next, item];
+    for (const item of remote.values()) if (!next.some((other) => other.id === item.id) && next.length < 50) next = [...next, portable(item)];
     // New here, or a shared copy that could not be read: this computer's copy is written (templates never change once saved).
     for (const item of next) if (!remote.has(item.id)) writeJson(path.join(directory, item.id + '.json'), item);
     if (next.length !== local.length || next.some((item, index) => item.id !== local[index].id)) save(this.root, 'project-templates.json', next);
@@ -205,6 +215,6 @@ export class DeviceSync {
     let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
     let connected = false; try { connected = Boolean(preferences.syncDevices) && path.isAbsolute(preferences.driveDirectory) && fs.statSync(preferences.driveDirectory).isDirectory(); } catch { /* Offline. */ }
     const conflicts = (['settings', 'rules'] as const).flatMap((document) => { const held = state.pending[document]; return held ? [{ document, from: held.machine.name, at: held.updatedAt }] : []; });
-    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: this.error, computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
+    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: this.error ?? (preferences.syncDevices ? this.identityError : null), computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
   }
 }
