@@ -6,7 +6,8 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
-import type { RunningSession, SessionEvent, EngineInfo } from '../../../shared/ipc';
+import type { RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
+import { isPersonInput } from '../../../shared/terminal-input';
 import { resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
@@ -62,6 +63,22 @@ export class PtyManager {
     if (!run || run.finished) return;
     this.flush(run);
     this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message });
+  }
+
+  /** Runs still going, for the phone remote. */
+  running(): RunningSession[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session })); }
+
+  /**
+   * Input typed on a paired phone. It reaches the run by its reference rather than through the owning window, and tells
+   * that window the person answered, so a waiting prompt clears on the desktop too.
+   */
+  writeRemote(reference: RunReference, data: string) {
+    const run = this.runs.get(reference.sessionId);
+    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    try { run.pty.write(data); }
+    catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
+    if (isPersonInput(data)) this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId: run.session.runId, at: new Date().toISOString() });
   }
 
   private send(owner: number, event: SessionEvent) {

@@ -120,6 +120,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (session.id !== event.sessionId) return session;
     if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null } : session;
     if (event.runId !== session.runId) return session;
+    if (event.type === 'answered') return session.attention && session.attention.at <= event.at ? { ...session, attention: null } : session;
     if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: new Date().toISOString() } } : session;
     if (event.type === 'exit') return { ...session, status: 'exited', pid: null, error: event.diagnostic ?? session.error, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
     if (event.type === 'error') return { ...session, error: event.message };

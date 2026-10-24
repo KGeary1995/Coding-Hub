@@ -40,6 +40,8 @@ import { finishWorkspaceFlushSchema } from '../shared/schemas';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
+import { RemoteServer } from './services/remote/remote-server';
+import { serveRemote, tailscaleRunner, tailscaleState } from './services/remote/tailscale';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
@@ -64,6 +66,7 @@ let updates: UpdateService | null = null;
 let projectChecks: ProjectChecks | null = null;
 let storage: WorkspaceStorage | null = null;
 let hub: HubService | null = null;
+let remote: RemoteServer | null = null;
 let autoMemory: AutoMemory | null = null;
 let storageFailure = 'Local storage is unavailable. Check access to ~/.coding-hub.';
 let workspaceLoaded = false;
@@ -91,6 +94,7 @@ const manager = new PtyManager((owner, event) => {
     void autoMemory?.finish(event.runId, transcript).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
   if (event.type === 'exit') try { hub?.telemetry?.end(event.runId); } catch { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); }
+  try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
 }, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
@@ -301,6 +305,33 @@ else app.whenReady().then(() => {
   const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop coding sessions and verification before changing repositories or applying templates.'); };
   delivery = new Delivery(confirmWorkflow, workflowReady);
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
+  // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
+  remote = new RemoteServer(storageRoot, {
+    sessions: () => (storage?.load()?.sessions ?? []).map((session) => ({ id: session.id, title: session.title, engine: session.config.engine })),
+    running: () => manager.running(),
+    write: (reference, data) => manager.writeRemote(reference, data),
+  });
+  const runTailscale = tailscaleRunner(); const phone = remote;
+  const refreshTailscale = async () => { if (phone.enabled) phone.tailscale = await tailscaleState(runTailscale, phone.port); };
+  void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
+  setInterval(() => void refreshTailscale().catch(() => {}), 60000).unref();
+  const remoteControl = async (payload: unknown) => {
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
+      z.object({ action: z.literal('remote-pair') }).strict(), z.object({ action: z.literal('remote-cancel-pairing') }).strict(),
+      z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve') }).strict(),
+    ]).parse(payload);
+    if (request.action === 'remote-enable') await phone.setEnabled(request.enabled);
+    if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
+    if (request.action === 'remote-revoke') return phone.revoke(request.id);
+    if (request.action === 'remote-serve') {
+      const confirmed = (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
+        message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;
+      if (confirmed) { try { await serveRemote(runTailscale, phone.port); } catch (error) { throw new HubError('TAILSCALE_SERVE', `Tailscale could not set up HTTPS: ${(error as Error).message}. HTTPS certificates must be enabled for your tailnet in the Tailscale admin console.`); } }
+    }
+    await refreshTailscale().catch(() => {});
+    return request.action === 'remote-pair' ? phone.pair() : phone.status();
+  };
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
@@ -308,6 +339,7 @@ else app.whenReady().then(() => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
     if (action === 'codex-models') return modelCatalog.execute(payload);
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
+    if (action.startsWith('remote-')) return remoteControl(payload);
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
@@ -420,7 +452,11 @@ else app.whenReady().then(() => {
     }
     return manager.start(owner, payload);
   });
-  handle(IPC_CHANNELS.writeSession, (owner, payload) => { manager.write(owner, payload); return null; });
+  handle(IPC_CHANNELS.writeSession, (owner, payload) => {
+    manager.write(owner, payload);
+    const input = payload as { sessionId?: unknown; data?: unknown }; if (typeof input.sessionId === 'string' && typeof input.data === 'string') remote?.personInput(input.sessionId, input.data);
+    return null;
+  });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => { manager.resize(owner, payload); return null; });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   createWindow();
@@ -437,6 +473,6 @@ app.on('before-quit', (event) => {
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()]))
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     .then(() => autoMemory?.drain(10000)).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
-    try { attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });
