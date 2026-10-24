@@ -14,7 +14,11 @@ export function DeviceSyncCard() {
     setBusy(true); setError('');
     try { setStatus(await hubCall<DeviceSyncStatus>(request)); await refreshSynced(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
-  useEffect(() => { void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then(setStatus).catch((e) => setError(e.message)); }, []);
+  // The sync also runs in the background every 30 seconds; follow it so connection, conflicts and errors stay current.
+  useEffect(() => {
+    const load = () => void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then(setStatus).catch((e) => setError(e.message));
+    load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
+  }, []);
   if (!status) return error ? <p role="alert" className="error-message">{error}</p> : null;
   return <article className="storage-card device-sync" aria-labelledby="device-sync-title">
     <header><h2 id="device-sync-title"><MonitorSmartphone size={16} aria-hidden="true" />Sync between computers</h2>
@@ -34,7 +38,7 @@ export function DeviceSyncCard() {
         </div>
       </div>)}
       {status.error && <p role="alert" className="error-message">{status.error}</p>}
-      <div className="hub-toolbar"><button className="button secondary" disabled={busy || !status.connected} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
+      <div className="hub-toolbar"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
     </>}
     {!status.enabled && <p className="control-note">Turn on “Sync settings, rules, templates and usage between computers” above and save. Do the same on each computer, with the same Drive folder.</p>}
     {error && <p role="alert" className="error-message">{error}</p>}
