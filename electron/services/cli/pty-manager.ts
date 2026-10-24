@@ -182,6 +182,8 @@ export class PtyManager {
     if (!parsed.success) throw new HubError('INVALID_RESIZE', 'Invalid terminal dimensions.');
     const run = this.ownedRun(owner, parsed.data);
     if (!run.stopping) {
+      // Output drawn at the old size goes out first, so every terminal following this run sees it before the resize.
+      this.flush(run);
       try { run.pty.resize(parsed.data.cols, parsed.data.rows); }
       catch { throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
     }
