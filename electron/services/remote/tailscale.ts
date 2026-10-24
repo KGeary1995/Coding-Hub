@@ -7,10 +7,13 @@ const CANDIDATES = process.platform === 'win32'
   ? [process.env.ProgramFiles && `${process.env.ProgramFiles}\\Tailscale\\tailscale.exe`, 'tailscale.exe']
   : process.platform === 'darwin' ? ['/Applications/Tailscale.app/Contents/MacOS/Tailscale', '/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale', 'tailscale'] : ['/usr/bin/tailscale', '/usr/local/bin/tailscale', 'tailscale'];
 
+/** The CLI to run, looked up on every call so Tailscale installed while Trace is open is found without a restart. */
+export const tailscaleExecutable = (exists: (file: string) => boolean = fs.existsSync, candidates: (string | undefined)[] = CANDIDATES) =>
+  candidates.find((candidate): candidate is string => Boolean(candidate) && (!candidate!.includes('/') && !candidate!.includes('\\') || exists(candidate!))) ?? 'tailscale';
+
 /** Runs the tailscale CLI by fixed arguments only; nothing a phone or page sends reaches its command line. */
 export function tailscaleRunner(): RunTailscale {
-  const executable = CANDIDATES.find((candidate): candidate is string => Boolean(candidate) && (!candidate!.includes('/') && !candidate!.includes('\\') || fs.existsSync(candidate!))) ?? 'tailscale';
-  return (args) => new Promise((resolve, reject) => execFile(executable, args, { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+  return (args) => new Promise((resolve, reject) => execFile(tailscaleExecutable(), args, { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
     if (error) reject(Object.assign(new Error(String(stderr || error.message).trim().split('\n')[0].slice(0, 300)), { code: (error as NodeJS.ErrnoException).code })); else resolve(stdout);
   }));
 }
