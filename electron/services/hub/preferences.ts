@@ -1,0 +1,3 @@
+import { z } from 'zod';
+
+export const preferencesSchema = z.object({ folderId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/), driveDirectory: z.string().max(4096), terminalFontSize: z.number().int().min(10).max(22), terminalWebGL: z.boolean().optional(), automaticMemory: z.boolean().optional(), syncDevices: z.boolean().optional(), prices: z.array(z.object({ model: z.string().min(1).max(120), input: z.number().finite().min(0).max(10000), output: z.number().finite().min(0).max(10000), cacheRead: z.number().finite().min(0).max(10000), cacheWrite: z.number().finite().min(0).max(10000) }).strict()).max(100) }).strict();

@@ -92,7 +92,7 @@ export function UsageScreen() {
           const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const context = lastContext(record);
           return <tr key={record.runId}>
             <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{session ? `CH${index + 1}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
-            <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}</td>
+            <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}{record.machine && <span className="tr-cell-machine"> · {record.machine}</span>}</td>
             <td className="tr-cell-mono">{record.model}</td>
             <td className="tr-cell-mono">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
             <td className="num">{compact(record.input)}</td><td className="num">{compact(record.output)}</td><td className="num">{compact(record.cached)}</td>

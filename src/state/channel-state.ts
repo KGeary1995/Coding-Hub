@@ -70,13 +70,13 @@ export function channelAlerts(sessions: Session[], records: UsageRecord[]): Chan
  */
 export const freshInput = (record: UsageRecord) => record.engine === 'codex' ? Math.max(0, record.input - record.cached) : record.input;
 
-/** Today's reported input + output tokens (cache excluded) and cost, by local date. Cost is null when nothing is priced. */
+/** This computer's reported input + output tokens today (cache excluded) and cost, by local date. Cost is null when nothing is priced. */
 export function todayTotals(records: UsageRecord[], now = new Date()) {
   const day = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
   const today = day(now); let tokens = 0; let cost: number | null = null;
   for (const record of records) {
     const started = new Date(record.timestamp);
-    if (Number.isNaN(started.getTime()) || day(started) !== today) continue;
+    if (record.machine || Number.isNaN(started.getTime()) || day(started) !== today) continue;
     tokens += freshInput(record) + record.output;
     if (record.cost !== null) cost = (cost ?? 0) + record.cost;
   }

@@ -13,13 +13,13 @@ import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 const label = z.object({ key: z.string().min(1).max(200), name: z.string().trim().min(1).max(100), pinned: z.boolean() }).strict();
 const check = z.object({ name: z.string().trim().min(1).max(100), steps: z.array(z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm','pnpm','yarn','python','cargo','go','dotnet']), args: z.array(z.string().max(500).refine((value) => !value.includes('\0'))).min(1).max(30) }).strict()).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300) }).strict();
-const template = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), description: z.string().max(1000), workspace: savedWorkspaceSchema, rules: z.string().max(50000), checks: z.array(check).max(20), createdAt: z.iso.datetime() }).strict();
+export const templateSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), description: z.string().max(1000), workspace: savedWorkspaceSchema, rules: z.string().max(50000), checks: z.array(check).max(20), createdAt: z.iso.datetime() }).strict();
 const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-conversations') }).strict(), label.extend({ action: z.literal('flow-conversation-save') }).strict(),
  z.object({ action: z.literal('flow-failures') }).strict(),
  z.object({ action: z.literal('flow-search'), query: z.string().trim().min(2).max(200), directory: z.string().max(4096).nullable(), includeOutput: z.boolean() }).strict(),
  z.object({ action: z.literal('flow-templates') }).strict(),
- z.object({ action: z.literal('flow-template-save'), name: template.shape.name, description: template.shape.description, workspace: savedWorkspaceSchema, includeRules: z.boolean(), includeChecks: z.boolean() }).strict(),
+ z.object({ action: z.literal('flow-template-save'), name: templateSchema.shape.name, description: templateSchema.shape.description, workspace: savedWorkspaceSchema, includeRules: z.boolean(), includeChecks: z.boolean() }).strict(),
  z.object({ action: z.literal('flow-template-apply'), id: z.uuid(), directory: z.string().max(4096), applyRules: z.boolean(), applyChecks: z.boolean() }).strict(),
  z.object({ action: z.literal('flow-template-delete'), id: z.uuid() }).strict(),
 ]);
@@ -28,7 +28,7 @@ export class Workflows {
  get running() { return this.busy; }
  constructor(private root: string, private native: NativeSessions, private verification: Verification, private rules: RulesService, private storage: WorkspaceStorage, private confirm: (title: string, detail: string) => Promise<boolean>) {}
  labels(): ConversationLabel[] { return load(this.root, 'conversation-labels.json', z.array(label).max(500), []); }
- templates(): ProjectTemplate[] { return load(this.root, 'project-templates.json', z.array(template).max(50), []); }
+ templates(): ProjectTemplate[] { return load(this.root, 'project-templates.json', z.array(templateSchema).max(50), []); }
  async execute(input: unknown) {
   const request = schema.parse(input);
   if (request.action === 'flow-conversations') return this.labels();
@@ -48,7 +48,7 @@ export class Workflows {
    const workspace = structuredClone(request.workspace);
    for (const session of workspace.sessions) { delete session.config.resumeId; delete session.preparedRequest; }
    const value: ProjectTemplate = { id: randomUUID(), name: request.name, description: request.description, workspace, rules: request.includeRules ? this.rules.read([]).content : '', checks: request.includeChecks ? this.verification.data().profiles.filter((profile) => profile.directory === workspace.rootDirectory).slice(0, 20).map(({ name, steps, timeoutSeconds }) => ({ name, steps, timeoutSeconds })) : [], createdAt: new Date().toISOString() };
-   template.parse(value); save(this.root, 'project-templates.json', [value, ...templates]); return value;
+   templateSchema.parse(value); save(this.root, 'project-templates.json', [value, ...templates]); return value;
   }
   if (this.busy) throw new HubError('TEMPLATE_BUSY', 'A template operation is already running.');
   const selected = templates.find((item) => item.id === request.id); if (!selected) throw new HubError('TEMPLATE_MISSING', 'Select an available template.');

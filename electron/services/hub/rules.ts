@@ -108,6 +108,20 @@ export class RulesService {
     }
     return this.read(selected.map((t) => t.directory));
   }
+  /** The saved rules text, without project targets (device sync compares and carries only this). */
+  content() { return this.state().state.content; }
+  /**
+   * Replaces the saved rules text with a version from another computer. Project files are not touched: until the person
+   * applies the new rules to a project, that project shows as not applied and its sessions do not start.
+   */
+  adopt(content: string) {
+    replaceRules('', content);
+    const { source, state } = this.state(); if (state.content === content) return;
+    if (this.readFile(this.file).fingerprint !== source.fingerprint) throw new HubError('RULES_CHANGED', 'Shared rules changed during sync. It will retry.');
+    if (source.text !== null) fs.writeFileSync(this.file + '.coding-hub-backup-' + randomUUID(), source.text, { mode: 0o600, flag: 'wx' });
+    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    this.replace(this.file, JSON.stringify({ version: 1, content, directories: state.directories }, null, 2) + '\n', source.mode);
+  }
   private replace(file: string, text: string, mode: number) {
     const temporary = file + '.coding-hub-' + randomUUID();
     try { fs.writeFileSync(temporary, text, { mode, flag: 'wx' }); fs.renameSync(temporary, file); }

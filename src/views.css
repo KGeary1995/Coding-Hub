@@ -36,3 +36,10 @@
 :where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form, .server-card, .memory-connection, .hub-preview, .usage-chart) { padding: 16px 18px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); box-shadow: none; }
 :where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form) h2 { margin-bottom: 6px; }
 :where(.app-shell:not([data-view="workspace"]) .main-shell) .hub-toolbar { gap: 10px; margin: 12px 0; }
+
+/* Sync between computers (Settings) and synced usage rows. */
+.device-sync header h2 { display: flex; align-items: center; gap: 8px; }
+.device-sync dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 12px 0; }
+.device-sync dt { color: var(--tr-fg-dim); }
+.device-sync-conflict { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--tr-st-limit); border-radius: var(--tr-r-panel); }
+.tr-cell-machine { color: var(--tr-fg-dim); }
