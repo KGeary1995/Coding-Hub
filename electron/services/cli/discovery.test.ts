@@ -33,6 +33,10 @@ describe('Windows npm CLI shim resolution', () => {
     await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { codex: 'claude.exe' } }));
     expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toEqual([]);
   });
+  it('runs JavaScript entries with an installed console Node.js instead of Electron when one is on PATH', async () => {
+    const { shim, packageRoot } = await fixture({ codex: 'cli.cjs' });
+    expect(await npmEntryForShim(shim, 'codex', 'arm', '/nodejs/node.exe')).toEqual({ file: '/nodejs/node.exe', prefixArgs: [path.join(packageRoot, 'cli.cjs')], extraEnv: {}, displayPath: shim });
+  });
   it('supports string bin declarations', async () => {
     const { shim } = await fixture('cli.cjs');
     expect((await npmEntryForShim(shim, 'codex')).prefixArgs).toHaveLength(2);
