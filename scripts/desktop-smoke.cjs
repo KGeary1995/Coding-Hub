@@ -415,6 +415,18 @@ const { _electron } = require('playwright-core');
       const windows = app ? app.windows() : [];
       for (const window of windows) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.account-terminal, .xterm-rows, [role="alert"], .session-error')].map((node) => `[${node.className || node.getAttribute('role')}] ${node.textContent.trim().slice(-1500)}`).join('\n')));
     } catch { /* The window may already be gone. */ }
+    // Resize diagnostics: size reports so far, then a direct resize of the first running session.
+    try {
+      const window = app && app.windows()[0];
+      if (window) console.error('Resize probe:', JSON.stringify(await window.evaluate(async () => {
+        const sizes = () => (window.testEvents ?? []).filter((event) => event.type === 'data' && event.data.includes('SIZE:')).map((event) => event.data.match(/SIZE:\d+x\d+/g)).flat();
+        const before = sizes(); const started = (window.testEvents ?? []).filter((event) => event.type === 'started');
+        const run = started[0]; if (!run) return { before, note: 'no started session' };
+        const result = await window.codingHub.resizeSession({ sessionId: run.sessionId, runId: run.runId, cols: 61, rows: 17 });
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return { before, resize: result.ok ? 'ok' : result.error, after: sizes() };
+      })));
+    } catch (resizeError) { console.error('Resize probe failed:', resizeError); }
     // Compare how Electron-as-Node behaves inside a pseudoconsole with and without the launch bootstrap.
     try {
       const probe = path.join(root, 'pty-probe.cjs'); await writeFile(probe, 'process.stdout.write("PROBE-READY " + (process.env.ELECTRON_RUN_AS_NODE ?? "cleared") + "\\n"); setTimeout(() => process.exit(0), 300);');
