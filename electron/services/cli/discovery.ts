@@ -29,7 +29,7 @@ export function hostEnvironment(): Record<string, string> {
 export const CLEAR_RUN_AS_NODE = '--import=data:text/javascript,delete%20process.env.ELECTRON_RUN_AS_NODE';
 
 /** Resolve Windows npm shims to JavaScript; never interpolate argv into cmd.exe. */
-export async function npmEntryForShim(shim: string, engine: CLIEngine, architecture: string = process.arch): Promise<Executable> {
+export async function npmEntryForShim(shim: string, engine: CLIEngine, architecture: string = process.arch, node: string | null = null): Promise<Executable> {
   const packageName = engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex';
   const packageRoot = path.join(path.dirname(shim), 'node_modules', ...packageName.split('/'));
   let entry: string;
@@ -54,12 +54,25 @@ export async function npmEntryForShim(shim: string, engine: CLIEngine, architect
       try { if ((await stat(binary)).isFile()) return { file: binary, prefixArgs: [], extraEnv: { CODEX_MANAGED_BY_NPM: '1', CODEX_MANAGED_PACKAGE_ROOT: packageRoot }, displayPath: binary }; } catch { /* Keep the JS fallback for older/fixture packages. */ }
     }
   }
+  // electron.exe is a Windows GUI program: in a pseudoconsole it shows no output at all. npm shims imply an
+  // installed Node.js, a console program, so run the JavaScript entry with it and keep Electron as a fallback.
+  if (node) return { file: node, prefixArgs: [entry], extraEnv: {}, displayPath: shim };
   return { file: process.execPath, prefixArgs: [CLEAR_RUN_AS_NODE, entry], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: shim };
+}
+
+/** The first regular `node.exe` on PATH (Windows only; elsewhere npm shims are runnable scripts). */
+async function findNode(directories: string[]): Promise<string | null> {
+  for (const directory of directories) {
+    const candidate = path.join(directory.replace(/^"|"$/g, ''), 'node.exe');
+    try { if ((await stat(candidate)).isFile()) return candidate; } catch { /* Keep looking. */ }
+  }
+  return null;
 }
 
 export async function findExecutable(engine: CLIEngine, env = hostEnvironment()): Promise<Executable> {
   let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+  let node: Promise<string | null> | null = null;
   // Windows cannot run extensionless files (npm/pnpm/yarn put POSIX sh shims there), so never pick one.
   const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat'] : [''];
   for (const directory of (env[pathKey] ?? '').split(path.delimiter).filter(Boolean)) {
@@ -70,7 +83,10 @@ export async function findExecutable(engine: CLIEngine, env = hostEnvironment())
         if (!(await stat(candidate)).isFile()) continue;
       } catch { continue; }
       // A yarn/pnpm shim earlier on PATH must not hide a working executable later on PATH.
-      if (/\.(cmd|bat)$/i.test(candidate)) { try { return await npmEntryForShim(candidate, engine); } catch (error) { shimError ??= error; continue; } }
+      if (/\.(cmd|bat)$/i.test(candidate)) {
+        node ??= findNode((env[pathKey] ?? '').split(path.delimiter).filter(Boolean));
+        try { return await npmEntryForShim(candidate, engine, process.arch, await node); } catch (error) { shimError ??= error; continue; }
+      }
       return { file: candidate, prefixArgs: [], extraEnv: {}, displayPath: candidate };
     }
   }
