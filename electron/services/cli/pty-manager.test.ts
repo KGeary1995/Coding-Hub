@@ -75,6 +75,15 @@ describe('PTY lifecycle and IPC ownership', () => {
     expect(events.map((event) => event.type)).toEqual(['started', 'data', 'exit']);
     expect(events[1]).toMatchObject({ data: 'last-output', runId: run.runId });
   });
+  it('sends output drawn at the old size before resizing, so every follower sees it first', async () => {
+    const { manager, processes, events } = fixture();
+    const run = await manager.start(7, request());
+    processes[0].data('drawn-at-80');
+    expect(events.map((event) => event.type)).toEqual(['started']);
+    manager.resize(7, { ...runReference(run), cols: 120, rows: 40 });
+    expect(events.at(-1)).toMatchObject({ type: 'data', data: 'drawn-at-80' });
+  });
+
   it('rejects input from another owner and stale references after restart', async () => {
     const { manager } = fixture();
     const first = await manager.start(7, request());
