@@ -56,7 +56,7 @@ Conversation resume uses the installed CLI's advertised resume support and recor
 
 ## Design workspace and AI coaching (v1.5.0)
 
-**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. Archive HTML is static; use the new approved live preview window for JavaScript applications. Claude Design/cloud history is not synced automatically. Import exported HTML or screenshots from those tools when available.
+**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. Archive HTML is static; use the new approved live preview window for JavaScript applications. To work with Claude Design, use the **Claude Design** section (see below), or import exported HTML or screenshots.
 
 **AI coaching** shows local usage trends, token totals, configured-price estimates, and heuristic suggestions. Add curated prompt examples and record successful/partial/failed outcomes; no full session logs are mined automatically. Select up to five examples and review the complete coaching report. Nothing is sent to a model by opening this screen or preparing a report.
 
@@ -144,13 +144,32 @@ Saving with no projects selected stores the rule draft locally. Clearing the edi
 
 These rules are real project instructions, not a guarantee of model compliance. Higher-priority engine instructions, nested project files, and CLI permissions still apply. Resolve contradictory instructions and verify results. Tests, hooks, permissions, and CI provide mechanical enforcement when required. Rules do not automatically commit, deploy, or change permission settings.
 
+## Automatic shared memory
+
+Every Claude Code and Codex session started in Coding Hub gets shared project memory automatically, in every project, with no changes to project files. Turn it off in **Settings → Automatic shared memory for every project**.
+
+- **At launch** the session receives the project's most recent handoff notes (up to about 6,000 characters, newest first, labelled as history rather than instructions) and the `coding-hub-memory` tools **read_memory** and **write_handoff**. Claude Code gets them through `--append-system-prompt` and `--mcp-config`; Codex through `--config developer_instructions` and `--config mcp_servers.…`. Any `developer_instructions` already set in your Codex configuration are kept and come first.
+- **When the session ends** Coding Hub writes a summary note: the files that changed during the session (from `git status`), commits made, and the agent's last message. Sessions that changed nothing and produced no reply are skipped. Agents can still write fuller handoffs with **write_handoff**.
+- **Project keys are automatic.** Clones and worktrees of the same Git remote share one key on every computer (for example `app-1a2b3c4d5e`); unrelated folders with the same name stay separate. **Shared memory** shows the key for the selected project.
+- Applies only to sessions started in Coding Hub. For CLIs run from other terminals, or for teammates who clone the repository, use the project installation below. When a project already has `coding-hub-memory` installed, sessions use that server instead of adding a second copy.
+
+## Claude Design
+
+Claude Design runs on claude.ai; Claude Code connects it to a project. **Design workspace → Claude Design** opens a Claude Code tile in the current project for each action. Start the tile, finish any sign-in or trust prompts, then press the tile's send button.
+
+- **Bring a design into code** sends `/design import`, which pulls a Claude Design project into the working directory.
+- **Sync design system** sends `/design-sync`, so Claude Design builds with the project's real components.
+- **Import handoff bundle (.zip)** or **Import handoff folder** takes a bundle downloaded with Claude Design's *Send to local coding agent*. It is copied into `design-handoff/<name>/` in the project (never overwriting an earlier import), its main HTML or screenshot is saved in the design archive with local stylesheets inlined, and a Claude tile is prepared with a request to build it. ZIP64 and encrypted archives are not supported; extract them and import the folder.
+
+These commands need Claude Code signed in with a claude.ai Pro, Max, Team or Enterprise account (not an API key); the first use opens the browser to authorize Claude Design. Coding Hub does not call Claude Design itself.
+
 ## Shared Google Drive memory
 
 The default shared folder is **`G:\My Drive\Coding Hub`**, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Coding Hub.
 
 1. Confirm **Settings → Local Drive folder** points to the actual synced/mounted folder. Save preferences if you change it.
 2. Open your project, then open **Shared memory**. Use the same **shared project key** on every desktop participating in that project's handoffs. Different project keys keep notes separate.
-3. Use **Enable memory for both CLIs** and review the changes, then **Install local memory server**. This adds a `coding-hub-memory` entry to project `.mcp.json` and `.codex/config.toml`, and appends marked instructions to `CLAUDE.md` and `AGENTS.md`. Existing files receive private backups. Existing server entries with that name are never silently replaced.
+3. Optional (automatic memory covers sessions started in Coding Hub): use **Enable memory for both CLIs** and review the changes, then **Install local memory server**. This adds a `coding-hub-memory` entry to project `.mcp.json` and `.codex/config.toml`, and appends marked instructions to `CLAUDE.md` and `AGENTS.md`. Existing files receive private backups. Existing server entries with that name are never silently replaced.
 4. Restart the CLI sessions. Approve the MCP server / project trust through the CLI's normal controls. The local server exposes **read_memory** and **write_handoff**.
 5. Save a manual handoff or ask the agent to record its decisions, changed files, checks, remaining work, and blockers. The next agent can read those notes through MCP.
 

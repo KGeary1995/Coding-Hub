@@ -132,6 +132,8 @@ export class TelemetryService {
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
+  /** The CLI's own session file for a run, once it has been located. */
+  transcript(runId: string): string | null { return this.watches.get(runId)?.file ?? null; }
   end(runId: string) { const w = this.watches.get(runId); if (w) { clearInterval(w.timer); w.stopped = true; for (let i = 0; i < 8; i++) { const offset = w.offset; this.poll(w); if (w.offset === offset) break; } this.watches.delete(runId); try { fs.rmSync(w.logDir, { recursive: true, force: true }); } catch { /* A locked Windows TUI log can be removed after the next restart. */ } } }
   close() { for (const id of [...this.watches.keys()]) this.end(id); this.database.close(); }
 }

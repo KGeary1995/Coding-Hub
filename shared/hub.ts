@@ -12,6 +12,7 @@ export type HubRequest =
   | { action: 'drive-conflicts'; project: string }
   | { action: 'drive-resolve'; project: string; id: string; localHash: string; remoteHash: string }
   | { action: 'memory-list'; project: string }
+  | { action: 'memory-key'; directory: string }
   | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
   | { action: 'memory-install'; directory: string; project: string }
   | { action: 'usage' }
@@ -25,11 +26,11 @@ export interface MemoryNote { id: string; project: string; title: string; conten
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 export interface UsageRecord { conversationId?: string; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
-export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean }
+export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean }
 export interface DriveStatus { connected: boolean; clientConfigured: boolean; persistent: boolean; folderId: string }
 export interface RulesTargetReference { directory: string; claudeHash: string; codexHash: string }
 export interface RulesTarget extends RulesTargetReference { applied: boolean; error?: string }
 export interface SharedRules { content: string; revision: string; directories: string[]; targets: RulesTarget[] }
-export type HubResponse = MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | { uploaded: number; downloaded: number } | null;
+export type HubResponse = MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
-export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, prices: [] };
+export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };

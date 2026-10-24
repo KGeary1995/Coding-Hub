@@ -14,6 +14,8 @@ import { LivePreview } from './services/workbench/live-preview';
 import { z } from 'zod';
 import { CoachingService } from './services/coaching/service';
 import { DesignArchive } from './services/design/archive';
+import { HandoffImport } from './services/design/handoff';
+import type { DesignSnapshot } from '../shared/design';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
@@ -38,6 +40,7 @@ import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { TelemetryService } from './services/hub/telemetry';
+import { AutoMemory } from './services/hub/auto-memory';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
@@ -60,6 +63,7 @@ let updates: UpdateService | null = null;
 let projectChecks: ProjectChecks | null = null;
 let storage: WorkspaceStorage | null = null;
 let hub: HubService | null = null;
+let autoMemory: AutoMemory | null = null;
 let storageFailure = 'Local storage is unavailable. Check access to ~/.coding-hub.';
 let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
@@ -77,6 +81,11 @@ const manager = new PtyManager((owner, event) => {
     if (event.type === 'data') storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
+  if (event.type === 'exit') {
+    // Read the transcript location before telemetry forgets the run.
+    const transcript = hub?.telemetry?.transcript(event.runId) ?? null;
+    void autoMemory?.finish(event.runId, transcript).catch(() => hostHealth?.record('auto-memory-summary-failed'));
+  }
   if (event.type === 'exit') try { hub?.telemetry?.end(event.runId); } catch { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
 }, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
@@ -84,6 +93,8 @@ const manager = new PtyManager((owner, event) => {
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
+  // Last: Claude's --mcp-config takes a list of values.
+  autoMemory?.prepare(run, config.model, info, launch);
 }, onStarted: (run, config, owner) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
@@ -223,11 +234,35 @@ else app.whenReady().then(() => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
   } catch { /* Live sessions remain available without optional storage integrations. */ }
+  if (hub) {
+    const memoryHub = hub;
+    autoMemory = new AutoMemory({
+      memory: memoryHub.memory,
+      enabled: () => { try { return memoryHub.preferences().automaticMemory !== false; } catch { return true; } },
+      server: path.join(__dirname, 'services', 'hub', 'memory-server.js'),
+      executable: process.execPath,
+      scratch: path.join(storageRoot, 'auto-memory'),
+      onWrite: (key) => memoryHub.trackProject(key),
+    });
+  }
   const designs = new DesignArchive(storageRoot, async () => {
     const result = await dialog.showOpenDialog(window!, { title: 'Save a design preview', properties: ['openFile'], filters: [{ name: 'HTML or screenshots', extensions: ['html', 'htm', 'png', 'jpg', 'jpeg', 'webp'] }] });
     return result.canceled ? null : result.filePaths[0] ?? null;
   }, (bytes) => { const image = nativeImage.createFromBuffer(bytes); const size = image.getSize(); return !image.isEmpty() && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 40000000; });
-  handle(IPC_CHANNELS.designs, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return designs.execute(payload); });
+  const handoffs = new HandoffImport(path.join(storageRoot, 'handoff-scratch'), async (source) => {
+    const result = source === 'zip'
+      ? await dialog.showOpenDialog(window!, { title: 'Import a Claude Design handoff bundle', properties: ['openFile'], filters: [{ name: 'ZIP bundle', extensions: ['zip'] }] })
+      : await dialog.showOpenDialog(window!, { title: 'Import an extracted Claude Design handoff folder', properties: ['openDirectory'] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  }, async (title, notes, projectDirectory, file) => {
+    const preview = await designs.execute({ action: 'import', title, notes, projectDirectory }, file);
+    return preview && 'snapshot' in preview ? (preview.snapshot as DesignSnapshot) : null;
+  });
+  handle(IPC_CHANNELS.designs, (_owner, payload) => {
+    if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.');
+    if (payload && typeof payload === 'object' && 'action' in payload && payload.action === 'handoff-import') return handoffs.execute(payload);
+    return designs.execute(payload);
+  });
   // A folder is in use while a session runs in it or a saved tile is bound to it.
   const directoryInUse = (directory: string) => {
     if (manager.usesDirectory(directory)) return true;

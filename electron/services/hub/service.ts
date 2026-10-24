@@ -5,11 +5,12 @@ import { DEFAULT_PREFERENCES, type HubPreferences, type HubRequest, type HubResp
 import { ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService, projectSchema } from './memory';
 import { DriveMirror } from './drive';
+import { projectMemoryKey } from './auto-memory';
 import { HubError } from '../cli/engine-adapter';
 import type { TelemetryService } from './telemetry';
 import { RulesService } from './rules';
 const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
-export const preferencesSchema = z.object({ folderId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/), driveDirectory: z.string().max(4096), terminalFontSize: z.number().int().min(10).max(22), terminalWebGL: z.boolean().optional(), prices: z.array(z.object({ model: z.string().min(1).max(120), input: z.number().finite().min(0).max(10000), output: z.number().finite().min(0).max(10000), cacheRead: z.number().finite().min(0).max(10000), cacheWrite: z.number().finite().min(0).max(10000) }).strict()).max(100) }).strict();
+export const preferencesSchema = z.object({ folderId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/), driveDirectory: z.string().max(4096), terminalFontSize: z.number().int().min(10).max(22), terminalWebGL: z.boolean().optional(), automaticMemory: z.boolean().optional(), prices: z.array(z.object({ model: z.string().min(1).max(120), input: z.number().finite().min(0).max(10000), output: z.number().finite().min(0).max(10000), cacheRead: z.number().finite().min(0).max(10000), cacheWrite: z.number().finite().min(0).max(10000) }).strict()).max(100) }).strict();
 export const hubRequestSchema = z.discriminatedUnion('action', [
   // The registry holds up to 200 folders (100 projects plus prepared coaching folders) and the panel adds workspace folders.
   z.object({ action: z.literal('rules-read'), directories: z.array(dir).max(250) }).strict(),
@@ -22,6 +23,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('drive-conflicts'), project: projectSchema }).strict(),
   z.object({ action: z.literal('drive-resolve'), project: projectSchema, id, localHash: z.string().regex(/^[a-f0-9]{64}$/), remoteHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ action: z.literal('memory-list'), project: projectSchema }).strict(),
+  z.object({ action: z.literal('memory-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
   z.object({ action: z.literal('memory-install'), project: projectSchema, directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
@@ -35,6 +37,8 @@ export class HubService {
   readonly drive: DriveMirror;
   readonly preferencesPath: string;
   private projects = new Set<string>();
+  /** Keeps a project's notes in the 30-second Drive sync and syncs it now (offline folders retry later). */
+  trackProject(project: string) { this.projects.add(project); try { this.drive.sync(project); } catch { /* Retried by the interval. */ } }
   private interval: ReturnType<typeof setInterval>;
   telemetry: TelemetryService | null = null;
   constructor(root: string) {
@@ -56,6 +60,7 @@ export class HubService {
       case 'toggle-server': case 'remove-server': case 'toggle-extension': this.configs.mutate(request); return null;
       case 'add-server': this.configs.add(request); return null;
       case 'memory-list': this.projects.add(request.project); return this.memory.list(request.project);
+      case 'memory-key': return projectMemoryKey(request.directory);
       case 'memory-write': { this.projects.add(request.project); const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); try { this.drive.sync(request.project); } catch { /* Offline notes sync on next retry. */ } return note; }
       case 'memory-install': this.memory.install(request.directory, request.project, path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       case 'preferences': return this.preferences();
