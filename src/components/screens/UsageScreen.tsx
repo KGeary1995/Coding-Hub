@@ -4,7 +4,7 @@ import type { UsageRecord } from '../../../shared/hub';
 import { useHubStore, dollars } from '../../state/hub-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState } from '../../state/channel-state';
-import { USAGE_WINDOWS, axisMax, contextPeak, dailySeries, delta, inWindow, median, usageTotals, type UsageWindow } from '../../state/usage-summary';
+import { USAGE_WINDOWS, axisMax, lastContext, dailySeries, delta, inWindow, median, usageTotals, type UsageWindow } from '../../state/usage-summary';
 import { compact } from '../shell/StatusBar';
 
 type EngineFilter = 'all' | 'claude' | 'codex';
@@ -30,7 +30,7 @@ export function UsageScreen() {
   const series = useMemo(() => dailySeries(current, days, now), [current, days, now]);
   const top = axisMax(Math.max(...series.map((day) => day.claude + day.codex)));
   const focus = series[hovered ?? series.length - 1];
-  const peaks = current.map(contextPeak).filter((value): value is number => value !== null);
+  const contexts = current.map(lastContext).filter((value): value is number => value !== null);
   const byEngine = (['claude', 'codex'] as const).map((name) => { const records = current.filter((record) => record.engine === name); const sum = usageTotals(records); return { name, tokens: sum.input + sum.output, cost: sum.cost, unpriced: sum.unpriced, runs: records.length }; });
   const engineTotal = Math.max(1, byEngine.reduce((sum, item) => sum + item.tokens, 0));
   const windowLabel = days === 1 ? 'today' : `${days} d`;
@@ -45,7 +45,7 @@ export function UsageScreen() {
     { label: 'input tokens', value: compact(totals.input), sub: change(totals.input, prior.input) },
     { label: 'output tokens', value: compact(totals.output), sub: totals.reasoning ? `incl. ${compact(totals.reasoning)} reasoning` : change(totals.output, prior.output) },
     { label: 'cache reads', value: compact(totals.cached), sub: 'not counted in totals' },
-    { label: 'sessions', value: String(totals.sessions), sub: `${totals.overContext} hit 80% context` },
+    { label: 'sessions', value: String(totals.sessions), sub: `${totals.overContext} at 80%+ context, last report` },
     { label: 'estimated cost', value: dollars(totals.cost), sub: totals.unpriced ? `${totals.unpriced} unpriced · configured rates` : 'configured rates' },
   ];
   return <section className="tr-usage">
@@ -78,25 +78,25 @@ export function UsageScreen() {
         <h2>By engine · {windowLabel}</h2>
         <div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} style={{ flexGrow: item.tokens, background: `var(--tr-ch-${item.name})` }} />)}</div>
         {byEngine.map((item) => <div key={item.name} className="tr-side-row"><span><i className="tr-engine-square" style={{ background: `var(--tr-ch-${item.name})` }} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}
-        <h2>Context peaks</h2>
-        <div className="tr-side-row"><span>Sessions over 80%</span><span className={`tnum ${totals.overContext ? 'hot' : ''}`}>{totals.overContext}</span></div>
-        <div className="tr-side-row"><span>Median peak</span><span className="tnum">{percent(median(peaks))}</span></div>
+        <h2>Context at last report</h2>
+        <div className="tr-side-row"><span>Sessions at 80% or more</span><span className={`tnum ${totals.overContext ? 'hot' : ''}`}>{totals.overContext}</span></div>
+        <div className="tr-side-row"><span>Median</span><span className="tnum">{percent(median(contexts))}</span></div>
         <p className="tr-side-note">Only Codex reports its context window.</p>
       </aside>
     </div>
     <div className="tr-usage-table-wrap">
       <table className="usage-table tr-table">
-        <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th>Context peak</th><th className="num">Cost</th></tr></thead>
+        <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>
         <tbody>{[...current].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map((record) => {
           const index = sessions.findIndex((session) => session.runId === record.runId); const session = sessions[index];
-          const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const peak = contextPeak(record);
+          const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const context = lastContext(record);
           return <tr key={record.runId}>
             <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{session ? `CH${index + 1}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
             <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}</td>
             <td className="tr-cell-mono">{record.model}</td>
             <td className="tr-cell-mono">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
             <td className="num">{compact(record.input)}</td><td className="num">{compact(record.output)}</td><td className="num">{compact(record.cached)}</td>
-            <td>{peak === null ? <span className="tr-cell-mono dim">—</span> : <span className="tr-peak"><span className={`tr-peak-bar ${peak >= LIMIT_THRESHOLD ? 'hot' : ''}`}><i style={{ width: `${Math.min(100, peak * 100)}%` }} /></span><span className="tnum">{percent(peak)}</span></span>}</td>
+            <td>{context === null ? <span className="tr-cell-mono dim">—</span> : <span className="tr-peak"><span className={`tr-peak-bar ${context >= LIMIT_THRESHOLD ? 'hot' : ''}`}><i style={{ width: `${Math.min(100, context * 100)}%` }} /></span><span className="tnum">{percent(context)}</span></span>}</td>
             <td className="num">{dollars(record.cost)}</td>
           </tr>;
         })}</tbody>

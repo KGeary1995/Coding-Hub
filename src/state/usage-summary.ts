@@ -19,8 +19,11 @@ export function inWindow(records: UsageRecord[], days: number, now = new Date(),
   return records.filter((record) => { const at = new Date(record.timestamp).getTime(); return at >= from && at < to; });
 }
 
-/** Share of the context window a run reached, when the CLI reported one. */
-export const contextPeak = (record: UsageRecord) => record.context && record.context.limit > 0 ? record.context.used / record.context.limit : null;
+/**
+ * Share of the context window at the run's latest report, when the CLI reported one. Codex can compact its context, so
+ * this is where the run ended up, not necessarily the most it used.
+ */
+export const lastContext = (record: UsageRecord) => record.context && record.context.limit > 0 ? record.context.used / record.context.limit : null;
 
 export interface UsageTotals { input: number; output: number; cached: number; reasoning: number | null; sessions: number; overContext: number; cost: number | null; unpriced: number }
 
@@ -32,7 +35,7 @@ export function usageTotals(records: UsageRecord[]): UsageTotals {
     totals.input += record.input; totals.output += record.output; totals.cached += record.cached;
     if (record.reasoning !== null) reasoning = (reasoning ?? 0) + record.reasoning;
     if (record.cost === null) unpriced++; else cost = (cost ?? 0) + record.cost;
-    if ((contextPeak(record) ?? 0) >= 0.8) totals.overContext++;
+    if ((lastContext(record) ?? 0) >= 0.8) totals.overContext++;
   }
   return { ...totals, reasoning, cost, unpriced };
 }

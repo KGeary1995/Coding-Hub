@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore } from '../../state/hub-store';
@@ -15,11 +15,15 @@ export function Toasts() {
   const usage = useHubStore((state) => state.usage);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const alerts = channelAlerts(sessions, usage).filter((alert) => alert.state !== 'limit');
-  const keyed = alerts.map((alert) => {
+  const active = alerts.map((alert) => {
     const session = sessions.find((item) => item.id === alert.sessionId)!;
-    // Keyed by the request or run, so dismissing one notice never hides the next one for the same channel.
     return { alert, session, key: `${alert.sessionId}:${alert.state}:${alert.state === 'waiting' ? session.attention?.at : session.runId}` };
-  }).filter(({ key }) => !dismissed.includes(key));
+  });
+  const activeKeys = active.map(({ key }) => key).join('\n');
+  // A dismissal lasts only while its notice is current: once the channel moves on (answered, retried, closed), it is
+  // forgotten, so the next request or failure shows again even when a launch failed before it had a run ID.
+  useEffect(() => { setDismissed((current) => { const kept = current.filter((key) => activeKeys.split('\n').includes(key)); return kept.length === current.length ? current : kept; }); }, [activeKeys]);
+  const keyed = active.filter(({ key }) => !dismissed.includes(key));
   if (!keyed.length) return null;
   return <section className="tr-toasts" aria-label="Channel notifications" aria-live="polite">
     {keyed.map(({ alert, session, key }) => {

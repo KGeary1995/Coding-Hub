@@ -117,6 +117,13 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await (await tileControl(page, 'Engine settings for session 1')).click();
     assert.equal(await first.getByLabel('claude model', { exact: true }).isDisabled(), true);
     await (await tileControl(page, 'Engine settings for session 1')).click();
+    // A file found through the command menu opens selected in Files.
+    await page.keyboard.press('Control+Shift+P');
+    await page.getByLabel('Search commands', { exact: true }).fill('/steady');
+    await page.getByRole('option').filter({ hasText: 'main.ts' }).first().waitFor();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('[aria-label="File contents"]')?.textContent.includes('"working"'));
+    assert.match(await page.locator('.file-preview .code-heading h2').textContent(), /src\/main\.ts$/);
     await openView(page, 'Files');
     await page.getByRole('treeitem', { name: 'Folder src', exact: true }).click();
     await page.getByRole('treeitem', { name: 'File src/main.ts', exact: true }).click();
