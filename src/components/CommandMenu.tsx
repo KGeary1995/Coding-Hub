@@ -60,11 +60,12 @@ export function CommandMenu() {
     window.addEventListener('keydown', trapFocus);
     return () => { window.removeEventListener('keydown', trapFocus); if (previousFocus?.isConnected) previousFocus.focus(); };
   }, [open]);
-  // Project files and memory come from the local search; it reads files, so it waits for a pause in typing.
+  // Project files and memory come from the local search; it reads files, so it waits for a pause in typing. A memory
+  // search skips the project folder, so a large project cannot use up the search's limits before the notes are read.
   useEffect(() => {
     if (!open || !window.codingHub || !searchesFiles(scope, text)) { setHits([]); return; }
     let live = true;
-    const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: rootDirectory, includeOutput: false }).then((result) => { if (live) setHits(result.hits); }).catch(() => { if (live) setHits([]); }); }, 300);
+    const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: scope === 'memory' ? null : rootDirectory, includeOutput: false }).then((result) => { if (live) setHits(result.hits); }).catch(() => { if (live) setHits([]); }); }, 300);
     return () => { live = false; clearTimeout(timer); };
   }, [open, scope, text, rootDirectory]);
   const items = useMemo(() => {
