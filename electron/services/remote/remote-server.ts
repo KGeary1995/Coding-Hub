@@ -43,6 +43,7 @@ export class RemoteServer {
   private attention = new Map<string, { runId: string; message: string }>();
   private pairing: { code: string; expires: number; attempts: number } | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT) {}
 
@@ -63,7 +64,7 @@ export class RemoteServer {
     }
   }
   async stop() {
-    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null;
+    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
     const server = this.server; this.server = null; this.pairing = null;
     if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
@@ -104,6 +105,14 @@ export class RemoteServer {
     if (event.type === 'attention') { this.attention.set(event.sessionId, { runId: event.runId, message: event.message }); this.broadcastChannels(); return; }
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
+  /**
+   * The saved workspace changed (channels added, removed, renamed or reordered). Saves come often, so phones are told
+   * shortly after, and only when the channel list they see is different.
+   */
+  channelsChanged() {
+    if (this.channelsTimer || !this.streams.size) return;
+    this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
+  }
   /** The person typed on the desktop: a waiting prompt is answered there. */
   personInput(sessionId: string, data: string) { if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels(); }
 
@@ -114,7 +123,7 @@ export class RemoteServer {
       return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null };
     });
   }
-  private broadcastChannels() { if (!this.streams.size) return; const payload = `event: channels\ndata: ${JSON.stringify(this.channels())}\n\n`; for (const stream of this.streams) this.write(stream, payload); }
+  private broadcastChannels() { if (!this.streams.size) return; this.sentChannels = JSON.stringify(this.channels()); const payload = `event: channels\ndata: ${this.sentChannels}\n\n`; for (const stream of this.streams) this.write(stream, payload); }
   private write(stream: Stream, text: string) {
     // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay.
     if (stream.response.writableLength > STREAM_BUFFER) { stream.response.destroy(); this.streams.delete(stream); return; }

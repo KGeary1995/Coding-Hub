@@ -425,7 +425,7 @@ else app.whenReady().then(() => {
   });
   handle(IPC_CHANNELS.saveWorkspace, (_owner, payload) => {
     if (!workspaceLoaded) throw new HubError('WORKSPACE_NOT_LOADED', 'Load the saved workspace before saving changes.');
-    localStorage().save(payload); return null;
+    localStorage().save(payload); remote?.channelsChanged(); return null;
   });
   handle(IPC_CHANNELS.listHistory, () => localStorage().history());
   handle(IPC_CHANNELS.readRunLog, (_owner, payload) => localStorage().readLog(payload));
