@@ -400,6 +400,13 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await restored.waitForFunction(() => document.querySelectorAll('.memory-history .extension-row').length === 2);
     const revisions = await restored.evaluate(() => window.codingHub.hub({ action: 'memory-list', project: 'coding-hub' }));
     assert.equal(revisions.ok, true); assert.ok(revisions.value.some((note) => note.supersedes));
+    // A note under the default key, opened from another view, stays selected once Shared memory loads.
+    await openView(restored, 'Files');
+    await restored.keyboard.press('Control+Shift+P');
+    await restored.getByLabel('Search commands', { exact: true }).fill('#Revised handoff from desktop');
+    await restored.getByRole('option').first().waitFor();
+    await restored.keyboard.press('Enter');
+    await restored.waitForFunction(() => document.querySelector('.memory-history .hub-preview pre')?.textContent === 'Revised handoff from desktop smoke.');
     assert.ok(restoredUsage.value.every((usage) => usage.source && usage.confidence === 'reported'));
     await restored.getByRole('button', { name: 'Projects', exact: true }).click();
     await restored.getByLabel('Existing folder path', { exact: true }).fill(projects[0]);
