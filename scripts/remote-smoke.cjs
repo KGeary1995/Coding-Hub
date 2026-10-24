@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView } = require('./lib/navigate.cjs');
+const { openView, tileControl } = require('./lib/navigate.cjs');
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
 // its approval prompt from the phone, and remove the phone. Tailscale is not installed here; the page is reached on
 // loopback, which the remote also accepts.
@@ -66,6 +66,12 @@ const { openView } = require('./lib/navigate.cjs');
     await tile.locator('.session-attention').waitFor({ state: 'detached' });
     await phone.locator('#waiting').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.tr-toast.waiting').count(), 0, 'Answering on the phone clears the desktop notice');
+    // Restarting the channel on the computer starts the phone's view afresh, and typing reaches the new run.
+    await (await tileControl(tile, 'Stop')).click();
+    await (await tileControl(tile, 'Restart')).click();
+    await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
+    await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
 
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');

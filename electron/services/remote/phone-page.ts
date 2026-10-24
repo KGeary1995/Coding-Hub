@@ -35,7 +35,7 @@ pre{height:52vh;overflow:auto;margin:0;padding:10px;background:#070a0a;border:1p
 
 const JS = String.raw`(() => {
   const KEY = 'trace-remote-token'; const $ = (id) => document.getElementById(id);
-  let token = localStorage.getItem(KEY); let channels = []; let current = null; let stream = null;
+  let token = localStorage.getItem(KEY); let channels = []; let current = null; let run = null; let stream = null;
   const show = (id) => { for (const section of ['pair', 'channels', 'channel']) $(section).hidden = section !== id; };
   const strip = (text) => text.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\r(?!\n)/g, '');
   const api = async (path, options = {}) => {
@@ -54,6 +54,8 @@ const JS = String.raw`(() => {
       const item = document.createElement('li'); item.append(button); list.append(item);
     }
     const selected = channels.find((item) => item.sessionId === current);
+    // A restarted channel is a new process: start its output afresh, as the desktop terminal does.
+    if (selected && selected.runId && selected.runId !== run) { run = selected.runId; $('output').textContent = ''; }
     if (selected) { $('channel-title').textContent = 'CH' + selected.channel + ' · ' + selected.title; $('waiting').hidden = !selected.attention; $('waiting').textContent = selected.attention ? 'Waiting for you: ' + selected.attention : ''; }
   }
   function append(text) { const output = $('output'); const atEnd = output.scrollTop + output.clientHeight >= output.scrollHeight - 20; output.textContent = (output.textContent + strip(text)).slice(-200000); if (atEnd) output.scrollTop = output.scrollHeight; }
@@ -70,18 +72,18 @@ const JS = String.raw`(() => {
           const type = (/^event: (.*)$/m.exec(block) || [])[1]; const data = (/^data: (.*)$/m.exec(block) || [])[1]; if (!type || !data) continue;
           const message = JSON.parse(data);
           if (type === 'channels') { channels = message; renderChannels(); }
-          else if (type === 'replay' && message.sessionId === current) { $('output').textContent = ''; append(message.data); }
-          else if (type === 'output' && message.sessionId === current) append(message.data);
+          else if (type === 'replay' && message.sessionId === current) { run = message.runId; $('output').textContent = ''; append(message.data); }
+          else if (type === 'output' && message.sessionId === current && message.runId === run) append(message.data);
         }
       }
     } catch (error) { if (controller.signal.aborted) return; }
     $('state').textContent = 'reconnecting…'; if (stream === controller) setTimeout(() => { if (stream === controller) listen(); }, 2000);
   }
-  function open(sessionId) { current = sessionId; $('output').textContent = ''; show('channel'); renderChannels(); listen(); }
+  function open(sessionId) { current = sessionId; run = null; $('output').textContent = ''; show('channel'); renderChannels(); listen(); }
   async function send(data) {
     const channel = channels.find((item) => item.sessionId === current); $('send-error').textContent = '';
-    if (!channel || !channel.runId) { $('send-error').textContent = 'This channel is not running. Start it in Trace on your computer.'; return; }
-    try { await api('/api/input', { method: 'POST', body: JSON.stringify({ sessionId: channel.sessionId, runId: channel.runId, data }) }); }
+    if (!channel || !channel.runId || channel.runId !== run) { $('send-error').textContent = 'This channel is not running. Start it in Trace on your computer.'; return; }
+    try { await api('/api/input', { method: 'POST', body: JSON.stringify({ sessionId: channel.sessionId, runId: run, data }) }); }
     catch (error) { $('send-error').textContent = error.message; }
   }
   $('back').onclick = () => { current = null; show('channels'); listen(); };

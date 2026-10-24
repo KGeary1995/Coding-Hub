@@ -62,7 +62,7 @@ export class PtyManager {
     const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
     if (!run || run.finished) return;
     this.flush(run);
-    this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message });
+    this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message, at: new Date().toISOString() });
   }
 
   /** Runs still going, for the phone remote. */

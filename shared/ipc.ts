@@ -43,7 +43,8 @@ export type SessionEvent =
   | ({ type: 'exit'; diagnostic?: string; exitCode: number; signal?: number } & RunReference)
   | ({ type: 'error'; message: string } & RunReference)
   /** The CLI is waiting for the person (for example a permission prompt). Cleared by their next input. */
-  | ({ type: 'attention'; message: string } & RunReference)
+  /** `at` is when the host saw the request, so a later answer from a phone can be ordered against it. */
+  | ({ type: 'attention'; message: string; at: string } & RunReference)
   /** The person typed into the CLI from a paired phone; clears a waiting prompt raised before `at`. */
   | ({ type: 'answered'; at: string } & RunReference);
 

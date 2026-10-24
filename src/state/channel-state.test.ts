@@ -68,15 +68,27 @@ describe('attention in the workspace store', () => {
   it('marks the running run as waiting, clears it on input or exit, and never saves it', () => {
     const state = useWorkspaceStore.getState(); const id = state.sessions[0].id; const snapshot = savedWorkspace();
     state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });
-    state.applyEvent({ type: 'attention', sessionId: id, runId: 'other-run', message: 'stale' });
+    state.applyEvent({ type: 'attention', sessionId: id, runId: 'other-run', message: 'stale', at: new Date().toISOString() });
     expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
-    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'Claude needs your permission to use Bash' });
+    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'Claude needs your permission to use Bash', at: new Date().toISOString() });
     expect(useWorkspaceStore.getState().sessions[0].attention?.message).toBe('Claude needs your permission to use Bash');
     expect(savedWorkspace()).toEqual(snapshot);
     state.clearAttention(id, '2000-01-01T00:00:00.000Z'); expect(useWorkspaceStore.getState().sessions[0].attention?.message).toBe('Claude needs your permission to use Bash');
     state.clearAttention(id, new Date(Date.now() + 1000).toISOString()); expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
-    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'again' });
+    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'again', at: new Date().toISOString() });
     state.applyEvent({ type: 'exit', sessionId: id, runId: 'r1', exitCode: 0 });
     expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
+  });
+  it('orders a phone answer against the time the host saw the prompt, not when the window processed it', () => {
+    const state = useWorkspaceStore.getState(); const id = state.sessions[0].id;
+    state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });
+    // Both events were queued while the window was busy: the prompt at 10:00:00, the answer from the phone at 10:00:05.
+    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'Approve?', at: '2026-10-24T10:00:00.000Z' });
+    state.applyEvent({ type: 'answered', sessionId: id, runId: 'r1', at: '2026-10-24T10:00:05.000Z' });
+    expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
+    // An answer from before a newer prompt leaves that prompt in place.
+    state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'Again?', at: '2026-10-24T10:01:00.000Z' });
+    state.applyEvent({ type: 'answered', sessionId: id, runId: 'r1', at: '2026-10-24T10:00:30.000Z' });
+    expect(useWorkspaceStore.getState().sessions[0].attention?.message).toBe('Again?');
   });
 });

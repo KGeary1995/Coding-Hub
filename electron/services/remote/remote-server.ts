@@ -185,6 +185,8 @@ export class RemoteServer {
     }
     if (request.method === 'POST' && url.pathname === '/api/input') {
       const parsed = inputSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid input.' });
+      // The phone may have been removed while its request body was arriving.
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { this.host.write({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, parsed.data.data); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
