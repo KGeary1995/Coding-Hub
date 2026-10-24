@@ -59,6 +59,8 @@ async function nativeResult(page, method, request) {
     await nativeResult(page, 'hub', { action: 'rules-save', content: 'Run project checks. Preserve APIs. Save a handoff.', revision: rules.revision, targets: rules.targets.map(({ directory, claudeHash, codexHash }) => ({ directory, claudeHash, codexHash })) });
     await nativeResult(page, 'hub', { action: 'memory-install', project: 'upgrade-fixture', directory: project });
     await nativeResult(page, 'hub', { action: 'memory-write', project: 'upgrade-fixture', title: 'Upgrade handoff', content: 'Preserve this note across installation.', author: 'human' });
+    // Preferences are only written once changed; save a non-default one so upgrade and uninstall must keep it.
+    await nativeResult(page, 'hub', { action: 'save-preferences', preferences: { ...await nativeResult(page, 'hub', { action: 'preferences' }), terminalFontSize: 15 } });
     for (const session of initial.workspace.sessions) {
       const run = await nativeResult(page, 'startSession', { sessionId: session.id, cwd: project, config: session.config, cols: 90, rows: 24 });
       await nativeResult(page, 'writeSession', { sessionId: run.sessionId, runId: run.runId, data: 'upgrade-data\r' });
