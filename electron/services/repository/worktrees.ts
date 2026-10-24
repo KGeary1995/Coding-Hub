@@ -56,8 +56,9 @@ export class WorktreeService {
       const directory = fs.realpathSync(record.directory);
       if (directory !== record.directory) throw new HubError('WORKTREE_PATH', 'Worktree path changed. Inspect it before removal.');
       // `git worktree remove` deletes ignored files (.env, local databases, build output), so they count as changes.
-      // Default untracked mode collapses ignored folders (`!! node_modules/`) so large ones stay within the output limit.
-      if (await git(directory, ['status', '--porcelain', '--ignored'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
+      // `normal` collapses ignored folders (`!! node_modules/`) so large ones stay within the output limit; it is
+      // explicit because `status.showUntrackedFiles=no` would otherwise hide untracked files that removal deletes.
+      if (await git(directory, ['status', '--porcelain', '--ignored', '--untracked-files=normal'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
       await git(record.repository, ['worktree', 'remove', record.directory]);
       this.save(records.filter((item) => item.id !== record.id));
       return null;

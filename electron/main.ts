@@ -243,6 +243,7 @@ else app.whenReady().then(() => {
       executable: process.execPath,
       scratch: path.join(storageRoot, 'auto-memory'),
       onWrite: (key) => memoryHub.trackProject(key),
+      refresh: (key) => memoryHub.trackProject(key),
     });
   }
   const designs = new DesignArchive(storageRoot, async () => {
@@ -422,7 +423,9 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
   quitting = true;
-  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
+  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()]))
+    // Stopping sessions starts their memory summaries; let them save before storage closes.
+    .then(() => autoMemory?.drain(10000)).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
     try { modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

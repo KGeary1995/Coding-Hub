@@ -66,6 +66,9 @@ describe('native history and task scope', () => {
     const root = fixture(); const verification = new Verification(root, async () => true); const tasks = new Tasks(root, verification);
     await expect(tasks.execute({ action: 'task-save', title: 'Task', directory: root, sessionId: null, scope: ['src/**'], status: 'done', notes: '', verificationId: null })).rejects.toMatchObject({ code: 'TASK_REVIEW' });
     const record = await tasks.execute({ action: 'task-save', title: 'Task', directory: root, sessionId: null, scope: ['src/**'], status: 'queued', notes: '', verificationId: null }) as any; expect(tasks.list()[0].id).toBe(record.id);
+    // Folder scopes saved before stricter validation (`src/`) stay readable; empty and dot segments are still rejected.
+    await tasks.execute({ action: 'task-save', title: 'Folder', directory: root, sessionId: null, scope: ['src/'], status: 'queued', notes: '', verificationId: null }); expect(tasks.list()).toHaveLength(2);
+    for (const bad of ['src//a.ts', 'src/./a.ts']) await expect(tasks.execute({ action: 'task-save', title: 'Bad', directory: root, sessionId: null, scope: [bad], status: 'queued', notes: '', verificationId: null })).rejects.toThrow();
   });
 });
 describe('verification and experiment evidence', () => {
