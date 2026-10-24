@@ -42,7 +42,17 @@
 
 /* Status bar */
 .app-statusbar.tr-statusbar { height: var(--tr-statusbar-h); min-height: 0; flex: none; display: flex; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; margin: 0; background: var(--tr-surface); border-top: 1px solid var(--tr-line); font: var(--tr-t-meta); color: var(--tr-fg-dim); }
-.tr-sb-cell { display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-right: 1px solid var(--tr-line); background: none; color: inherit; font: inherit; white-space: nowrap; }
+.tr-sb-cell { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-right: 1px solid var(--tr-line); background: none; color: inherit; font: inherit; white-space: nowrap; }
+/* A long project name or alert list shrinks instead of pushing the cells after it off screen. */
+/* The project and save status give way first, so alerts keep their room. */
+.tr-sb-project, .tr-sb-alert, .tr-statusbar .storage-status { flex: 0 1 auto; min-width: 0; }
+.tr-sb-project, .tr-statusbar .storage-status { flex-shrink: 8; }
+.tr-sb-project { max-width: 240px; }
+/* Above the legacy `.app-statusbar span { display: flex }`, which would defeat the ellipsis. */
+.tr-statusbar .tr-sb-text { display: block; }
+.tr-statusbar .tr-sb-text, .tr-statusbar .storage-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tr-statusbar .storage-status { display: block; line-height: calc(var(--tr-statusbar-h) - 1px); }
+.tr-statusbar .tr-spacer { min-width: 0; }
 .tr-spacer + .tr-sb-cell, .tr-statusbar .tr-spacer ~ .tr-sb-cell { border-right: 0; border-left: 1px solid var(--tr-line); }
 button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-sb-channel { color: var(--tr-fg-muted); }
@@ -59,4 +69,5 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 
 /* Narrow windows (and 125% zoom): the command field shrinks, then hides its text. */
 @media (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } .tr-topbar .command-trigger kbd { display: none; } }
+@media (max-width: 1366px) { .tr-statusbar .tr-sb-host { display: none; } }
 @media (max-width: 1180px) { .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-tabs > button, .tr-menu-button { padding: 0 9px; } }

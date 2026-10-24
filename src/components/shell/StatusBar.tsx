@@ -13,7 +13,12 @@ export function StatusBar() {
   const today = todayTotals(usage);
   const alerts = channelAlerts(sessions, usage);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'no project';
-  const jump = (id: string) => { setView('workspace'); requestAnimationFrame(() => focusTerminal(id)); };
+  const jump = (id: string) => {
+    const state = useWorkspaceStore.getState();
+    // Only the isolated tile's terminal is mounted; isolate the requested one instead, as Alt+1–4 does.
+    if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
+    setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
+  };
   return <footer className="app-statusbar tr-statusbar">
     {sessions.map((session, index) => {
       const record = usageFor(session, usage); const state = channelState(session, record); const meta = CHANNEL_STATES[state];
@@ -24,12 +29,12 @@ export function StatusBar() {
         {record && <span className="tnum">{compact(tokens(record))} tok</span>}
       </button>;
     })}
-    <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}>{project}</span>
+    <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>
     <span className="tr-spacer" />
     <span className="tr-sb-cell tnum" title="Input and output tokens reported today, cache excluded">Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
-        <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span> {alerts.map((alert) => alert.text).join(' · ')}
+        <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>
       </button>
       : <span className="tr-sb-cell tr-sb-quiet">no alerts</span>}
     <span className={`tr-sb-cell storage-status ${persistenceStatus}`} data-testid="persistence-status">

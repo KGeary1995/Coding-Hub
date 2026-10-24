@@ -88,6 +88,14 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
+    // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
+    await page.getByRole('button', { name: 'Isolate session 1', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
+    await page.locator('.tr-sb-alert').click();
+    await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
+    await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile')?.textContent.includes('Approval requested'));
+    await page.getByRole('button', { name: 'Restore grid', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 3);
     await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').waitFor({ state: 'detached' });
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
