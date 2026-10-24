@@ -27,7 +27,8 @@
 .tr-segmented > button.active { background: var(--tr-control-on); color: var(--tr-fg-strong); }
 .tr-topbar .command-trigger { margin: 0 4px; width: 300px; min-width: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; background: var(--tr-bg); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); color: var(--tr-fg-dim); font: var(--tr-t-control); }
 .tr-topbar .command-trigger:hover { border-color: var(--tr-line-strong); color: var(--tr-fg); }
-.tr-topbar .command-trigger kbd { margin: 0; border: 0; background: none; padding: 0; font: var(--tr-t-meta); color: var(--tr-fg-faint); }
+.tr-topbar .command-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-topbar .command-trigger kbd { flex: none; white-space: nowrap; margin: 0; border: 0; background: none; padding: 0; font: var(--tr-t-meta); color: var(--tr-fg-faint); }
 .tr-menu { position: relative; }
 .tr-menu-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 4px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); box-shadow: var(--tr-shadow-overlay); }
 .tr-topbar > .tr-menu:nth-last-child(-n + 2) .tr-menu-list { left: auto; right: 0; }
@@ -57,5 +58,5 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-statusbar .storage-status.error { color: var(--tr-st-failed); }
 
 /* Narrow windows (and 125% zoom): the command field shrinks, then hides its text. */
-@media (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } }
+@media (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } .tr-topbar .command-trigger kbd { display: none; } }
 @media (max-width: 1180px) { .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-tabs > button, .tr-menu-button { padding: 0 9px; } }
