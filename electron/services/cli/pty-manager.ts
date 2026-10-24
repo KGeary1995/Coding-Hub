@@ -173,7 +173,8 @@ export class PtyManager {
     run.finished = true;
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
-    const tail = stripVTControlCharacters(run.outputTail).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
+    // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.
+    const tail = stripVTControlCharacters(run.outputTail.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
     // On POSIX a signalled exit reports code 0 plus the signal (OOM kill, crash); that is still a failure.
     const failed = (exitCode !== 0 || Boolean(signal)) && !run.stopping;
     if (failed && exitCode === 0 && signal) exitCode = 128 + signal;

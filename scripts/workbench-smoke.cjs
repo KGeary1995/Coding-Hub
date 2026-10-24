@@ -85,7 +85,10 @@ const { _electron } = require('playwright-core');
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
-    await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.xterm')?.textContent.includes('fixture invalid model'));
+    // A short tile can push the repeated error into scrollback (the Windows console repaints the main screen
+    // first), so scroll back a line at a time until it is in view, as a user would.
+    await tile.locator('.xterm-screen').hover();
+    for (let attempt = 0; !(await tile.locator('.xterm').textContent()).includes('fixture invalid model'); attempt++) { assert.ok(attempt < 60, 'The CLI error never appeared in the terminal'); if (attempt >= 20) await page.mouse.wheel(0, -20); await page.waitForTimeout(100); }
     await tile.getByRole('button', { name: 'Use Codex CLI defaults', exact: true }).click();
     assert.ok((await tile.textContent()).includes('Model and reasoning overrides cleared'));
     await app.close(); app = null;
