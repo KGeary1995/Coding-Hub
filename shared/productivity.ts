@@ -4,7 +4,7 @@ import type { VerificationProfile } from './workbench';
 export interface SessionBudget { tokens: number | null; costUSD: number | null; contextPercent: number }
 export interface PreparedSessionRequest { prompt: string; label: string }
 export interface ConversationLabel { key: string; name: string; pinned: boolean }
-export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules' | 'annotation'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules' | 'design'; snapshotId?: string }
+export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules' | 'annotation'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules' | 'design'; snapshotId?: string; noteId?: string }
 export interface SearchResults { hits: SearchHit[]; limited: boolean }
 export interface ProjectTemplate { id: string; name: string; description: string; workspace: SavedWorkspace; rules: string; checks: Pick<VerificationProfile, 'name' | 'steps' | 'timeoutSeconds'>[]; createdAt: string }
 export interface DeliveryStatus { directory: string; branch: string | null; head: string | null; revision: string; renames: Record<string,string>; staged: string[]; unstaged: string[]; remotes: string[] }

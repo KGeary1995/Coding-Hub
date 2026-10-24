@@ -71,10 +71,10 @@ export class Workflows {
  private log(id: string) { try { return this.storage.readLog({ runId: id }).text; } catch { return 'Recorded output is unavailable.'; } }
  private search(query: string, project: string | null, output: boolean): SearchResults {
   const needle = query.toLowerCase(); const hits: SearchHit[] = []; let visited = 0; let bytes = 0; let limited = false;
-  const add = (kind: SearchHit['kind'], title: string, location: string, text: string, view: SearchHit['view'], snapshotId?: string) => {
+  const add = (kind: SearchHit['kind'], title: string, location: string, text: string, view: SearchHit['view'], snapshotId?: string, noteId?: string) => {
    const index = text.toLowerCase().indexOf(needle); if (index < 0 && !`${title} ${location}`.toLowerCase().includes(needle)) return;
    if (hits.length >= 100) { limited = true; return; }
-   hits.push({ id: randomUUID(), kind, title, location, snippet: text.slice(Math.max(0, index - 100), Math.max(0, index - 100) + 350), view, ...(snapshotId ? { snapshotId } : {}) });
+   hits.push({ id: randomUUID(), kind, title, location, snippet: text.slice(Math.max(0, index - 100), Math.max(0, index - 100) + 350), view, ...(snapshotId ? { snapshotId } : {}), ...(noteId ? { noteId } : {}) });
   };
   const scan = (folder: string, depth: number, callback: (file: string) => void) => {
    if (depth > 10 || visited >= 3000 || bytes >= 8 * 1024 * 1024) { limited = true; return; }
@@ -87,7 +87,7 @@ export class Workflows {
   };
   const read = (file: string) => { try { const size = fs.statSync(file).size; if (size > 131072 || bytes + size > 8 * 1024 * 1024) { limited = true; return ''; } bytes += size; const text = fs.readFileSync(file, 'utf8'); return text.includes('\0') ? '' : text; } catch { return ''; } };
   if (project) { const cwd = directory(project); scan(cwd, 0, (file) => { if (/\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|html|rs|py|toml|yaml|yml|txt|go|cs)$/i.test(file)) add('file', path.basename(file), file, read(file), 'files'); }); }
-  scan(path.join(this.root, 'memory'), 0, (file) => { if (!file.endsWith('.json')) return; try { const note = JSON.parse(read(file)); if (typeof note.content === 'string') add('memory', String(note.title ?? 'Handoff'), String(note.project ?? ''), note.content, 'memory'); } catch {} });
+  scan(path.join(this.root, 'memory'), 0, (file) => { if (!file.endsWith('.json')) return; try { const note = JSON.parse(read(file)); if (typeof note.content === 'string') add('memory', String(note.title ?? 'Handoff'), String(note.project ?? ''), note.content, 'memory', undefined, typeof note.id === 'string' ? note.id : undefined); } catch {} });
   add('rules', 'Shared rules', 'Canonical local document', this.rules.read([]).content, 'rules');
   const annotations = load(this.root, 'design-annotations.json', z.array(z.object({ snapshotId: z.string(), text: z.string() }).passthrough()).max(1000), []);
   for (const item of annotations) add('annotation', 'Design annotation', item.snapshotId, item.text, 'design', item.snapshotId);
