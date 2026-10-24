@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
+import { exitNotice } from '../../shared/terminal-input';
 
 interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void> }
 const terminals = new Map<string, TerminalEntry>();
@@ -105,9 +106,7 @@ export function routeTerminalEvent(event: SessionEvent) {
     entry.run = null;
     entry.terminal.options.disableStdin = true;
     entry.terminal.options.cursorBlink = false;
-    // Failure details may have been drawn in Codex's alternate screen. Repeat
-    // the bounded diagnostic after leaving it so the last error stays visible.
-    entry.terminal.write(`\x1b[?1049l\x1b[?25h\x1b[0m\r\n\x1b[2m[Process exited · code ${event.exitCode}${event.signal ? ` · signal ${event.signal}` : ''}]\x1b[0m\r\n${event.diagnostic ? event.diagnostic.replace(/\r?\n/g, '\r\n') + '\r\n' : ''}`);
+    entry.terminal.write(exitNotice(event.exitCode, event.signal, event.diagnostic));
   }
 }
 

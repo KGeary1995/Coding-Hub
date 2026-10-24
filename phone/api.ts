@@ -33,7 +33,9 @@ export const unpair = () => api('/api/unpair', { method: 'POST' }).finally(() =>
 
 export type StreamEvent =
   | { type: 'channels'; data: RemoteChannel[] }
-  | { type: 'replay' | 'output'; data: { sessionId: string; runId: string; data: string } }
+  | { type: 'output'; data: { sessionId: string; runId: string; data: string } }
+  /** The channel's screen as it is now, at the size it is drawn at. */
+  | { type: 'replay'; data: { sessionId: string; runId: string; data: string; cols: number; rows: number } }
   | { type: 'resize'; data: { sessionId: string; runId: string; cols: number; rows: number } };
 
 /**
