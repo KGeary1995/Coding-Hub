@@ -33,6 +33,16 @@ it('refuses to remove a worktree whose only contents are ignored files', async (
   await expect(service.execute({ action: 'worktree-remove', id: tree.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
   expect(readFileSync(path.join(tree.directory, '.env'), 'utf8')).toBe('SECRET=1');
 });
+it('refuses removal of untracked files even when Git is configured to hide them', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });
+  git('init'); writeFileSync(path.join(repository, 'app.txt'), 'committed'); git('add', '.'); git('commit', '-m', 'baseline'); git('config', 'status.showUntrackedFiles', 'no');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  const tree = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  writeFileSync(path.join(tree.directory, 'important.txt'), 'keep');
+  await expect(service.execute({ action: 'worktree-remove', id: tree.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
+  expect(readFileSync(path.join(tree.directory, 'important.txt'), 'utf8')).toBe('keep');
+});
 it('drops a record whose worktree was removed outside the app and refuses large ignored folders as dirty', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
   const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository });

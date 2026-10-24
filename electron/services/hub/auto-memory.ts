@@ -116,7 +116,7 @@ function codexInstructions(cwd: string, context: string): string {
 }
 
 interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void> }
-export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void }
+export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void }
 
 /**
  * Gives every Coding Hub session the project's shared memory without editing project files:
@@ -125,6 +125,7 @@ export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boole
  */
 export class AutoMemory {
   private runs = new Map<string, Tracked>();
+  private pending = new Set<Promise<MemoryNote | null>>();
   constructor(private options: AutoMemoryOptions) {}
 
   /** True when the project already installed the server itself, so a second copy would clash. */
@@ -140,7 +141,12 @@ export class AutoMemory {
   prepare(run: RunningSession, model: string, info: EngineInfo, launch: { args: string[] }) {
     if (!this.options.enabled()) return;
     let key: string; let context: string;
-    try { key = projectMemoryKey(run.cwd); context = memoryContext(key, this.options.memory.list(key)); } catch { return; }
+    try {
+      key = projectMemoryKey(run.cwd);
+      // Pull newer handoffs from other computers first; offline Drive leaves the local notes.
+      try { this.options.refresh?.(key); } catch { /* Local notes only. */ }
+      context = memoryContext(key, this.options.memory.list(key));
+    } catch { return; }
     const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } };
     const extra: string[] = [];
     if (run.engine === 'claude') {
@@ -169,7 +175,15 @@ export class AutoMemory {
   async settled() { await Promise.all([...this.runs.values()].map((run) => run.ready)); }
 
   /** Writes the end-of-session summary. Returns the note, or null when the session left nothing to record. */
-  async finish(runId: string, transcript: string | null): Promise<MemoryNote | null> {
+  /** Writes the session summary. Shutdown waits for pending summaries with drain(). */
+  finish(runId: string, transcript: string | null): Promise<MemoryNote | null> {
+    const work = this.summarize(runId, transcript); this.pending.add(work);
+    void work.catch(() => {}).finally(() => this.pending.delete(work));
+    return work;
+  }
+  /** Waits up to `limit` milliseconds for summaries of sessions that ended while the app closes. */
+  async drain(limit: number) { await Promise.race([Promise.allSettled([...this.pending]), new Promise((resolve) => setTimeout(resolve, limit).unref?.())]); }
+  private async summarize(runId: string, transcript: string | null): Promise<MemoryNote | null> {
     const tracked = this.runs.get(runId); if (!tracked) return null; this.runs.delete(runId);
     try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder later. */ }
     if (!this.options.enabled()) return null;

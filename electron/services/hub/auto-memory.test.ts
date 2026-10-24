@@ -63,6 +63,15 @@ describe('launch context', () => {
     expect(codex.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Earlier decision');
     expect(git(project, 'status', '--porcelain')).toBe('');
   });
+  it('pulls newer shared notes before building the launch context and starts without them when sync fails', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
+    const synced: string[] = [];
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), refresh: (project) => { synced.push(project); memory.write(project, 'From another computer', 'Synced before launch.', 'codex'); } }));
+    const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch);
+    expect(synced).toEqual([key]); expect(launch.args[launch.args.indexOf('--append-system-prompt') + 1]).toContain('Synced before launch.');
+    const offline = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), refresh: () => { throw new Error('Drive offline'); } }));
+    const local = { args: [] as string[] }; offline.prepare(run('claude', project), '', info('claude'), local); expect(local.args).toContain('--append-system-prompt');
+  });
   it('skips the server when the project installed it and does nothing when switched off', () => {
     const root = temp(); const project = repository(root, 'project'); fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': { command: 'x' } } }));
     const memory = new MemoryService(path.join(root, 'memory')); let enabled = true;
@@ -93,5 +102,13 @@ describe('session summaries', () => {
     expect(written).toEqual([projectMemoryKey(project)]); expect(fs.existsSync(path.join(root, 'scratch', `${active.runId}.mcp.json`))).toBe(false);
     const idle = run('codex', project); auto.prepare(idle, '', info('codex'), { args: [] }); await new Promise((resolve) => setTimeout(resolve, 300));
     expect(await auto.finish(idle.runId, null)).toBeNull();
+  });
+  it('lets shutdown wait for summaries of sessions that just ended', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') }));
+    const active = run('codex', project); auto.prepare(active, '', info('codex'), { args: [] }); await auto.settled();
+    fs.writeFileSync(path.join(project, 'closing.txt'), 'unsaved');
+    void auto.finish(active.runId, null); await auto.drain(20000);
+    expect(memory.list(projectMemoryKey(project)).some((note) => note.content.includes('closing.txt'))).toBe(true);
   });
 });
