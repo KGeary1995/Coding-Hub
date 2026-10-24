@@ -22,7 +22,7 @@ async function nativeResult(page, method, request) {
 (async () => {
   if (process.platform !== 'win32') throw new Error('Installed-app validation requires native Windows. Linux execution is not a passing Windows test.');
   if (process.env.GITHUB_ACTIONS !== 'true' && !process.argv.includes('--isolated-windows-vm')) throw new Error('Run this installation test in GitHub Actions or an isolated Windows VM with --isolated-windows-vm. It installs/uninstalls the application and changes that VM’s app registration.');
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-installed-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-installed-')));
   const install = path.join(root, 'application'); const data = path.join(root, 'data'); const profile = path.join(root, 'profile'); const project = path.join(root, 'project'); const bin = path.join(root, 'bin');
   assert.equal(/\s/.test(install), false, 'Use a Windows TEMP path without spaces for the NSIS /D argument.');
   const baselineVersion = installBaselineVersion();

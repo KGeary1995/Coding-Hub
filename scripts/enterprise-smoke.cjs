@@ -7,7 +7,7 @@ const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 (async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
   const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
@@ -87,7 +87,9 @@ const { _electron } = require('playwright-core');
     const capture = await wb(page, { action: 'preview-capture', title: 'Live dashboard', notes: 'Local dev preview', projectDirectory: project }); assert.equal(capture.snapshot.kind, 'image'); assert.ok(capture.content.length > 100);
     await wb(page, { action: 'annotation-add', snapshotId: capture.snapshot.id, x: 40, y: 25, text: 'Improve spacing' });
     const feedback = await wb(page, { action: 'design-feedback', snapshotId: capture.snapshot.id }); assert.ok((await fs.readFile(path.join(feedback.directory, 'DESIGN_FEEDBACK.md'), 'utf8')).includes('Improve spacing'));
-    assert.equal(await fs.stat(path.join(feedback.directory, 'CLAUDE.md')).then(() => true), true);
+    // The feedback folder is registered with the current shared rules (empty rules need no instruction file).
+    const feedbackRules = await page.evaluate((directory) => window.codingHub.hub({ action: 'rules-read', directories: [directory] }), feedback.directory);
+    assert.equal(feedbackRules.ok, true); assert.equal(feedbackRules.value.targets[0].applied, true); assert.ok(feedbackRules.value.directories.includes(feedbackRules.value.targets[0].directory));
     await wb(page, { action: 'preview-close' });
     await page.getByRole('button', { name: 'Design workspace', exact: true }).click();
     await page.getByRole('button', { name: 'Live dashboard version 1', exact: true }).click();
