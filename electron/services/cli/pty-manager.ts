@@ -12,6 +12,7 @@ import { resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessi
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
+import { nodePty } from './native-pty';
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -52,7 +53,7 @@ export class PtyManager {
     private emit: (owner: number, event: SessionEvent) => void,
     private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
   ) {
-    this.spawn = dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
+    this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
     this.environment = dependencies.environment ?? hostEnvironment;
   }
@@ -128,7 +129,7 @@ export class PtyManager {
       let pty: IPty;
       try {
         pty = this.spawn(engine.executable.file, [...engine.executable.prefixArgs, ...launch.args], { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
-      } catch { throw new HubError('PTY_START_FAILED', 'The terminal process could not start. Run npm run rebuild:native, then verify the CLI runs in your system terminal.'); }
+      } catch (error) { throw new HubError('PTY_START_FAILED', `The terminal process could not start (${String((error as Error).message ?? error).split('\n')[0].slice(0, 200)}). Run npm run rebuild:native, then verify the CLI runs in your system terminal.`); }
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
