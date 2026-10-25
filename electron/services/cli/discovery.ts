@@ -28,7 +28,8 @@ export function loginShellPath(shell = process.env.SHELL || '/bin/zsh', run: (fi
 /** Adds the login shell's PATH folders after the current ones, once, for a Mac app opened outside a terminal. */
 export function adoptLoginShellPath(env: NodeJS.ProcessEnv = process.env, read: () => string | null = loginShellPath) {
   const shellPath = read(); if (!shellPath) return;
-  env.PATH = [...new Set([...(env.PATH ?? '').split(path.delimiter), ...shellPath.split(path.delimiter)].filter(Boolean))].join(path.delimiter);
+  // A login shell PATH is always colon-separated (macOS and Linux), whatever platform runs this.
+  env.PATH = [...new Set([...(env.PATH ?? '').split(':'), ...shellPath.split(':')].filter(Boolean))].join(':');
 }
 
 export function hostEnvironment(): Record<string, string> {
