@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { RemoteServer, type RemoteHost } from './remote-server';
-import { serveFailure, TAILSCALE_DNS_SETTINGS, tailscaleExecutable, tailscaleState } from './tailscale';
+import { serveFailure, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -230,6 +230,10 @@ describe('tailscale state', () => {
     expect(tailscaleExecutable((file) => installed.has(file), candidates)).toBe('tailscale');
     installed.add(candidates[0]);
     expect(tailscaleExecutable((file) => installed.has(file), candidates)).toBe(candidates[0]);
+  });
+  it('runs Tailscale as a CLI when Trace was opened from the Dock, with no terminal environment', () => {
+    expect(tailscaleEnvironment({ PATH: '/usr/bin' })).toEqual({ PATH: '/usr/bin', TERM: 'dumb' });
+    expect(tailscaleEnvironment({ TERM: 'xterm-256color' }).TERM).toBe('xterm-256color');
   });
   const runner = (outputs: Record<string, string | Error>) => async (args: string[]) => { const value = outputs[args.join(' ')]; if (value instanceof Error) throw value; if (value === undefined) throw new Error('unexpected ' + args.join(' ')); return value; };
   it('reports not installed, stopped, serving and funnel', async () => {

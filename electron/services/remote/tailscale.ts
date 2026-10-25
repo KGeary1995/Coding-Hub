@@ -14,9 +14,15 @@ export const tailscaleExecutable = (exists: (file: string) => boolean = fs.exist
 /** A failed CLI call: Tailscale's own words (it often writes them to stdout), and whether it was stopped for taking too long. */
 export interface TailscaleError extends Error { code?: string; output?: string; timedOut?: boolean }
 
+/**
+ * The Mac App Store Tailscale binary acts as the CLI only when it sees a terminal (TERM or SHLVL); without one it tries
+ * to start the GUI and prints "The Tailscale GUI failed to start" instead of JSON. Trace opened from the Dock has neither.
+ */
+export const tailscaleEnvironment = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => ({ ...env, TERM: env.TERM || 'dumb' });
+
 /** Runs the tailscale CLI by fixed arguments only; nothing a phone or page sends reaches its command line. */
 export function tailscaleRunner(): RunTailscale {
-  return (args) => new Promise((resolve, reject) => execFile(tailscaleExecutable(), args, { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+  return (args) => new Promise((resolve, reject) => execFile(tailscaleExecutable(), args, { timeout: 15000, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: tailscaleEnvironment() }, (error, stdout, stderr) => {
     if (!error) { resolve(stdout); return; }
     const output = `${stderr}\n${stdout}`.trim().slice(0, 4000);
     const line = output.split('\n').map((text) => text.trim()).find(Boolean) ?? error.message.split('\n')[0];
