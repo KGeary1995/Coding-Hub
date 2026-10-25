@@ -46,7 +46,7 @@ export class Workflows {
   if (request.action === 'flow-template-save') {
    if (templates.length >= 50) throw new HubError('TEMPLATE_LIMIT', 'Up to 50 templates are supported.');
    const workspace = structuredClone(request.workspace);
-   for (const session of workspace.sessions) { delete session.config.resumeId; delete session.preparedRequest; }
+   for (const session of workspace.sessions) { if (session.config.engine !== 'shell') delete session.config.resumeId; delete session.preparedRequest; }
    const value: ProjectTemplate = { id: randomUUID(), name: request.name, description: request.description, workspace, rules: request.includeRules ? this.rules.read([]).content : '', checks: request.includeChecks ? this.verification.data().profiles.filter((profile) => profile.directory === workspace.rootDirectory).slice(0, 20).map(({ name, steps, timeoutSeconds }) => ({ name, steps, timeoutSeconds })) : [], createdAt: new Date().toISOString() };
    templateSchema.parse(value); save(this.root, 'project-templates.json', [value, ...templates]); return value;
   }

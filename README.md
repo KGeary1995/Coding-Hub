@@ -43,8 +43,9 @@ If a channel says a CLI was not found, install it (or fix your PATH), then resta
 1. **Connect accounts.** Open **Agent setup → Accounts & connections**. Trace detects existing sign-ins; **Connect** runs the CLI's own login if needed.
 2. **Open a project.** Click **Open project** and pick the folder you want the agents to work in.
 3. **Start channels.** The workspace opens with a Claude Code channel (CH1) and a Codex channel (CH2). Press **Start session** on each. Click into a terminal to type.
-4. **Add more.** **+ Channel** adds up to eight channels. Each channel runs its own CLI, so more channels use more memory.
-5. **Review changes.** The **Changes** tab shows every file the agents changed.
+4. **Add more.** **+ Channel** adds up to eight channels. Each channel runs its own CLI, so more channels use more memory. Choose **Terminal** for a plain shell (zsh or bash on a Mac, PowerShell on Windows) in the project folder, for running tests or Git yourself.
+5. **Paste images.** Paste a screenshot into a Claude Code or Codex channel with Ctrl+V or Cmd+V, or drop an image file on it. A thumbnail appears under the terminal; click it to see it full size.
+6. **Review changes.** The **Changes** tab shows every file the agents changed.
 
 Getting around:
 - **Ctrl+Shift+P** (Cmd+Shift+P on Mac) opens the command menu.

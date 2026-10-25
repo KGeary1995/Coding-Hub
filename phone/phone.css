@@ -48,6 +48,7 @@ main.list { flex: 1; padding: 16px; }
 .chip { display: inline-block; padding: 1px 6px; border-radius: 3px; font: 600 12px var(--tr-font-mono); color: var(--tr-on-light, #0b1010); background: var(--tr-fg-dim); }
 .chip[data-engine="claude"] { background: var(--tr-ch-claude); }
 .chip[data-engine="codex"] { background: var(--tr-ch-codex); }
+.chip[data-engine="shell"] { background: var(--tr-ch-shell); }
 footer { padding: 16px; text-align: center; }
 
 .channel-view { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; gap: 8px; }

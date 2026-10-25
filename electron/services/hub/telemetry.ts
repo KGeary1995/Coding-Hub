@@ -3,7 +3,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { CLIEngineConfig } from '../../../shared/types';
-import type { RunningSession, EngineInfo } from '../../../shared/ipc';
+import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
 import type { UsageRecord, PriceRate } from '../../../shared/hub';
 
 type Json = Record<string, any>;
@@ -28,7 +28,7 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
 export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
-interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: RunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
+interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
@@ -40,16 +40,16 @@ export class TelemetryService {
     this.baselines.set(runId, { file, offset: size, usage });
   }
   private assigned = new Set<string>();
-  constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: RunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
+  constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
     this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL);');
     const cutoff = new Date(Date.now() - 366 * 86400000).toISOString(); this.database.prepare('DELETE FROM metadata WHERE json_extract(value,\'$.timestamp\') < ?').run(cutoff); this.database.exec('DELETE FROM usage WHERE run NOT IN(SELECT run FROM metadata);');
   }
-  prepare(run: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
+  prepare(run: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
     if (config.engine === 'claude' && !config.resumeId && info.supportsSessionId) launch.args.push('--session-id', run.runId);
     if (config.engine === 'codex' && info.supportsConfig) { const logDir = path.join(this.root, run.runId); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); launch.args.push('--config', `log_dir=${JSON.stringify(logDir.replace(/\\/g, '/'))}`); }
   }
-  start(run: RunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
+  start(run: AgentRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
     const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() }));

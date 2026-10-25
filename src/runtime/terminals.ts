@@ -8,6 +8,39 @@ import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 import { exitNotice } from '../../shared/terminal-input';
+import { addPastedImage, clearPastedImages, quotePath } from '../state/pasted-images';
+
+const MAC = /Mac/.test(navigator.userAgent);
+const WINDOWS = /Windows/.test(navigator.userAgent);
+const pastedLabel = () => `Pasted ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+
+/**
+ * Claude Code and Codex read an image straight from the clipboard when they receive Ctrl+V (Alt+V on Windows), which
+ * never reaches the page as a paste. So after any paste shortcut Trace looks at the clipboard too, and shows the image.
+ */
+async function showClipboardImage(id: string) {
+  if (!terminals.get(id)?.run || !window.codingHub) return;
+  try { const result = await window.codingHub.clipboardImage(); if (result.ok && result.value) addPastedImage(id, { label: pastedLabel(), thumbnail: result.value.thumbnail, full: result.value.full }); }
+  catch { /* The preview is a convenience; the paste itself still reaches the CLI. */ }
+}
+
+function readImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+}
+
+/** Dropping files types their paths, as in Terminal.app; dropped images also join the strip. */
+function attachDrop(id: string, element: HTMLElement) {
+  element.addEventListener('dragover', (event) => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
+  element.addEventListener('drop', (event) => {
+    const files = [...(event.dataTransfer?.files ?? [])]; if (!files.length) return;
+    event.preventDefault();
+    const paths = files.map((file) => window.codingHub?.pathForFile(file) ?? '').filter(Boolean);
+    if (!paths.length || !terminals.get(id)?.run) return;
+    void writeTerminal(id, paths.map((file) => quotePath(file, WINDOWS)).join(' ') + ' ');
+    for (const file of files) if (file.type.startsWith('image/') && file.size <= 20 * 1024 * 1024) void readImageFile(file).then((url) => addPastedImage(id, { label: file.name, thumbnail: url, full: url })).catch(() => undefined);
+    terminals.get(id)?.terminal.focus();
+  });
+}
 
 interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void> }
 const terminals = new Map<string, TerminalEntry>();
@@ -44,8 +77,20 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
   terminal.onData((data) => { void writeTerminal(session.id, data); });
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (event.type === 'keydown' && event.code === 'KeyV' && !event.shiftKey && (event.ctrlKey || event.metaKey || event.altKey)) void showClipboardImage(session.id);
+    return true;
+  });
+  // Cmd+V with only an image on the clipboard pastes no text, so nothing would reach the CLI. Send the Ctrl+V that
+  // Claude Code and Codex treat as "attach the clipboard image" instead, as a Mac terminal user would type.
+  element.addEventListener('paste', (event) => {
+    const data = event.clipboardData; if (!MAC || !data || data.getData('text/plain') || ![...data.items].some((item) => item.type.startsWith('image/'))) return;
+    event.preventDefault(); event.stopPropagation();
+    void writeTerminal(session.id, '\x16');
+  }, true);
+  attachDrop(session.id, element);
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
-  terminal.writeln(`\x1b[38;2;${session.config.engine === 'claude' ? '241;211;93' : '92;208;234'}m${session.title}\x1b[0m  ·  local interactive terminal`);
+  terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
   terminal.writeln('Choose a project, then start this session.');
   terminal.writeln('Your local CLI manages authentication and approvals.');
@@ -93,6 +138,7 @@ export function routeTerminalEvent(event: SessionEvent) {
   if (event.type === 'started') {
     entry.terminal.reset();
     forgetActivity(event.sessionId);
+    clearPastedImages(event.sessionId);
     entry.run = { sessionId: event.sessionId, runId: event.runId };
     entry.terminal.options.disableStdin = false;
     entry.terminal.options.cursorBlink = true;
@@ -117,5 +163,5 @@ export function terminalDimensions(id: string) {
 export function focusTerminal(id: string) { terminals.get(id)?.terminal.focus(); }
 export function releaseRemovedTerminals(ids: string[]) {
   const retained = new Set(ids);
-  for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); }
+  for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); clearPastedImages(id); }
 }

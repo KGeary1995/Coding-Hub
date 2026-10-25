@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
 import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
+import type { CLIEngineConfig, CodexCLIEngineConfig } from '../../shared/types';
 
 beforeEach(() => {
   const sessions = [createSession('claude'), createSession('codex')];
@@ -34,7 +35,7 @@ describe('multi-session workspace transitions', () => {
     useWorkspaceStore.getState().markStarting(session.id);
     useWorkspaceStore.getState().applyEvent({ type: 'started', sessionId: session.id, runId: 'run-two', engine: 'claude', pid: 123, cwd: '/running/repo' });
     useWorkspaceStore.getState().updateBinding(session.id, { mode: 'independent', cwd: '/other/repo' });
-    useWorkspaceStore.getState().updateConfig(session.id, { ...session.config, model: 'changed' });
+    useWorkspaceStore.getState().updateConfig(session.id, { ...session.config as CLIEngineConfig, model: 'changed' });
     useWorkspaceStore.getState().applyEvent({ type: 'exit', sessionId: session.id, runId: 'run-one', exitCode: 1 });
     const current = useWorkspaceStore.getState().sessions[0];
     expect(current.status).toBe('running');
@@ -117,7 +118,7 @@ describe('multi-session workspace transitions', () => {
 
 it('restores history into an idle session without reviving a PID or replacing active sessions', () => {
   const original = createSession('codex');
-  const run = { runId: 'history', sessionId: original.id, engine: 'codex' as const, config: original.config, cwd: '/recorded/repository', startedAt: original.createdAt, endedAt: null, status: 'interrupted' as const, exitCode: null, logFile: '', recordedBytes: 0, logTruncated: false };
+  const run = { runId: 'history', sessionId: original.id, engine: 'codex' as const, config: original.config as CodexCLIEngineConfig, cwd: '/recorded/repository', startedAt: original.createdAt, endedAt: null, status: 'interrupted' as const, exitCode: null, logFile: '', recordedBytes: 0, logTruncated: false };
   expect(useWorkspaceStore.getState().restoreRun(run)).toBe(true);
   expect(useWorkspaceStore.getState().sessions.at(-1)).toMatchObject({ status: 'idle', pid: null, runId: null, binding: { mode: 'independent', cwd: run.cwd } });
   while (useWorkspaceStore.getState().sessions.length < MAX_CHANNELS) useWorkspaceStore.getState().addSession('claude');
@@ -128,7 +129,7 @@ it('restores history into an idle session without reviving a PID or replacing ac
 it('clears old resume metadata along with Codex overrides for a fresh-default recovery, and preserves active launches',()=>{
  const session=useWorkspaceStore.getState().sessions[1];useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'old-model',reasoningEffort:'high',resumeId:crypto.randomUUID()});
  useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config).toEqual({engine:'codex',model:'',reasoningEffort:null});
- useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'chosen-model',reasoningEffort:'minimal'});useWorkspaceStore.getState().markStarting(session.id);useWorkspaceStore.getState().resetCodexConfig(session.id);expect(useWorkspaceStore.getState().sessions[1].config.model).toBe('chosen-model');
+ useWorkspaceStore.getState().updateConfig(session.id,{engine:'codex',model:'chosen-model',reasoningEffort:'minimal'});useWorkspaceStore.getState().markStarting(session.id);useWorkspaceStore.getState().resetCodexConfig(session.id);expect((useWorkspaceStore.getState().sessions[1].config as CodexCLIEngineConfig).model).toBe('chosen-model');
 });
 
 describe('directory changes after a run', () => {
@@ -140,4 +141,14 @@ describe('directory changes after a run', () => {
     useWorkspaceStore.getState().updateBinding(session.id, { mode: 'independent', cwd: '/new/repo' });
     expect(useWorkspaceStore.getState().sessions[0].runningCwd).toBeNull();
   });
+});
+
+it('adds a Terminal channel that saves and restores like the agents', () => {
+  useWorkspaceStore.getState().addSession('shell');
+  const shell = useWorkspaceStore.getState().sessions.at(-1)!;
+  expect(shell).toMatchObject({ title: 'Terminal', config: { engine: 'shell' }, status: 'idle' });
+  const saved = savedWorkspace();
+  expect(savedWorkspaceSchema.parse(saved).sessions.at(-1)?.config).toEqual({ engine: 'shell' });
+  useWorkspaceStore.getState().addSession('shell', shell.id);
+  expect(useWorkspaceStore.getState().sessions.at(-1)?.config).toEqual({ engine: 'shell' });
 });

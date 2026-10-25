@@ -18,7 +18,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -458,6 +458,16 @@ else app.whenReady().then(() => {
     assertSender(event);
     const result = await dialog.showOpenDialog(window!, { title: 'Choose a local project folder — files are hidden in this view', buttonLabel: 'Use this folder', properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  // Read only to show the person what they pasted; the CLI reads the clipboard itself to attach the image.
+  handle(IPC_CHANNELS.clipboardImage, async () => {
+    const items = await clipboard.read();
+    const type = items.flatMap((item) => item.types.map((name) => ({ item, name }))).sort((a, b) => Number(b.name === 'image/png') - Number(a.name === 'image/png')).find(({ name }) => name.startsWith('image/'));
+    if (!type) return null;
+    const image = nativeImage.createFromBuffer(Buffer.from(await (await type.item.getType(type.name) as Blob).arrayBuffer())); if (image.isEmpty()) return null;
+    const { width, height } = image.getSize();
+    const full = Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image;
+    return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
   });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {

@@ -29,6 +29,7 @@
   /* engines (channel colours) */
   --tr-ch-claude: oklch(0.87 0.14 95);
   --tr-ch-codex: oklch(0.80 0.11 215);
+  --tr-ch-shell: oklch(0.84 0.03 165);  /* Terminal channels: a plain shell, kept quieter than the agents */
 
   /* states — "working" uses the engine colour */
   --tr-st-idle: #879692;

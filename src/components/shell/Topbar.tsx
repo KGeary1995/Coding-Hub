@@ -63,6 +63,6 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <CommandMenu />
     <button className="tr-icon" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal className="tr-narrow-icon" size={14} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
-    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }]} />
+    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }, { label: 'Terminal', detail: busyNote ?? 'Your shell (zsh, bash or PowerShell) in the project folder', onSelect: () => addSession('shell') }]} />
   </header>;
 }

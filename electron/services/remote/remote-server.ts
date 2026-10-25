@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
-import type { CLIEngine } from '../../../shared/types';
+import type { ChannelEngine } from '../../../shared/types';
 import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { HubError } from '../cli/engine-adapter';
@@ -14,7 +14,7 @@ import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } 
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 export interface RemoteHost {
-  sessions(): { id: string; title: string; engine: CLIEngine }[];
+  sessions(): { id: string; title: string; engine: ChannelEngine }[];
   running(): (RunningSession & { cols?: number; rows?: number })[];
   write(reference: RunReference, data: string): void;
 }

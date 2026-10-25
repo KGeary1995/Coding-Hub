@@ -1,18 +1,18 @@
 import { create } from 'zustand';
-import type { CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
+import type { ChannelEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
 export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
-export function createSession(engine: CLIEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
+export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
   return {
     id: crypto.randomUUID(),
-    title: engine === 'claude' ? 'Claude Code' : 'Codex',
+    title: engine === 'claude' ? 'Claude Code' : engine === 'codex' ? 'Codex' : 'Terminal',
     config: engine === 'claude'
       ? { engine, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-      : { engine, model: '', reasoningEffort: null },
+      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : { engine },
     binding,
     status: 'idle',
     pid: null,
@@ -77,7 +77,7 @@ interface WorkspaceState {
   setRootDirectory: (directory: string) => void;
   setView: (view: NavigationView) => void;
   restoreRun: (run: SessionHistoryRun) => boolean;
-  addSession: (engine: CLIEngine, sourceSessionId?: string) => void;
+  addSession: (engine: ChannelEngine, sourceSessionId?: string) => void;
   removeSession: (id: string) => void;
   updateConfig: (id: string, config: CLIEngineConfig) => void;
   resetCodexConfig: (id: string) => void;
@@ -143,7 +143,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
     const session = createSession(engine, source ? { ...source.binding } : undefined);
-    if (source?.config.engine === engine) { session.config = structuredClone(source.config); delete session.config.resumeId; }
+    if (source?.config.engine === engine) { session.config = structuredClone(source.config); if (session.config.engine !== 'shell') delete session.config.resumeId; }
     const sessions = [...state.sessions, session];
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),

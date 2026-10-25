@@ -25,6 +25,11 @@ export interface CodexCLIEngineConfig {
 /** A discriminated union keeps one engine's settings out of the other's adapter. */
 export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
+/** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */
+export interface ShellChannelConfig { engine: 'shell' }
+export type ChannelEngine = CLIEngine | 'shell';
+export type ChannelConfig = CLIEngineConfig | ShellChannelConfig;
+
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'exited' | 'error';
 export type WorkspaceBinding =
   | { mode: 'workspace' }
@@ -35,7 +40,7 @@ export interface Session {
   preparedRequest?: import('./productivity').PreparedSessionRequest;
   id: string;
   title: string;
-  config: CLIEngineConfig;
+  config: ChannelConfig;
   binding: WorkspaceBinding;
   status: SessionStatus;
   pid: number | null;

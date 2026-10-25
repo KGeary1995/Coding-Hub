@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import type { CLIEngine } from '../../../shared/types';
-import type { EngineInfo, RunningSession } from '../../../shared/ipc';
+import type { EngineInfo, AgentRunningSession } from '../../../shared/ipc';
 import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
 import { readConfig } from './config';
@@ -138,7 +138,7 @@ export class AutoMemory {
   }
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
-  prepare(run: RunningSession, model: string, info: EngineInfo, launch: { args: string[] }) {
+  prepare(run: AgentRunningSession, model: string, info: EngineInfo, launch: { args: string[] }) {
     if (!this.options.enabled()) return;
     let key: string; let context: string;
     try {

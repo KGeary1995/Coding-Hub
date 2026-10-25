@@ -3,7 +3,7 @@ import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
-import type { CLIEngine, CLIEngineConfig, SavedWorkspace, StorageInfo, SessionHistoryRun, RunLog, RepositoryContext, DirectoryListing, FilePreview, GitStatus, GitFileDiff, DiffArea } from './types';
+import type { ChannelConfig, ChannelEngine, CLIEngine, SavedWorkspace, StorageInfo, SessionHistoryRun, RunLog, RepositoryContext, DirectoryListing, FilePreview, GitStatus, GitFileDiff, DiffArea } from './types';
 import type { ProjectCheckRequest, ProjectAudit, CheckResult } from './project-checks';
 import type { ProjectToolsRequest, ProjectToolsResponse } from './project-tools';
 import type { UpdateRequest, UpdateStatus } from './updates';
@@ -31,12 +31,14 @@ export interface EngineInfo {
 export interface StartSessionRequest {
   sessionId: string;
   cwd: string;
-  config: CLIEngineConfig;
+  config: ChannelConfig;
   cols: number;
   rows: number;
 }
 export interface RunReference { sessionId: string; runId: string }
-export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: CLIEngine }
+export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: ChannelEngine }
+/** A run of Claude Code or Codex, which usage, memory and history follow; Terminal channels never reach them. */
+export type AgentRunningSession = RunningSession & { engine: CLIEngine };
 export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
   | ({ type: 'data'; data: string } & RunReference)
@@ -82,7 +84,12 @@ export interface CodingHubHost {
   resizeSession(request: RunReference & { cols: number; rows: number }): Promise<HostResult<null>>;
   stopSession(request: RunReference): Promise<HostResult<null>>;
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
+  clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
+  /** The local path of a file dropped on the page, or '' when it has none. */
+  pathForFile(file: File): string;
 }
+/** An image on the system clipboard, as PNG data URLs: a small one for the strip and one capped at 2000px to enlarge. */
+export interface ClipboardImage { thumbnail: string; full: string; width: number; height: number; hasText: boolean }
 export const IPC_CHANNELS = {
   workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
@@ -116,4 +123,5 @@ export const IPC_CHANNELS = {
   resizeSession: 'coding-hub:resize-session',
   stopSession: 'coding-hub:stop-session',
   sessionEvent: 'coding-hub:session-event',
+  clipboardImage: 'coding-hub:clipboard-image',
 } as const;

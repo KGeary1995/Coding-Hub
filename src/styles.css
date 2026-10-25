@@ -31,6 +31,7 @@ h2 { margin: 0; font-size: 14px; font-weight: 550; }
 .session-tile { container-type: inline-size; height: 100%; display: flex; flex-direction: column; border: 1px solid var(--tr-line-control); border-radius: 6px; overflow: hidden; background: var(--tr-panel); box-shadow: none; }
 .session-tile.claude { border-top-color: var(--tr-ch-claude); }
 .session-tile.codex { border-top-color: var(--tr-ch-codex); }
+.session-tile.shell { border-top-color: var(--tr-ch-shell); }
 .tile-header { height: 46px; flex-shrink: 0; display: flex; align-items: center; gap: 9px; padding: 0 11px; border-bottom: 1px solid var(--tr-line); background: var(--tr-hover); }
 .tile-drag-handle { cursor: grab; display: flex; align-items: center; color: var(--tr-fg-off); padding: 2px 0; }
 .tile-drag-handle:hover { color: var(--tr-fg-muted); }
@@ -74,6 +75,7 @@ kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-lef
 .engine-glyph { font-size: 15px; color: var(--tr-fg-dim); line-height: 1; }
 .engine-glyph.claude { color: var(--tr-ch-claude); }
 .engine-glyph.codex { color: var(--tr-ch-codex); }
+.engine-glyph.shell { color: var(--tr-ch-shell); }
 .engine-detection { font-family: var(--tr-font-mono); color: var(--tr-fg); font-size: 12px; white-space: nowrap; }
 .engine-diagnostic { position: absolute; top: 33px; left: 0; z-index: 40; width: 330px; padding: 15px; background: var(--tr-raised); border: 1px solid var(--tr-line-strong); border-radius: 4px; box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg-dim); font-size: 13px; }
 .engine-diagnostic code { display: block; word-break: break-all; color: var(--tr-fg); font-size: 12px; margin-bottom: 8px; }

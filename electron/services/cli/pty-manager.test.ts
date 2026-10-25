@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
 import { MAX_CHANNELS } from '../../../shared/schemas';
-import { isWithinDirectory, PtyManager } from './pty-manager';
+import { isWithinDirectory, PtyManager, shellProgram } from './pty-manager';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -151,5 +151,35 @@ describe('signalled exits', () => {
     processes[0].exit({ exitCode: 0, signal: 9 });
     expect(events.find((event) => event.type === 'exit')).toMatchObject({ runId: run.runId, exitCode: 137, signal: 9 });
     expect((events.find((event) => event.type === 'exit') as { diagnostic?: string }).diagnostic).toContain('code 137');
+  });
+});
+
+describe('Terminal channels', () => {
+  it('run the login shell in the channel folder without agent discovery, usage, rules or memory', async () => {
+    const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine));
+    const prepareLaunch = vi.fn(); const onStarted = vi.fn();
+    const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
+    const events: SessionEvent[] = [];
+    const manager = new PtyManager((_owner, event) => events.push(event), { spawn, discover, prepareLaunch, onStarted, environment: () => ({ PATH: '/bin', SHELL: process.execPath }), stopDependencies: { platform: 'linux', signalGroup: () => {} } });
+    managers.push(manager);
+    const session = await manager.start(1, { sessionId: 'shell-one', cwd: process.cwd(), config: { engine: 'shell' }, cols: 80, rows: 24 });
+    expect(session).toMatchObject({ engine: 'shell', cwd: fs.realpathSync(process.cwd()) });
+    expect(discover).not.toHaveBeenCalled(); expect(prepareLaunch).not.toHaveBeenCalled(); expect(onStarted).not.toHaveBeenCalled();
+    const [file, args, options] = spawn.mock.calls[0];
+    if (process.platform !== 'win32') { expect(file).toBe(process.execPath); expect(args).toEqual(['-l']); }
+    expect(options).toMatchObject({ cwd: fs.realpathSync(process.cwd()), env: { PATH: '/bin', TERM: 'xterm-256color' } });
+    expect(events[0]).toMatchObject({ type: 'started', engine: 'shell' });
+  });
+  it('reject settings, so nothing but the shell can be launched', async () => {
+    const { manager, spawn } = fixture();
+    await expect(manager.start(1, { sessionId: 'shell-two', cwd: process.cwd(), config: { engine: 'shell', model: 'x' }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it('pick PowerShell on Windows and the login shell elsewhere, with safe fallbacks', () => {
+    expect(shellProgram({ SystemRoot: 'C:\\Windows' }, 'win32', () => true)).toEqual({ file: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', args: ['-NoLogo'], name: 'PowerShell' });
+    expect(shellProgram({}, 'win32', () => false).file).toBe('powershell.exe');
+    expect(shellProgram({ SHELL: '/opt/homebrew/bin/fish' }, 'darwin', () => true)).toEqual({ file: '/opt/homebrew/bin/fish', args: ['-l'], name: 'fish' });
+    expect(shellProgram({ SHELL: 'zsh' }, 'darwin', () => true).file).toBe('/bin/zsh');
+    expect(shellProgram({ SHELL: '/missing/zsh' }, 'linux', () => false).file).toBe('/bin/bash');
   });
 });

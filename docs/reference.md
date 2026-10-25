@@ -158,6 +158,10 @@ Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile
 
 With the tile focused, Enter starts an idle channel or moves into its terminal.
 
+**Terminal channels** (+ Channel → Terminal) run your login shell (zsh or bash) on macOS and Linux, or Windows PowerShell, in the channel's folder. They have no model, usage, shared rules check, shared memory or approval alerts, and their output is not saved to session history. They appear on the phone page like any other channel.
+
+**Pasted images:** Ctrl+V (and Alt+V) still go straight to the CLI, which attaches the clipboard image itself. On a Mac, Cmd+V with only an image on the clipboard sends Ctrl+V for you. Trace also reads the image to show a thumbnail strip under the terminal; click one to enlarge it, or × to remove it from the strip (the agent keeps its copy). Dropping files on a channel types their paths, quoted when needed, and dropped images join the strip. The strip clears when the channel restarts.
+
 ## Approval alerts
 
 When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.

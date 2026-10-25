@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, openSync, readSync, statSync, unlinkSync, writeSy
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import type { CLIEngineConfig, RunLog, SavedWorkspace, SessionHistoryRun, StorageInfo } from '../../../shared/types';
-import type { RunningSession } from '../../../shared/ipc';
+import type { AgentRunningSession } from '../../../shared/ipc';
 import { readRunLogSchema, savedWorkspaceSchema } from '../../../shared/schemas';
 import { HubError } from '../cli/engine-adapter';
 
@@ -56,7 +56,7 @@ export class WorkspaceStorage {
     this.database.prepare('INSERT INTO workspace(id,snapshot) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot').run(JSON.stringify(result.data));
   }
 
-  beginRun(run: RunningSession, config: CLIEngineConfig) {
+  beginRun(run: AgentRunningSession, config: CLIEngineConfig) {
     const file = openSync(this.logPath(run.runId), 'wx', 0o600);
     try {
       this.database.prepare("INSERT INTO runs(runId,sessionId,engine,config,cwd,startedAt,status) VALUES(?,?,?,?,?,?,'running')").run(run.runId, run.sessionId, run.engine, JSON.stringify(config), run.cwd, new Date().toISOString());

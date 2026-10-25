@@ -9,7 +9,7 @@ const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
  * The channel's oscilloscope: terminal output per second for the last two minutes, a dashed limit rail and the
  * context (or budget) bar. The trace is real output only; the state shows in its colour, never in invented data.
  */
-export function ScopeStrip({ sessionId, state, engine, limit, limitLabel }: { sessionId: string; state: ChannelState; engine: 'claude' | 'codex'; limit: number | null; limitLabel: string }) {
+export function ScopeStrip({ sessionId, state, engine, limit, limitLabel }: { sessionId: string; state: ChannelState; engine: 'claude' | 'codex' | 'shell'; limit: number | null; limitLabel: string }) {
   const samples = useActivityStore((store) => store.samples[sessionId]) ?? EMPTY;
   const rate = samples.at(-1) ?? 0;
   const color = state === 'working' ? `var(--tr-ch-${engine})` : `var(--tr-st-${state})`;

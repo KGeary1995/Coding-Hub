@@ -2,11 +2,11 @@ import { stopProcess, type StopDependencies } from './stop-process';
 import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
-import type { RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
+import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
@@ -22,6 +22,19 @@ function canonical(directory: string) {
 export function isWithinDirectory(directory: string, candidate: string): boolean {
   const relative = path.relative(canonical(directory), canonical(candidate));
   return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
+
+/**
+ * The program a Terminal channel runs: PowerShell on Windows, otherwise the person's login shell (as Terminal.app
+ * starts it), falling back to zsh on macOS and bash elsewhere.
+ */
+export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync): { file: string; args: string[]; name: string } {
+  if (platform === 'win32') {
+    const file = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    return { file: exists(file) ? file : 'powershell.exe', args: ['-NoLogo'], name: 'PowerShell' };
+  }
+  const file = env.SHELL && path.isAbsolute(env.SHELL) && exists(env.SHELL) ? env.SHELL : platform === 'darwin' ? '/bin/zsh' : '/bin/bash';
+  return { file, args: ['-l'], name: path.basename(file) };
 }
 
 type Spawn = (file: string, args: string[], options: IPtyForkOptions) => IPty;
@@ -51,7 +64,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: RunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: RunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -102,7 +115,8 @@ export class PtyManager {
     if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
     if (this.runs.size + this.pending.size >= MAX_CHANNELS) throw new HubError('SESSION_LIMIT', `At most ${MAX_CHANNELS} CLI processes can run simultaneously.`);
     const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
-    const nativeKey = request.config.resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${request.config.resumeId}` : undefined;
+    const resumeId = request.config.engine === 'shell' ? undefined : request.config.resumeId;
+    const nativeKey = resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${resumeId}` : undefined;
     if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');
     const reservation = { owner, cancelled: false, profileId, nativeKey };
     this.pending.set(request.sessionId, reservation);
@@ -113,22 +127,32 @@ export class PtyManager {
         cwd = await realpath(request.cwd);
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
-      const profileEnvironment = this.dependencies.profileEnvironment;
-      if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
       const baseEnvironment = this.environment();
-      const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
-      const engine = await this.discover(request.config.engine, discoveryEnvironment);
-      if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
-      const launch = buildLaunch(request.config, engine.info);
-      if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
-      if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
-      const session: RunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
-      this.dependencies.prepareLaunch?.(session, request.config, engine.info, launch);
-      const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
-      const env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession;
+      if (request.config.engine === 'shell') {
+        // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
+        const program = shellProgram(baseEnvironment);
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
+        session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
+        ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      } else {
+        const profileEnvironment = this.dependencies.profileEnvironment;
+        if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
+        const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
+        const engine = await this.discover(request.config.engine, discoveryEnvironment);
+        if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
+        const launch = buildLaunch(request.config, engine.info);
+        if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
+        const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
+        this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
+        const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
+        env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...launch.args];
+      }
       let pty: IPty;
       try {
-        pty = this.spawn(engine.executable.file, [...engine.executable.prefixArgs, ...launch.args], { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
+        pty = this.spawn(file, args, { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
       } catch (error) { throw new HubError('PTY_START_FAILED', `The terminal process could not start (${String((error as Error).message ?? error).split('\n')[0].slice(0, 200)}). Run npm run rebuild:native, then verify the CLI runs in your system terminal.`); }
       session.pid = pty.pid;
       let resolveExit!: () => void;
@@ -144,7 +168,7 @@ export class PtyManager {
         if (run.osc) for (const message of run.osc.push(data)) this.notifyAttention(run.session.runId, message);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
-      this.dependencies.onStarted?.(session, request.config, owner);
+      if (request.config.engine !== 'shell') this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
       this.send(owner, { type: 'started', ...session });
       return session;
     } finally {

@@ -18,9 +18,11 @@ export const engineConfigSchema = z.discriminatedUnion('engine', [
   z.object({ engine: z.literal('claude'), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
   z.object({ engine: z.literal('codex'), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
+/** Every channel type: the agents plus a plain terminal, which takes no settings. */
+export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, z.object({ engine: z.literal('shell') }).strict()]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
-export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.'), config: engineConfigSchema, ...dimensions }).strict();
+export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.'), config: channelConfigSchema, ...dimensions }).strict();
 export const writeSessionSchema = runReferenceSchema.extend({ data: z.string().max(64 * 1024) }).strict();
 export const resizeSessionSchema = runReferenceSchema.extend(dimensions).strict();
 
@@ -29,7 +31,7 @@ export const savedWorkspaceSchema = z.object({
   version: z.literal(1),
   rootDirectory: directory.nullable(),
   sessions: z.array(z.object({
-    id: identifier, title: z.string().min(1).max(160), config: engineConfigSchema,
+    id: identifier, title: z.string().min(1).max(160), config: channelConfigSchema,
     binding: z.discriminatedUnion('mode', [z.object({ mode: z.literal('workspace') }).strict(), z.object({ mode: z.literal('independent'), cwd: directory }).strict()]),
     budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
     preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),

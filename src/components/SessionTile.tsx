@@ -2,13 +2,14 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, X, SquareChevronRight } from 'lucide-react';
 import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
+import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, dollars } from '../state/hub-store';
@@ -35,6 +36,10 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
   const engine = session.config.engine;
   const claude = engine === 'claude';
+  const shell = engine === 'shell';
+  const engineName = claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
+  const resumeId = session.config.engine === 'shell' ? undefined : session.config.resumeId;
+  const model = session.config.engine === 'shell' ? '' : session.config.model;
   const channel = index + 1;
   const setupView = !cwd || /working directory|absolute.*directory/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
   const busy = session.status === 'running' || session.status === 'starting';
@@ -64,7 +69,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
     : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
     : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
     : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out" onClick={() => setView('memory')}>Write handoff</button>
-    : state === 'finished' ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
+    : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
   const facts = [
     stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
@@ -73,18 +78,18 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
     context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : null,
   ].filter(Boolean).join(' · ');
   return (
-    <article className={`session-tile tr-tile ${claude ? 'claude' : 'codex'} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
+    <article className={`session-tile tr-tile ${engine} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
       data-status={session.status} data-state={state} aria-label={`${session.title} session ${channel}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
-          <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={claude ? 'Claude Code' : 'Codex CLI'}>CH{channel}</span>
+          <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={engineName}>CH{channel}</span>
           <strong className="tr-tile-name" title={session.title}>{session.title}</strong>
-          <span className="tr-tile-model model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${session.config.model || 'none'}.` : session.config.model ? `Next launch model override: ${session.config.model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || session.config.model || 'CLI default'}</span>
+          {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${model || 'none'}.` : model ? `Next launch model override: ${model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || model || 'CLI default'}</span>}
           {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
           <span className="tr-spacer" />
-          <span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>
-          <span className="tr-tile-metric tnum" title={usage ? 'Reported input + output tokens for this run' : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span>
+          {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>
+          <span className="tr-tile-metric tnum" title={usage ? 'Reported input + output tokens for this run' : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
             <span aria-hidden="true">{meta.glyph}</span>{meta.word}
@@ -104,7 +109,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
-        <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />
+        {session.config.engine !== 'shell' && <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />}
         <label className="binding-control">Working directory<select aria-label="Working directory" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
         {session.binding.mode === 'independent' && <label className="binding-control">Repository path<input aria-label="Repository path" value={session.binding.cwd} placeholder="Absolute directory path" onChange={(event) => updateBinding(session.id, { mode: 'independent', cwd: event.target.value })} spellCheck={false} /><button className="button secondary" type="button" onClick={() => void window.codingHub?.pickDirectory().then((directory) => { if (directory) updateBinding(session.id, { mode: 'independent', cwd: directory }); }).catch(() => useWorkspaceStore.getState().setSessionError(session.id, 'Folder picker unavailable. Use Projects to enter a path.'))}><FolderOpen size={13} />Browse repository folder</button></label>}
         <SessionPreferences session={session} />
@@ -113,10 +118,11 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void writeTerminal(session.id, prompt + '\r').then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {session.status === 'running' && session.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{session.attention.message}</span></div>}
-      {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && !claude && <button className="quiet-button" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
+      {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
-      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''}`}><TerminalViewport session={session} />{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">CH{channel} · {session.config.resumeId ? 'RESUME CONVERSATION' : 'LOCAL CLI'}</span><h3>{claude ? 'Claude Code' : 'OpenAI Codex'}</h3><p>{session.config.resumeId ? 'Continue your saved conversation with its original context.' : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? folderName(cwd) : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${channel}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Press Start in the channel header{session.config.resumeId ? ' to resume' : ''}. CLI permissions and approvals apply.</small></div>}</div>
+      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''}`}><TerminalViewport session={session} />{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : shell ? <SquareChevronRight size={25} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">CH{channel} · {resumeId ? 'RESUME CONVERSATION' : shell ? 'LOCAL SHELL' : 'LOCAL CLI'}</span><h3>{claude ? 'Claude Code' : shell ? 'Terminal' : 'OpenAI Codex'}</h3><p>{resumeId ? 'Continue your saved conversation with its original context.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? folderName(cwd) : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${channel}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Press Start in the channel header{resumeId ? ' to resume' : ''}.{shell ? '' : ' CLI permissions and approvals apply.'}</small></div>}</div>
+      <PastedImages sessionId={session.id} />
     </article>
   );
 }

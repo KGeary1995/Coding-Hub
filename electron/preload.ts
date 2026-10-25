@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CodingHubHost, SessionEvent } from '../shared/ipc';
 import type { AccountEvent } from '../shared/accounts';
 import type { UpdateStatus } from '../shared/updates';
@@ -62,5 +62,7 @@ const host: CodingHubHost = {
     ipcRenderer.on('coding-hub:session-event', receive);
     return () => { ipcRenderer.removeListener('coding-hub:session-event', receive); };
   },
+  clipboardImage: () => ipcRenderer.invoke('coding-hub:clipboard-image'),
+  pathForFile: (file) => webUtils.getPathForFile(file),
 };
 contextBridge.exposeInMainWorld('codingHub', host);

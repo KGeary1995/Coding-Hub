@@ -16,7 +16,7 @@ const KEYS: { label: string; name?: string; data: string }[] = [
   { label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' },
   { label: 'Tab', data: '\t' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }, { label: 'Ctrl C', data: '\x03' },
 ];
-const ENGINE = { claude: 'Claude Code', codex: 'Codex' } as const;
+const ENGINE = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 
 type Child = Node | string | false | null | undefined;
 /** A DOM element with properties (`className`, `onclick`, …), `data-` and `aria-` attributes, and children. */

@@ -27,6 +27,7 @@
 .tr-action kbd { margin: 0; padding: 0; border: 0; background: none; font: 400 10px/1 var(--tr-font-mono); color: inherit; opacity: .7; }
 .tr-action.start { background: var(--tr-ch-codex); }
 .claude .tr-action.start { background: var(--tr-ch-claude); }
+.shell .tr-action.start { background: var(--tr-ch-shell); }
 .tr-action.waiting { background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
 .tr-action.retry { background: var(--tr-fg); }
 .tr-action.limit { background: var(--tr-st-limit); }
@@ -88,3 +89,18 @@
   .tr-tile-detail, .tr-scope-limit i { transition: none; }
   .session-tile.tr-tile, .tr-state-chip { animation: none !important; }
 }
+
+/* Pasted images: Trace's view of what the person pasted; the CLI attaches its own copy. */
+.pasted-images { display: flex; align-items: center; gap: 12px; padding: 8px 13px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); flex-shrink: 0; }
+.pasted-images ul { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; overflow-x: auto; min-width: 0; }
+.pasted-images li { position: relative; flex-shrink: 0; }
+.pasted-thumb { display: block; padding: 0; border: 1px solid var(--tr-line-control); background: var(--tr-term); cursor: zoom-in; }
+.pasted-thumb:hover, .pasted-thumb:focus-visible { border-color: var(--tr-line-strong); }
+.pasted-thumb img { display: block; height: 56px; max-width: 120px; object-fit: cover; }
+.pasted-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
+.pasted-remove:hover, .pasted-remove:focus-visible { color: var(--tr-fg-strong); }
+.pasted-count { flex-shrink: 0; color: var(--tr-fg-dim); font: 400 11px/16px var(--tr-font-mono); }
+.pasted-viewer { max-width: min(92vw, 1600px); max-height: 92vh; padding: 0; border: 1px solid var(--tr-line-strong); background: var(--tr-term); color: var(--tr-fg); }
+.pasted-viewer::backdrop { background: rgb(0 0 0 / .7); }
+.pasted-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); font: 400 12px/16px var(--tr-font-mono); }
+.pasted-viewer img { display: block; max-width: min(92vw, 1600px); max-height: calc(92vh - 34px); object-fit: contain; }
