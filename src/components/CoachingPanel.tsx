@@ -4,6 +4,7 @@ import { GraduationCap, Plus, Trash2 } from 'lucide-react';
 import { coachingFindings, coachingPacket, type CoachingPrepared, type CoachingRequest, type CoachingResponse, type PromptExample } from '../../shared/coaching';
 import { createSession, arrangeTiles, useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../state/hub-store';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 async function call(request: CoachingRequest): Promise<CoachingResponse> { if (!window.codingHub) throw new Error('Coaching requires the desktop app.'); const result = await window.codingHub.coaching(request); if (!result.ok) throw new Error(result.error.message); return result.value; }
 export function CoachingPanel() {
@@ -19,9 +20,9 @@ export function CoachingPanel() {
   async function prepare(engine: 'claude' | 'codex') {
     if (!approved || busy) return; setBusy(true); setError('');
     try {
-      if (useWorkspaceStore.getState().sessions.length >= 4) throw new Error('Close an idle session tile to make room for a coaching session.');
+      if (useWorkspaceStore.getState().sessions.length >= MAX_CHANNELS) throw new Error('Close an idle session tile to make room for a coaching session.');
       const prepared = await call({ action: 'prepare', report: approvedPacket ?? packet }) as CoachingPrepared;
-      const state = useWorkspaceStore.getState(); if (state.sessions.length >= 4) throw new Error('The workspace is now full. Your local report was preserved. Close an idle tile and prepare again.');
+      const state = useWorkspaceStore.getState(); if (state.sessions.length >= MAX_CHANNELS) throw new Error('The workspace is now full. Your local report was preserved. Close an idle tile and prepare again.');
       const session = createSession(engine, { mode: 'independent', cwd: prepared.directory }); session.title = engine === 'claude' ? 'Claude · AI coach' : 'Codex · AI coach';
       session.preparedRequest = { prompt: prepared.prompt, label: 'Send coaching request' };
       const sessions = [...state.sessions, session]; useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null, activeView: 'workspace' });

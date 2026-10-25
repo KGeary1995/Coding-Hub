@@ -92,6 +92,48 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     assert.equal(await phone.locator('#text').inputValue(), long, 'a draft survives going back to the channel list');
     await phone.locator('#text').fill('');
 
+    // Tailscale HTTPS with certificates off for the tailnet: Trace shows the steps, opens the admin console's DNS page,
+    // and tries again by itself once the person comes back. A fake tailscale stands in; it appears on PATH only now.
+    if (process.platform !== 'win32') {
+      const state = path.join(root, 'tailscale-state');
+      await fs.writeFile(path.join(bin, 'tailscale'), `#!/usr/bin/env node
+const fs = require('node:fs'); const state = ${JSON.stringify(state)}; const args = process.argv.slice(2).join(' ');
+const serving = fs.existsSync(state + '.serving');
+if (args === 'status --json') console.log(JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }));
+else if (args === 'serve status --json') console.log(serving ? JSON.stringify({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:47821' } } } } }) : '');
+else if (args.startsWith('serve --bg --https=443')) {
+  fs.appendFileSync(state + '.calls', 'serve\\n');
+  if (!fs.existsSync(state + '.certificates')) { console.error('HTTPS certificates must be enabled for your tailnet in the Tailscale admin console.'); process.exit(1); }
+  fs.writeFileSync(state + '.serving', '');
+} else process.exit(2);
+`, { mode: 0o755 });
+      await app.evaluate(({ dialog, shell }) => {
+        globalThis.smokeDialogs = 0; globalThis.smokeOpened = [];
+        dialog.showMessageBox = async () => { globalThis.smokeDialogs++; return { response: 0, checkboxChecked: false }; };
+        shell.openExternal = async (url) => { globalThis.smokeOpened.push(url); };
+      });
+      await openView(page, 'Settings');
+      await card.getByText('Connected as', { exact: false }).waitFor();
+      await card.getByRole('button', { name: 'Set up Tailscale HTTPS', exact: true }).click();
+      const guide = card.getByRole('group', { name: 'Finish Tailscale HTTPS' });
+      await guide.getByText('Enable HTTPS', { exact: true }).waitFor();
+      assert.deepEqual(await app.evaluate(() => [globalThis.smokeDialogs, globalThis.smokeOpened]), [1, ['https://login.tailscale.com/admin/dns']]);
+      // Coming back without changing anything retries quietly: no second question, no page bounced open again.
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      for (let i = 0; i < 100 && (await fs.readFile(state + '.calls', 'utf8')).split('\n').filter(Boolean).length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+      await guide.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+      assert.deepEqual(await app.evaluate(() => [globalThis.smokeDialogs, globalThis.smokeOpened.length]), [1, 1]);
+      await guide.getByRole('button', { name: 'Open Tailscale DNS settings', exact: true }).click();
+      for (let i = 0; i < 50 && await app.evaluate(() => globalThis.smokeOpened.length) < 2; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.deepEqual(await app.evaluate(() => globalThis.smokeOpened), ['https://login.tailscale.com/admin/dns', 'https://login.tailscale.com/admin/dns']);
+      // The person turns certificates on and returns: HTTPS is set up without another click.
+      await fs.writeFile(state + '.certificates', '');
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await card.getByText('https://desk.example.ts.net/', { exact: true }).waitFor();
+      assert.equal(await guide.count(), 0); assert.equal(await app.evaluate(() => globalThis.smokeDialogs), 1);
+      await fs.rm(path.join(bin, 'tailscale'));
+    }
+
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');
     await card.getByRole('button', { name: 'Remove Phone', exact: true }).click();
@@ -100,7 +142,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch('http://127.0.0.1:47821/').then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, and revocation.');
+    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });

@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { CLIEngine } from '../../../shared/types';
-import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, type RemoteStatus, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -56,6 +56,8 @@ export class RemoteServer {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
+  /** The last failed `tailscale serve`, and the Tailscale page that fixes it; both clear once HTTPS works. */
+  serveProblem: ServeProblem | null = null; serveLink: string | null = null;
   private alerted = new Map<string, number>();
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
@@ -135,7 +137,7 @@ export class RemoteServer {
   status(): RemoteStatus {
     const base = this.tailscale.serving && this.tailscale.host ? `https://${this.tailscale.host}/` : null;
     const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString() } : null;
-    return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing,
+    return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing, serveProblem: this.tailscale.serving ? null : this.serveProblem,
       devices: this.devices().map(({ id, name, createdAt, lastSeen, push }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push) })) };
   }
 

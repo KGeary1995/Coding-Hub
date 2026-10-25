@@ -4,6 +4,7 @@ import type { Annotation, PreparedRequest } from '../../shared/workbench';
 import type { DesignPreview } from '../../shared/design';
 import { workbench } from '../runtime/workbench';
 import { createSession, arrangeTiles, useWorkspaceStore } from '../state/workspace-store';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 export function DesignReviewPanel({ selected, onCapture }: { selected: DesignPreview | null; onCapture: (value: DesignPreview) => void }) {
   const [viewport, setViewport] = useState('1440x900');
@@ -15,8 +16,8 @@ export function DesignReviewPanel({ selected, onCapture }: { selected: DesignPre
       else if (kind === 'capture') { const value = await workbench<DesignPreview>({ action: 'preview-capture', title, notes: 'Captured from approved local development preview', projectDirectory: root, ...(selected ? { designId: selected.snapshot.designId } : {}) }); onCapture(value); }
       else if (kind === 'annotation' && selected) { const value = await workbench<Annotation>({ action: 'annotation-add', snapshotId: selected.snapshot.id, x, y, text }); setAnnotations([...annotations, value]); setText(''); }
       else if (kind === 'feedback' && selected) {
-        if (useWorkspaceStore.getState().sessions.length >= 4) throw new Error('Close an idle tile to make room for design feedback.');
-        const prepared = await workbench<PreparedRequest>({ action: 'design-feedback', snapshotId: selected.snapshot.id }); const state = useWorkspaceStore.getState(); if (state.sessions.length >= 4) throw new Error('Workspace is now full. Your prepared feedback was saved locally.');
+        if (useWorkspaceStore.getState().sessions.length >= MAX_CHANNELS) throw new Error('Close an idle tile to make room for design feedback.');
+        const prepared = await workbench<PreparedRequest>({ action: 'design-feedback', snapshotId: selected.snapshot.id }); const state = useWorkspaceStore.getState(); if (state.sessions.length >= MAX_CHANNELS) throw new Error('Workspace is now full. Your prepared feedback was saved locally.');
         const session = createSession(engine, { mode: 'independent', cwd: prepared.directory }); session.title = engine === 'claude' ? 'Claude · design review' : 'Codex · design review'; session.preparedRequest = { prompt: prepared.prompt, label: 'Send design feedback' }; const sessions = [...state.sessions, session]; useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', activeView: 'workspace', focusedSessionId: null });
       }
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }

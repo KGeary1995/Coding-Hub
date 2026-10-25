@@ -2,6 +2,7 @@ import { CircleHelp, Columns2, Grid2X2, PanelLeft, Rows2, SlidersHorizontal } fr
 import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
+import { MAX_CHANNELS } from '../../../shared/schemas';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'projects', label: 'Projects' }];
@@ -35,6 +36,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const toItems = (views: { view: NavigationView; label: string }[]): MenuItem[] => views.map(({ view, label }) => ({ label, current: activeView === view, onSelect: () => setView(view) }));
   const insight = INSIGHT_VIEWS.find((item) => item.view === activeView);
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
+  // Each channel is its own CLI process; past four, say so where the next one is added.
+  const busyNote = sessions.length >= 4 ? `Channel ${sessions.length + 1} of ${MAX_CHANNELS}. Each runs its own CLI and uses more memory.` : undefined;
   return <header className="tr-topbar">
     <Wordmark />
     {project
@@ -54,6 +57,6 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <CommandMenu />
     <button className="tr-icon" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal className="tr-narrow-icon" size={14} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
-    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= 4} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }]} />
+    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }]} />
   </header>;
 }

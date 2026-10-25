@@ -9,6 +9,7 @@ import { CHANNEL_STATES, channelState, usageFor } from '../state/channel-state';
 import { VIEW_KEYS } from '../runtime/view-shortcuts';
 import { jumpToChannel } from './shell/StatusBar';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 type Group = 'actions' | 'channels' | 'files' | 'memory';
 interface Item { id: string; group: Group; label: string; glyph: string; color?: string; meta?: ReactNode; metaClass?: string; shortcut?: string; run: () => void }
@@ -100,7 +101,7 @@ export function CommandMenu() {
     sessions.forEach((session, index) => {
       const state = channelState(session, usageFor(session, usage)); const meta = CHANNEL_STATES[state];
       all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${session.title}`, glyph: meta.glyph, color: meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color,
-        meta: state === 'waiting' ? `hold · ${session.attention?.message ?? 'approval'}` : meta.word.toLowerCase(), metaClass: state, shortcut: index < 4 ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
+        meta: state === 'waiting' ? `hold · ${session.attention?.message ?? 'approval'}` : meta.word.toLowerCase(), metaClass: state, shortcut: index < MAX_CHANNELS ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
     });
     for (const hit of hits) {
       const memory = hit.kind !== 'file';

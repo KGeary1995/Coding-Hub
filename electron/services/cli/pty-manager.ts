@@ -8,7 +8,7 @@ import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
 import type { RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
-import { resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
+import { MAX_CHANNELS, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
@@ -100,7 +100,7 @@ export class PtyManager {
     const request = parsed.data;
     if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
     if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
-    if (this.runs.size + this.pending.size >= 4) throw new HubError('SESSION_LIMIT', 'At most four CLI processes can run simultaneously.');
+    if (this.runs.size + this.pending.size >= MAX_CHANNELS) throw new HubError('SESSION_LIMIT', `At most ${MAX_CHANNELS} CLI processes can run simultaneously.`);
     const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
     const nativeKey = request.config.resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${request.config.resumeId}` : undefined;
     if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');

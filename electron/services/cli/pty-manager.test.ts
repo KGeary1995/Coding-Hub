@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
+import { MAX_CHANNELS } from '../../../shared/schemas';
 import { isWithinDirectory, PtyManager } from './pty-manager';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -94,12 +95,12 @@ describe('PTY lifecycle and IPC ownership', () => {
     expect(() => manager.write(7, { ...runReference(first), data: 'bad' })).toThrow('stale');
     await expect(manager.stop(7, runReference(first))).rejects.toThrow('stale');
   });
-  it('reserves pending launches and enforces the four-process limit under concurrency', async () => {
+  it('reserves pending launches and enforces the process limit under concurrency', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const { manager } = fixture(async (engine) => { await gate; return engines(engine); });
-    const starts = [0, 1, 2, 3].map((index) => manager.start(7, request(`session-${index}`)));
-    await expect(manager.start(7, request('fifth'))).rejects.toThrow('four');
+    const starts = Array.from({ length: MAX_CHANNELS }, (_, index) => manager.start(7, request(`session-${index}`)));
+    await expect(manager.start(7, request('one-more'))).rejects.toThrow(`At most ${MAX_CHANNELS}`);
     await expect(manager.start(7, request('session-0'))).rejects.toThrow('already');
     release();
     await Promise.all(starts);

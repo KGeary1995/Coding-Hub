@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { ArrowDownToLine, FolderInput, PackageOpen, RefreshCw } from 'lucide-react';
 import type { DesignSnapshot, HandoffResult } from '../../shared/design';
 import { arrangeTiles, createSession, useWorkspaceStore } from '../state/workspace-store';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 /** Opens an idle Claude Code tile in the project with a request the user sends once the CLI is ready. */
 function openClaudeTile(directory: string, title: string, prompt: string, label: string, showWorkspace = true) {
   const state = useWorkspaceStore.getState();
-  if (state.sessions.length >= 4) throw new Error('Close an idle session tile to make room for a Claude Design session.');
+  if (state.sessions.length >= MAX_CHANNELS) throw new Error('Close an idle session tile to make room for a Claude Design session.');
   const session = createSession('claude', { mode: 'independent', cwd: directory }); session.title = title;
   session.preparedRequest = { prompt, label };
   const sessions = [...state.sessions, session];

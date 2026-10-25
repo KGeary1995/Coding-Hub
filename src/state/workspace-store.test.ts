@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
+import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
 
 beforeEach(() => {
   const sessions = [createSession('claude'), createSession('codex')];
@@ -54,12 +55,25 @@ describe('multi-session workspace transitions', () => {
     useWorkspaceStore.getState().removeSession(session.id);
     expect(useWorkspaceStore.getState().sessions).toHaveLength(2);
   });
-  it('caps sessions at four and keeps every tile bound to a unique session', () => {
-    for (let index = 0; index < 8; index++) useWorkspaceStore.getState().addSession('codex');
+  it('caps sessions at the channel limit and keeps every tile bound to a unique session', () => {
+    for (let index = 0; index < MAX_CHANNELS + 3; index++) useWorkspaceStore.getState().addSession('codex');
     const { sessions, tiles } = useWorkspaceStore.getState();
-    expect(sessions).toHaveLength(4);
+    expect(sessions).toHaveLength(MAX_CHANNELS);
     expect(tiles.map((tile) => tile.sessionId)).toEqual(sessions.map((session) => session.id));
-    expect(new Set(sessions.map((session) => session.id)).size).toBe(4);
+    expect(new Set(sessions.map((session) => session.id)).size).toBe(MAX_CHANNELS);
+  });
+
+  it('lays out up to eight channels in two grid rows, and wraps columns after four', () => {
+    for (let index = 0; index < 4; index++) useWorkspaceStore.getState().addSession('codex');
+    const sessions = useWorkspaceStore.getState().sessions;
+    const grid = arrangeTiles(sessions, 'grid');
+    expect(grid.map(({ x, y, w }) => [x, y, w])).toEqual([[0, 0, 4], [4, 0, 4], [8, 0, 4], [0, 12, 4], [4, 12, 4], [8, 12, 4]]);
+    expect(arrangeTiles(sessions.slice(0, 2), 'grid').map(({ w, y }) => [w, y])).toEqual([[6, 0], [6, 0]]);
+    expect(arrangeTiles([...sessions, ...sessions.slice(0, 2)], 'grid').every(({ w, y }) => w === 3 && y <= 12)).toBe(true);
+    expect(arrangeTiles(sessions, 'columns').map(({ y, w }) => [y, w])).toEqual([[0, 3], [0, 3], [0, 3], [0, 3], [12, 3], [12, 3]]);
+    // Every arrangement is a workspace the host accepts.
+    const workspace = { version: 1, rootDirectory: null, sessions: sessions.map(({ id, title, config, binding, createdAt }) => ({ id, title, config, binding, createdAt })), layoutMode: 'grid', focusedSessionId: null };
+    for (const mode of ['grid', 'columns', 'rows'] as const) expect(savedWorkspaceSchema.safeParse({ ...workspace, layoutMode: mode, tiles: arrangeTiles(sessions, mode) }).success).toBe(true);
   });
 
   it('duplicates independent repository bindings and configs without sharing mutable state', () => {
@@ -106,7 +120,7 @@ it('restores history into an idle session without reviving a PID or replacing ac
   const run = { runId: 'history', sessionId: original.id, engine: 'codex' as const, config: original.config, cwd: '/recorded/repository', startedAt: original.createdAt, endedAt: null, status: 'interrupted' as const, exitCode: null, logFile: '', recordedBytes: 0, logTruncated: false };
   expect(useWorkspaceStore.getState().restoreRun(run)).toBe(true);
   expect(useWorkspaceStore.getState().sessions.at(-1)).toMatchObject({ status: 'idle', pid: null, runId: null, binding: { mode: 'independent', cwd: run.cwd } });
-  useWorkspaceStore.getState().addSession('claude');
+  while (useWorkspaceStore.getState().sessions.length < MAX_CHANNELS) useWorkspaceStore.getState().addSession('claude');
   useWorkspaceStore.setState({ sessions: useWorkspaceStore.getState().sessions.map((session) => ({ ...session, status: 'running' })) });
   const before = savedWorkspace(); expect(useWorkspaceStore.getState().restoreRun(run)).toBe(false); expect(savedWorkspace()).toEqual(before);
 });

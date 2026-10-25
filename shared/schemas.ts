@@ -4,6 +4,8 @@ const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
 export const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:/[\]-]*$/;
 export const MAX_MODEL_LENGTH = 160;
+/** Channels (CLI sessions) a workspace can hold; each one runs its own CLI process. */
+export const MAX_CHANNELS = 8;
 export const MAX_TOKEN_SETTING = 1_000_000;
 /** Returns the model text to store, or null when it would make the saved workspace invalid. */
 export function modelValue(value: string): string | null {
@@ -32,12 +34,12 @@ export const savedWorkspaceSchema = z.object({
     budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
     preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
     createdAt: z.string().datetime(),
-  }).strict()).min(2).max(4),
+  }).strict()).min(2).max(MAX_CHANNELS),
   tiles: z.array(z.object({
     sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),
     w: z.number().int().min(3).max(12), h: z.number().int().min(10).max(1000),
     minW: z.number().int().min(3).max(12), minH: z.number().int().min(10).max(1000),
-  }).strict()).min(2).max(4),
+  }).strict()).min(2).max(MAX_CHANNELS),
   layoutMode: z.enum(['columns', 'rows', 'grid']), focusedSessionId: identifier.nullable(),
 }).strict().superRefine((workspace, context) => {
   const ids = new Set(workspace.sessions.map((session) => session.id));
