@@ -130,5 +130,13 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     assert.equal((await native(page, 'designs', { action: 'list' })).length, 1);
     assert.equal(errors.length, 0, errors.join('\n'));
     console.log('PASS: native diagnostics and redaction, approval requests from both CLIs, real Claude/Codex resume and delta-only token accounting, duplicate resume guard, approved npm verification, task overlap audit and completion evidence, measured A/B trials, isolated live preview and blocked remote requests, screenshot capture, annotations and feedback, local backup restore across app restart, and new navigation. Fixture CLIs; no provider request or Windows installation measured.');
+  } catch (error) {
+    // Show what each CLI printed and which events arrived (the fixture reports APPROVAL:requested, hook-failed or
+    // unsupported), so a CI failure says where an approval request or usage report stopped.
+    try {
+      const window = app && app.windows()[0];
+      if (window) console.error('Session events at failure:\n' + await window.evaluate(() => (window.events ?? []).slice(-60).map((event) => `${String(event.runId).slice(0, 8)} ${event.type}${event.type === 'data' ? ' ' + JSON.stringify(event.data.slice(-200)) : event.message ? ' ' + JSON.stringify(event.message) : ''}`).join('\n')));
+    } catch { /* The window may already be gone. */ }
+    throw error;
   } finally { if (app) await app.close(); await new Promise((resolve) => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
