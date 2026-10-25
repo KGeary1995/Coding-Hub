@@ -60,3 +60,7 @@
 .phone-devices li { display: flex; align-items: center; gap: 12px; }
 .phone-devices li .muted { flex: 1; }
 @container shell (max-width: 900px) { .phone-pairing { flex-direction: column; } }
+.more-tools-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 16px; }
+.more-tools-list .storage-card { display: grid; gap: 8px; align-content: start; justify-items: start; }
+.more-tools-page { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.more-tools-back { justify-self: start; margin: 8px 0 0 16px; display: inline-flex; align-items: center; gap: 4px; }

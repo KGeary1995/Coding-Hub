@@ -3,7 +3,7 @@ import { useWorkspaceStore, type NavigationView } from '../state/workspace-store
 
 /** `G` then a letter opens a view. Alt+1…8 (focus a channel) is handled in AccessibilityControls. */
 export const VIEW_KEYS: Record<string, NavigationView> = {
-  w: 'workspace', c: 'diff', p: 'projects', u: 'usage', h: 'history', f: 'files', t: 'tasks', v: 'verification', d: 'design', o: 'coaching',
+  w: 'workspace', c: 'diff', p: 'projects', u: 'usage', h: 'history', f: 'files', t: 'tasks', v: 'verification', d: 'design', o: 'coaching', l: 'tools',
   a: 'accounts', m: 'memory', r: 'rules', s: 'settings',
 };
 

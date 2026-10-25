@@ -54,7 +54,19 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, and G-letter view shortcuts.');
+    // Occasional tools live on More tools, not in the Insight menu, and each one leads back there.
+    await page.getByRole('button', { name: 'Insight views', exact: true }).click();
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'More tools']);
+    await page.getByRole('menuitem', { name: 'More tools', exact: true }).click();
+    assert.deepEqual(await page.locator('.more-tools h2').allTextContents(), ['Design workspace', 'AI coaching', 'Task coordination', 'Verification profiles']);
+    await page.getByRole('button', { name: 'Open Task coordination', exact: true }).click();
+    await page.getByRole('heading', { name: 'Task coordination', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Insight views', exact: true }).textContent(), 'More tools▾');
+    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
+    await page.keyboard.press('g'); await page.keyboard.press('w');
+    await page.locator('.session-tile').first().waitFor();
+    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
   } finally {
     if (app) await app.close();
     await rm(root, { recursive: true, force: true });

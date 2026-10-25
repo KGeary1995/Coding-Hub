@@ -12,15 +12,18 @@ import { HelpPanel } from './HelpPanel';
 import { ConfigurationPanel, MemoryPanel, SettingsPanel } from './HubPanels';
 import { UsageScreen } from './screens/UsageScreen';
 import { AgentSetup } from './screens/AgentSetup';
-import { SETUP_VIEWS } from './shell/Topbar';
+import { MORE_TOOLS, SETUP_VIEWS } from './shell/Topbar';
+import { MoreTools, MoreToolsBack } from './screens/MoreTools';
 export function FeaturePanel() {
   const view = useWorkspaceStore((s) => s.activeView);
   const panel = <Panel />;
+  if (MORE_TOOLS.some((item) => item.view === view)) return <div className="more-tools-page"><MoreToolsBack />{panel}</div>;
   return SETUP_VIEWS.some((item) => item.view === view) ? <AgentSetup>{panel}</AgentSetup> : panel;
 }
 
 function Panel() {
   const view = useWorkspaceStore((s) => s.activeView);
+  if (view === 'tools') return <MoreTools />;
   if (view === 'workflow') return <Suspense fallback={<p className="control-note">Opening workflow tools…</p>}><WorkflowCenter /></Suspense>;
   if (view === 'tasks') return <TasksPanel />;
   if (view === 'verification') return <VerificationPanel />;

@@ -7,8 +7,14 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'projects', label: 'Projects' }];
 export const INSIGHT_VIEWS: { view: NavigationView; label: string }[] = [
-  { view: 'usage', label: 'Usage' }, { view: 'history', label: 'Session history' }, { view: 'files', label: 'Files' }, { view: 'tasks', label: 'Task coordination' },
-  { view: 'verification', label: 'Verification profiles' }, { view: 'design', label: 'Design workspace' }, { view: 'coaching', label: 'AI coaching' },
+  { view: 'usage', label: 'Usage' }, { view: 'history', label: 'Session history' }, { view: 'files', label: 'Files' }, { view: 'tools', label: 'More tools' },
+];
+/** Rarely used tools, listed on the More tools page instead of in the menus. */
+export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
+  { view: 'design', label: 'Design workspace', detail: 'Design previews and versions, live preview of a local app, annotations and screenshot comparison.' },
+  { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
+  { view: 'tasks', label: 'Task coordination', detail: 'A task board that gives each agent a file scope and flags overlapping edits.' },
+  { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string }[] = [
   { view: 'accounts', label: 'Accounts & connections' }, { view: 'memory', label: 'Shared memory' }, { view: 'rules', label: 'Shared rules' }, { view: 'connectors', label: 'MCP servers' },
@@ -34,7 +40,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore();
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string }[]): MenuItem[] => views.map(({ view, label }) => ({ label, current: activeView === view, onSelect: () => setView(view) }));
-  const insight = INSIGHT_VIEWS.find((item) => item.view === activeView);
+  const insight = INSIGHT_VIEWS.find((item) => item.view === activeView) ?? (MORE_TOOLS.some((item) => item.view === activeView) ? INSIGHT_VIEWS.find((item) => item.view === 'tools') : undefined);
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   const busyNote = sessions.length >= 4 ? `Channel ${sessions.length + 1} of ${MAX_CHANNELS}. Each runs its own CLI and uses more memory.` : undefined;
