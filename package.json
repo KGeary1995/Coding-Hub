@@ -52,7 +52,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-grid-layout": "1.5.4",
-    "zod": "^4.0.0",
+    "zod": "^4.6.7",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -63,7 +63,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
-    "electron": "^44.7.0",
+    "electron": "^44.9.3",
     "electron-builder": "26.15.3",
     "playwright-core": "^1.64.0",
     "postcss": "^8.4.49",
