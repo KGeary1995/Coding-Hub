@@ -87,6 +87,7 @@ export function CommandMenu() {
       { id: 'skills', label: 'Inspect skills and plugins', run: go('skills') },
       { id: 'help', label: 'Open help and AI guide', run: go('help') },
       { id: 'settings', label: 'Open workspace settings', run: go('settings') },
+      { id: 'tools', label: 'Open more tools (design, coaching, tasks, verification)', run: go('tools') },
       { id: 'search', label: 'Search local workspace', run: () => { useWorkspaceStore.setState({ workflowTab: 'search' }); setView('workflow'); } },
       { id: 'recovery', label: 'Recover a failed session', run: () => { useWorkspaceStore.setState({ workflowTab: 'recovery' }); setView('workflow'); } },
       { id: 'templates', label: 'Apply a project template', run: () => { useWorkspaceStore.setState({ workflowTab: 'templates' }); setView('workflow'); } },

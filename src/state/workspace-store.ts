@@ -3,7 +3,7 @@ import type { CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, S
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
-export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow';
+export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 export function createSession(engine: CLIEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {

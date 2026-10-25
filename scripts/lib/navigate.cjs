@@ -1,4 +1,5 @@
-// Opens a view by its name through the Trace top bar: a primary tab, or an item in the Insight or Agent setup menus.
+// Opens a view by its name through the Trace top bar: a primary tab, an item in the Insight or Agent setup menus, or a
+// tool on the More tools page.
 async function openView(page, name) {
   const tab = page.locator('.tr-tabs').getByRole('button', { name, exact: true });
   if (await tab.count()) { await tab.click(); return; }
@@ -9,6 +10,10 @@ async function openView(page, name) {
     if (await item.count()) { await item.click(); return; }
     await page.keyboard.press('Escape');
   }
+  await page.getByRole('button', { name: 'Insight views', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'More tools', exact: true }).click();
+  const tool = page.locator('.more-tools').getByRole('button', { name: `Open ${name}`, exact: true });
+  if (await tool.count()) { await tool.click(); return; }
   throw new Error(`No navigation entry named ${name}`);
 }
 
