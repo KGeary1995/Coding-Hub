@@ -37,9 +37,9 @@ Each release:
 
 1. Bump the version: `npm version <x.y.z> --no-git-tag-version` (updates package.json and package-lock.json together), and update `docs/RELEASE_NOTES.md`.
 2. Merge to main and let **Windows release candidate** pass on that commit (it runs the installer upgrade/uninstall test).
-3. Push the tag `v<x.y.z>` on that commit. The **Release** workflow checks the tag matches package.json, builds the Windows Setup/Portable executables and the Mac disk images, starts a CLI in the packaged Mac app, and publishes everything on trace-releases with `docs/RELEASE_NOTES.md` as the description.
+3. Push the tag `v<x.y.z>` on that commit, or run **Release** by hand on main with **Publish** ticked (it then uses `v<package.json version>`). The workflow checks the tag matches package.json, builds the Windows Setup/Portable executables and the Mac disk images, starts a CLI in the packaged Mac app, and publishes everything on trace-releases with `docs/RELEASE_NOTES.md` as the description. A version that is already published is never replaced.
 
-Running **Release** by hand builds and tests without publishing. Asset names and bytes must not change after publishing: `latest.yml` refers to them by name and SHA-512.
+Running **Release** by hand without **Publish** builds and tests only. Asset names and bytes must not change after publishing: `latest.yml` refers to them by name and SHA-512.
 
 ## Mac disk images
 
