@@ -1,3 +1,5 @@
+const macIdentity = process.env.MAC_SIGNING_IDENTITY;
+
 module.exports = {
   appId: 'com.codinghub.desktop',
   productName: 'AI Coding Hub',
@@ -37,10 +39,14 @@ module.exports = {
     icon: 'assets/icon.png',
     category: 'public.app-category.developer-tools',
     files: ['!node_modules/node-pty/prebuilds/win32-*/**'],
-    // Ad-hoc signed: Apple silicon runs only signed code, and no Apple Developer ID is configured. macOS asks once to
-    // allow the app (System Settings → Privacy & Security → Open Anyway). A Developer ID would also need notarization.
-    identity: '-',
-    hardenedRuntime: false,
+    // MAC_SIGNING_IDENTITY (a Developer ID Application name, e.g. "Kyle Geary (73DB29GHV2)") signs with the hardened
+    // runtime, and APPLE_KEYCHAIN_PROFILE (from `xcrun notarytool store-credentials`) or APPLE_API_KEY / APPLE_ID also
+    // notarizes, so macOS opens the app without asking. Without them the app is ad-hoc signed (Apple silicon runs only
+    // signed code) and macOS asks once to allow it (System Settings → Privacy & Security → Open Anyway).
+    identity: macIdentity || '-',
+    hardenedRuntime: Boolean(macIdentity),
+    ...(macIdentity ? { entitlements: 'assets/entitlements.mac.plist', entitlementsInherit: 'assets/entitlements.mac.plist' } : {}),
+    notarize: Boolean(macIdentity && (process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID)),
   },
   dmg: { artifactName: 'AI-Coding-Hub-${version}-macOS-${arch}.${ext}' },
   // Installers are published to a public downloads repository so installed copies can check it without credentials;

@@ -9,6 +9,8 @@ const { releaseVersion } = require('./release-paths.cjs');
 const root = path.resolve(__dirname, '..');
 const run = (file, args) => { const result = spawnSync(file, args, { cwd: root, stdio: 'inherit', shell: false }); if (result.error) throw result.error; if (result.status !== 0) throw new Error(`${path.basename(file)} failed with exit ${result.status ?? result.signal}.`); };
 
+const notarizing = () => Boolean(process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID);
+
 /** Checks one packaged app folder (AI Coding Hub.app on a Mac); returns its executable. */
 function verifyApp(app, arch) {
   const resources = path.join(app, 'Contents/Resources/app');
@@ -21,6 +23,14 @@ function verifyApp(app, arch) {
   assert.equal(fs.existsSync(path.join(resources, 'node_modules/node-pty/prebuilds/win32-x64')), false, `${arch}: Windows binding leaked into the Mac app`);
   const executable = path.join(app, 'Contents/MacOS', fs.readdirSync(path.join(app, 'Contents/MacOS'))[0]);
   if (process.platform === 'darwin') run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+  if (process.platform === 'darwin' && process.env.MAC_SIGNING_IDENTITY) {
+    // codesign -d reports on stderr.
+    const details = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=2', app], { encoding: 'utf8' }).stderr;
+    assert.match(details, /Authority=Developer ID Application:/, `${arch}: not signed with a Developer ID`);
+    assert.match(details, /flags=0x10000\(runtime\)/, `${arch}: hardened runtime is off, so notarization would fail`);
+    // Gatekeeper accepts the app only once Apple has notarized it and the ticket is stapled.
+    if (notarizing()) { run('/usr/bin/xcrun', ['stapler', 'validate', app]); run('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose', app]); }
+  }
   return executable;
 }
 
