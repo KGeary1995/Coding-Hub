@@ -124,13 +124,20 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelector('[aria-label="File contents"]')?.textContent.includes('"working"'));
     assert.match(await page.locator('.file-preview .code-heading h2').textContent(), /src\/main\.ts$/);
-    // A memory note under another project key opens selected in Shared memory.
-    assert.equal((await page.evaluate(() => window.codingHub.hub({ action: 'memory-write', project: 'other-key', title: 'Menu handoff', content: 'quokka decision', author: 'human' }))).ok, true);
-    await page.keyboard.press('Control+Shift+P');
-    await page.getByLabel('Search commands', { exact: true }).fill('#quokka');
-    await page.getByRole('option').filter({ hasText: 'Menu handoff' }).first().waitFor();
-    await page.keyboard.press('Enter');
-    await page.locator('.memory-history .hub-preview').getByRole('heading', { name: 'Menu handoff', exact: true }).waitFor();
+    // A memory note under another project key opens selected in Shared memory, also on a slow computer: with the
+    // renderer throttled, the panel's first load can answer before React discards it, and must not take the pick.
+    const throttle = await page.context().newCDPSession(page); await throttle.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+    for (const round of [1, 2, 3, 4]) {
+      if (round > 1) await openView(page, 'Files');
+      const title = round === 1 ? 'Menu handoff' : `Menu handoff ${round}`;
+      assert.equal((await page.evaluate((note) => window.codingHub.hub({ action: 'memory-write', project: 'other-key', title: note.title, content: `quokka${note.round} decision`, author: 'human' }), { title, round })).ok, true);
+      await page.keyboard.press('Control+Shift+P');
+      await page.getByLabel('Search commands', { exact: true }).fill(`#quokka${round}`);
+      await page.getByRole('option').filter({ hasText: title }).first().waitFor();
+      await page.keyboard.press('Enter');
+      await page.locator('.memory-history .hub-preview').getByRole('heading', { name: title, exact: true }).waitFor();
+    }
+    await throttle.send('Emulation.setCPUThrottlingRate', { rate: 1 }); await throttle.detach();
     assert.equal(await page.locator('.project-key input').inputValue(), 'other-key');
     await openView(page, 'Files');
     await page.getByRole('treeitem', { name: 'Folder src', exact: true }).click();
