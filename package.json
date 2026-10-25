@@ -1,6 +1,6 @@
 {
   "name": "ai-coding-hub",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/main.js",
@@ -18,6 +18,8 @@
     "postinstall": "install-electron && node scripts/check-native.cjs",
     "start": "npm run build && electron . --production",
     "dist:win": "npm run build && node scripts/build-windows.cjs",
+    "dist:mac": "npm run build && node scripts/build-mac.cjs",
+    "test:packaged": "node scripts/packaged-smoke.cjs",
     "verify:win": "node scripts/verify-windows-package.cjs",
     "test:memory": "npm run build:host && node scripts/memory-smoke.cjs",
     "test:release": "node --test scripts/release-paths.node-test.cjs",

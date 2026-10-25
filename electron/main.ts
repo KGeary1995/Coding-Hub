@@ -28,7 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { discoverEngine } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -37,6 +37,7 @@ import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
 import { finishWorkspaceFlushSchema } from '../shared/schemas';
+import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
@@ -235,6 +236,8 @@ function createWindow() {
   window.on('closed', () => { window = null; });
 }
 
+// Opened from Finder or the Dock, the Mac app lacks the shell's PATH, where the CLIs and Node.js usually are.
+if (process.platform === 'darwin' && app.isPackaged) adoptLoginShellPath();
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
@@ -405,7 +408,8 @@ else app.whenReady().then(() => {
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR)),
-    disabledReason: 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
+    disabledReason: process.platform === 'darwin' && app.isPackaged ? 'The Mac edition does not update itself yet. Download each new version from the downloads page.' : 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
+    openDownloads: () => shell.openExternal(DOWNLOADS_URL),
     storageDirectory: storageRoot,
     updater: autoUpdater,
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },

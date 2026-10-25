@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -11,6 +11,25 @@ import { HubError } from './engine-adapter';
 
 export interface Executable { file: string; prefixArgs: string[]; extraEnv: Record<string, string>; displayPath: string }
 export interface DiscoveredEngine { info: EngineInfo; executable: Executable | null }
+
+/**
+ * The PATH a login shell sets up. A Mac app opened from Finder or the Dock starts with only the system folders, so a
+ * CLI (or the Node.js it runs on) installed through nvm, asdf, Volta or a shell profile would not be found. The PATH is
+ * printed between markers so anything a profile prints is ignored. Returns null when the shell does not answer.
+ */
+export function loginShellPath(shell = process.env.SHELL || '/bin/zsh', run: (file: string, args: string[]) => string = (file, args) => execFileSync(file, args, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })): string | null {
+  try {
+    const output = run(shell, ['-ilc', 'printf "__TRACE_PATH__%s__TRACE_PATH__" "$PATH"']);
+    const value = /__TRACE_PATH__(.*?)__TRACE_PATH__/s.exec(output)?.[1]?.trim();
+    return value && value.includes('/') ? value : null;
+  } catch { return null; }
+}
+
+/** Adds the login shell's PATH folders after the current ones, once, for a Mac app opened outside a terminal. */
+export function adoptLoginShellPath(env: NodeJS.ProcessEnv = process.env, read: () => string | null = loginShellPath) {
+  const shellPath = read(); if (!shellPath) return;
+  env.PATH = [...new Set([...(env.PATH ?? '').split(path.delimiter), ...shellPath.split(path.delimiter)].filter(Boolean))].join(path.delimiter);
+}
 
 export function hostEnvironment(): Record<string, string> {
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));

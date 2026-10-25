@@ -1,8 +1,8 @@
-# Windows installation and releases
+# Windows and Mac installation and releases
 
 ## Build a candidate
 
-On a Windows desktop with Node >=22.13 installed, run `npm ci`, then `npm run dist:win`. Build candidates on Windows using the **Windows release candidate** GitHub Actions workflow too. It runs on pushes to main and supports manual dispatch. The workflow executes unit/release tests, production desktop smoke tests using fixture CLIs, package verification, and an isolated installed-app upgrade/uninstall test. It uploads artifacts without creating tags or publishing releases.
+On a Windows desktop with Node >=22.13 installed, run `npm ci`, then `npm run dist:win`. Build candidates on Windows using the **Windows release candidate** GitHub Actions workflow too. It runs on pushes to main and supports manual dispatch. The workflow executes unit/release tests, production desktop smoke tests using fixture CLIs, package verification, and an isolated installed-app upgrade/uninstall test. It uploads artifacts without creating tags or publishing releases; publishing is the separate tag-driven **Release** workflow below.
 
 Each attempt packages into a unique `release/.build-<id>/` staging folder. The previous `win-unpacked` is never renamed or deleted, so a running older unpacked app cannot lock the new build. Once verified, artifacts are promoted to `release/`, with metadata last. `last-build.json` identifies the verified staging directory for `npm run verify:win`. If an installer EXE itself is open and locked, close it and retry; its staged candidate remains available. Old staging folders can be manually archived after closing apps that use them.
 
@@ -23,17 +23,29 @@ Unsigned builds are suitable for local review but may trigger Windows trust prom
 
 When CSC_LINK is present, executable signing and forceCodeSigning are enabled: signing failures fail the build. electron-builder supplies the certificate publisher metadata for electron-updater's default Windows verification. Retain the same publisher identity for future upgrades. TLS validation and updater checksum validation are never disabled. Unsigned local builds do not establish a trusted publisher identity; metadata hashes alone do not authenticate a release publisher.
 
-## Publish a reviewed release
+## Publish a release
 
-The fixed update source is the public stable releases of `KGeary1995/Coding-Hub`. Do not embed a GitHub token into the app. Private repository feeds require a separately designed authenticated distribution channel and are not supported by this workflow.
+Installers are published on the public repository **KGeary1995/trace-releases**, which holds only release files; the source repository stays private. Installed Windows copies read `latest.yml` there without credentials (the feed is fixed in `electron-builder.cjs` and checked by `verify-windows-package.cjs`). Never embed a GitHub token in the app.
 
-1. Bump package.json and the root/package entry in package-lock.json together.
-2. Run the Windows candidate workflow from the intended source revision and inspect its artifacts.
-3. Test Setup installation, authenticated Claude/Codex CLI launch, uninstall, and an upgrade on a native Windows machine.
-4. Prepare a GitHub release tagged `v<package version>` with the Setup EXE, its blockmap, and latest.yml. Portable EXE can be attached as an optional download. Keep the release as a draft while reviewing it.
-5. Publish as a stable, non-prerelease only after review. Preserve the exact asset names and bytes referenced by latest.yml.
+One-time setup:
 
-The workflow does not publish anything automatically. Existing installed clients cannot discover drafts or prereleases. A missing release or missing assets causes a recoverable update error; it does not affect sessions. Manual installer upgrades are available even when the update service is offline.
+1. Create the public repository `KGeary1995/trace-releases` with a README (a release needs at least one commit).
+2. Create a fine-grained personal access token limited to that repository, with **Contents: Read and write**.
+3. In this repository, add it as the Actions secret `RELEASES_TOKEN`.
+
+Each release:
+
+1. Bump the version: `npm version <x.y.z> --no-git-tag-version` (updates package.json and package-lock.json together), and update `docs/RELEASE_NOTES.md`.
+2. Merge to main and let **Windows release candidate** pass on that commit (it runs the installer upgrade/uninstall test).
+3. Push the tag `v<x.y.z>` on that commit. The **Release** workflow checks the tag matches package.json, builds the Windows Setup/Portable executables and the Mac disk images, starts a CLI in the packaged Mac app, and publishes everything on trace-releases with `docs/RELEASE_NOTES.md` as the description.
+
+Running **Release** by hand builds and tests without publishing. Asset names and bytes must not change after publishing: `latest.yml` refers to them by name and SHA-512.
+
+## Mac disk images
+
+`npm run dist:mac` (on a Mac) builds `AI-Coding-Hub-<version>-macOS-arm64.dmg` (Apple silicon) and `…-macOS-x64.dmg` (Intel) into `release/mac` and checks each app: renderer, phone app, the node-pty binding for its processor, and an executable `spawn-helper` (without it no terminal starts). `npm run test:packaged -- "<app>/Contents/MacOS/AI Coding Hub"` then starts a fixture CLI in the packaged app.
+
+The apps are ad-hoc signed, not signed with an Apple Developer ID or notarized, so macOS blocks the first launch; **System Settings → Privacy & Security → Open Anyway** allows it once. A Developer ID ($99/year Apple Developer Program) plus notarization would remove that step and is also what in-app updates on macOS require; until then the Mac edition is updated from the downloads page (Settings → Application updates → Open downloads page). Opened from Finder, the app reads the login shell's PATH so it finds CLIs installed through Homebrew, nvm, Volta or a shell profile.
 
 ## Update behavior and validation
 

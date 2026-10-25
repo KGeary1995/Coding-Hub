@@ -24,9 +24,11 @@ interface Dependencies {
   hasSessions: () => boolean;
   prepareRestart: () => Promise<boolean>;
   installationFailed?: () => void;
+  /** Opens the public downloads page, for editions that are updated by hand. */
+  openDownloads?: () => Promise<void>;
 }
 const requestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.enum(['status', 'check', 'download', 'install']) }).strict(),
+  z.object({ action: z.enum(['status', 'check', 'download', 'install', 'downloads']) }).strict(),
   z.object({ action: z.literal('automatic'), enabled: z.boolean() }).strict(),
 ]);
 
@@ -84,6 +86,7 @@ export class UpdateService {
     if (!parsed.success) throw new HubError('INVALID_UPDATE_REQUEST', 'Invalid update request.');
     const request: UpdateRequest = parsed.data;
     if (request.action === 'status') return this.status();
+    if (request.action === 'downloads') { await this.dependencies.openDownloads?.(); return this.status(); }
     if (request.action === 'automatic') {
       mkdirSync(path.dirname(this.settingsPath), { recursive: true });
       const temporary = `${this.settingsPath}.tmp`;
