@@ -8,6 +8,7 @@ import { LOGIN_ARGUMENTS, INSTALL_GUIDES, inspectAccount } from './account-conne
 import { hostEnvironment } from './discovery';
 import type { ClaudeProfiles } from './claude-profiles';
 import { HubError } from './engine-adapter';
+import { nodePty } from './native-pty';
 const provider = z.enum(['claude', 'codex', 'github']); const cols = z.number().int().min(2).max(500); const rows = z.number().int().min(1).max(300);
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('status'), profileId: z.uuid().optional() }).strict(), z.object({ action: z.literal('profile-list') }).strict(), z.object({ action: z.literal('profile-create'), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('profile-rename'), profileId: z.uuid(), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('login'), provider, profileId: z.uuid().optional(), cols, rows }).strict(), z.object({ action: z.literal('stop'), runId: z.uuid().optional() }).strict(), z.object({ action: z.literal('write'), runId: z.uuid(), data: z.string().max(16384) }).strict(), z.object({ action: z.literal('resize'), runId: z.uuid(), cols, rows }).strict(), z.object({ action: z.literal('install-guide'), provider }).strict()]);
 interface Run { owner: number; login: AccountLogin; pty: IPty; exited: Promise<void>; resolve: () => void; finished: boolean }
@@ -58,7 +59,7 @@ export class AccountLoginManager {
       if (!discovered.executable || !discovered.connection.canLogin) throw new HubError('LOGIN_UNAVAILABLE', discovered.connection.message);
       if (reservation.cancelled || this.closing) throw new HubError('LOGIN_CANCELLED', 'Login was cancelled.');
       const login: AccountLogin = { runId: randomUUID(), provider: request.provider, ...(request.profileId ? { profileId: request.profileId } : {}) };
-      const spawn = this.dependencies.spawn ?? ((file, args, options) => (require('node-pty') as typeof import('node-pty')).spawn(file, args, options));
+      const spawn = this.dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
       const pty = spawn(discovered.executable.file, [...discovered.executable.prefixArgs, ...LOGIN_ARGUMENTS[request.provider]], { cwd: homedir(), cols: request.cols, rows: request.rows, env: { ...((this.dependencies.profiles?.environment({ ...env, ...discovered.executable.extraEnv }, request.profileId)) ?? { ...env, ...discovered.executable.extraEnv }), TERM: 'xterm-256color', COLORTERM: 'truecolor' } });
       let resolve!: () => void; const exited = new Promise<void>((done) => { resolve = done; }); const run: Run = { owner, login, pty, exited, resolve, finished: false }; this.run = run;
       pty.onData((data) => { if (run.finished) return; for (let offset = 0; offset < data.length; offset += 16384) this.send(owner, { type: 'data', ...login, data: data.slice(offset, offset + 16384) }); });
