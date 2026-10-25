@@ -1,0 +1,81 @@
+name: Release
+# Pushing a tag v<version> (matching package.json) builds the Windows installer and the Mac disk images, checks that
+# the Mac app starts a CLI (windows-release.yml on main already tests the Windows installer), and publishes them on
+# the public downloads repository KGeary1995/trace-releases, which installed copies check for updates. A manual run
+# builds and tests without publishing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::Tag $GITHUB_REF_NAME does not match package.json"; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:win
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          if-no-files-found: error
+          path: |
+            release/*-Setup.exe
+            release/*-Setup.exe.blockmap
+            release/*-Portable.exe
+            release/latest.yml
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::Tag $GITHUB_REF_NAME does not match package.json"; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:pty
+      - run: npm run dist:mac
+      - name: Start a CLI in the packaged app (Apple silicon)
+        run: node scripts/packaged-smoke.cjs "release/mac/mac-arm64/AI Coding Hub.app/Contents/MacOS/AI Coding Hub"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac
+          if-no-files-found: error
+          path: release/mac/*.dmg
+  publish:
+    needs: [windows, mac]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish on the downloads repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::Add the RELEASES_TOKEN secret: a token that can write to KGeary1995/trace-releases (see docs/windows-releases.md)."; exit 1; fi
+          ls -l assets
+          gh release create "$GITHUB_REF_NAME" --repo KGeary1995/trace-releases --title "Trace ${GITHUB_REF_NAME#v}" --notes-file docs/RELEASE_NOTES.md assets/*

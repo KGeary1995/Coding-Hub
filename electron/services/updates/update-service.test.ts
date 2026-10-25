@@ -103,4 +103,13 @@ describe('Windows update lifecycle', () => {
     expect(updatesEnabled(true, 'win32', directory, true)).toBe(false);
     expect(updatesEnabled(true, 'win32', path.join(directory, 'missing'), false)).toBe(false);
   });
+  it('opens the downloads page from any edition, updating or not', async () => {
+    for (const enabled of [false, true]) {
+      const { service, dependencies } = fixture(enabled); const openDownloads = vi.fn(async () => {});
+      const withPage = new UpdateService({ ...dependencies, openDownloads });
+      expect((await withPage.execute({ action: 'downloads' })).phase).toBe(enabled ? 'idle' : 'disabled');
+      expect(openDownloads).toHaveBeenCalledOnce();
+      await expect(service.execute({ action: 'downloads', url: 'https://example.com' })).rejects.toMatchObject({ code: 'INVALID_UPDATE_REQUEST' });
+    }
+  });
 });

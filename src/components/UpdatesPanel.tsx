@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 import type { UpdateRequest, UpdateStatus } from '../../shared/updates';
 
 export function UpdatesPanel() {
@@ -43,6 +43,7 @@ export function UpdatesPanel() {
         {(status?.phase === 'ready' || (status?.phase === 'error' && status.progress === 100)) && <button className="button primary" disabled={working} onClick={() => void run({ action: 'install' })}>Restart and install</button>}
       </div>
     </>}
-    <p className="control-note">Settings, rules, memory, and logs are stored separately in ~/.coding-hub and retained across upgrades. Stop all CLI sessions before installing.</p>
+    {window.codingHub && <button className="button secondary" disabled={busy} onClick={() => void run({ action: 'downloads' })}><ExternalLink size={14} />Open downloads page</button>}
+    <p className="control-note">The downloads page has the Windows installer and the Mac disk images for every release. Settings, rules, memory, and logs are stored separately in ~/.coding-hub and retained across upgrades. Stop all CLI sessions before installing.</p>
   </article>;
 }

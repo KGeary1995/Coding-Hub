@@ -59,7 +59,7 @@ for (const name of ['@xterm/headless', '@xterm/addon-serialize']) assert.ok(pack
 const feed = load(fs.readFileSync(path.join(app, 'resources/app-update.yml'), 'utf8'));
 assert.equal(feed.provider, 'github');
 assert.equal(feed.owner, 'KGeary1995');
-assert.equal(feed.repo, 'Coding-Hub');
+assert.equal(feed.repo, 'trace-releases');
 assert.equal(fs.existsSync(path.join(resources, 'node_modules/node-pty/build/Release/pty.node')), false, 'Linux binding leaked into Windows package');
 const html = fs.readFileSync(path.join(resources, 'dist/index.html'), 'utf8');
 for (const match of html.matchAll(/(?:src|href)="(\.\/assets\/[^"?#]+)"/g)) {

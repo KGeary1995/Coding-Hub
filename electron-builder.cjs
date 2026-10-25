@@ -21,18 +21,31 @@ module.exports = {
     '!node_modules/node-pty/scripts/**',
     '!node_modules/node-pty/typings/**',
     '!node_modules/node-pty/third_party/**',
-    '!node_modules/node-pty/prebuilds/win32-arm64/**',
-    '!node_modules/node-pty/prebuilds/darwin-x64/**',
-    '!node_modules/node-pty/prebuilds/darwin-arm64/**',
   ],
   win: {
+    // Only the Windows x64 terminal binding ships in the Windows package.
+    files: ['!node_modules/node-pty/prebuilds/win32-arm64/**', '!node_modules/node-pty/prebuilds/darwin-*/**'],
     // electron-builder 26 only accepts publisherName under signtoolOptions; directly under win it fails validation.
     ...(process.env.WINDOWS_PUBLISHER_NAME ? { signtoolOptions: { publisherName: process.env.WINDOWS_PUBLISHER_NAME } } : {}),
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'portable', arch: ['x64'] }],
     icon: 'assets/icon.ico',
     signExecutable: Boolean(process.env.CSC_LINK),
   },
-  publish: [{ provider: 'github', owner: 'KGeary1995', repo: 'Coding-Hub', releaseType: 'draft' }],
+  mac: {
+    // One disk image per processor: Apple silicon (arm64) and Intel (x64). Each keeps its own node-pty binding.
+    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }],
+    icon: 'assets/icon.png',
+    category: 'public.app-category.developer-tools',
+    files: ['!node_modules/node-pty/prebuilds/win32-*/**'],
+    // Ad-hoc signed: Apple silicon runs only signed code, and no Apple Developer ID is configured. macOS asks once to
+    // allow the app (System Settings → Privacy & Security → Open Anyway). A Developer ID would also need notarization.
+    identity: '-',
+    hardenedRuntime: false,
+  },
+  dmg: { artifactName: 'AI-Coding-Hub-${version}-macOS-${arch}.${ext}' },
+  // Installers are published to a public downloads repository so installed copies can check it without credentials;
+  // the source repository stays private. See docs/windows-releases.md.
+  publish: [{ provider: 'github', owner: 'KGeary1995', repo: 'trace-releases', releaseType: 'release' }],
   nsis: {
     oneClick: false,
     perMachine: false,

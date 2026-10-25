@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { CLEAR_RUN_AS_NODE, npmEntryForShim } from './discovery';
+import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, loginShellPath, npmEntryForShim } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -46,5 +46,23 @@ describe('Windows npm CLI shim resolution', () => {
       const { shim } = await fixture(bin);
       await expect(npmEntryForShim(shim, 'codex')).rejects.toThrow('Reinstall');
     }
+  });
+});
+
+describe('Mac login shell PATH', () => {
+  it('reads the PATH between markers, ignoring what a shell profile prints', () => {
+    const calls: string[][] = [];
+    const value = loginShellPath('/bin/zsh', (file, args) => { calls.push([file, ...args]); return 'Welcome back!\n__TRACE_PATH__/Users/me/.nvm/versions/node/v22/bin:/usr/bin__TRACE_PATH__\n'; });
+    expect(value).toBe('/Users/me/.nvm/versions/node/v22/bin:/usr/bin');
+    expect(calls[0].slice(0, 2)).toEqual(['/bin/zsh', '-ilc']);
+    expect(loginShellPath('/bin/zsh', () => 'no markers here')).toBeNull();
+    expect(loginShellPath('/bin/zsh', () => { throw new Error('timed out'); })).toBeNull();
+  });
+  it('adds the shell folders after the current ones without repeating any', () => {
+    const env: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
+    adoptLoginShellPath(env, () => '/opt/homebrew/bin:/usr/bin:/Users/me/.volta/bin');
+    expect(env.PATH).toBe('/usr/bin:/bin:/opt/homebrew/bin:/Users/me/.volta/bin');
+    adoptLoginShellPath(env, () => null);
+    expect(env.PATH).toBe('/usr/bin:/bin:/opt/homebrew/bin:/Users/me/.volta/bin');
   });
 });
