@@ -41,7 +41,8 @@ function promote(stage, output, version) {
   try {
     for (const item of copies) fs.copyFileSync(path.join(stage, item.name), item.temporary, fs.constants.COPYFILE_EXCL);
     for (const item of copies) fs.renameSync(item.temporary, path.join(output, item.name));
-    const manifest = { version, stage: path.relative(output, stage), builtAt: new Date().toISOString() };
+    // Real paths on both sides: an aliased output folder (macOS /var -> /private/var) would record ../private/... here.
+    const manifest = { version, stage: path.relative(fs.realpathSync(output), fs.realpathSync(stage)), builtAt: new Date().toISOString() };
     const temporary = path.join(output, '.last-build-' + randomUUID() + '.json');
     fs.writeFileSync(temporary, JSON.stringify(manifest, null, 2));
     fs.renameSync(temporary, path.join(output, 'last-build.json'));
