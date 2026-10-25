@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { RemoteServer, type RemoteHost } from './remote-server';
-import { serveFailure, tailscaleExecutable, tailscaleState } from './tailscale';
+import { serveFailure, TAILSCALE_DNS_SETTINGS, tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -215,12 +215,15 @@ describe('phone alerts', () => {
 });
 
 describe('tailscale state', () => {
-  it('explains a failed serve with Tailscale\'s own words, and returns its approval link', () => {
+  it('explains a failed serve, with the Tailscale page that fixes it', () => {
     const waiting = serveFailure(Object.assign(new Error('Command failed'), { timedOut: true, output: 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nAbc123' }));
-    expect(waiting.url).toBe('https://login.tailscale.com/f/serve?node=nAbc123'); expect(waiting.message).toMatch(/allow HTTPS/);
-    expect(serveFailure(Object.assign(new Error('Command failed'), { timedOut: true, output: '' }))).toMatchObject({ url: null, message: expect.stringMatching(/HTTPS Certificates/) });
-    expect(serveFailure(Object.assign(new Error('Access denied: serve config denied'), { output: 'Access denied: serve config denied' })).message).toMatch(/administrator/);
-    expect(serveFailure(Object.assign(new Error('some other problem'), { output: 'see https://evil.example/x' }))).toEqual({ url: null, message: 'Tailscale could not set up HTTPS: some other problem' });
+    expect(waiting).toMatchObject({ kind: 'approve', link: true, url: 'https://login.tailscale.com/f/serve?node=nAbc123' }); expect(waiting.message).toMatch(/allow HTTPS/);
+    // Tailscale's words when HTTPS certificates are off for the tailnet (as seen on Windows).
+    const certificates = serveFailure(Object.assign(new Error('Command failed: tailscale.exe serve --bg --https=443 http://127.0.0.1:47821'), { output: 'HTTPS certificates must be enabled for your tailnet in the Tailscale admin console.' }));
+    expect(certificates).toMatchObject({ kind: 'certificates', link: true, url: TAILSCALE_DNS_SETTINGS });
+    expect(serveFailure(Object.assign(new Error('Command failed'), { timedOut: true, output: '' }))).toMatchObject({ kind: 'certificates', url: TAILSCALE_DNS_SETTINGS });
+    expect(serveFailure(Object.assign(new Error('Access denied: serve config denied'), { output: 'Access denied: serve config denied' }))).toMatchObject({ kind: 'permission', link: false, url: null, message: expect.stringMatching(/administrator/) });
+    expect(serveFailure(Object.assign(new Error('some other problem'), { output: 'see https://evil.example/x' }))).toEqual({ kind: 'other', link: false, url: null, message: 'Tailscale could not set up HTTPS: some other problem' });
   });
   it('finds a Tailscale app installed after Trace started', () => {
     const installed = new Set<string>(); const candidates = ['/Applications/Tailscale.app/Contents/MacOS/Tailscale', 'tailscale'];

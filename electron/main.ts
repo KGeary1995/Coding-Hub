@@ -311,27 +311,36 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
   }, undefined, path.join(__dirname, '../../dist/phone'));
-  const runTailscale = tailscaleRunner(); const phone = remote;
-  const refreshTailscale = async () => { if (phone.enabled) phone.tailscale = await tailscaleState(runTailscale, phone.port); };
+  const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
+  const refreshTailscale = async () => { if (!phone.enabled) return; phone.tailscale = await tailscaleState(runTailscale, phone.port); if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; } };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   setInterval(() => void refreshTailscale().catch(() => {}), 60000).unref();
   const remoteControl = async (payload: unknown) => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
       z.object({ action: z.literal('remote-pair') }).strict(), z.object({ action: z.literal('remote-cancel-pairing') }).strict(),
-      z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve') }).strict(),
+      z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve'), automatic: z.boolean().optional() }).strict(),
+      z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
     ]).parse(payload);
     if (request.action === 'remote-enable') await phone.setEnabled(request.enabled);
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
     if (request.action === 'remote-test-alert') return phone.testAlert(request.id);
+    if (request.action === 'remote-open-tailscale') { if (phone.serveLink) await shell.openExternal(phone.serveLink); return phone.status(); }
     if (request.action === 'remote-serve') {
-      const confirmed = (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
+      // Once agreed, a retry runs the same command: after fixing Tailscale's settings the person is not asked again.
+      // An automatic retry never asks and never opens a page, so returning to Trace cannot bounce back to the browser.
+      const confirmed = serveConsent || !request.automatic && (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
         message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;
       if (confirmed) {
-        try { await serveRemote(runTailscale, phone.port); }
-        catch (error) { const failure = serveFailure(error as TailscaleError); if (failure.url) void shell.openExternal(failure.url); throw new HubError('TAILSCALE_SERVE', failure.message); }
+        serveConsent = true;
+        try { await serveRemote(runTailscale, phone.port); phone.serveProblem = null; phone.serveLink = null; }
+        catch (error) {
+          const { url, ...problem } = serveFailure(error as TailscaleError);
+          phone.serveProblem = problem; phone.serveLink = url;
+          if (url && !request.automatic) void shell.openExternal(url);
+        }
       }
     }
     await refreshTailscale().catch(() => {});

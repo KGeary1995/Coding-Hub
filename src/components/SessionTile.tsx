@@ -15,6 +15,7 @@ import { useHubStore, tokens, dollars } from '../state/hub-store';
 import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { compact } from './shell/StatusBar';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
@@ -97,7 +98,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
             ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
           <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
-          <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= 4} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
+          <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
           <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
           <button className="tr-detail-button" title="Stop and close (keep at least two channels)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
         </div>

@@ -28,7 +28,15 @@ export interface RemoteStatus {
   tailscale: TailscaleState;
   /** A pairing code waiting to be used, with the link a phone opens to use it. */
   pairing: { code: string; url: string; expiresAt: string } | null;
+  /** Why the last `tailscale serve` failed, until HTTPS on the tailnet works. */
+  serveProblem: ServeProblem | null;
 }
+/**
+ * What stopped Tailscale HTTPS: `certificates` (HTTPS certificates or MagicDNS are off for the tailnet), `approve`
+ * (Serve waits for approval on a Tailscale page), `permission` (this user may not change Tailscale), or `other`.
+ * `link` says the host holds a Tailscale page to open for it.
+ */
+export interface ServeProblem { kind: 'certificates' | 'approve' | 'permission' | 'other'; message: string; link: boolean }
 export type RemoteRequest =
   | { action: 'remote-status' }
   | { action: 'remote-enable'; enabled: boolean }
@@ -36,7 +44,9 @@ export type RemoteRequest =
   | { action: 'remote-cancel-pairing' }
   | { action: 'remote-revoke'; id: string }
   | { action: 'remote-test-alert'; id: string }
-  | { action: 'remote-serve' };
+  /** `automatic` retries after the person returns from Tailscale's settings: no confirmation and no page opened. */
+  | { action: 'remote-serve'; automatic?: boolean }
+  | { action: 'remote-open-tailscale' };
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;

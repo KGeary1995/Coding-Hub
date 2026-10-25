@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
+import { MAX_CHANNELS } from '../../shared/schemas';
 
 export type NavigationView = 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -26,7 +27,8 @@ export function createSession(engine: CLIEngine, binding: WorkspaceBinding = { m
 }
 
 export function arrangeTiles(sessions: Session[], mode: LayoutMode): GridTile[] {
-  const columns = mode === 'rows' ? 1 : mode === 'columns' ? sessions.length : Math.min(2, sessions.length);
+  // Columns wrap after four; the grid keeps two rows, so five to eight channels sit three or four across.
+  const columns = mode === 'rows' ? 1 : mode === 'columns' ? Math.min(4, sessions.length) : sessions.length <= 2 ? sessions.length : Math.ceil(sessions.length / 2);
   const width = 12 / columns;
   return sessions.map((session, index) => ({
     sessionId: session.id,
@@ -130,15 +132,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();
-    const slot = state.sessions.length >= 4 ? state.sessions.find((session) => session.status !== 'running' && session.status !== 'starting') : null;
-    if (state.sessions.length >= 4 && !slot) return false;
+    const slot = state.sessions.length >= MAX_CHANNELS ? state.sessions.find((session) => session.status !== 'running' && session.status !== 'starting') : null;
+    if (state.sessions.length >= MAX_CHANNELS && !slot) return false;
     const session = createSession(run.engine, { mode: 'independent', cwd: run.cwd }); session.config = structuredClone(run.config);
     const sessions = slot ? state.sessions.map((item) => item.id === slot.id ? session : item) : [...state.sessions, session];
     set({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null, activeView: 'workspace' });
     return true;
   },
   addSession: (engine, sourceSessionId) => set((state) => {
-    if (state.sessions.length >= 4) return state;
+    if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
     const session = createSession(engine, source ? { ...source.binding } : undefined);
     if (source?.config.engine === engine) { session.config = structuredClone(source.config); delete session.config.resumeId; }

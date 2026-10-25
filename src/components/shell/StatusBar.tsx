@@ -6,7 +6,7 @@ import { focusTerminal } from '../../runtime/terminals';
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
 
-/** Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–4 does). */
+/** Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–8 does). */
 export function jumpToChannel(id: string) {
   const state = useWorkspaceStore.getState();
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
