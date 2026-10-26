@@ -16,7 +16,7 @@ const model = z.string().max(MAX_MODEL_LENGTH).refine((value) => value === '' ||
 const tokens = z.number().int().min(0).max(MAX_TOKEN_SETTING).nullable();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
   z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
-  z.object({ engine: z.literal('codex'), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
+  z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
 /** Every channel type: the agents plus a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, z.object({ engine: z.literal('shell') }).strict()]);

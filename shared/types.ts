@@ -20,6 +20,8 @@ export interface ClaudeCLIEngineConfig {
 export interface CodexCLIEngineConfig {
   engine: 'codex';
   resumeId?: string;
+  /** A chat channel: Codex's app server, drawn by Trace as a conversation (with images) instead of a terminal. */
+  chat?: boolean;
   model: string;
   reasoningEffort: ReasoningEffort | null;
 }

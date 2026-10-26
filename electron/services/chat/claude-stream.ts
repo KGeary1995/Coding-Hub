@@ -13,7 +13,10 @@ const shorten = (value: string) => value.length > TOOL_RESULT_LIMIT ? value.slic
  * `control_request`/`can_use_tool` once the host has introduced itself (`initialize`), and are answered with a
  * `control_response` saying allow (with the input unchanged) or deny.
  */
-export class ClaudeStream {
+/** What a chat run needs from the CLI's protocol, whichever CLI it is. */
+export interface ChatStream { start(): void; send(message: string, images: ChatImage[]): void; answer(requestId: string, allow: boolean, allowEdits?: boolean): boolean; interrupt(): void; close(): void; push(data: string): void }
+
+export class ClaudeStream implements ChatStream {
   private buffer = '';
   private pending = new Map<string, { input: Record<string, unknown>; suggestions: unknown[] }>();
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void) {}

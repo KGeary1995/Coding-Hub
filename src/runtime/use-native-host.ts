@@ -47,8 +47,8 @@ export function useNativeHost() {
     const unsubscribe = host.onSessionEvent((event) => {
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-      if (event.type === 'started' && before?.config.engine === 'claude' && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
-      if (event.type === 'exit' && before?.config.engine === 'claude' && before.config.chat) chatEnded(event.sessionId);
+      if (event.type === 'started' && before && before.config.engine !== 'shell' && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
+      if (event.type === 'exit' && before && before.config.engine !== 'shell' && before.config.chat) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
       catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }

@@ -164,11 +164,12 @@ With the tile focused, Enter starts an idle channel or moves into its terminal.
 
 ## Chat channels
 
-**+ Channel → Claude chat** runs Claude Code in its structured mode (`--print --input-format stream-json --output-format stream-json`) instead of its terminal screen, and Trace draws the conversation: your messages with images inline, replies formatted (headings, lists, tables, code), tool calls as cards with their results (edits as before/after), and Claude's thinking folded away. It runs in the channel's folder with the channel's account profile, model, shared rules, shared memory and MCP tools, as a terminal channel does, and usage is recorded the same way.
+**+ Channel → Claude chat** (or **Codex chat**) runs the agent without its terminal screen, and Trace draws the conversation. Claude Code runs in its structured mode (`--print --input-format stream-json --output-format stream-json`) instead of its terminal screen, and Trace draws the conversation: your messages with images inline, replies formatted (headings, lists, tables, code), tool calls as cards with their results (edits as before/after), and Claude's thinking folded away. It runs in the channel's folder with the channel's account profile, model, shared rules, shared memory and MCP tools, as a terminal channel does, and usage is recorded the same way.
 
 - **Images:** paste, drop or attach (button) up to 10 per message. They go to Claude as images, not file paths. Images over about 5 MB, or in other formats, are redrawn as JPEG at most 2000 px.
 - **Approvals:** when Claude asks to use a tool your permission settings do not already allow, a card offers **Allow**, **Allow edits this run** (when Claude suggests it) or **Deny**. The channel shows as waiting (status bar, notice, phone alert) until you answer; **Answer** goes to the card.
 - **Stop** interrupts the reply; Claude keeps what it has done. A restarted chat continues the conversation.
+- **Codex chat** runs Codex's app server (`codex app-server`, the protocol its IDE extension uses): images go in as images, commands and file changes appear as cards with their output, and Codex's approval requests offer **Allow**, **Allow for this session** or **Deny**. Codex's own settings (approval policy, sandbox) apply as in its terminal.
 - Terminal-only screens such as `/config` or the model picker are not part of chat; use a terminal channel for those. Chat channels are not yet shown on the phone.
 
 ## Approval alerts

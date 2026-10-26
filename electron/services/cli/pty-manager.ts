@@ -13,7 +13,8 @@ import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
-import { CHAT_ARGS, ClaudeStream } from '../chat/claude-stream';
+import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
+import { CodexStream } from '../chat/codex-stream';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
 import type { ChatEnvelope } from '../../../shared/chat';
 
@@ -67,7 +68,7 @@ interface ManagedRun {
   /** The latest title the CLI gave its terminal (OSC 0/2): Claude Code's task summary, for phones. */
   title?: string;
   /** A chat channel: Claude's structured messages, turned into chat events for the window. */
-  chat?: ClaudeStream;
+  chat?: ChatStream;
 }
 
 export class PtyManager {
@@ -160,7 +161,7 @@ export class PtyManager {
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
       const baseEnvironment = this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession;
-      const chat = request.config.engine === 'claude' && request.config.chat === true;
+      const chat = request.config.engine !== 'shell' && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const program = shellProgram(baseEnvironment);
@@ -173,14 +174,16 @@ export class PtyManager {
         const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
         const engine = await this.discover(request.config.engine, discoveryEnvironment);
         if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
-        const launch = buildLaunch(request.config, engine.info);
+        // A Codex chat is the app server; its model, reasoning and resumed thread go in its protocol, not on the command line.
+        const codexChat = chat && request.config.engine === 'codex';
+        const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : buildLaunch(request.config, engine.info);
         if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
         const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
         this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(chat ? CHAT_ARGS : []), ...launch.args];
+        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(codexChat ? ['app-server'] : chat ? CHAT_ARGS : []), ...launch.args];
       }
       let pty: IPty;
       try {
@@ -191,7 +194,7 @@ export class PtyManager {
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run);
-      if (chat) this.attachChat(run, pty as ChatProcess);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } : null);
       else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-8192);
@@ -214,14 +217,16 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess) {
+  private attachChat(run: ManagedRun, child: ChatProcess, codex: { cwd: string; model: string; reasoningEffort: string | null; resumeId?: string } | null) {
     const { sessionId, runId } = run.session;
-    const stream = new ClaudeStream((line) => { try { child.write(line); } catch { /* Exited. */ } }, (event) => {
+    const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
+    const emit = (event: import('../../../shared/chat').ChatEvent) => {
       if (run.finished && event.type !== 'permission-done') return;
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
-    });
+    };
+    const stream: ChatStream = codex ? new CodexStream(write, emit, codex) : new ClaudeStream(write, emit);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.

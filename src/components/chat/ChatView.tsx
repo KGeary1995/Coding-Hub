@@ -57,27 +57,30 @@ function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' 
   </details>;
 }
 
-function Permission({ item, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; answer: (allow: boolean, allowEdits?: boolean) => void }) {
+function Permission({ item, agent, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; answer: (allow: boolean, allowEdits?: boolean) => void }) {
   const summary = toolSummary(item.toolName, item.input);
   return <div className={`chat-permission ${item.answer ?? 'open'}`} role={item.answer ? undefined : 'alert'}>
-    <p><strong>Claude wants to use {item.toolName}</strong>{item.description && item.description !== summary ? ` · ${item.description}` : ''}</p>
+    <p><strong>{agent} wants to use {item.toolName}</strong>{item.description && item.description !== summary ? ` · ${item.description}` : ''}</p>
     {summary && <pre>{summary}</pre>}
     {item.answer ? <p className="chat-permission-answer">{item.answer === 'allowed' ? 'Allowed' : item.answer === 'denied' ? 'Denied' : 'No longer waiting'}</p>
       : <div className="chat-permission-actions">
         <button className="button primary" onClick={() => answer(true)}>Allow</button>
-        {item.canAllowEdits && <button className="button secondary" title="Let Claude edit files without asking for the rest of this run" onClick={() => answer(true, true)}>Allow edits this run</button>}
+        {item.canAllowEdits && (agent === 'Codex'
+          ? <button className="button secondary" title="Allow this kind of action without asking for the rest of this session" onClick={() => answer(true, true)}>Allow for this session</button>
+          : <button className="button secondary" title="Let Claude edit files without asking for the rest of this run" onClick={() => answer(true, true)}>Allow edits this run</button>)}
         <button className="button secondary" onClick={() => answer(false)}>Deny</button>
       </div>}
   </div>;
 }
 
 /**
- * A chat channel: Claude Code's conversation drawn by Trace, with the person's images in the thread, formatted
+ * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
  * replies, tool calls as cards with their results, and approvals as buttons. The CLI runs in structured mode in the
  * channel's folder with the channel's account, rules, memory and tools, as a terminal channel does.
  */
 export function ChatView({ session }: { session: Session }) {
   const chat = useChatStore((state) => state.threads[session.id] ?? EMPTY);
+  const agent = session.config.engine === 'codex' ? 'Codex' : 'Claude';
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState('');
   const [viewing, setViewing] = useState<string | null>(null);
@@ -112,7 +115,7 @@ export function ChatView({ session }: { session: Session }) {
 
   return <div className="chat-view" data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
-      {!chat.items.length && <p className="chat-empty">{running ? 'Ask Claude anything about this project. Paste or drop screenshots to include them.' : 'Start the channel to chat with Claude in this folder.'}</p>}
+      {!chat.items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
       {chat.items.map((item) => item.kind === 'user'
         ? <div key={item.id} className="chat-message user">
           {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => setViewing(url)}><img src={url} alt="" /></button>)}</div>}
@@ -125,9 +128,9 @@ export function ChatView({ session }: { session: Session }) {
                 : <ToolCard key={block.id} block={block} result={chat.results[block.id]} />)}
             {item.streaming && <div className="chat-streaming"><Markdown text={item.streaming} /></div>}
           </div>
-          : item.kind === 'permission' ? <Permission key={item.id} item={item} answer={answer(item.id)} />
+          : item.kind === 'permission' ? <Permission key={item.id} item={item} agent={agent} answer={answer(item.id)} />
             : <p key={item.id} className={`chat-notice ${item.error ? 'error' : ''}`}>{item.text}</p>)}
-      {chat.busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>Claude is working</p>}
+      {chat.busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{agent} is working</p>}
     </div>
     <div className="chat-composer">
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
@@ -135,9 +138,9 @@ export function ChatView({ session }: { session: Session }) {
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
-        <textarea ref={input} rows={1} value={text} disabled={!running} placeholder={running ? (chat.busy ? 'Claude is working. You can write your next message.' : 'Message Claude (Enter to send, Shift+Enter for a new line)') : 'Start the channel to chat'} aria-label="Message to Claude" onChange={(event) => setText(event.target.value)} onKeyDown={onKey} onPaste={onPaste} />
+        <textarea ref={input} rows={1} value={text} disabled={!running} placeholder={running ? (chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`) : 'Start the channel to chat'} aria-label={`Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} onPaste={onPaste} />
         {chat.busy
-          ? <button className="chat-icon stop" aria-label="Stop Claude's reply" title="Stop the reply (Claude keeps what it has done)" onClick={interrupt}><Square size={14} /></button>
+          ? <button className="chat-icon stop" aria-label={`Stop ${agent}'s reply`} title={`Stop the reply (${agent} keeps what it has done)`} onClick={interrupt}><Square size={14} /></button>
           : <button className="chat-icon send" aria-label="Send" disabled={!running || (!text.trim() && !images.length)} onClick={() => void send()}><Send size={16} /></button>}
       </div>
     </div>
