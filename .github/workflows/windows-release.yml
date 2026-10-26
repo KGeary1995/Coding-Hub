@@ -40,7 +40,6 @@ jobs:
         run: node scripts/build-windows.cjs --output release/baseline --version 1.2.0
         env:
           TRACE_LEGACY_PRODUCT_NAME: '1'
-        env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
       - run: npm run test:install

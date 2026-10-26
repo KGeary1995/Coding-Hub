@@ -148,11 +148,15 @@ function reportStorageError(message: string) { sendToRenderer(IPC_CHANNELS.stora
  * installer does, by the shared app ID). Once, Trace offers to move that old copy to the Trash.
  */
 async function offerToRemoveOldApp() {
-  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  // Never from a copy with its own profile (tests, or a second setup): only the person's own Trace asks.
+  if (process.platform !== 'darwin' || !app.isPackaged || app.commandLine.hasSwitch('user-data-dir')) return;
+  // As a sheet on Trace's window once it is up, so it is clearly this app asking.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  const parent = window && !window.isDestroyed() ? window : null; if (!parent) return;
   const old = '/Applications/AI Coding Hub.app'; const asked = path.join(app.getPath('userData'), 'old-app-offered');
   if (!fs.existsSync(old) || fs.existsSync(asked) || app.getPath('exe').startsWith(old + '/')) return;
   // Nothing is moved unless the person clicks Move to Trash: Return, Escape or closing the question keeps the old copy.
-  const { response } = await dialog.showMessageBox({ type: 'question', buttons: ['Keep it', 'Move to Trash'], defaultId: 0, cancelId: 0, title: 'Remove the old copy?', message: 'An older copy of this app, named AI Coding Hub, is still in Applications.', detail: 'Trace replaces it and keeps all your settings, channels and history. If AI Coding Hub is in your Dock, remove it and add Trace instead.' });
+  const { response } = await dialog.showMessageBox(parent, { type: 'question', buttons: ['Keep it', 'Move to Trash'], defaultId: 0, cancelId: 0, title: 'Remove the old copy?', message: 'An older copy of this app, named AI Coding Hub, is still in Applications.', detail: 'Trace replaces it and keeps all your settings, channels and history. If AI Coding Hub is in your Dock, remove it and add Trace instead.' });
   fs.writeFileSync(asked, new Date().toISOString());
   if (response === 1) await shell.trashItem(old);
 }
