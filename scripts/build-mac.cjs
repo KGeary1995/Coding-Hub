@@ -14,6 +14,8 @@ const notarizing = () => Boolean(process.env.APPLE_KEYCHAIN_PROFILE || process.e
 /** Checks one packaged app folder (AI Coding Hub.app on a Mac); returns its executable. */
 function verifyApp(app, arch) {
   const resources = path.join(app, 'Contents/Resources/app');
+  // Only the built app ships: source folders here would publish the private source on the public downloads page.
+  assert.deepEqual(fs.readdirSync(resources).sort(), ['dist', 'dist-electron', 'node_modules', 'package.json'], `${arch}: packaged app holds files beyond the built app`);
   for (const relative of ['dist/index.html', 'dist/phone/index.html', 'dist-electron/electron/main.js', 'dist-electron/electron/preload.js', 'dist-electron/electron/services/cli/native-pty.js', 'node_modules/node-pty/lib/index.js', 'node_modules/@xterm/headless/package.json', 'node_modules/@xterm/addon-serialize/package.json'])
     assert.ok(fs.existsSync(path.join(resources, relative)), `${arch}: missing ${relative}`);
   const prebuild = path.join(resources, 'node_modules/node-pty/prebuilds', `darwin-${arch}`);

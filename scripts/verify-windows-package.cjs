@@ -20,6 +20,8 @@ const app = path.join(output, 'win-unpacked');
 const resources = path.join(app, 'resources/app');
 const packageRequire = createRequire(path.join(resources, 'package.json'));
 assert.equal(JSON.parse(fs.readFileSync(path.join(resources, 'package.json'), 'utf8')).version, expectedVersion, 'Packaged app version mismatch');
+// Only the built app ships: source folders here would publish the private source on the public downloads page.
+assert.deepEqual(fs.readdirSync(resources).sort(), ['dist', 'dist-electron', 'node_modules', 'package.json'], 'Packaged app holds files beyond the built app');
 
 function verifyPE(relativePath, machine) {
   const buffer = fs.readFileSync(path.join(app, relativePath));

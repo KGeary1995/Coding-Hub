@@ -1,4 +1,20 @@
 const macIdentity = process.env.MAC_SIGNING_IDENTITY;
+// Only the built app ships. A platform's own `files` replaces this list rather than adding to it (a list of only
+// exclusions there packed the whole source tree), so each platform repeats it before its exclusions.
+const common = [
+  'dist/**/*',
+  'dist-electron/**/*',
+  'package.json',
+  '!**/*.map',
+  '!**/*.test.*',
+  '!**/*.pdb',
+  '!node_modules/node-pty/build/**',
+  '!node_modules/node-pty/src/**',
+  '!node_modules/node-pty/deps/**',
+  '!node_modules/node-pty/scripts/**',
+  '!node_modules/node-pty/typings/**',
+  '!node_modules/node-pty/third_party/**',
+];
 
 module.exports = {
   appId: 'com.codinghub.desktop',
@@ -10,23 +26,10 @@ module.exports = {
   // node-pty 1.1 ships stable Node-API Windows x64 binaries in its npm package.
   // Rebuilding on the Linux packaging host would replace them with Linux binaries.
   npmRebuild: false,
-  files: [
-    'dist/**/*',
-    'dist-electron/**/*',
-    'package.json',
-    '!**/*.map',
-    '!**/*.test.*',
-    '!**/*.pdb',
-    '!node_modules/node-pty/build/**',
-    '!node_modules/node-pty/src/**',
-    '!node_modules/node-pty/deps/**',
-    '!node_modules/node-pty/scripts/**',
-    '!node_modules/node-pty/typings/**',
-    '!node_modules/node-pty/third_party/**',
-  ],
+  files: common,
   win: {
     // Only the Windows x64 terminal binding ships in the Windows package.
-    files: ['!node_modules/node-pty/prebuilds/win32-arm64/**', '!node_modules/node-pty/prebuilds/darwin-*/**'],
+    files: [...common, '!node_modules/node-pty/prebuilds/win32-arm64/**', '!node_modules/node-pty/prebuilds/darwin-*/**'],
     // electron-builder 26 only accepts publisherName under signtoolOptions; directly under win it fails validation.
     ...(process.env.WINDOWS_PUBLISHER_NAME ? { signtoolOptions: { publisherName: process.env.WINDOWS_PUBLISHER_NAME } } : {}),
     target: [{ target: 'nsis', arch: ['x64'] }, { target: 'portable', arch: ['x64'] }],
@@ -38,7 +41,7 @@ module.exports = {
     target: [{ target: 'dmg', arch: ['arm64', 'x64'] }],
     icon: 'assets/icon.png',
     category: 'public.app-category.developer-tools',
-    files: ['!node_modules/node-pty/prebuilds/win32-*/**'],
+    files: [...common, '!node_modules/node-pty/prebuilds/win32-*/**'],
     // MAC_SIGNING_IDENTITY (a Developer ID Application name, e.g. "Kyle Geary (73DB29GHV2)") signs with the hardened
     // runtime, and APPLE_KEYCHAIN_PROFILE (from `xcrun notarytool store-credentials`) or APPLE_API_KEY / APPLE_ID also
     // notarizes, so macOS opens the app without asking. Without them the app is ad-hoc signed (Apple silicon runs only

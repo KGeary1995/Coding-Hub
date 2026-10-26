@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { configDefaults } from 'vitest/config';
 
 // The packaged app loads dist/index.html over file://, where response-header CSP from
 // electron/main.ts never applies. Keep this in sync with the production policy there.
@@ -18,7 +19,8 @@ export default defineConfig({
   plugins: [react(), productionCsp()],
   base: './',
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
-  test: { setupFiles: ['./vitest.setup.ts'] },
+  // Built apps under release/ hold copies of the compiled tests; only the sources are tested.
+  test: { setupFiles: ['./vitest.setup.ts'], exclude: [...configDefaults.exclude, 'release/**'] },
   build: {
     outDir: 'dist',
     rollupOptions: {
