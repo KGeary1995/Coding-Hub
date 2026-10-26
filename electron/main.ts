@@ -396,7 +396,7 @@ else app.whenReady().then(() => {
   remote = new RemoteServer(storageRoot, {
     // Channels still called by their engine's name are named after their folder, as on the desktop.
     sessions: () => { const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
+      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),

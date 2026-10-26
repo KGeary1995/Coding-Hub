@@ -128,7 +128,7 @@ function renderList() {
     h('button', { className: `channel ${state(channel)}`, onclick: () => showChannel(channel.sessionId) },
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
       h('span', { className: 'name' }, channel.title, (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
-      h('span', { className: 'tag' }, word[state(channel)]),
+      h('span', { className: 'tag' }, channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
@@ -175,6 +175,13 @@ function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; holding = true; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
+  // A chat channel's conversation is not passed on to phones yet: say so rather than show an empty screen.
+  if (channel?.chat) {
+    holding = false;
+    app.replaceChildren(header(showList, h('span', { className: 'title' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title}`)),
+      h('main', { className: 'list' }, h('p', { className: 'ask-banner', aria: { role: 'status' } }, `This is a chat channel. Its conversation${channel.attention ? ', and the approval it is waiting for,' : ''} can only be seen and answered in Trace on ${channel.computer?.name ?? 'your computer'} for now.`)));
+    return;
+  }
   const title = h('span', { className: 'title', id: 'channel-title' });
   const waiting = h('p', { id: 'waiting', className: 'ask-banner', hidden: true, aria: { role: 'status' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });

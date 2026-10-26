@@ -6,7 +6,9 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   /** Set on a channel that runs on another of the person's computers and is passed on by this one (phones only). */
   computer?: { id: string; name: string };
   /** What the session is working on, from its CLI's terminal title (Claude Code's task summary). */
-  topic?: string }
+  topic?: string;
+  /** A chat channel: its conversation is shown only on the computer it runs on, which is where it is answered too. */
+  chat?: true }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
 /** `kind` is `computer` for another Trace linked to this one, which may also start and stop channels. */
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }

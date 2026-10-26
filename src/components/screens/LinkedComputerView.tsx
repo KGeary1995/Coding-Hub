@@ -13,7 +13,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
   const container = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<ChannelControl | null>(null); const [error, setError] = useState('');
   useEffect(() => {
-    if (!container.current) return;
+    if (!container.current || channel.chat) return;
     const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel);
     container.current.appendChild(entry.element);
     return () => { entry.element.remove(); };
@@ -34,7 +34,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       <span className="tr-tile-model model-name">{computer.name}</span>
       <span className="tr-spacer" />
       {channel.running
-        ? <><button className="tr-detail-button icon" title="Interrupt (Ctrl+C)" aria-label={`Interrupt channel ${channel.channel} on ${computer.name}`} disabled={Boolean(busy)} onClick={interrupt}><OctagonPause size={13} /></button>
+        ? <>{!channel.chat && <button className="tr-detail-button icon" title="Interrupt (Ctrl+C)" aria-label={`Interrupt channel ${channel.channel} on ${computer.name}`} disabled={Boolean(busy)} onClick={interrupt}><OctagonPause size={13} /></button>}
           <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => void control('restart')}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'restart' ? 'Restarting' : 'Restart'}</span></button>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => void control('stop')}><Square size={12} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'stop' ? 'Stopping' : 'Stop'}</span></button></>
         : <button className="tr-action start" disabled={Boolean(busy)} onClick={() => void control('start')}><Play size={12} aria-hidden="true" /> {busy === 'start' ? 'Starting' : 'Start'}</button>}
@@ -42,7 +42,9 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
-    <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} /></div>
+    {channel.chat
+      ? <p className="history-empty">This is a chat channel. Its conversation is shown on {computer.name}, and answered there.</p>
+      : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} /></div>}
   </article>;
 }
 
