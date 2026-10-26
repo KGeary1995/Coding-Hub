@@ -40,6 +40,8 @@ interface Connection {
 export class LinkedComputers implements RemoteRelay {
   private connections = new Map<string, Connection>();
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Computers whose tab the desktop has open: only their live output is sent to the window. */
+  private watching = new Set<string>();
   constructor(
     private root: string,
     private self: () => { id: string; name: string },
@@ -115,9 +117,13 @@ export class LinkedComputers implements RemoteRelay {
   }
   /** The desktop opened a linked computer's tab: send it every channel's screen as it is now. */
   watch(id: string) {
+    this.watching.add(id);
     const connection = this.connections.get(id); if (!connection) return;
     for (const [sessionId, mirror] of connection.mirrors) mirror.snapshot((screen) => this.emit({ type: 'replay', id, sessionId, runId: mirror.runId, ...screen }));
   }
+
+  /** The desktop left a linked computer's tab. */
+  unwatch(id: string) { this.watching.delete(id); }
 
   // RemoteRelay: this computer's phones see linked computers' channels.
   channels(): RemoteChannel[] { return [...this.connections.values()].filter((connection) => connection.connected).flatMap((connection) => this.tagged(connection)); }
@@ -202,7 +208,7 @@ export class LinkedComputers implements RemoteRelay {
     if (type === 'replay' && typeof event.data === 'string' && event.cols && event.rows) {
       connection.mirrors.get(event.sessionId)?.dispose();
       const mirror = new ScreenMirror(event.runId, event.cols, event.rows); mirror.write(event.data); connection.mirrors.set(event.sessionId, mirror);
-      this.emit({ type: 'replay', id, sessionId: event.sessionId, runId: event.runId, data: event.data, cols: event.cols, rows: event.rows });
+      if (this.watching.has(id)) this.emit({ type: 'replay', id, sessionId: event.sessionId, runId: event.runId, data: event.data, cols: event.cols, rows: event.rows });
     } else if (type === 'output' && typeof event.data === 'string') {
       let mirror = connection.mirrors.get(event.sessionId);
       // A run that started after this computer connected has no replay; its screen starts with its first output.
@@ -211,12 +217,12 @@ export class LinkedComputers implements RemoteRelay {
         mirror = new ScreenMirror(event.runId, channel?.cols ?? 80, channel?.rows ?? 24); connection.mirrors.set(event.sessionId, mirror);
       }
       mirror.write(event.data);
-      this.emit({ type: 'output', id, sessionId: event.sessionId, runId: event.runId, data: event.data });
+      if (this.watching.has(id)) this.emit({ type: 'output', id, sessionId: event.sessionId, runId: event.runId, data: event.data });
       this.sink.output(event.sessionId, event.runId, event.data);
     } else if (type === 'resize' && event.cols && event.rows) {
       const mirror = connection.mirrors.get(event.sessionId); if (mirror?.runId === event.runId) mirror.resize(event.cols, event.rows);
       const channel = connection.channels.find((item) => item.sessionId === event.sessionId); if (channel) { channel.cols = event.cols; channel.rows = event.rows; }
-      this.emit({ type: 'resize', id, sessionId: event.sessionId, runId: event.runId, cols: event.cols, rows: event.rows });
+      if (this.watching.has(id)) this.emit({ type: 'resize', id, sessionId: event.sessionId, runId: event.runId, cols: event.cols, rows: event.rows });
       this.sink.resize(event.sessionId, event.runId, event.cols, event.rows);
     }
   }

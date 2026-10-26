@@ -15,7 +15,7 @@
 .tr-tile .tile-drag-handle { flex: none; display: grid; place-items: center; color: var(--tr-fg-off); cursor: grab; }
 .tr-ch-badge { flex: none; padding: 1px 6px; border-radius: var(--tr-r-chip); color: var(--tr-on-light); font: var(--tr-t-micro); }
 .tr-tile .tr-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
-.tr-tile .tr-tile-model { margin: 0; padding: 0; border: 0; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.tr-tile .tr-tile-model { margin: 0; padding: 0; border: 0; min-width: 0; flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .tr-profile-chip.account-profile-chip { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 5px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-muted); font: 400 11px/16px var(--tr-font-mono); }
 .tr-tile-head .tr-spacer { flex: 1 1 0; min-width: 0; }
 .tr-tile-metric { flex: none; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); white-space: nowrap; }
@@ -113,7 +113,7 @@
 .pasted-viewer img { display: block; max-width: min(92vw, 1600px); max-height: calc(92vh - 34px); object-fit: contain; }
 
 /* What the channel is working on (from its CLI's terminal title), after its name. */
-.tr-tile-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 13px/18px var(--tr-font-ui); }
+.tr-tile-topic { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 13px/18px var(--tr-font-ui); }
 .tr-tile-topic::before { content: '· '; color: var(--tr-fg-dim); }
 
 /* Chat channels: Claude's conversation drawn by Trace. */

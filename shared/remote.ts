@@ -71,7 +71,8 @@ export type LinkedComputerRequest =
   | { action: 'linked-unlink'; id: string }
   | { action: 'linked-input'; id: string; sessionId: string; runId: string; data: string }
   | { action: 'linked-control'; id: string; sessionId: string; control: ChannelControl }
-  | { action: 'linked-watch'; id: string };
+  | { action: 'linked-watch'; id: string }
+  | { action: 'linked-unwatch'; id: string };
 /** Live updates about linked computers for the desktop window. */
 export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }

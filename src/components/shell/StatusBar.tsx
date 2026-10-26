@@ -27,7 +27,7 @@ function PlanLimitCells() {
   useEffect(() => {
     if (!window.codingHub) return;
     void refreshPlanLimits();
-    const timer = setInterval(() => void refreshPlanLimits(true), 5 * 60000);
+    const timer = setInterval(() => void refreshPlanLimits(), 5 * 60000);
     const focus = () => void refreshPlanLimits();
     window.addEventListener('focus', focus);
     return () => { clearInterval(timer); window.removeEventListener('focus', focus); };

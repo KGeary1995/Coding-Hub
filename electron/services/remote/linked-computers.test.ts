@@ -54,9 +54,14 @@ describe('linked computers', () => {
     await until(() => mac.status()[0].connected && mac.status()[0].channels.length === 1, 'the stream');
     expect(mac.status()[0].channels[0]).toMatchObject({ sessionId: 'pc-1', running: true, computer: { id: PC, name: 'Obsidian-Halo' } });
 
+    // With the computer's tab closed, its output still reaches phones but not the desktop window.
+    pc.server.onSessionEvent({ type: 'data', sessionId: 'pc-1', runId: 'run-pc-1', data: 'before the tab opened' });
+    await until(() => relayed.includes('before the tab opened'), 'relayed output');
+    expect(events.some((event) => event.type === 'output')).toBe(false);
+    mac.watch(PC);
     pc.server.onSessionEvent({ type: 'data', sessionId: 'pc-1', runId: 'run-pc-1', data: 'hello from the PC' });
     await until(() => events.some((event) => event.type === 'output' && event.data === 'hello from the PC'), 'output');
-    expect(relayed).toEqual(['hello from the PC']);
+    expect(relayed).toEqual(['before the tab opened', 'hello from the PC']);
 
     await mac.input(PC, 'pc-1', 'run-pc-1', 'y\r');
     expect(pc.writes).toEqual([{ reference: { sessionId: 'pc-1', runId: 'run-pc-1' }, data: 'y\r' }]);

@@ -53,6 +53,8 @@ export function LinkedComputerView() {
   // Every channel's current screen, whenever the tab opens, reconnects, or a channel starts a new run.
   const runs = computer?.channels.map((channel) => `${channel.sessionId}:${channel.runId}`).join() ?? '';
   useEffect(() => { if (computer?.connected) void workbench({ action: 'linked-watch', id: computer.id }).catch(() => {}); }, [computer?.id, computer?.connected, runs]);
+  // Leaving the tab stops the other computer's live output reaching this window (phones still get it).
+  useEffect(() => { const id = computer?.id; return () => { if (id) void workbench({ action: 'linked-unwatch', id }).catch(() => {}); }; }, [computer?.id]);
   if (!computer) return <section className="feature-panel"><p className="history-empty">That computer is no longer linked. Open Settings → Other computers.</p></section>;
   return <section className="linked-computer" aria-labelledby="linked-computer-title">
     <header className="linked-computer-head"><h1 id="linked-computer-title"><Monitor size={16} aria-hidden="true" />{computer.name}</h1>

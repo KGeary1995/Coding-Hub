@@ -11,6 +11,7 @@ import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
 import { useChannelName } from '../state/channel-names';
+import { modelLabel } from '../../shared/model-name';
 import { ChatView } from './chat/ChatView';
 import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
@@ -37,6 +38,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const [stopping, setStopping] = useState(false);
   const usage = useHubStore((s) => usageFor(session, s.usage));
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
+  // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
+  const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
   const alerts = budgetAlerts(session.budget, usage);
   const { engines, rootDirectory, sessions, focusedSessionId, toggleFocus, removeSession, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore();
   const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
@@ -92,8 +95,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
           <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={engineName}>CH{channel}</span>
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
+          {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
-          {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${model || 'none'}.` : model ? `Next launch model override: ${model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || model || 'CLI default'}</span>}
           {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
           <span className="tr-spacer" />
           {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>

@@ -48,7 +48,7 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
 
 /**
  * Keeps the usage limits of the person's Claude accounts (the CLI's own login and each connected profile) and Codex
- * fresh: read on request, at most once a minute, and every five minutes while Trace is open.
+ * fresh: at most every five minutes (Check now reads at once).
  */
 export class PlanLimitsService {
   private latest: PlanLimits[] = []; private reading: Promise<PlanLimits[]> | null = null; private last = 0;
@@ -56,7 +56,8 @@ export class PlanLimitsService {
   current() { return this.latest; }
   refresh(force = false): Promise<PlanLimits[]> {
     if (this.reading) return this.reading;
-    if (!force && Date.now() - this.last < 60000) return Promise.resolve(this.latest);
+    // Each check starts the CLIs, so only an explicit Check now reads more often than every five minutes.
+    if (!force && Date.now() - this.last < 5 * 60000) return Promise.resolve(this.latest);
     this.reading = (async () => {
       const env = this.environment(); const reads: Promise<PlanLimits>[] = [];
       const claude = await findExecutable('claude', env).catch(() => null);

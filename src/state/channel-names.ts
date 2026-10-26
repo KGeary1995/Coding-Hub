@@ -5,7 +5,10 @@ import { useWorkspaceStore } from './workspace-store';
 
 /** The latest title each channel's CLI gave its terminal, kept for the run (see sessionTopic). */
 export const useTitleStore = create<{ titles: Record<string, string> }>(() => ({ titles: {} }));
-export function setTerminalTitle(sessionId: string, title: string) {
+export function setTerminalTitle(sessionId: string, raw: string) {
+  // CLIs animate a spinner in front of their title many times a second while working; only a change in the words
+  // themselves is stored, so a busy channel does not redraw its tile on every frame.
+  const title = raw.replace(/[\x00-\x1f\x7f]/g, '').replace(/^[^\p{L}\p{N}"'(\[]+/u, '').trim();
   if (useTitleStore.getState().titles[sessionId] === title) return;
   useTitleStore.setState((state) => ({ titles: { ...state.titles, [sessionId]: title } }));
 }
