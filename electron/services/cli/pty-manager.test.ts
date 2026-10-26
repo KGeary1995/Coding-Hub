@@ -239,6 +239,15 @@ describe('Chat channels', () => {
   const fixtureScript = path.join(__dirname, '../../../scripts/fixtures/claude-stream-fixture.cjs');
   const chatEngine = (): DiscoveredEngine => { const engine = engines('claude'); engine.executable = { file: process.execPath, prefixArgs: [fixtureScript], extraEnv: {}, displayPath: 'claude' }; return engine; };
   const chatRequest = (sessionId = 'chat-one') => ({ sessionId, cwd: process.cwd(), config: { engine: 'claude' as const, chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, cols: 80, rows: 24 });
+  it('shows a resumed chat its earlier messages as it starts', async () => {
+    const chats: ChatEnvelope[] = []; const asked: unknown[] = [];
+    const history = { type: 'history' as const, messages: [{ role: 'user' as const, text: 'earlier', images: 0 }], results: {} };
+    const manager = new PtyManager(() => {}, { discover: async () => { const engine = chatEngine(); engine.info.supportsResume = true; return engine; }, environment: () => ({ ...process.env } as Record<string, string>), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope), chatHistory: (config) => { asked.push(config); return history; } });
+    managers.push(manager);
+    const request = chatRequest('chat-resumed'); const session = await manager.start(1, { ...request, config: { ...request.config, resumeId: '11111111-2222-4333-8444-555555555555' } });
+    expect(asked).toEqual([expect.objectContaining({ resumeId: '11111111-2222-4333-8444-555555555555' })]);
+    expect(chats[0]).toEqual({ sessionId: 'chat-resumed', runId: session.runId, event: history });
+  });
   it('runs Claude in structured mode: messages with images, streamed replies, approvals in the window, and the waiting state', async () => {
     const chats: ChatEnvelope[] = []; const events: SessionEvent[] = []; let launched: string[] = [];
     const manager = new PtyManager((_owner, event) => events.push(event), { discover: async () => chatEngine(), environment: () => ({ ...process.env } as Record<string, string>), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
@@ -254,7 +263,9 @@ describe('Chat channels', () => {
 
     manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'look at this', images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] });
     await until(() => kinds().includes('done'));
-    expect(chats[0].event).toEqual({ type: 'ready', conversationId: '11111111-2222-4333-8444-555555555555', model: 'fixture-model' });
+    // The message is recorded for the run's history as it is sent, then Claude's conversation starts.
+    expect(chats[0].event).toEqual({ type: 'user', text: 'look at this', images: 1 });
+    expect(chats[1].event).toEqual({ type: 'ready', conversationId: '11111111-2222-4333-8444-555555555555', model: 'fixture-model' });
     expect(chats.filter((chat) => chat.event.type === 'delta').map((chat) => (chat.event as { text: string }).text).join('')).toBe('I see 1 image. look at this');
     expect(chats.find((chat) => chat.event.type === 'assistant')?.event).toMatchObject({ messageId: 'msg-1', blocks: [{ type: 'text', text: 'I see 1 image. look at this' }] });
 

@@ -53,4 +53,12 @@ describe('chat threads', () => {
     event({ type: 'done', isError: true, error: 'Interrupted.' });
     expect(items().find((item) => item.kind === 'permission')).toMatchObject({ answer: 'closed' });
   });
+  it('shows a resumed conversation\'s earlier messages, unless the thread still shows the conversation', () => {
+    useChatStore.setState({ threads: {} }); chatStarted('s', 'r', true);
+    event({ type: 'history', messages: [{ role: 'user', text: 'hi', images: 1 }, { role: 'assistant', messageId: 'm', blocks: [{ type: 'tool', id: 't', name: 'Bash', input: {} }] }], results: { t: { text: 'ok', isError: false, image: false } } });
+    expect(items().map((item) => item.kind)).toEqual(['user', 'assistant', 'notice']); expect(items()[0]).toMatchObject({ text: 'hi\n[1 image]' });
+    expect(useChatStore.getState().threads.s.results.t).toMatchObject({ text: 'ok' });
+    event({ type: 'history', messages: [{ role: 'user', text: 'again', images: 0 }], results: {} }); expect(items()).toHaveLength(3);
+    event({ type: 'user', text: 'new', images: 0 }); expect(items()).toHaveLength(3);
+  });
 });

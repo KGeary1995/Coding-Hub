@@ -72,6 +72,16 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
       case 'permission': return { ...current, items: [...items, { kind: 'permission', id: event.requestId, toolName: event.toolName, description: event.description, input: event.input, canAllowEdits: event.canAllowEdits, answer: null }] };
       case 'permission-done': return { ...current, items: items.map((item) => item.kind === 'permission' && item.id === event.requestId && !item.answer ? { ...item, answer: 'closed' } : item) };
       case 'notice': return { ...current, items: [...items, { kind: 'notice', id: nextId(), text: event.text, error: false }] };
+      // The window adds the person's message itself when it is sent.
+      case 'user': return current;
+      case 'history': {
+        // A resumed conversation's earlier messages, unless this window still shows the conversation itself.
+        if (items.some((item) => item.kind === 'user' || item.kind === 'assistant') || !event.messages.length) return current;
+        const earlier: ChatItem[] = event.messages.map((message) => message.role === 'user'
+          ? { kind: 'user', id: nextId(), text: message.images ? `${message.text}${message.text ? '\n' : ''}[${message.images} image${message.images === 1 ? '' : 's'}]` : message.text, images: [], at: '' }
+          : { kind: 'assistant', id: nextId(), blocks: message.blocks, streaming: '' });
+        return { ...current, results: { ...event.results, ...current.results }, items: [...earlier, { kind: 'notice', id: nextId(), text: 'Resumed. The messages above are from the saved conversation.', error: false }] };
+      }
       case 'done': {
         // Streamed text that never got its final message (an interruption) stays as it was.
         // An approval still open when its reply ended no longer belongs to anything.

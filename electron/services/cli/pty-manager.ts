@@ -16,7 +16,7 @@ import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream } from '../chat/codex-stream';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
-import type { ChatEnvelope } from '../../../shared/chat';
+import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -81,7 +81,9 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
+      /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
+      chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -207,6 +209,10 @@ export class PtyManager {
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (request.config.engine !== 'shell') this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
       this.send(owner, { type: 'started', ...session });
+      if (chat && request.config.engine !== 'shell' && request.config.resumeId) {
+        let history: Extract<ChatEvent, { type: 'history' }> | null = null; try { history = this.dependencies.chatHistory?.(request.config) ?? null; } catch { /* Shown without its earlier messages. */ }
+        if (history) try { this.dependencies.onChat?.(owner, { sessionId: session.sessionId, runId: session.runId, event: history }); } catch { this.dependencies.onEventError?.(); }
+      }
       return session;
     } finally {
       if (this.pending.get(request.sessionId) === reservation) this.pending.delete(request.sessionId);
@@ -242,7 +248,11 @@ export class PtyManager {
     if (!run.chat || run.finished) throw new HubError('NOT_CHAT', 'This channel is not a running chat.');
     if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
     const request = parsed.data;
-    if (request.action === 'send') { if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.'); run.chat.send(request.text, request.images); }
+    if (request.action === 'send') {
+      if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
+      run.chat.send(request.text, request.images);
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length } }); } catch { this.dependencies.onEventError?.(); }
+    }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else run.chat.interrupt();
   }
