@@ -107,6 +107,7 @@ async function nativeResult(page, method, request) {
     await app?.close().catch(() => {});
     const reportPath = path.resolve(__dirname, '../release/windows-install-report.json');
     await fs.mkdir(path.dirname(reportPath), { recursive: true }); await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-    if (uninstalled) await fs.rm(root, { recursive: true, force: true }); else console.error('Installation-test files retained for diagnosis:', root);
+    // Windows briefly locks freshly written files (antivirus scans, the uninstaller finishing): retry rather than fail a passed run.
+    if (uninstalled) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }); else console.error('Installation-test files retained for diagnosis:', root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

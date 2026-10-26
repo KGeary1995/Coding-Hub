@@ -148,7 +148,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch('http://127.0.0.1:47821/').then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone's size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });
