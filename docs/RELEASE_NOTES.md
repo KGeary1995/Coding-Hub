@@ -1,15 +1,19 @@
 ## What's new
 
-- **Trace is now called Trace everywhere.** The app installs as Trace (Trace.app, Trace.exe and its shortcuts) instead of AI Coding Hub. Your settings, channels, history, phone pairing and sync carry over.
-  - **Windows:** the installer replaces AI Coding Hub.
-  - **Mac:** drag Trace to Applications. Trace then offers once to move the old AI Coding Hub to the Trash (it stays unless you click Move to Trash). If AI Coding Hub is in your Dock, remove it and add Trace.
-- **Scroll the conversation on your phone.** Claude Code draws full screen and keeps its conversation itself, so swiping on the phone only moved the visible screen. A swipe now scrolls Claude Code's conversation, as the trackpad does on your computer.
-- **Typing from your phone is no longer garbled.** Typed straight into the terminal, the phone keyboard's autocorrect and predictions rewrote words as you typed, and each rewrite reached the CLI. Tapping the terminal now opens the message box at the bottom: type there and tap Send (Enter on the keyboard works too). The key row still sends Enter, Esc, arrows, Tab and Ctrl C.
-- **Channels no longer shrink on your computer by themselves.** A channel left open on your phone kept the CLI at the phone's size, and the phone took that size again whenever it reconnected, even right after you typed at your computer. Now the phone gives the size back when it's locked or you switch apps, and takes it again only when you touch the channel on the phone.
-- **Copying several lines from Claude Code works again.** Claude Code now selects text itself when you drag in its full-screen view, and asks the terminal to put the selection on the clipboard. Trace ignored that request, so nothing was copied. Trace now copies it, lines and all, but only right after you used the mouse or keyboard in that channel, so a CLI can't change your clipboard on its own.
-- **Today's token count includes channels started yesterday.** "Σ today" counted a channel's tokens on the day it started, so a channel left running past midnight added nothing. Each reply now counts on the day it was used.
+1.11.1 fixes the problems found in a review of 1.11.0:
 
-Also in 1.10.2: copying from a channel keeps sentences whole. In 1.10.1: no lag while agents work, and the model on every channel. In 1.10.0: chat channels for Claude and Codex with images, and your plan limits always in view.
+- **Chat channels keep their conversation.** A chat is saved in the channel's history, so it can be searched and exported, and resuming a saved conversation shows its earlier messages instead of an empty thread.
+- **Chat channels behave.** The channel header's interrupt button and "Send prepared request" now go through the chat instead of breaking it, approval buttons close when a reply is interrupted, and closed chats no longer hold on to their messages and images.
+- **A chat CLI that fails to start can no longer crash Trace.**
+- **Phone and linked computers:** chat channels are labelled as chat and explain that they are answered on their computer, instead of showing an empty screen. The phone reconnects by itself when its connection goes silent, instead of showing "live" indefinitely.
+- **Security:** a computer you remove can no longer finish asking for a phone key it started requesting just before, and an unusual request from a linked computer can no longer make the list of paired devices unreadable.
+- **Conversation history** lists the newest conversations from Claude, Codex and every Claude profile, however large one history is, and resuming a saved channel finds its conversation however old it is.
+- **Usage:** a run whose usage could not all be read shows its warning at once and is shared with your other computers; other computers' usage is priced with this computer's rates; the daily bars count tokens on the day they were used.
+- **Restoring a backup:** channels on a named Claude profile start a new conversation instead of refusing to start (backups don't include those profiles' conversations).
+- **Closing and quitting** also ask about a sign-in terminal that could not be stopped, and **design screenshots** compare correctly on Retina displays.
+- **Memory summaries** are no longer missed for short conversations.
+
+Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
 
 ## Install
 
