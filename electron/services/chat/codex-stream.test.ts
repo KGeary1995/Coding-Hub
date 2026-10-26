@@ -68,4 +68,9 @@ describe('Codex chat protocol', () => {
     const failed = codex(); failed.stream.start(); failed.reply(1, {}); failed.stream.push(JSON.stringify({ id: 2, error: { message: 'Not signed in' } }) + '\n');
     expect(failed.events).toEqual([{ type: 'done', isError: true, error: 'Not signed in' }]);
   });
+  it('skips lines that are not messages instead of throwing', () => {
+    const { stream, events } = codex(); stream.start();
+    expect(() => stream.push('null\n[1,2]\n"text"\n42\n{"method":"turn/completed","params":null}\n')).not.toThrow();
+    expect(events.filter((event) => event.type !== 'done')).toEqual([]);
+  });
 });

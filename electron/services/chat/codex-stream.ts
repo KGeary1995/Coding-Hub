@@ -67,8 +67,11 @@ export class CodexStream implements ChatStream {
     while ((end = this.buffer.indexOf('\n')) >= 0) {
       const line = this.buffer.slice(0, end).trim(); this.buffer = this.buffer.slice(end + 1);
       if (!line) continue;
-      let message: Record<string, unknown>; try { message = JSON.parse(line); } catch { continue; }
-      this.read(message);
+      let message: unknown; try { message = JSON.parse(line); } catch { continue; }
+      // Only JSON objects are messages; a line that is not one (or one that cannot be handled) is skipped, never let
+      // out of the output listener, where it would bring down the app.
+      if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
+      try { this.read(message as Record<string, unknown>); } catch { /* Skipped. */ }
     }
     if (this.buffer.length > 64 * 1024 * 1024) this.buffer = '';
   }
