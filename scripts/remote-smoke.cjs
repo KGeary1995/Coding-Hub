@@ -67,6 +67,9 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'running' }).waitFor();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();
+    // Tapping the terminal opens the message box; the terminal itself takes no typing (a phone keyboard garbles it).
+    await phone.locator('#output').click(); await phone.waitForFunction(() => document.activeElement?.id === 'text');
+    await phone.locator('#output .xterm-helper-textarea').evaluate((element) => element.focus()); await phone.keyboard.type('stray'); await phone.waitForTimeout(300);
     await phone.locator('#text').fill('need-approval'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#waiting').filter({ hasText: 'Approval requested: npm test' }).waitFor();
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();

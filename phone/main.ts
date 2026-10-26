@@ -8,7 +8,6 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
-import { withoutTerminalReplies } from '../shared/terminal-input';
 import { alertsOn, alertsSupported, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
@@ -171,7 +170,7 @@ function showChannel(sessionId: string) {
   const waiting = h('p', { id: 'waiting', className: 'ask-banner', hidden: true, aria: { role: 'status' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
-  const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type to the CLI', enterKeyHint: 'send', aria: { label: 'Message' } });
+  const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type here, then Send', enterKeyHint: 'send', aria: { label: 'Message' } });
   const form = h('form', { className: 'compose' }, text, h('button', { className: 'primary', type: 'submit' }, 'Send'));
   // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
   // Drafts are kept per channel, so going back to the list and returning finds the message still there.
@@ -191,10 +190,12 @@ function showChannel(sessionId: string) {
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   fit = new FitAddon(); terminal.loadAddon(fit);
   terminal.open(output);
-  // Typing straight into the terminal (tap it to bring up the keyboard) goes to the CLI as it is typed. The terminal's
-  // own replies to the CLI's queries (cursor position and the like, also raised by replayed output) are left out: the
-  // desktop's terminal already answers them, and they are not the person answering a prompt.
-  terminal.onData((data) => { const typed = withoutTerminalReplies(data); if (typed) void type(typed); });
+  // The terminal only shows the channel. Typed straight into it, a phone keyboard's autocorrect and predictions rewrite
+  // words as they are typed and every rewrite reaches the CLI, garbling the text; so tapping the terminal opens the
+  // message box instead, where the keyboard works as in any text field. Its replies to the CLI's queries are not sent
+  // either: the desktop's terminal answers them.
+  terminal.options.disableStdin = true; terminal.textarea?.setAttribute('inputmode', 'none'); terminal.textarea?.setAttribute('tabindex', '-1');
+  output.addEventListener('click', () => text.focus());
   scrollBySwipe(output, terminal);
   renderChannel(); listen(sessionId);
 }
