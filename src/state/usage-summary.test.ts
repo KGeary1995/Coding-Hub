@@ -32,6 +32,9 @@ describe('usage summary', () => {
     expect(series.map((day) => day.date.getDate())).toEqual([22, 23, 24]);
     expect(series[1]).toMatchObject({ claude: 0, codex: 11, cost: 1 });
     expect(series[2]).toMatchObject({ claude: 150, codex: 0, cost: null });
+    // A run left going past midnight adds to each day it was used on.
+    const spanning = dailySeries([record({ timestamp: at(23), days: { '2026-10-23': { tokens: 40, cost: 0.5 }, '2026-10-24': { tokens: 60, cost: null } } })], 3, now);
+    expect(spanning[1]).toMatchObject({ claude: 40, cost: 0.5 }); expect(spanning[2]).toMatchObject({ claude: 60, cost: null });
   });
 
   it('compares windows and picks readable axis steps', () => {

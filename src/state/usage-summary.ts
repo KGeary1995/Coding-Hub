@@ -1,4 +1,4 @@
-import type { UsageRecord } from '../../shared/hub';
+import { localDay, type UsageRecord } from '../../shared/hub';
 import { freshInput } from './channel-state';
 
 /** Usage windows on the Usage screen, in days ("Today" is the current local day). */
@@ -6,7 +6,7 @@ export const USAGE_WINDOWS = [{ id: 1, label: 'Today' }, { id: 7, label: '7 d' }
 export type UsageWindow = typeof USAGE_WINDOWS[number]['id'];
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
-const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+const dayKey = localDay;
 
 /** The first instant of a window that ends today and spans `days` local days, shifted back `periods` whole windows. */
 export function windowStart(days: number, now = new Date(), periods = 0) {
@@ -54,6 +54,12 @@ export function dailySeries(records: UsageRecord[], days: number, now = new Date
   for (let offset = 0; offset < days; offset++) { const date = new Date(start); date.setDate(start.getDate() + offset); series.push({ key: dayKey(date), date, claude: 0, codex: 0, cost: null }); }
   const byKey = new Map(series.map((day) => [day.key, day]));
   for (const record of records) {
+    // A run that reports usage by day adds to each day it was used on (as the status bar's "Σ today" does); older
+    // records, and other computers' runs, count on the day they started.
+    if (record.days) {
+      for (const [key, used] of Object.entries(record.days)) { const day = byKey.get(key); if (!day) continue; day[record.engine] += used.tokens; if (used.cost !== null) day.cost = (day.cost ?? 0) + used.cost; }
+      continue;
+    }
     const day = byKey.get(dayKey(new Date(record.timestamp))); if (!day) continue;
     day[record.engine] += freshInput(record) + record.output;
     if (record.cost !== null) day.cost = (day.cost ?? 0) + record.cost;
