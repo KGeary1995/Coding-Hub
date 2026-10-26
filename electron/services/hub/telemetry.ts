@@ -167,17 +167,17 @@ export class TelemetryService {
    * A run ended: read the rest of its usage log, up to the size it has now, in steps that leave the app responsive.
    * A log that cannot be read to that point marks the run incomplete, so Usage does not present partial totals as final.
    */
-  end(runId: string): Promise<void> {
-    const w = this.watches.get(runId); if (!w) return Promise.resolve();
+  end(runId: string): Promise<string | null> {
+    const w = this.watches.get(runId); if (!w) return Promise.resolve(null);
     clearInterval(w.timer); w.stopped = true;
     // The log's size is taken once it has been found (the first read may be what finds it).
     let target = -1;
-    return new Promise((resolve) => {
+    return new Promise<string | null>((resolve) => {
       const step = () => {
-        if (this.closed) return resolve();
+        if (this.closed) return resolve(w.file);
         const before = w.offset; this.poll(w); if (target < 0) target = Math.max(this.size(w), w.offset);
         if (w.file && w.offset < target && w.offset !== before) { setImmediate(step); return; }
-        this.finish(w, target); resolve();
+        this.finish(w, target); resolve(w.file);
       };
       step();
     });

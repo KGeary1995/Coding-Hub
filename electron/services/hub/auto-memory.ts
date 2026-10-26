@@ -176,15 +176,17 @@ export class AutoMemory {
 
   /** Writes the end-of-session summary. Returns the note, or null when the session left nothing to record. */
   /** Writes the session summary. Shutdown waits for pending summaries with drain(). */
-  finish(runId: string, transcript: string | null): Promise<MemoryNote | null> {
+  /** `transcript` may still be being located (telemetry's last read of the run can be what finds it). */
+  finish(runId: string, transcript: string | null | Promise<string | null>): Promise<MemoryNote | null> {
     const work = this.summarize(runId, transcript); this.pending.add(work);
     void work.catch(() => {}).finally(() => this.pending.delete(work));
     return work;
   }
   /** Waits up to `limit` milliseconds for summaries of sessions that ended while the app closes. */
   async drain(limit: number) { await Promise.race([Promise.allSettled([...this.pending]), new Promise((resolve) => setTimeout(resolve, limit).unref?.())]); }
-  private async summarize(runId: string, transcript: string | null): Promise<MemoryNote | null> {
+  private async summarize(runId: string, located: string | null | Promise<string | null>): Promise<MemoryNote | null> {
     const tracked = this.runs.get(runId); if (!tracked) return null; this.runs.delete(runId);
+    const transcript = await located;
     try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder later. */ }
     if (!this.options.enabled()) return null;
     await tracked.ready;

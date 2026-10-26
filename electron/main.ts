@@ -101,11 +101,11 @@ const manager = new PtyManager((owner, event) => {
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   if (event.type === 'exit') attention.unregister(event.runId);
   if (event.type === 'exit') {
-    // Read the transcript location before telemetry forgets the run.
+    // Telemetry's last read of the run can be what finds a short run's transcript, so the summary waits for it.
     const transcript = hub?.telemetry?.transcript(event.runId) ?? null;
-    void autoMemory?.finish(event.runId, transcript).catch(() => hostHealth?.record('auto-memory-summary-failed'));
+    const ended = hub?.telemetry ? hub.telemetry.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); return transcript; }) : Promise.resolve(null);
+    void autoMemory?.finish(event.runId, ended).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
-  if (event.type === 'exit') void hub?.telemetry?.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
 }, { onChat: (owner, envelope) => { sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner); }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {

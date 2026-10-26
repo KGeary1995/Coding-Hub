@@ -98,6 +98,17 @@ describe('structured telemetry', () => {
       expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
     } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
   });
+  it('hands over a short run’s transcript found only by the last read, for its memory summary', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    try {
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      // The CLI wrote its transcript and exited before telemetry's next poll.
+      fs.writeFileSync(file, JSON.stringify({ type: 'assistant', message: { id: 'a', model: 'm', usage: { input_tokens: 1, output_tokens: 2 } } }) + '\n');
+      expect(telemetry.transcript(run.runId)).toBeNull();
+      expect(await telemetry.end(run.runId)).toBe(file);
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
   it('says so when a run’s usage log keeps failing to read, including that its token limit is not enforced', () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
     const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); const errors: string[] = []; telemetry.onError = (_run, message) => errors.push(message);
