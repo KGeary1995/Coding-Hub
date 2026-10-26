@@ -148,13 +148,17 @@ describe('linked computers', () => {
     // Typing at the desktop gives the channel back too.
     await size('mac-1', 50, 20); mac.server.personInput('mac-1', 'a');
     expect(mac.sizes.slice(-2)).toEqual(['50x20', '100x30']);
-    // The desktop resizing it itself wins: nothing is put back later.
-    await size('mac-1', 50, 20); mac.server.desktopResized('mac-1'); await release('mac-1');
+    // While the phone shows it, a desktop resize (a tile selected, the window moved) does not change it under the
+    // phone; the desktop's new size is the one put back when the phone lets go.
+    await size('mac-1', 50, 20); expect(mac.server.desktopResize('mac-1', 'run-mac-1', 120, 40)).toBe(true);
     expect(mac.sizes.slice(-1)).toEqual(['50x20']);
+    await release('mac-1'); expect(mac.sizes.slice(-1)).toEqual(['120x40']);
+    // Without a phone holding it, the desktop resizes normally.
+    expect(mac.server.desktopResize('mac-1', 'run-mac-1', 100, 30)).toBe(false);
 
     // The other computer's channel is resized there, through this one.
     expect((await size('pc-1', 40, 22)).status).toBe(200); expect((await release('pc-1')).status).toBe(200);
-    expect(pc.sizes).toEqual(['40x22', '100x30']); expect(mac.sizes.slice(-1)).toEqual(['50x20']);
+    expect(pc.sizes).toEqual(['40x22', '100x30']); expect(mac.sizes.slice(-1)).toEqual(['120x40']);
     // Out-of-range sizes are refused.
     expect((await size('mac-1', 5, 2)).status).toBe(400);
   });

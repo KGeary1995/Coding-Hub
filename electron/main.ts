@@ -36,7 +36,7 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, suppo
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
-import { finishWorkspaceFlushSchema } from '../shared/schemas';
+import { finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
@@ -564,8 +564,11 @@ else app.whenReady().then(() => {
   });
   handle(IPC_CHANNELS.ackSession, (owner, payload) => { manager.ack(owner, payload); return null; });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => {
+    const parsed = resizeSessionSchema.safeParse(payload);
+    // A channel a phone is showing keeps the phone's size; the desktop's new size is applied when the phone lets go.
+    if (parsed.success && remote?.desktopResize(parsed.data.sessionId, parsed.data.runId, parsed.data.cols, parsed.data.rows)) return null;
     manager.resize(owner, payload);
-    const sessionId = (payload as { sessionId?: unknown }).sessionId; if (typeof sessionId === 'string') remote?.desktopResized(sessionId);
+    if (parsed.success) remote?.resized(parsed.data.sessionId);
     return null;
   });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });

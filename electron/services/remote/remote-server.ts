@@ -245,8 +245,16 @@ export class RemoteServer {
     if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels();
     const hold = this.phoneSizes.get(sessionId); if (hold && isPersonInput(data)) this.release(sessionId, hold.device);
   }
-  /** The desktop window resized a channel itself: its size wins over a phone's. */
-  desktopResized(sessionId: string) { this.phoneSizes.delete(sessionId); this.resized(sessionId); }
+  /**
+   * The desktop window resized a channel (its layout changed, a tile was selected, the window moved). While a phone
+   * shows that channel at the phone's size, the phone's size stays: changing it under the phone would leave the phone's
+   * screen drawn for the wrong size. The desktop's new size is kept and put back when the phone lets go. Returns true
+   * when the resize is held back.
+   */
+  desktopResize(sessionId: string, runId: string, cols: number, rows: number) {
+    const hold = this.phoneSizes.get(sessionId); if (!hold || hold.runId !== runId) return false;
+    hold.desktop = { cols, rows }; return true;
+  }
   /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number) {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
