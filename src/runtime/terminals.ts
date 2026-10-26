@@ -10,6 +10,7 @@ import { forgetActivity, isPersonInput, recordActivity } from '../state/activity
 import { exitNotice } from '../../shared/terminal-input';
 import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } from '../state/pasted-images';
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
+import { unwrapCopied, type CopiedRow } from './copy-text';
 
 const MAC = /Mac/.test(navigator.userAgent);
 const WINDOWS = /Windows/.test(navigator.userAgent);
@@ -27,6 +28,21 @@ async function showClipboardImage(id: string) {
 
 function readImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+}
+
+/** The selected text, row by row as it is on screen (rows the terminal itself wrapped are kept together). */
+function selectedRows(terminal: Terminal): CopiedRow[] | null {
+  const range = terminal.getSelectionPosition(); if (!range) return null;
+  const buffer = terminal.buffer.active; const rows: CopiedRow[] = [];
+  for (let y = range.start.y; y <= range.end.y; y++) {
+    const line = buffer.getLine(y); if (!line) continue;
+    const full = line.translateToString(false);
+    const from = y === range.start.y ? range.start.x : 0; const to = y === range.end.y ? range.end.x : terminal.cols;
+    const part = full.slice(from, to);
+    if (line.isWrapped && rows.length) rows[rows.length - 1].text += part;
+    else rows.push({ text: part, startColumn: from, line: full });
+  }
+  return rows;
 }
 
 /** Dropping files types their paths, as in Terminal.app; dropped images also join the strip. */
@@ -96,6 +112,13 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     void writeTerminal(session.id, '\x16');
   }, true);
   attachDrop(session.id, element);
+  // Claude Code and Codex break long text into separate lines to fit the window; copying joins those lines again.
+  element.addEventListener('copy', (event) => {
+    if (!terminal.hasSelection() || !event.clipboardData) return;
+    const rows = selectedRows(terminal); if (!rows?.length) return;
+    event.preventDefault(); event.stopPropagation();
+    event.clipboardData.setData('text/plain', unwrapCopied(rows, terminal.cols));
+  }, true);
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
