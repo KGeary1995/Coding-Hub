@@ -125,8 +125,14 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
             back = setInterval(() => { void api('/api/computers', { signal: AbortSignal.timeout(4000) }, home).then(() => current.abort()).catch(() => {}); }, 30000);
           }
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
+          // The computer sends a heartbeat every 25 seconds: a connection silent for a minute has stalled (the network
+          // dropped it without saying so), and is replaced rather than left showing "live".
+          const current = controller; let silence: ReturnType<typeof setTimeout> | null = null;
+          const listen = () => { if (silence) clearTimeout(silence); silence = setTimeout(() => current.abort(), 60000); };
           for (;;) {
-            const { value, done } = await reader.read(); if (done) break;
+            listen(); let next: ReadableStreamReadResult<Uint8Array>;
+            try { next = await reader.read(); } finally { if (silence) clearTimeout(silence); }
+            const { value, done } = next; if (done) break;
             buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
