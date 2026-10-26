@@ -60,7 +60,8 @@ describe('durable workflow records and bounded search',()=>{
 describe('usage targets and screenshot evidence',()=>{
  it('does not invent cost or double count cached Codex input and reasoning',()=>{
   const usage:any={engine:'codex',input:100,output:25,cached:20,cacheWrite:0,reasoning:10,cost:null,context:{used:850,limit:1000}};
-  expect(budgetAlerts({tokens:126,costUSD:1,contextPercent:85},usage)).toEqual(['Context usage reached 85%']);expect(budgetAlerts({tokens:125,costUSD:1,contextPercent:90},usage)).toHaveLength(1);expect(budgetAlerts({tokens:1,costUSD:1,contextPercent:1},undefined)).toEqual([]);
+  // New tokens: 80 input outside the cache + 25 output = 105 (Codex's input already includes the 20 cached).
+  expect(budgetAlerts({tokens:106,costUSD:1,contextPercent:85},usage)).toEqual(['Context usage reached 85%']);expect(budgetAlerts({tokens:105,costUSD:1,contextPercent:90},usage)).toHaveLength(1);expect(budgetAlerts({tokens:1,costUSD:1,contextPercent:1},undefined)).toEqual([]);
  });
  it('measures changed pixels and refuses mismatched bitmap dimensions',()=>{
   const original=Buffer.from([0,0,0,255,0,0,0,255]);const edited=Buffer.from([0,0,0,255,100,0,0,255]);expect(difference(original,edited,2,1,20).changedPixels).toBe(1);expect(difference(original,edited,2,1,120).changedPixels).toBe(0);expect(()=>difference(original,edited,3,1,20)).toThrow('dimensions');

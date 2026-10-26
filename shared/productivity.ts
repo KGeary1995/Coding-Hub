@@ -1,5 +1,5 @@
 import type { SavedWorkspace, SessionHistoryRun } from './types';
-import type { UsageRecord } from './hub';
+import { newTokens, type UsageRecord } from './hub';
 import type { VerificationProfile } from './workbench';
 export interface SessionBudget { tokens: number | null; costUSD: number | null; contextPercent: number }
 export interface PreparedSessionRequest { prompt: string; label: string }
@@ -31,7 +31,7 @@ export type WorkflowRequest =
 export type WorkflowResponse = ConversationLabel[] | ConversationLabel | (SessionHistoryRun & { diagnostic: string })[] | SearchResults | ProjectTemplate[] | ProjectTemplate | SavedWorkspace | DeliveryStatus | DeliveryResult | VisualDifference | { exported: boolean } | { state: string; publisher: string | null } | import('./workbench').Task | null;
 export function budgetAlerts(budget: SessionBudget | undefined, usage: UsageRecord | undefined): string[] {
   if (!budget || !usage) return [];
-  const tokens = usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0);
+  const tokens = newTokens(usage);
   const messages: string[] = [];
   if (budget.tokens !== null && tokens >= budget.tokens) messages.push(`Reported tokens reached ${budget.tokens.toLocaleString()}`);
   if (budget.costUSD !== null && usage.cost !== null && usage.cost >= budget.costUSD) messages.push(`Estimated cost reached $${budget.costUSD.toFixed(2)}`);

@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
-import type { UsageRecord, PriceRate } from '../../../shared/hub';
+import { newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
 
 type Json = Record<string, any>;
 interface Snapshot { key: string; model: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: UsageRecord['context'] }
@@ -27,7 +27,8 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   const input = usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
-export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
+/** The tokens a session limit counts: new tokens, as shown everywhere in Trace (cache re-reads are not counted). */
+export function totalTokens(usage: UsageRecord) { return newTokens(usage); }
 interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
   /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
   errors?: number; reported?: boolean }

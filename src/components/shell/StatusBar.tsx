@@ -29,12 +29,12 @@ export function StatusBar() {
       return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${session.title}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
         <i className="tr-engine-square" style={{ background: `var(--tr-ch-${session.config.engine})` }} aria-hidden="true" />CH{index + 1}
         <span style={{ color }}><span aria-hidden="true">{meta.glyph}</span> {meta.word.toLowerCase()}</span>
-        {record && <span className="tnum">{compact(tokens(record))} tok</span>}
+        {record && <span className="tnum" title={`New tokens (input outside the cache, plus output); ${compact(record.cached)} cache reads not counted`}>{compact(tokens(record))} tok</span>}
       </button>;
     })}
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>
     <span className="tr-spacer" />
-    <span className="tr-sb-cell tnum" title="Input and output tokens reported today, cache excluded">Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
+    <span className="tr-sb-cell tnum" title="New tokens reported today on this computer: input outside the cache, plus output">Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
         <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>

@@ -42,3 +42,12 @@ export interface SharedRules { content: string; revision: string; directories: s
 export type HubResponse = MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
 export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };
+
+/**
+ * New tokens for a run: input not served from the prompt cache, plus output. This is what "tok" means everywhere in
+ * Trace (tiles, status bar, today's total, Usage, budgets and Claude's session limit). Cache re-reads, which repeat the
+ * whole conversation every turn and cost a fraction of new input, are shown separately. Codex's input already includes
+ * its cached input; Claude's does not.
+ */
+export const freshInput = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached'>) => usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
+export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'>) => freshInput(usage) + usage.output;

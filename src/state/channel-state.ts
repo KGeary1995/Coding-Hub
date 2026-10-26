@@ -1,5 +1,5 @@
 import type { Session } from '../../shared/types';
-import type { UsageRecord } from '../../shared/hub';
+import { freshInput, newTokens, type UsageRecord } from '../../shared/hub';
 
 /** What a session is doing, as the Trace design shows it (docs/design/trace/README.md). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
@@ -21,7 +21,7 @@ export function limitRatio(session: Session, usage: UsageRecord | undefined) {
   const context = usage.context && usage.context.limit > 0 ? usage.context.used / usage.context.limit : 0;
   const budget = session.budget;
   if (!budget) return context;
-  const tokens = usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0);
+  const tokens = newTokens(usage);
   return Math.max(
     context,
     budget.tokens ? tokens / budget.tokens : 0,
@@ -68,7 +68,7 @@ export function channelAlerts(sessions: Session[], records: UsageRecord[]): Chan
  * Input that was not read from cache. Codex counts cached input inside its input total; Claude reports cache reads
  * separately. Same normalisation as the cost estimate (electron/services/hub/telemetry.ts, usageCost).
  */
-export const freshInput = (record: UsageRecord) => record.engine === 'codex' ? Math.max(0, record.input - record.cached) : record.input;
+export { freshInput };
 
 /** This computer's reported input + output tokens today (cache excluded) and cost, by local date. Cost is null when nothing is priced. */
 export function todayTotals(records: UsageRecord[], now = new Date()) {
@@ -77,7 +77,7 @@ export function todayTotals(records: UsageRecord[], now = new Date()) {
   for (const record of records) {
     const started = new Date(record.timestamp);
     if (record.machine || Number.isNaN(started.getTime()) || day(started) !== today) continue;
-    tokens += freshInput(record) + record.output;
+    tokens += newTokens(record);
     if (record.cost !== null) cost = (cost ?? 0) + record.cost;
   }
   return { tokens, cost };

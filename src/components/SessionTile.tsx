@@ -5,6 +5,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, X, SquareChevronRight } from 'lucide-react';
 import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
+import { freshInput, type UsageRecord } from '../../shared/hub';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
@@ -18,6 +19,8 @@ import { ScopeStrip } from './tile/ScopeStrip';
 import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
+/** What "tok" counts, and the cache traffic it leaves out. */
+const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads${usage.cacheWrite ? `, ${usage.cacheWrite.toLocaleString()} cache writes` : ''}.`;
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
 /** One channel: header, scope strip, a detail row on hover or keyboard focus, notices and the terminal (docs/design/trace, sheet 08). */
@@ -89,7 +92,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
           <span className="tr-spacer" />
           {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>
-          <span className="tr-tile-metric tnum" title={usage ? 'Reported input + output tokens for this run' : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
+          <span className="tr-tile-metric tnum" title={usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
             <span aria-hidden="true">{meta.glyph}</span>{meta.word}

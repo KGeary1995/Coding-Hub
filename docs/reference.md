@@ -141,7 +141,7 @@ The installed program, its data folders (`~/.coding-hub`) and its update channel
 ## Channel tiles
 
 Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile shows:
-- **Header:** the channel badge in the engine's colour, the name, the model, a named Claude profile, `ctx` (context used; Codex only, since Claude Code does not report its window) and `tok` (input + output tokens). Then the action for the current state, and the state chip.
+- **Header:** the channel badge in the engine's colour, the name, the model, a named Claude profile, `ctx` (context used; Codex only, since Claude Code does not report its window) and `tok` (new tokens: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
 - **Scope strip:** the terminal's output per second over the last two minutes, a dashed limit rail and, along the bottom, a bar for the context or session budget used, with a marker at 80%. The trace only ever shows real output.
 - **Detail row:** point at the header, or tab into it, to swap the strip for the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Settings, Duplicate, Maximize and Close buttons.
 - **The terminal.**
@@ -306,7 +306,7 @@ File previews are bounded to 1 MiB / 4,000 rendered lines; folders list up to 50
 
 Blank fields inherit local CLI settings. Suggested model names are editable examples; your CLI and account determine model availability.
 
-**Claude Code:** model maps to `--model`; manual `thinking.budget_tokens` maps to `MAX_THINKING_TOKENS` only for explicit supported manual-thinking models. Adaptive-thinking aliases/default models are rejected when a manual budget is configured. The budget must be at least 1,024 and smaller than an explicit output limit. Maximum output tokens maps to `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. A session token threshold stops the process **after reported usage** reaches it; a response may exceed it. Enforcement requires structured transcript usage and advertised `--session-id` support. It is not a hard request-level billing cap.
+**Claude Code:** model maps to `--model`; manual `thinking.budget_tokens` maps to `MAX_THINKING_TOKENS` only for explicit supported manual-thinking models. Adaptive-thinking aliases/default models are rejected when a manual budget is configured. The budget must be at least 1,024 and smaller than an explicit output limit. Maximum output tokens maps to `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. A session token threshold stops the process **after reported new tokens** (input outside the cache, plus output) reach it; a response may exceed it. Enforcement requires structured transcript usage and advertised `--session-id` support. It is not a hard request-level billing cap.
 
 **Codex:** model maps to `--model`; reasoning maps to `--config model_reasoning_effort="<effort>"`. Choices are `none`, `low`, `medium`, `high`, and `xhigh`; supported efforts depend on the selected model. When advertised, `--no-daemon` keeps the session attached to its PTY.
 
