@@ -8,7 +8,7 @@ import { Terminal } from '@xterm/xterm';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
 import { withoutTerminalReplies } from '../shared/terminal-input';
-import { alertsOn, alertsSupported, disableAlerts, enableAlerts, follow, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent } from './api';
+import { alertsOn, alertsSupported, collectKeys, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 const KEYS: { label: string; name?: string; data: string }[] = [
@@ -31,6 +31,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: { dataset?: Rec
 const app = document.getElementById('app')!;
 let channels: RemoteChannel[] = []; let current: string | null = null; let run: string | null = null;
 let stop: (() => void) | null = null; let terminal: Terminal | null = null; let connected = false;
+/** The other computer the phone is talking to directly while this app's own computer is off, if any. */
+let via: string | null = null;
 /** Unsent messages, by channel. */
 const drafts = new Map<string, string>();
 /** A channel an alert asked to open that the phone has not heard of yet: opened when the next channel list has it. */
@@ -43,7 +45,7 @@ function header(back?: () => void, title?: Node, ...tools: Node[]) {
   return h('header', { className: 'bar' },
     back ? h('button', { className: 'icon', onclick: back, aria: { label: 'Back to channels' } }, '‹') : h('span', { className: 'mark' }, h('i'), h('i'), h('i'), ' trace'),
     title ?? h('span'), ...tools,
-    h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, connected ? 'live' : 'reconnecting…'));
+    h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, linkText()));
 }
 
 function showPair(error = '') {
@@ -67,16 +69,23 @@ function showPair(error = '') {
   app.replaceChildren(form);
 }
 
+const linkText = () => !connected ? 'reconnecting…' : via ? `live · ${via}` : 'live';
 function listen(sessionId: string | null) {
   stop?.();
-  stop = follow(sessionId, onEvent, (value) => { connected = value; for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = value ? 'live' : 'reconnecting…'; } }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
+  stop = follow(sessionId, onEvent, (value: boolean, target: Target) => {
+    connected = value; if (value) via = target.id ? target.name : null;
+    for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = linkText(); }
+    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !via; notice.textContent = via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : ''; }
+    // On its own computer, the phone picks up keys to the others, so it can still reach them when this one is off.
+    if (value && !target.id) void collectKeys().catch(() => {});
+  }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
 }
 
 function showList() {
   disposeTerminal(); current = null; run = null;
   const list = h('ul', { id: 'channel-list', className: 'channels' });
-  const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
+  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
   renderList(); listen(null);
 }
 

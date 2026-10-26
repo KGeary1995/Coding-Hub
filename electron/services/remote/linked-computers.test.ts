@@ -94,6 +94,42 @@ describe('linked computers', () => {
     expect(mac.server.channels('computer').map((channel) => channel.sessionId)).toEqual(['mac-1']);
   });
 
+  it('gives a phone on one computer its own key to the other, so it can reach that one directly when the first is off', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const mac = await computer(MAC, 'MacBook', 'mac-1');
+    const link = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => mac.server.relayChanged() });
+    cleanup.push(() => link.stop()); mac.server.setRelay(link);
+    await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
+    const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
+    expect(await (await fetch(`${mac.url}api/computers`, { headers: auth })).json()).toMatchObject({ self: { id: MAC, name: 'MacBook' }, others: [{ id: PC, name: 'Obsidian-Halo' }] });
+    const first = await (await fetch(`${mac.url}api/computer-key`, { method: 'POST', headers: auth, body: JSON.stringify({ id: PC }) })).json() as { id: string; url: string; token: string };
+    expect(first).toMatchObject({ id: PC, name: 'Obsidian-Halo', url: pc.url });
+    // Straight to the PC with that key: a phone there, which sees the PC's channels and cannot control them.
+    const direct = { Authorization: `Bearer ${first.token}`, 'Content-Type': 'application/json' };
+    expect((await (await fetch(`${pc.url}api/channels`, { headers: direct })).json() as { sessionId: string }[]).map((channel) => channel.sessionId)).toEqual(['pc-1']);
+    expect((await fetch(`${pc.url}api/control`, { method: 'POST', headers: direct, body: JSON.stringify({ sessionId: 'pc-1', control: 'stop' }) })).status).toBe(403);
+    expect(pc.server.status().devices.find((device) => device.kind === 'phone')?.name).toBe('Phone (through MacBook)');
+    // Asking again replaces that key rather than piling up keys on the PC.
+    const second = await (await fetch(`${mac.url}api/computer-key`, { method: 'POST', headers: auth, body: JSON.stringify({ id: PC }) })).json() as { token: string };
+    expect((await fetch(`${pc.url}api/channels`, { headers: direct })).status).toBe(401);
+    expect((await fetch(`${pc.url}api/channels`, { headers: { Authorization: `Bearer ${second.token}` } })).status).toBe(200);
+    expect(pc.server.status().devices.filter((device) => device.kind === 'phone')).toHaveLength(1);
+    // A linked computer cannot use the phone route, and a phone cannot use the computer route.
+    expect((await fetch(`${mac.url}api/phone-key`, { method: 'POST', headers: auth, body: JSON.stringify({ name: 'x', relayKey: 'y' }) })).status).toBe(403);
+  });
+
+  it('lets the phone app from the other computer call this one directly, and no other site', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const token = await phoneToken(pc.server);
+    pc.server.allowedOrigins = () => ['https://macbook.tail1234.ts.net'];
+    const preflight = await fetch(`${pc.url}api/channels`, { method: 'OPTIONS', headers: { Origin: 'https://macbook.tail1234.ts.net', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' } });
+    expect(preflight.status).toBe(204); expect(preflight.headers.get('access-control-allow-origin')).toBe('https://macbook.tail1234.ts.net');
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('Authorization');
+    const allowed = await fetch(`${pc.url}api/channels`, { headers: { Origin: 'https://macbook.tail1234.ts.net', Authorization: `Bearer ${token}` } });
+    expect(allowed.status).toBe(200); expect(allowed.headers.get('access-control-allow-origin')).toBe('https://macbook.tail1234.ts.net');
+    expect((await fetch(`${pc.url}api/channels`, { headers: { Origin: 'https://evil.example.com', Authorization: `Bearer ${token}` } })).status).toBe(403);
+    // Without a key the other computer's app gets nothing, origin or not.
+    expect((await fetch(`${pc.url}api/channels`, { headers: { Origin: 'https://macbook.tail1234.ts.net' } })).status).toBe(401);
+  });
+
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {
     expect(linkableAddress('https://desk.tail1234.ts.net/')).toBe('https://desk.tail1234.ts.net/');
     expect(linkableAddress('https://desk.tail1234.ts.net/some/path')).toBe('https://desk.tail1234.ts.net/');

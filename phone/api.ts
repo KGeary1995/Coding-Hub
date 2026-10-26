@@ -4,11 +4,33 @@ import type { RemoteChannel } from '../shared/remote';
 const KEY = 'trace-remote-token';
 export const token = { get: () => localStorage.getItem(KEY), set: (value: string) => localStorage.setItem(KEY, value), clear: () => localStorage.removeItem(KEY) };
 
-export class Unpaired extends Error { constructor() { super('This phone is not paired. Pair it again from Settings on the computer.'); } }
+/** `home` is false when another computer, reached directly, no longer accepts this phone; only its key is dropped. */
+export class Unpaired extends Error { constructor(readonly home = true) { super('This phone is not paired. Pair it again from Settings on the computer.'); } }
 
-export async function api(path: string, init: RequestInit = {}) {
-  const response = await fetch(path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token.get() ?? ''}`, 'Content-Type': 'application/json' } });
-  if (response.status === 401) { token.clear(); throw new Unpaired(); }
+/**
+ * Another of the person's computers this phone can reach directly, with a phone key the computer that served this app
+ * fetched for it. Used when that computer is off, so one app on the phone works with whichever computer is on.
+ */
+export interface Sibling { id: string; name: string; url: string; token: string }
+const SIBLINGS = 'trace-remote-computers'; const HOME_NAME = 'trace-remote-home-name';
+export const siblings = {
+  list: (): Sibling[] => { try { const value = JSON.parse(localStorage.getItem(SIBLINGS) ?? '[]') as Sibling[]; return Array.isArray(value) ? value : []; } catch { return []; } },
+  save: (list: Sibling[]) => localStorage.setItem(SIBLINGS, JSON.stringify(list)),
+  remove: (id: string) => siblings.save(siblings.list().filter((item) => item.id !== id)),
+};
+export const homeName = () => localStorage.getItem(HOME_NAME);
+
+/** Where requests go: the computer that served this app (`id` null), or another one directly. */
+export interface Target { id: string | null; name: string | null; base: string; key: () => string | null }
+const home: Target = { id: null, name: null, base: '', key: () => token.get() };
+const direct = (sibling: Sibling): Target => ({ id: sibling.id, name: sibling.name, base: sibling.url.replace(/\/$/, ''), key: () => sibling.token });
+let active: Target = home;
+/** The computer the phone is talking to now. */
+export const activeTarget = () => active;
+
+export async function api(path: string, init: RequestInit = {}, target: Target = active) {
+  const response = await fetch(target.base + path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${target.key() ?? ''}`, 'Content-Type': 'application/json' } });
+  if (response.status === 401) { if (target.id) { siblings.remove(target.id); throw new Unpaired(false); } token.clear(); throw new Unpaired(); }
   if (!response.ok) throw new Error((await response.json().catch(() => ({})) as { error?: string }).error ?? 'The computer did not accept the request.');
   return response;
 }
@@ -29,25 +51,45 @@ export function send(sessionId: string, runId: string, data: string) {
   const delivery = queue.then(() => api('/api/input', { method: 'POST', body })); queue = delivery.catch(() => {});
   return delivery;
 }
-export const unpair = () => api('/api/unpair', { method: 'POST' }).finally(() => token.clear());
+/** Removes this phone from its computer and from every other computer it could reach directly. */
+export const unpair = async () => {
+  await Promise.all(siblings.list().map((sibling) => api('/api/unpair', { method: 'POST' }, direct(sibling)).catch(() => {})));
+  siblings.save([]); await api('/api/unpair', { method: 'POST' }, home).finally(() => token.clear());
+};
+
+/**
+ * Asks the computer that served this app for keys to the other computers linked to it, so the phone can still reach
+ * them if this one is off. Only computers it has no key for yet are asked for.
+ */
+export async function collectKeys() {
+  if (active !== home) return;
+  const info = await (await api('/api/computers', {}, home)).json() as { self: { id: string; name: string } | null; others: { id: string; name: string }[] };
+  if (info.self) localStorage.setItem(HOME_NAME, info.self.name);
+  const known = new Set(siblings.list().map((item) => item.id));
+  for (const other of info.others) if (!known.has(other.id)) {
+    try { const sibling = await (await api('/api/computer-key', { method: 'POST', body: JSON.stringify({ id: other.id }) }, home)).json() as Sibling; if (sibling.token && sibling.url) siblings.save([...siblings.list().filter((item) => item.id !== sibling.id), sibling]); }
+    catch { /* Asked again on the next connection. */ }
+  }
+}
 
 /** Whether this browser can receive alerts here; on iPhone and iPad that needs Trace added to the Home Screen first. */
 export function alertsSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
-export async function alertsOn() { return ((await (await api('/api/alerts')).json()) as { on: boolean }).on; }
+// Alerts come from the computer that served this app: a browser takes push messages from one computer's key here.
+export async function alertsOn() { return ((await (await api('/api/alerts', {}, home)).json()) as { on: boolean }).on; }
 /** Asks for permission, subscribes with the computer's key and hands the subscription to the computer. */
 export async function enableAlerts() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Alerts are blocked for Trace in this browser’s settings.');
-  const { publicKey } = await (await api('/api/alerts')).json() as { publicKey: string };
+  const { publicKey } = await (await api('/api/alerts', {}, home)).json() as { publicKey: string };
   const registration = await navigator.serviceWorker.ready;
   const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (char) => char.charCodeAt(0));
   const existing = await registration.pushManager.getSubscription();
   // A subscription made for another computer's key cannot carry this one's alerts.
   if (existing && existing.options.applicationServerKey && new Uint8Array(existing.options.applicationServerKey).join() !== key.join()) await existing.unsubscribe();
   const subscription = (await registration.pushManager.getSubscription()) ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-  await api('/api/alerts', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+  await api('/api/alerts', { method: 'POST', body: JSON.stringify(subscription.toJSON()) }, home);
 }
 export async function disableAlerts() {
-  await api('/api/alerts', { method: 'DELETE' });
+  await api('/api/alerts', { method: 'DELETE' }, home);
   await (await (await navigator.serviceWorker.ready).pushManager.getSubscription())?.unsubscribe();
 }
 
@@ -59,32 +101,43 @@ export type StreamEvent =
   | { type: 'resize'; data: { sessionId: string; runId: string; cols: number; rows: number } };
 
 /**
- * Follows the computer's event stream (server-sent events read through fetch, which can send the device key). It
- * reconnects after a drop until `stop` is called; `onState` reports whether it is connected.
+ * Follows a computer's event stream (server-sent events read through fetch, which can send the device key): the one
+ * that served this app when it answers, otherwise each other computer the phone has a key for, directly. It reconnects
+ * after a drop until `stop` is called, trying this app's computer first each time, and while on another computer it
+ * checks every 30 seconds whether this app's computer is back. `onState` reports the connection and which computer.
  */
-export function follow(sessionId: string | null, onEvent: (event: StreamEvent) => void, onState: (connected: boolean) => void, onUnpaired: () => void) {
+export function follow(sessionId: string | null, onEvent: (event: StreamEvent) => void, onState: (connected: boolean, via: Target) => void, onUnpaired: () => void) {
   let stopped = false; let controller: AbortController | null = null;
   const run = async () => {
     while (!stopped) {
-      controller = new AbortController();
-      try {
-        const response = await api('/api/stream' + (sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''), { signal: controller.signal });
-        onState(true);
-        const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
-        for (;;) {
-          const { value, done } = await reader.read(); if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
-            const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-            const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1];
-            if (type && data) onEvent({ type, data: JSON.parse(data) } as StreamEvent);
+      for (const target of [home, ...siblings.list().map(direct)]) {
+        if (stopped) return;
+        controller = new AbortController(); const connecting = setTimeout(() => controller?.abort(), 6000); let back: ReturnType<typeof setInterval> | null = null;
+        try {
+          const response = await api('/api/stream' + (sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''), { signal: controller.signal }, target);
+          clearTimeout(connecting); active = target; onState(true, target);
+          if (target !== home) {
+            const current = controller;
+            back = setInterval(() => { void api('/api/computers', { signal: AbortSignal.timeout(4000) }, home).then(() => current.abort()).catch(() => {}); }, 30000);
           }
-        }
-      } catch (error) {
-        if (error instanceof Unpaired) { stopped = true; onUnpaired(); return; }
+          const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
+          for (;;) {
+            const { value, done } = await reader.read(); if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
+              const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+              const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1];
+              if (type && data) onEvent({ type, data: JSON.parse(data) } as StreamEvent);
+            }
+          }
+          break;
+        } catch (error) {
+          if (error instanceof Unpaired && error.home) { stopped = true; onUnpaired(); return; }
+          if (active === target && target !== home) break;
+        } finally { clearTimeout(connecting); if (back) clearInterval(back); }
       }
       if (stopped) return;
-      onState(false); await new Promise((resolve) => setTimeout(resolve, 2000));
+      onState(false, active); await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   };
   void run();

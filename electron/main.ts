@@ -43,7 +43,7 @@ import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
-import { LinkedComputers } from './services/remote/linked-computers';
+import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
@@ -379,6 +379,8 @@ else app.whenReady().then(() => {
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() });
     phone.setRelay(linked); linked.start();
+    // The phone app the other computer served may call this one directly while that one is off.
+    phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
   }
   const refreshTailscale = async () => { if (!phone.enabled) return; phone.tailscale = await tailscaleState(runTailscale, phone.port); if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; } };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));

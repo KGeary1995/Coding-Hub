@@ -27,6 +27,8 @@ export interface RemoteRelay {
   /** Calls back with the channel's screen and returns true, or returns false when no linked computer runs it. */
   snapshot(sessionId: string, callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void): boolean;
   write(sessionId: string, runId: string, data: string): Promise<void>;
+  /** Asks a linked computer for a phone key for one of this computer's phones, so that phone can reach it directly. */
+  phoneKey(computerId: string, name: string, relayKey: string): Promise<{ id: string; name: string; url: string; token: string }>;
 }
 /**
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
@@ -37,7 +39,9 @@ interface Stream { device: string; kind: RemoteDeviceKind; response: http.Server
 const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(pushEndpoint, 'Not a push service.'), p256dh: z.string().regex(/^[A-Za-z0-9_-]{87}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/) }).strict();
 const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional(),
   /** Absent on phones paired before computers could link. */
-  kind: z.enum(['phone', 'computer']).optional(), machineId: z.uuid().optional() }).strict();
+  kind: z.enum(['phone', 'computer']).optional(), machineId: z.uuid().optional(),
+  /** A phone key a linked computer asked for on behalf of its phone: asking again replaces it. */
+  relayKey: z.string().max(100).optional() }).strict();
 const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
 /** What a browser's `PushSubscription.toJSON()` gives (`expirationTime` is usually null and is not needed to send). */
 const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
@@ -46,6 +50,8 @@ const ALERT_INTERVAL = 20000;
 type Device = z.infer<typeof deviceSchema>;
 const settingsSchema = z.object({ enabled: z.boolean() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
+const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
+const computerKeySchema = z.object({ id: z.uuid() }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
@@ -73,6 +79,11 @@ export class RemoteServer {
   private relay: RemoteRelay | null = null;
   /** This computer's sync identity, given to a computer that links to it so it can recognise this one in Drive. */
   identity: { id: string; name: string } | null = null;
+  /**
+   * The person's other computers' remote addresses (https://name.tailnet.ts.net). The phone app one of them served may
+   * call this computer directly when that one is off, so these origins are allowed alongside this computer's own.
+   */
+  allowedOrigins: () => string[] = () => [];
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
@@ -292,13 +303,21 @@ export class RemoteServer {
     if (!this.allowedHost(request.headers.host)) return this.send(response, 421, { error: 'Unknown host.' });
     // Tailscale Funnel would put the remote on the public internet; refuse rather than rely on the device key alone.
     if (request.headers['tailscale-funnel-request'] !== undefined) return this.send(response, 403, { error: 'The phone remote is not available through Tailscale Funnel.' });
-    const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return this.send(response, 403, { error: 'Cross-site request refused.' });
+    const origin = request.headers.origin;
+    const sibling = Boolean(origin) && !this.allowedHost(URL.canParse(origin!) ? new URL(origin!).host : '') && this.allowedOrigins().includes(origin!.replace(/\/$/, '').toLowerCase());
+    if (origin && !sibling && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return this.send(response, 403, { error: 'Cross-site request refused.' });
+    if (sibling) {
+      // The phone app from another of the person's computers, calling this one directly; it still needs its own key.
+      response.setHeader('Access-Control-Allow-Origin', origin!); response.setHeader('Vary', 'Origin');
+      if (request.method === 'OPTIONS') { response.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' }); return void response.end(); }
+    }
     const url = new URL(request.url ?? '/', 'http://remote');
     const file = request.method === 'GET' && !url.pathname.startsWith('/api/') ? phoneFile(this.phoneRoot, url.pathname) : null;
     if (file) {
       response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': file.immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
         // xterm.js sets inline styles for its rows and cursor; scripts stay limited to the app's own files.
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+        // The app may also call the person's other computers directly (see allowedOrigins).
+        'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ${['\'self\'', ...this.allowedOrigins()].join(' ')}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` });
       return void response.end(file.body);
     }
     if (request.method === 'POST' && url.pathname === '/api/pair') {
@@ -348,6 +367,28 @@ export class RemoteServer {
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
       return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/phone-key') {
+      // A linked computer passing on a phone of its own: the phone gets a phone's key here, never more.
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can ask for a phone key.' });
+      const parsed = phoneKeySchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+      const relayKey = `${device.id}:${parsed.data.relayKey}`; const kept = this.devices().filter((item) => item.relayKey !== relayKey);
+      if (kept.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
+      const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || 'Phone';
+      for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device) && stream.device !== device.id) { stream.response.end(); this.streams.delete(stream); }
+      save(this.root, 'remote-devices.json', [...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]);
+      return this.send(response, 200, { token, computer: this.identity, url: this.status().url });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/computers') {
+      // The phone learns which computer this is and which others it could reach directly.
+      const others = new Map<string, string>(); for (const channel of this.relay?.channels() ?? []) if (channel.computer) others.set(channel.computer.id, channel.computer.name);
+      return this.send(response, 200, { self: this.identity, url: this.status().url, others: [...others].map(([id, name]) => ({ id, name })) });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/computer-key') {
+      if (kind !== 'phone' || !this.relay || !this.identity) return this.send(response, 403, { error: 'Only a phone can ask for a key to another computer.' });
+      const parsed = computerKeySchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+      try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
     }
     if (request.method === 'POST' && url.pathname === '/api/control') {
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can start or stop channels.' });

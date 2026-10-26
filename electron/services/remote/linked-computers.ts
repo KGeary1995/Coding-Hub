@@ -99,6 +99,14 @@ export class LinkedComputers implements RemoteRelay {
 
   async input(id: string, sessionId: string, runId: string, data: string) { await this.request(this.linked(id), 'api/input', { method: 'POST', body: JSON.stringify({ sessionId, runId, data }) }); }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
+  /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */
+  async phoneKey(id: string, name: string, relayKey: string) {
+    const link = this.linked(id);
+    const body = await (await this.request(link, 'api/phone-key', { method: 'POST', body: JSON.stringify({ name, relayKey }), signal: AbortSignal.timeout(15000) })).json() as { token?: string; url?: string | null };
+    const url = linkableAddress(body.url ?? link.url);
+    if (!body.token || !url) throw new HubError('LINK_PHONE_KEY', `${link.name} did not give a key.`);
+    return { id, name: link.name, url, token: body.token };
+  }
   /** The desktop opened a linked computer's tab: send it every channel's screen as it is now. */
   watch(id: string) {
     const connection = this.connections.get(id); if (!connection) return;

@@ -1,5 +1,17 @@
 // Trace phone app service worker: shows alerts Trace sends when a channel needs the person, and opens that channel
-// when one is tapped. It caches nothing; the app always loads from the computer.
+// when one is tapped. It also keeps a copy of the app itself (never anything from /api/), loaded from the computer
+// whenever it answers, so the app still opens while that computer is off and can reach the person's other computer.
+const SHELL = 'trace-shell-v1';
+self.addEventListener('fetch', (event) => {
+  const request = event.request; const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  const key = request.mode === 'navigate' ? '/' : request;
+  event.respondWith((async () => {
+    const cache = await caches.open(SHELL);
+    try { const response = await fetch(request); if (response.ok) await cache.put(key, response.clone()); return response; }
+    catch { return (await cache.match(key)) || Response.error(); }
+  })());
+});
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
