@@ -4,7 +4,9 @@ import type { ChannelEngine } from './types';
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
 export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: ChannelEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null;
   /** Set on a channel that runs on another of the person's computers and is passed on by this one (phones only). */
-  computer?: { id: string; name: string } }
+  computer?: { id: string; name: string };
+  /** What the session is working on, from its CLI's terminal title (Claude Code's task summary). */
+  topic?: string }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
 /** `kind` is `computer` for another Trace linked to this one, which may also start and stop channels. */
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }

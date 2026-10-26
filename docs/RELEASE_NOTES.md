@@ -1,5 +1,6 @@
 ## What's new
 
+- **Channels named after their repo.** A channel you haven't renamed shows the folder it works in (say *Coding-Hub* or *ADHD-Tax*) instead of "Claude Code" or "Codex"; the model and badge colour still tell them apart. While Claude Code works on something, its summary of the task appears next to the name, on your phone too. A name you give a channel always wins.
 - **Token counts that agree.** "tok" on channels, in the status bar and in today's total now all count the same thing: new tokens (input outside the prompt cache, plus output). Channels used to add Claude's cache re-reads, which repeat the whole conversation every turn, so they could show more than the day's total. Hover a count to see the cache reads. Session budgets and Claude's session token limit count new tokens too.
 - **Typing from your phone no longer comes out garbled.** While a channel is open on your phone it stays at the phone's size, even when the desktop window or tiles change; the desktop gets its size back when you leave the channel on the phone or type at the desk.
 

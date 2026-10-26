@@ -130,6 +130,7 @@ function renderList() {
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
       h('span', { className: 'name' }, channel.title, (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
       h('span', { className: 'tag' }, word[state(channel)]),
+      channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
 }

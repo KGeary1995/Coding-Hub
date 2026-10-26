@@ -104,3 +104,7 @@
 .pasted-viewer::backdrop { background: rgb(0 0 0 / .7); }
 .pasted-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); font: 400 12px/16px var(--tr-font-mono); }
 .pasted-viewer img { display: block; max-width: min(92vw, 1600px); max-height: calc(92vh - 34px); object-fit: contain; }
+
+/* What the channel is working on (from its CLI's terminal title), after its name. */
+.tr-tile-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 13px/18px var(--tr-font-ui); }
+.tr-tile-topic::before { content: '· '; color: var(--tr-fg-dim); }

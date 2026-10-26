@@ -10,6 +10,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
+import { useChannelName } from '../state/channel-names';
 import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
@@ -29,6 +30,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   useEffect(() => { if (session.config.engine === 'claude') void refreshClaudeProfiles(); }, [session.config.engine]);
   const profileId = session.config.engine === 'claude' ? session.config.accountProfileId : undefined;
   const profileName = profileId ? profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile' : null;
+  const { name, topic } = useChannelName(session);
   const [coachingSent, setCoachingSent] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -82,12 +84,13 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   ].filter(Boolean).join(' · ');
   return (
     <article className={`session-tile tr-tile ${engine} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
-      data-status={session.status} data-state={state} aria-label={`${session.title} session ${channel}`} tabIndex={0} onKeyDown={onTileKey}>
+      data-status={session.status} data-state={state} aria-label={`${name} session ${channel}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
           <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={engineName}>CH{channel}</span>
-          <strong className="tr-tile-name" title={session.title}>{session.title}</strong>
+          <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
+          {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Usage record model: ${reportedModel}. Requested override: ${model || 'none'}.` : model ? `Next launch model override: ${model}` : 'Next launch inherits local CLI configuration'}>{reportedModel || model || 'CLI default'}</span>}
           {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
           <span className="tr-spacer" />

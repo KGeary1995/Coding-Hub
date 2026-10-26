@@ -61,6 +61,8 @@ interface ManagedRun {
   finished: boolean;
   /** Output sent to the window and not yet acknowledged as drawn. */
   unacked: number; paused: boolean; stall?: ReturnType<typeof setTimeout>;
+  /** The latest title the CLI gave its terminal (OSC 0/2): Claude Code's task summary, for phones. */
+  title?: string;
 }
 
 export class PtyManager {
@@ -89,7 +91,7 @@ export class PtyManager {
   }
 
   /** Runs still going, for the phone remote. */
-  running(): (RunningSession & { cols: number; rows: number })[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session, cols: run.pty.cols, rows: run.pty.rows })); }
+  running(): (RunningSession & { cols: number; rows: number; title?: string })[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session, cols: run.pty.cols, rows: run.pty.rows, ...(run.title ? { title: run.title } : {}) })); }
 
   /**
    * Input typed on a paired phone. It reaches the run by its reference rather than through the owning window, and tells
@@ -185,6 +187,7 @@ export class PtyManager {
       pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-8192);
+        if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);

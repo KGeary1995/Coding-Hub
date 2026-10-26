@@ -73,3 +73,4 @@ footer { padding: 16px; text-align: center; }
 .switcher button.active { background: var(--tr-raised, var(--tr-panel)); border-color: var(--tr-line-strong, var(--tr-line)); font-weight: 600; }
 .switcher .count:empty { display: none; }
 .switcher .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--tr-st-waiting); color: var(--tr-on-waiting, #120b10); font-size: 12px; line-height: 18px; text-align: center; }
+.channel .topic { grid-column: 1 / -1; color: var(--tr-fg-muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

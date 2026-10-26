@@ -1,3 +1,4 @@
+import { channelNameNow } from '../../state/channel-names';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, tokens, formatNumber, dollars } from '../../state/hub-store';
 import { CHANNEL_STATES, channelAlerts, channelState, todayTotals, usageFor } from '../../state/channel-state';
@@ -26,7 +27,7 @@ export function StatusBar() {
     {sessions.map((session, index) => {
       const record = usageFor(session, usage); const state = channelState(session, record); const meta = CHANNEL_STATES[state];
       const color = meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color;
-      return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${session.title}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
+      return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${channelNameNow(session)}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
         <i className="tr-engine-square" style={{ background: `var(--tr-ch-${session.config.engine})` }} aria-hidden="true" />CH{index + 1}
         <span style={{ color }}><span aria-hidden="true">{meta.glyph}</span> {meta.word.toLowerCase()}</span>
         {record && <span className="tnum" title={`New tokens (input outside the cache, plus output); ${compact(record.cached)} cache reads not counted`}>{compact(tokens(record))} tok</span>}

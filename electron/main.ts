@@ -44,6 +44,7 @@ import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
+import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
@@ -367,7 +368,9 @@ else app.whenReady().then(() => {
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
   remote = new RemoteServer(storageRoot, {
-    sessions: () => (storage?.load()?.sessions ?? []).map((session) => ({ id: session.id, title: session.title, engine: session.config.engine })),
+    // Channels still called by their engine's name are named after their folder, as on the desktop.
+    sessions: () => { const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
+      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),

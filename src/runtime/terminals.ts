@@ -9,6 +9,7 @@ import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 import { exitNotice } from '../../shared/terminal-input';
 import { addPastedImage, clearPastedImages, quotePath } from '../state/pasted-images';
+import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
 
 const MAC = /Mac/.test(navigator.userAgent);
 const WINDOWS = /Windows/.test(navigator.userAgent);
@@ -77,6 +78,8 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
   terminal.onData((data) => { void writeTerminal(session.id, data); });
+  // The CLI's terminal title says what it is working on (Claude Code's task summary).
+  terminal.onTitleChange((title) => setTerminalTitle(session.id, title));
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type === 'keydown' && event.code === 'KeyV' && !event.shiftKey && (event.ctrlKey || event.metaKey || event.altKey)) void showClipboardImage(session.id);
     return true;
@@ -155,7 +158,7 @@ export function routeTerminalEvent(event: SessionEvent) {
   if (event.type === 'started') {
     entry.terminal.reset();
     forgetActivity(event.sessionId);
-    clearPastedImages(event.sessionId);
+    clearPastedImages(event.sessionId); clearTerminalTitle(event.sessionId);
     entry.run = { sessionId: event.sessionId, runId: event.runId };
     entry.terminal.options.disableStdin = false;
     entry.terminal.options.cursorBlink = true;

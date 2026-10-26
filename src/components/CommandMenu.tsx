@@ -1,3 +1,4 @@
+import { channelNameNow } from '../state/channel-names';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../state/workspace-store';
@@ -95,13 +96,13 @@ export function CommandMenu() {
       { id: 'grid', label: 'Arrange channels in grid', run: () => { setView('workspace'); arrange('grid'); } },
       { id: 'detect', label: 'Refresh local CLI detection', run: () => void refreshEngines() },
       ...sessions.flatMap((session, index) => session.status === 'running'
-        ? [{ id: `stop-${session.id}`, label: `Stop CH${index + 1} · ${session.title}`, run: () => void stopSession(session.id) }]
-        : session.status !== 'starting' ? [{ id: `start-${session.id}`, label: `Start CH${index + 1} · ${session.title}`, run: () => { setView('workspace'); void startSession(session.id); } }] : []),
+        ? [{ id: `stop-${session.id}`, label: `Stop CH${index + 1} · ${channelNameNow(session)}`, run: () => void stopSession(session.id) }]
+        : session.status !== 'starting' ? [{ id: `start-${session.id}`, label: `Start CH${index + 1} · ${channelNameNow(session)}`, run: () => { setView('workspace'); void startSession(session.id); } }] : []),
     ];
     const all: Item[] = actions.map((action) => { const key = viewKey(action.id as NavigationView); return { ...action, group: 'actions' as const, glyph: '>', ...(key ? { shortcut: `G ${key.toUpperCase()}` } : {}) }; });
     sessions.forEach((session, index) => {
       const state = channelState(session, usageFor(session, usage)); const meta = CHANNEL_STATES[state];
-      all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${session.title}`, glyph: meta.glyph, color: meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color,
+      all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${channelNameNow(session)}`, glyph: meta.glyph, color: meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color,
         meta: state === 'waiting' ? `hold · ${session.attention?.message ?? 'approval'}` : meta.word.toLowerCase(), metaClass: state, shortcut: index < MAX_CHANNELS ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
     });
     for (const hit of hits) {
