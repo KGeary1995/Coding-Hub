@@ -1,8 +1,8 @@
 ## What's new
 
-- **Steadier under heavy output.** Each channel's CLI is held to the pace the window can draw, so a channel printing huge amounts of output no longer piles up work that makes Trace sluggish. Nothing is lost; the CLI just waits to write.
-- **Accurate usage for long sessions.** When a session ends, Trace now reads all of its usage, not just the first few megabytes. A run whose usage could not be read completely is marked **incomplete** in Usage, and if usage cannot be read during a session you are told, including when a session token limit cannot be enforced.
-- **Faster start.** Screens you don't need at start (Settings, Usage, Help and the like) load in the background, making the start-up bundle about a third smaller.
+- **Typing from your phone no longer comes out garbled.** While a channel is open on your phone it stays at the phone's size, even when the desktop window or tiles change; the desktop gets its size back when you leave the channel on the phone or type at the desk.
+
+Also in 1.9.1: steadier under heavy output, accurate usage for long sessions, and a faster start.
 
 ## Install
 

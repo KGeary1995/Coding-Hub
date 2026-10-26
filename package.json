@@ -1,6 +1,6 @@
 {
   "name": "ai-coding-hub",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/main.js",
