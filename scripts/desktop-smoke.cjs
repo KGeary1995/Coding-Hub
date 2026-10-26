@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
+const { waitForPage } = require('./lib/wait.cjs');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 
 (async () => {
@@ -442,7 +443,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await restored.getByRole('button', { name: 'Create and open project', exact: true }).click();
     await restored.waitForFunction(() => document.querySelector('.tr-detail-facts')?.textContent.includes('new-desktop-project'));
     // The workspace is saved once changes settle.
-    await restored.waitForFunction(async (expected) => (await window.codingHub.loadWorkspace()).value.workspace.rootDirectory === expected, path.join(root, 'new-desktop-project'));
+    await waitForPage(restored, async (expected) => (await window.codingHub.loadWorkspace()).value.workspace.rootDirectory === expected, path.join(root, 'new-desktop-project'), 'The new project was not saved as the workspace root.');
     if (process.env.CODING_HUB_TEST_SCREENSHOT) await restored.screenshot({ path: process.env.CODING_HUB_TEST_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
     await app.close();
