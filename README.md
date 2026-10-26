@@ -104,7 +104,7 @@ On Windows, use `npm.cmd` in PowerShell. Run these commands inside the project f
 
 **Releases:** pushing a `v<version>` tag builds the Windows installer and the Mac disk images, and publishes them on the downloads page. See [releases](docs/windows-releases.md).
 
-**Signed Mac builds:** set `MAC_SIGNING_IDENTITY` to your Developer ID Application name (for example `"Kyle Geary (73DB29GHV2)"`) before `npm run dist:mac` to sign with the hardened runtime. To notarize as well, store credentials once with `xcrun notarytool store-credentials trace-notary --apple-id <your Apple ID> --team-id 73DB29GHV2` and set `APPLE_KEYCHAIN_PROFILE=trace-notary`. The build then checks that Gatekeeper accepts the app, so it opens without **Open Anyway**.
+**Signed Mac builds:** set `MAC_SIGNING_IDENTITY` to your Developer ID Application name (for example `"Kyle Geary (73DB29GHV2)"`) before `npm run dist:mac` to sign with the hardened runtime. To notarize as well, store credentials once with `xcrun notarytool store-credentials trace-notary --apple-id <your Apple ID> --team-id 73DB29GHV2` and set `APPLE_KEYCHAIN_PROFILE=trace-notary`. The build then checks that Gatekeeper accepts the app, so it opens without **Open Anyway**. Notarize each signed disk image too before publishing: `xcrun notarytool submit <dmg> --keychain-profile trace-notary --wait`, then `xcrun stapler staple <dmg>`.
 
 ## More
 

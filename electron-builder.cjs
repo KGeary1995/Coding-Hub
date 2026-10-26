@@ -51,7 +51,8 @@ module.exports = {
     ...(macIdentity ? { entitlements: 'assets/entitlements.mac.plist', entitlementsInherit: 'assets/entitlements.mac.plist' } : {}),
     notarize: Boolean(macIdentity && (process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID)),
   },
-  dmg: { artifactName: 'AI-Coding-Hub-${version}-macOS-${arch}.${ext}' },
+  // A signed disk image, so Gatekeeper accepts the download itself; notarize it after the build (see README).
+  dmg: { artifactName: 'AI-Coding-Hub-${version}-macOS-${arch}.${ext}', sign: Boolean(macIdentity) },
   // Installers are published to a public downloads repository so installed copies can check it without credentials;
   // the source repository stays private. See docs/windows-releases.md.
   publish: [{ provider: 'github', owner: 'KGeary1995', repo: 'trace-releases', releaseType: 'release' }],
