@@ -28,7 +28,12 @@ export function chatStarted(sessionId: string, runId: string, resumed: boolean) 
     : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', id: nextId(), text: 'Resumed a saved conversation. Earlier messages are in Claude’s history; new ones appear here.', error: false }] : [] });
 }
 export function chatEnded(sessionId: string) { update(sessionId, (current) => ({ ...current, busy: false, items: current.items.map((item) => item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' } : item) })); }
-export function chatForget(sessionId: string) { useChatStore.setState((state) => { const threads = { ...state.threads }; delete threads[sessionId]; return { threads }; }); }
+/** Frees the conversations (with their images) of channels no longer in the workspace. */
+export function forgetChatsExcept(sessionIds: Iterable<string>) {
+  const kept = new Set(sessionIds); const threads = useChatStore.getState().threads;
+  if (Object.keys(threads).every((id) => kept.has(id))) return;
+  useChatStore.setState({ threads: Object.fromEntries(Object.entries(threads).filter(([id]) => kept.has(id))) });
+}
 
 /** The person's message, shown at once; images as data URLs for the thread. */
 export function chatSent(sessionId: string, text: string, images: ChatImage[]) {
@@ -69,7 +74,8 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
       case 'notice': return { ...current, items: [...items, { kind: 'notice', id: nextId(), text: event.text, error: false }] };
       case 'done': {
         // Streamed text that never got its final message (an interruption) stays as it was.
-        const settled = items.map((item) => item.kind === 'assistant' && item.streaming ? { ...item, blocks: [...item.blocks, { type: 'text' as const, text: item.streaming }], streaming: '' } : item);
+        // An approval still open when its reply ended no longer belongs to anything.
+        const settled = items.map((item) => item.kind === 'assistant' && item.streaming ? { ...item, blocks: [...item.blocks, { type: 'text' as const, text: item.streaming }], streaming: '' } : item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' as const } : item);
         return { ...current, busy: false, items: event.isError && event.error ? [...settled, { kind: 'notice', id: nextId(), text: event.error, error: true }] : settled };
       }
     }

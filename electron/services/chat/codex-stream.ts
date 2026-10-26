@@ -99,6 +99,8 @@ export class CodexStream implements ChatStream {
     if (method === 'turn/completed') {
       const turn = record(params.turn); const failed = turn.status === 'failed';
       this.turnId = null;
+      // Approvals belong to their turn: one that ended (an interruption, say) leaves nothing to approve.
+      this.close();
       this.emit({ type: 'done', isError: failed || turn.status === 'interrupted', error: failed ? text(record(turn.error).message) || 'Codex ended the turn with an error.' : turn.status === 'interrupted' ? 'Interrupted.' : null });
       return;
     }

@@ -59,6 +59,11 @@ describe('Codex chat protocol', () => {
     expect(stream.answer('codex-50', false)).toBe(true); expect(sent.at(-1)).toEqual({ id: 50, result: { decision: 'decline' } });
     expect(stream.answer('codex-51', true, true)).toBe(true); expect(sent.at(-1)).toEqual({ id: 51, result: { decision: 'acceptForSession' } });
     expect(stream.answer('codex-51', true)).toBe(false);
+    // An approval left open when its turn ends (interrupted) is closed and can no longer be answered.
+    stream.push(JSON.stringify({ id: 53, method: 'item/commandExecution/requestApproval', params: { threadId: 't', turnId: 'u', itemId: 'd', command: 'npm test', reason: null } }) + '\n');
+    stream.push(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'u', status: 'interrupted' } } }) + '\n');
+    expect(events.slice(-2)).toEqual([{ type: 'permission-done', requestId: 'codex-53' }, { type: 'done', isError: true, error: 'Interrupted.' }]);
+    expect(stream.answer('codex-53', true)).toBe(false);
     // A failed start says so.
     const failed = codex(); failed.stream.start(); failed.reply(1, {}); failed.stream.push(JSON.stringify({ id: 2, error: { message: 'Not signed in' } }) + '\n');
     expect(failed.events).toEqual([{ type: 'done', isError: true, error: 'Not signed in' }]);

@@ -10,6 +10,7 @@ import { forgetActivity, isPersonInput, recordActivity } from '../state/activity
 import { exitNotice } from '../../shared/terminal-input';
 import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } from '../state/pasted-images';
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
+import { forgetChatsExcept } from '../state/chat-store';
 import { osc52Text, unwrapCopied, type CopiedRow } from './copy-text';
 
 const MAC = /Mac/.test(navigator.userAgent);
@@ -225,4 +226,5 @@ export function focusTerminal(id: string) {
 export function releaseRemovedTerminals(ids: string[]) {
   const retained = new Set(ids);
   for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); clearPastedImages(id); }
+  forgetChatsExcept(retained);
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { applyChatEvent, chatAnswered, chatEnded, chatSent, chatStarted, useChatStore } from './chat-store';
+import { applyChatEvent, chatAnswered, chatEnded, chatSent, chatStarted, forgetChatsExcept, useChatStore } from './chat-store';
 
 const items = () => useChatStore.getState().threads.s.items;
 const event = (value: Parameters<typeof applyChatEvent>[0]['event']) => applyChatEvent({ sessionId: 's', runId: 'r', event: value });
@@ -43,5 +43,14 @@ describe('chat threads', () => {
     expect(items().map((item) => item.kind)).toEqual(['user', 'notice']);
     chatStarted('s', 'r3', false);
     expect(items()).toEqual([]);
+  });
+  it('frees the conversations of channels removed from the workspace', () => {
+    chatStarted('gone', 'r2', false); chatSent('gone', 'hi', [{ mediaType: 'image/png', data: 'AAAA' }]);
+    forgetChatsExcept(['s']); expect(Object.keys(useChatStore.getState().threads)).toEqual(['s']);
+  });
+  it('closes an approval left open when its reply ends', () => {
+    event({ type: 'permission', requestId: 'p', toolName: 'Bash', description: 'ls', input: {}, canAllowEdits: false });
+    event({ type: 'done', isError: true, error: 'Interrupted.' });
+    expect(items().find((item) => item.kind === 'permission')).toMatchObject({ answer: 'closed' });
   });
 });
