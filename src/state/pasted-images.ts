@@ -1,18 +1,31 @@
 import { create } from 'zustand';
 
-/** An image the person pasted or dropped into a channel, shown under its terminal. The CLI attaches its own copy. */
-export interface PastedImage { id: string; label: string; thumbnail: string; full: string }
+/**
+ * An image the person pasted or dropped into a channel, shown under its terminal. The CLI attaches its own copy; this
+ * is Trace's record of it: attached until the person sends their message (Enter), then sent, with the time.
+ */
+export interface PastedImage { id: string; label: string; thumbnail: string; full: string; number: number; sentAt: string | null }
 
-/** Thumbnails kept per channel; the oldest drop off first. */
+/** Images kept per channel, attached and sent together; the oldest sent ones drop off first. */
 export const MAX_PASTED_IMAGES = 12;
 
-export const usePastedImages = create<{ images: Record<string, PastedImage[]> }>(() => ({ images: {} }));
+export const usePastedImages = create<{ images: Record<string, PastedImage[]>; counts: Record<string, number> }>(() => ({ images: {}, counts: {} }));
 
 let counter = 0;
-export function addPastedImage(sessionId: string, image: Omit<PastedImage, 'id'>) {
-  const { images } = usePastedImages.getState();
-  const next = [...(images[sessionId] ?? []), { ...image, id: `pasted-${++counter}` }].slice(-MAX_PASTED_IMAGES);
-  usePastedImages.setState({ images: { ...images, [sessionId]: next } });
+/** Adds an attached image, numbered in the order pasted in this run (as the CLI numbers [Image #1], [Image #2]…). */
+export function addPastedImage(sessionId: string, image: Pick<PastedImage, 'label' | 'thumbnail' | 'full'>) {
+  const { images, counts } = usePastedImages.getState(); const number = (counts[sessionId] ?? 0) + 1;
+  const list = [...(images[sessionId] ?? []), { ...image, id: `pasted-${++counter}`, number, sentAt: null }];
+  // Over the limit, sent images go first; attached ones are about to be sent and are kept.
+  while (list.length > MAX_PASTED_IMAGES) { const index = list.findIndex((item) => item.sentAt); list.splice(index >= 0 ? index : 0, 1); }
+  usePastedImages.setState({ images: { ...images, [sessionId]: list }, counts: { ...counts, [sessionId]: number } });
+}
+
+/** The person sent their message: every attached image in that channel is now sent. */
+export function markPastedImagesSent(sessionId: string, at = new Date()) {
+  const { images } = usePastedImages.getState(); const list = images[sessionId];
+  if (!list?.some((image) => !image.sentAt)) return;
+  usePastedImages.setState({ images: { ...images, [sessionId]: list.map((image) => image.sentAt ? image : { ...image, sentAt: at.toISOString() }) } });
 }
 
 export function removePastedImage(sessionId: string, id: string) {
@@ -23,11 +36,12 @@ export function removePastedImage(sessionId: string, id: string) {
   usePastedImages.setState({ images: next });
 }
 
+/** A channel restarted (a new run numbers its images from 1) or was removed. */
 export function clearPastedImages(sessionId: string) {
-  const { images } = usePastedImages.getState();
-  if (!(sessionId in images)) return;
-  const next = { ...images }; delete next[sessionId];
-  usePastedImages.setState({ images: next });
+  const { images, counts } = usePastedImages.getState();
+  if (!(sessionId in images) && !(sessionId in counts)) return;
+  const nextImages = { ...images }; delete nextImages[sessionId]; const nextCounts = { ...counts }; delete nextCounts[sessionId];
+  usePastedImages.setState({ images: nextImages, counts: nextCounts });
 }
 
 /** A dropped file's path as typed at a shell prompt, quoted when it holds spaces or shell characters. */

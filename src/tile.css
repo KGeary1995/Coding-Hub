@@ -91,7 +91,7 @@
 }
 
 /* Pasted images: Trace's view of what the person pasted; the CLI attaches its own copy. */
-.pasted-images { display: flex; align-items: center; gap: 12px; padding: 8px 13px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); flex-shrink: 0; }
+.pasted-images { display: flex; align-items: flex-end; gap: 12px; padding: 8px 13px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); flex-shrink: 0; }
 .pasted-images ul { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; overflow-x: auto; min-width: 0; }
 .pasted-images li { position: relative; flex-shrink: 0; }
 .pasted-thumb { display: block; padding: 0; border: 1px solid var(--tr-line-control); background: var(--tr-term); cursor: zoom-in; }
@@ -99,7 +99,14 @@
 .pasted-thumb img { display: block; height: 56px; max-width: 120px; object-fit: cover; }
 .pasted-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
 .pasted-remove:hover, .pasted-remove:focus-visible { color: var(--tr-fg-strong); }
-.pasted-count { flex-shrink: 0; color: var(--tr-fg-dim); font: 400 11px/16px var(--tr-font-mono); }
+.pasted-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pasted-group + .pasted-group { padding-left: 12px; border-left: 1px solid var(--tr-line); }
+.pasted-heading { color: var(--tr-fg-muted); font: 400 11px/16px var(--tr-font-mono); white-space: nowrap; }
+.pasted-group.sent .pasted-heading { color: var(--tr-fg-dim); }
+.pasted-thumb { position: relative; }
+.pasted-number { position: absolute; left: 3px; bottom: 3px; padding: 0 4px; border-radius: 3px; background: rgb(0 0 0 / .7); color: var(--tr-fg-strong); font: 600 10px/14px var(--tr-font-mono); }
+/* Sent images are smaller and quieter: a record, not something about to go out. */
+.pasted-images li.sent .pasted-thumb img { height: 36px; max-width: 72px; opacity: .8; }
 .pasted-viewer { max-width: min(92vw, 1600px); max-height: 92vh; padding: 0; border: 1px solid var(--tr-line-strong); background: var(--tr-term); color: var(--tr-fg); }
 .pasted-viewer::backdrop { background: rgb(0 0 0 / .7); }
 .pasted-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); font: 400 12px/16px var(--tr-font-mono); }

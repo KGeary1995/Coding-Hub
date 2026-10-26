@@ -8,7 +8,7 @@ import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 import { exitNotice } from '../../shared/terminal-input';
-import { addPastedImage, clearPastedImages, quotePath } from '../state/pasted-images';
+import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } from '../state/pasted-images';
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
 
 const MAC = /Mac/.test(navigator.userAgent);
@@ -77,7 +77,11 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   } catch { disposeWebGL(); }
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
-  terminal.onData((data) => { void writeTerminal(session.id, data); });
+  terminal.onData((data) => {
+    // Enter on its own is the person sending their message, and with it any images they attached.
+    if (data === '\r') markPastedImagesSent(session.id);
+    void writeTerminal(session.id, data);
+  });
   // The CLI's terminal title says what it is working on (Claude Code's task summary).
   terminal.onTitleChange((title) => setTerminalTitle(session.id, title));
   terminal.attachCustomKeyEventHandler((event) => {
