@@ -5,10 +5,11 @@ import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
 import './phone.css';
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
 import { withoutTerminalReplies } from '../shared/terminal-input';
-import { alertsOn, alertsSupported, collectKeys, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { alertsOn, alertsSupported, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 const KEYS: { label: string; name?: string; data: string }[] = [
@@ -30,7 +31,7 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: { dataset?: Rec
 
 const app = document.getElementById('app')!;
 let channels: RemoteChannel[] = []; let current: string | null = null; let run: string | null = null;
-let stop: (() => void) | null = null; let terminal: Terminal | null = null; let connected = false;
+let stop: (() => void) | null = null; let terminal: Terminal | null = null; let fit: FitAddon | null = null; let connected = false;
 /** The other computer the phone is talking to directly while this app's own computer is off, if any. */
 let via: string | null = null;
 /** Unsent messages, by channel. */
@@ -82,7 +83,7 @@ function listen(sessionId: string | null) {
 }
 
 function showList() {
-  disposeTerminal(); current = null; run = null;
+  leaveChannel(); disposeTerminal(); current = null; run = null;
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
   app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
@@ -133,24 +134,36 @@ function renderList() {
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
 }
 
-function disposeTerminal() { terminal?.dispose(); terminal = null; }
+function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
 
 /**
- * Draws the CLI's screen at its own width: by default the text shrinks to fit the phone, down to a floor. The person
- * can make it larger (the screen then scrolls sideways); that choice is remembered on the phone.
+ * The phone shows a channel at its own size, like tmux: it works out how many columns and rows fit its screen at the
+ * chosen text size and asks the computer to redraw the CLI at that size. The computer puts the desktop's size back
+ * when the phone leaves the channel or disconnects, or the person types at the desktop. A− / A+ change the text size
+ * (remembered on the phone), which changes how much fits.
  */
-const SIZE_KEY = 'trace-remote-text-size';
-let larger = Number(localStorage.getItem(SIZE_KEY)) || 0;
-function fitFont(cols: number) {
-  const width = document.getElementById('output')?.clientWidth ?? 360;
-  return Math.max(7, Math.min(16, Math.floor((width - 4) / (cols * 0.6)) + larger));
+const SIZE_KEY = 'trace-remote-font';
+let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) || 13));
+let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
+function requestSize() {
+  if (sizeTimer) clearTimeout(sizeTimer);
+  sizeTimer = setTimeout(() => {
+    sizeTimer = null; const dims = fit?.proposeDimensions();
+    if (!current || !run || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
+    const cols = Math.max(20, Math.min(300, dims.cols)); const rows = Math.max(6, Math.min(200, dims.rows)); const key = `${current}:${run}:${cols}x${rows}`;
+    if (key === sentSize) return; sentSize = key;
+    void sizeChannel(current, run, cols, rows).catch(() => { sentSize = ''; });
+  }, 200);
 }
+/** Gives the channel being left back to the desktop's size. */
+function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; }
 function resizeText(step: number) {
-  larger = Math.max(0, Math.min(8, larger + step)); localStorage.setItem(SIZE_KEY, String(larger));
-  const channel = channels.find((item) => item.sessionId === current); if (terminal && channel) terminal.options.fontSize = fitFont(channel.cols ?? 80);
+  textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
+  if (terminal) { terminal.options.fontSize = textSize; requestSize(); }
 }
 
 function showChannel(sessionId: string) {
+  if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   const title = h('span', { className: 'title', id: 'channel-title' });
@@ -173,8 +186,9 @@ function showChannel(sessionId: string) {
   const keys = h('div', { className: 'keys', aria: { label: 'Keys' } }, ...KEYS.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)));
   const size = [h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
   app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view' }, waiting, output, problem, keys, form));
-  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: fitFont(channel?.cols ?? 80), lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
+  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
+  fit = new FitAddon(); terminal.loadAddon(fit);
   terminal.open(output);
   // Typing straight into the terminal (tap it to bring up the keyboard) goes to the CLI as it is typed. The terminal's
   // own replies to the CLI's queries (cursor position and the like, also raised by replayed output) are left out: the
@@ -190,7 +204,7 @@ function renderChannel() {
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   // A restarted channel is a new process: its screen starts afresh, as on the desktop.
-  if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); }
+  if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); requestSize(); }
   if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);
 }
 
@@ -202,7 +216,7 @@ function inOrder(change: (screen: Terminal) => void) {
   const screen = terminal; screen?.write('', () => { if (terminal === screen) change(screen); });
 }
 function resizeTo(cols: number, rows: number) {
-  inOrder((screen) => { if (screen.cols !== cols || screen.rows !== rows) { screen.options.fontSize = fitFont(cols); screen.resize(cols, rows); } });
+  inOrder((screen) => { if (screen.cols !== cols || screen.rows !== rows) screen.resize(cols, rows); });
 }
 
 /** Sends input to the channel being shown; true once the computer has taken it. */
@@ -230,12 +244,14 @@ function onEvent(event: StreamEvent) {
   }
   if (event.type === 'replay') {
     run = event.data.runId; inOrder((screen) => screen.reset()); resizeTo(event.data.cols, event.data.rows);
-    terminal.write(event.data.data); return;
+    // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
+    terminal.write(event.data.data); sentSize = ''; requestSize(); return;
   }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 
-window.addEventListener('resize', () => { const channel = channels.find((item) => item.sessionId === current); if (terminal && channel?.cols) terminal.options.fontSize = fitFont(channel.cols); });
+// Rotating the phone, or the keyboard opening or closing, changes how much fits.
+window.addEventListener('resize', requestSize); window.visualViewport?.addEventListener('resize', requestSize);
 // Alerts arrive through the service worker; tapping one opens its channel.
 if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -370,6 +370,7 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
+    resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
@@ -562,7 +563,7 @@ else app.whenReady().then(() => {
   });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => {
     manager.resize(owner, payload);
-    const sessionId = (payload as { sessionId?: unknown }).sessionId; if (typeof sessionId === 'string') remote?.resized(sessionId);
+    const sessionId = (payload as { sessionId?: unknown }).sessionId; if (typeof sessionId === 'string') remote?.desktopResized(sessionId);
     return null;
   });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });

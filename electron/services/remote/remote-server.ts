@@ -19,6 +19,8 @@ export interface RemoteHost {
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
   control?(sessionId: string, control: ChannelControl): Promise<void>;
+  /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
+  resize?(reference: RunReference, cols: number, rows: number): void;
 }
 /** Channels running on linked computers, which this computer passes on to its phones. */
 export interface RemoteRelay {
@@ -29,6 +31,8 @@ export interface RemoteRelay {
   write(sessionId: string, runId: string, data: string): Promise<void>;
   /** Asks a linked computer for a phone key for one of this computer's phones, so that phone can reach it directly. */
   phoneKey(computerId: string, name: string, relayKey: string): Promise<{ id: string; name: string; url: string; token: string }>;
+  /** Draws a linked computer's channel at a phone's size, or (null) gives it back. */
+  size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
 }
 /**
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
@@ -52,6 +56,8 @@ const settingsSchema = z.object({ enabled: z.boolean() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
 const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
 const computerKeySchema = z.object({ id: z.uuid() }).strict();
+const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200) }).strict();
+const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
@@ -90,6 +96,11 @@ export class RemoteServer {
   /** The last failed `tailscale serve`, and the Tailscale page that fixes it; both clear once HTTPS works. */
   serveProblem: ServeProblem | null = null; serveLink: string | null = null;
   private alerted = new Map<string, number>();
+  /**
+   * Channels a phone is showing at its own size, like tmux: the CLI redraws for the phone, and the desktop's size is
+   * kept to put back when the phone leaves the channel or disconnects, or the person types at the desktop.
+   */
+  private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number } }>();
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
 
@@ -178,6 +189,7 @@ export class RemoteServer {
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
   onSessionEvent(event: SessionEvent) {
+    if (event.type === 'started' || event.type === 'exit') this.phoneSizes.delete(event.sessionId);
     if (event.type === 'started') {
       this.forget(event.sessionId); if (this.server) this.mirror(event.sessionId, event.runId);
       this.attention.delete(event.sessionId); this.broadcastChannels(); return;
@@ -228,8 +240,29 @@ export class RemoteServer {
     if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload); }
     this.channelsChanged();
   }
-  /** The person typed on the desktop: a waiting prompt is answered there. */
-  personInput(sessionId: string, data: string) { if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels(); }
+  /** The person typed on the desktop: a waiting prompt is answered there, and a channel a phone resized is given back. */
+  personInput(sessionId: string, data: string) {
+    if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels();
+    const hold = this.phoneSizes.get(sessionId); if (hold && isPersonInput(data)) this.release(sessionId, hold.device);
+  }
+  /** The desktop window resized a channel itself: its size wins over a phone's. */
+  desktopResized(sessionId: string) { this.phoneSizes.delete(sessionId); this.resized(sessionId); }
+  /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
+  private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number) {
+    const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
+    if (!run || !this.host.resize) throw new HubError('STALE_SESSION', 'This channel is not running.');
+    const hold = this.phoneSizes.get(sessionId);
+    const desktop = hold?.runId === runId ? hold.desktop : { cols: run.cols ?? 80, rows: run.rows ?? 24 };
+    this.phoneSizes.set(sessionId, { device, runId, desktop });
+    if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
+  }
+  /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
+  private release(sessionId: string, device: string) {
+    const hold = this.phoneSizes.get(sessionId); if (!hold || hold.device !== device) return;
+    this.phoneSizes.delete(sessionId);
+    const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === hold.runId);
+    if (run && this.host.resize) try { this.host.resize({ sessionId, runId: hold.runId }, hold.desktop.cols, hold.desktop.rows); this.resized(sessionId); } catch { /* The run ended. */ }
+  }
 
   /**
    * This computer's channels, and for phones also those of linked computers. A linked computer is never given channels
@@ -343,7 +376,11 @@ export class RemoteServer {
       if (all && kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can follow every channel.' });
       response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
       const stream: Stream = { device: device.id, kind, response, sessionId: all ? null : sessionId, all }; this.streams.add(stream);
-      request.on('close', () => this.streams.delete(stream));
+      request.on('close', () => {
+        this.streams.delete(stream);
+        // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
+        if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone' && this.relay) void this.relay.size(sessionId, '', null).catch(() => {}); }
+      });
       this.write(stream, `event: channels\ndata: ${JSON.stringify(this.channels(kind))}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
       const screens: { sessionId: string; take: (callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void) => boolean }[] = all
@@ -389,6 +426,22 @@ export class RemoteServer {
       const parsed = computerKeySchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
+    }
+    if (url.pathname === '/api/size' && (request.method === 'POST' || request.method === 'DELETE')) {
+      const body = await this.body(request);
+      try {
+        if (request.method === 'DELETE') {
+          const parsed = releaseSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+          if (this.local(parsed.data.sessionId)) this.release(parsed.data.sessionId, device.id); else if (kind === 'phone' && this.relay) await this.relay.size(parsed.data.sessionId, '', null);
+        } else {
+          const parsed = sizeSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid size.' });
+          const { sessionId, runId, cols, rows } = parsed.data;
+          if (this.local(sessionId)) this.phoneSize(device.id, sessionId, runId, cols, rows);
+          else if (kind === 'phone' && this.relay) await this.relay.size(sessionId, runId, { cols, rows });
+          else return this.send(response, 400, { error: 'Unknown channel.' });
+        }
+      } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be resized.' }); }
+      return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/control') {
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can start or stop channels.' });

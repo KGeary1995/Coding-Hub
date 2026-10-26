@@ -95,6 +95,16 @@ export class PtyManager {
     if (isPersonInput(data)) this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId: run.session.runId, at: new Date().toISOString() });
   }
 
+  /** A paired phone drawing a channel at its own size; the desktop takes its size back (see RemoteServer phone sizes). */
+  resizeRemote(reference: RunReference, cols: number, rows: number) {
+    const run = this.runs.get(reference.sessionId);
+    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+    if (run.stopping) return;
+    this.flush(run);
+    try { run.pty.resize(Math.min(500, Math.max(2, cols)), Math.min(300, Math.max(1, rows))); }
+    catch { throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
+  }
+
   private send(owner: number, event: SessionEvent) {
     try { this.emit(owner, event); }
     catch { try { this.dependencies.onEventError?.(); } catch { /* Reporting must not interrupt process cleanup. */ } }

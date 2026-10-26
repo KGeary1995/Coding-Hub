@@ -107,6 +107,12 @@ export class LinkedComputers implements RemoteRelay {
     if (!body.token || !url) throw new HubError('LINK_PHONE_KEY', `${link.name} did not give a key.`);
     return { id, name: link.name, url, token: body.token };
   }
+  /** A phone of this computer shows a linked computer's channel at its size, or (null) leaves it. */
+  async size(sessionId: string, runId: string, size: { cols: number; rows: number } | null) {
+    const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
+    if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
+    await this.request(connection.link, 'api/size', size ? { method: 'POST', body: JSON.stringify({ sessionId, runId, ...size }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+  }
   /** The desktop opened a linked computer's tab: send it every channel's screen as it is now. */
   watch(id: string) {
     const connection = this.connections.get(id); if (!connection) return;

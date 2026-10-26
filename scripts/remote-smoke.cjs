@@ -82,12 +82,18 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), '', 'a delivered message leaves the field');
+    // The phone shows the channel at its own size (the CLI redraws for it), so the text fills the phone.
+    const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const phoneCols = await width(); assert.ok(phoneCols >= 20 && phoneCols <= 60, `the channel is drawn at the phone's width (${phoneCols} columns)`);
     // A message that cannot be delivered stays in the field instead of being lost.
     const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), long, 'an undelivered message stays in the field');
-    // So does a draft left while looking at another screen.
+    // So does a draft left while looking at another screen. Leaving the channel gives the desktop its size back.
     await phone.getByRole('button', { name: 'Back to channels' }).click();
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'leaving the channel on the phone gives the desktop its size back');
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     assert.equal(await phone.locator('#text').inputValue(), long, 'a draft survives going back to the channel list');
     await phone.locator('#text').fill('');
@@ -142,7 +148,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch('http://127.0.0.1:47821/').then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone's size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });

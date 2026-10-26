@@ -51,6 +51,10 @@ export function send(sessionId: string, runId: string, data: string) {
   const delivery = queue.then(() => api('/api/input', { method: 'POST', body })); queue = delivery.catch(() => {});
   return delivery;
 }
+/** Asks the computer to draw a channel at this phone's size (it gives it back to the desktop when asked or when the phone leaves). */
+export const sizeChannel = (sessionId: string, runId: string, cols: number, rows: number) => api('/api/size', { method: 'POST', body: JSON.stringify({ sessionId, runId, cols, rows }) });
+export const releaseChannel = (sessionId: string) => api('/api/size', { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+
 /** Removes this phone from its computer and from every other computer it could reach directly. */
 export const unpair = async () => {
   await Promise.all(siblings.list().map((sibling) => api('/api/unpair', { method: 'POST' }, direct(sibling)).catch(() => {})));

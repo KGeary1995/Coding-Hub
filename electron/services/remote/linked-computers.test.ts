@@ -16,15 +16,17 @@ const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'li
 async function computer(id: string, name: string, sessionId: string) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = [];
+  const size = { cols: 100, rows: 30 }; const sizes: string[] = [];
   const host: RemoteHost = {
     sessions: () => [{ id: sessionId, title: 'Claude Code', engine: 'claude' }],
-    running: () => running.map((run) => ({ ...run, cols: 100, rows: 30 })),
+    running: () => running.map((run) => ({ ...run, ...size })),
+    resize: (_reference, cols, rows) => { Object.assign(size, { cols, rows }); sizes.push(`${cols}x${rows}`); },
     write: (reference, data) => { writes.push({ reference, data }); },
     control: async (target, control) => { controls.push({ sessionId: target, control }); },
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
-  return { server, writes, controls, url: `http://127.0.0.1:${server.address}/` };
+  return { server, writes, controls, sizes, url: `http://127.0.0.1:${server.address}/` };
 }
 async function phoneToken(server: RemoteServer) {
   const code = server.pair('phone').pairing!.code;
@@ -128,6 +130,33 @@ describe('linked computers', () => {
     expect((await fetch(`${pc.url}api/channels`, { headers: { Origin: 'https://evil.example.com', Authorization: `Bearer ${token}` } })).status).toBe(403);
     // Without a key the other computer's app gets nothing, origin or not.
     expect((await fetch(`${pc.url}api/channels`, { headers: { Origin: 'https://macbook.tail1234.ts.net' } })).status).toBe(401);
+  });
+
+  it('draws a channel at the phone’s size while the phone shows it, and gives it back to the desktop', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const mac = await computer(MAC, 'MacBook', 'mac-1');
+    const link = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => mac.server.relayChanged() });
+    cleanup.push(() => link.stop()); mac.server.setRelay(link);
+    await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
+    const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
+    const size = (sessionId: string, cols: number, rows: number) => fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId, runId: 'run-' + sessionId, cols, rows }) });
+    const release = (sessionId: string) => fetch(`${mac.url}api/size`, { method: 'DELETE', headers: auth, body: JSON.stringify({ sessionId }) });
+
+    // The phone's size, then a new one (keyboard opened), then back to the desktop's own 100x30.
+    expect((await size('mac-1', 44, 30)).status).toBe(200); expect((await size('mac-1', 44, 18)).status).toBe(200);
+    expect((await release('mac-1')).status).toBe(200);
+    expect(mac.sizes).toEqual(['44x30', '44x18', '100x30']);
+    // Typing at the desktop gives the channel back too.
+    await size('mac-1', 50, 20); mac.server.personInput('mac-1', 'a');
+    expect(mac.sizes.slice(-2)).toEqual(['50x20', '100x30']);
+    // The desktop resizing it itself wins: nothing is put back later.
+    await size('mac-1', 50, 20); mac.server.desktopResized('mac-1'); await release('mac-1');
+    expect(mac.sizes.slice(-1)).toEqual(['50x20']);
+
+    // The other computer's channel is resized there, through this one.
+    expect((await size('pc-1', 40, 22)).status).toBe(200); expect((await release('pc-1')).status).toBe(200);
+    expect(pc.sizes).toEqual(['40x22', '100x30']); expect(mac.sizes.slice(-1)).toEqual(['50x20']);
+    // Out-of-range sizes are refused.
+    expect((await size('mac-1', 5, 2)).status).toBe(400);
   });
 
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {

@@ -267,7 +267,7 @@ On the phone:
 
 - **Add it to your home screen** (Share → Add to Home Screen on iPhone, or Install app on Android) so it opens like an app.
 - **Channels** lists every channel with its state; one that needs you is outlined and shows the request.
-- **A channel** shows its terminal exactly as the CLI draws it, at the CLI's own width. **A− / A+** change the text size (larger text scrolls sideways). Tap the terminal to type straight into it, use the key row (Enter, Esc, arrows, 1–3, y, n, Tab, Ctrl C) for prompts, or type a line and press **Send**.
+- **A channel** is redrawn at the phone's size while it is open there (like tmux), so the text fills the screen; **A− / A+** change the text size, and so how much fits. The CLI gets the desktop's size back when you leave the channel on the phone, the phone disconnects, or you type in that channel at the desktop. If the desktop resizes the terminal itself, its size wins. Tap the terminal to type straight into it, use the key row (Enter, Esc, arrows, 1–3, y, n, Tab, Ctrl C) for prompts, or type a line and press **Send**.
 - A restarted channel starts its screen afresh. **Remove this phone** at the bottom of the list unpairs it.
 - **Alerts:** **Turn on alerts** under the channel list, and the phone gets a notification when a channel needs you or stops with an error, even with Trace closed. Tapping it opens that channel. On iPhone and iPad this works once Trace is added to the Home Screen and opened from there (iOS 16.4 or later). Settings on the computer shows which phones have alerts on and can **Send test alert**.
 
