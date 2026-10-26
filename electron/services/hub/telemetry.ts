@@ -28,7 +28,9 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
 export function totalTokens(usage: UsageRecord) { return usage.input + usage.output + (usage.engine === 'claude' ? usage.cached + usage.cacheWrite : 0); }
-interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string }
+interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
+  /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
+  errors?: number; reported?: boolean }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
@@ -39,7 +41,9 @@ export class TelemetryService {
     if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
     this.baselines.set(runId, { file, offset: size, usage });
   }
-  private assigned = new Set<string>();
+  private assigned = new Set<string>(); private closed = false;
+  /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
+  onError: (run: AgentRunningSession, message: string) => void = () => {};
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
     this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -115,7 +119,16 @@ export class TelemetryService {
       }
       w.partial = data.subarray(start).length <= 2 * 1024 * 1024 ? data.subarray(start) : Buffer.alloc(0);
       if (changed) { const usage = this.runUsage(w.run.runId); if (usage) { this.publish(usage); if (w.config.engine === 'claude' && w.config.tokenLimits.maxSessionTokens && totalTokens(usage) >= w.config.tokenLimits.maxSessionTokens && !w.stopped) { w.stopped = true; this.stopAtLimit(w.run); } } }
-    } catch { /* Telemetry failures cannot stop interactive terminal output. */ }
+      w.errors = 0;
+    } catch (error) {
+      // Telemetry failures cannot stop interactive terminal output, but they must not go unnoticed: usage would be
+      // wrong, and a session token limit would silently stop working.
+      w.errors = (w.errors ?? 0) + 1;
+      if (w.errors >= 3 && !w.reported && !this.closed) {
+        w.reported = true; const limited = w.config.engine === 'claude' && w.config.tokenLimits.maxSessionTokens !== null;
+        this.onError(w.run, `This run's usage could not be read (${String((error as Error).message ?? error).split('\n')[0].slice(0, 120)}), so its usage may be incomplete${limited ? ' and its session token limit is not being enforced' : ''}.`);
+      }
+    }
     finally { w.polling = false; }
   }
   /** Unreadable preferences leave usage unpriced; they must not stop usage recording or token limits. */
@@ -134,6 +147,37 @@ export class TelemetryService {
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
   /** The CLI's own session file for a run, once it has been located. */
   transcript(runId: string): string | null { return this.watches.get(runId)?.file ?? null; }
-  end(runId: string) { const w = this.watches.get(runId); if (w) { clearInterval(w.timer); w.stopped = true; for (let i = 0; i < 8; i++) { const offset = w.offset; this.poll(w); if (w.offset === offset) break; } this.watches.delete(runId); try { fs.rmSync(w.logDir, { recursive: true, force: true }); } catch { /* A locked Windows TUI log can be removed after the next restart. */ } } }
-  close() { for (const id of [...this.watches.keys()]) this.end(id); this.database.close(); }
+  /**
+   * A run ended: read the rest of its usage log, up to the size it has now, in steps that leave the app responsive.
+   * A log that cannot be read to that point marks the run incomplete, so Usage does not present partial totals as final.
+   */
+  end(runId: string): Promise<void> {
+    const w = this.watches.get(runId); if (!w) return Promise.resolve();
+    clearInterval(w.timer); w.stopped = true;
+    // The log's size is taken once it has been found (the first read may be what finds it).
+    let target = -1;
+    return new Promise((resolve) => {
+      const step = () => {
+        if (this.closed) return resolve();
+        const before = w.offset; this.poll(w); if (target < 0) target = Math.max(this.size(w), w.offset);
+        if (w.file && w.offset < target && w.offset !== before) { setImmediate(step); return; }
+        this.finish(w, target); resolve();
+      };
+      step();
+    });
+  }
+  /** On quit every log is read to its end before the database closes. */
+  close() {
+    for (const w of [...this.watches.values()]) { clearInterval(w.timer); w.stopped = true; this.poll(w); const target = Math.max(this.size(w), w.offset); for (let before = -1; w.file && w.offset < target && w.offset !== before;) { before = w.offset; this.poll(w); } this.finish(w, target); }
+    this.closed = true; this.database.close();
+  }
+  private size(w: Watcher) { try { return w.file ? fs.statSync(w.file).size : 0; } catch { return 0; } }
+  private finish(w: Watcher, target: number) {
+    if (w.file && w.offset < target) try {
+      const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId);
+      if (record) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...JSON.parse(String(record.value)), incomplete: true }), w.run.runId);
+    } catch { /* Storage is closing. */ }
+    this.watches.delete(w.run.runId);
+    try { fs.rmSync(w.logDir, { recursive: true, force: true }); } catch { /* A locked Windows TUI log can be removed after the next restart. */ }
+  }
 }

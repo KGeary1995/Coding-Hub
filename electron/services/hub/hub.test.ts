@@ -69,6 +69,32 @@ describe('structured telemetry', () => {
   it('parses actual engine formats without treating reasoning as additional output', () => {
     const event = parseUsage('codex', { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 60, output_tokens: 40, reasoning_output_tokens: 20 }, last_token_usage: { input_tokens: 90, output_tokens: 30 }, model_context_window: 1000 } } }, 'model')!; expect(event.context).toEqual({ used: 120, limit: 1000 }); const record = { ...run, ...event, timestamp: new Date().toISOString(), engine: 'codex', cost: null } as UsageRecord; expect(totalTokens(record)).toBe(140); expect(usageCost(record, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }])).toBeCloseTo(0.00054); expect(usageCost(record, [])).toBeNull(); expect(parseUsage('claude', { type: 'user', message: {} }, '')).toBeNull();
   });
+  it('reads the whole rest of a usage log when a run ends, however much is left', async () => {
+    const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    try {
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      const usage = (id: string, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: 1, output_tokens: output } } }) + '\n';
+      // 6 MB of other events before the last usage entry: more than the old 8 × 512 KB finishing read reached.
+      const filler = (JSON.stringify({ type: 'user', message: { content: 'x'.repeat(1000) } }) + '\n').repeat(6000);
+      fs.writeFileSync(file, usage('first', 10) + filler + usage('last', 32));
+      await telemetry.end(run.runId);
+      expect(telemetry.list()[0]).toMatchObject({ output: 42 }); expect(telemetry.list()[0].incomplete).toBeUndefined();
+    } finally { telemetry.close(); }
+  });
+  it('says so when a run’s usage log keeps failing to read, including that its token limit is not enforced', () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); const errors: string[] = []; telemetry.onError = (_run, message) => errors.push(message);
+    try {
+      fs.writeFileSync(file, '');
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 1000 } });
+      vi.advanceTimersByTime(750);
+      // The log becomes unreadable (here: replaced by a folder).
+      fs.rmSync(file); fs.mkdirSync(file); fs.writeFileSync(path.join(file, 'x'), 'x'.repeat(10));
+      vi.advanceTimersByTime(750 * 5);
+      expect(errors).toHaveLength(1); expect(errors[0]).toMatch(/usage may be incomplete and its session token limit is not being enforced/);
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
   it('deduplicates Claude snapshots, persists totals, and triggers the reported session limit', () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl'); const publish = vi.fn(); const stop = vi.fn(); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], publish, stop, home, path.join(root, 'codex'));
     telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 150 } }); const event = (output: number) => JSON.stringify({ type: 'assistant', message: { id: 'same-message', model: 'actual-model', usage: { input_tokens: 100, output_tokens: output, cache_read_input_tokens: 20, cache_creation_input_tokens: 10 } } }) + '\n'; fs.writeFileSync(file, event(10) + event(30)); vi.advanceTimersByTime(750); expect(telemetry.list()[0]).toMatchObject({ input: 100, output: 30, cached: 20, cacheWrite: 10, model: 'actual-model', reasoning: null }); expect(totalTokens(telemetry.list()[0])).toBe(160); expect(stop).toHaveBeenCalledTimes(1); fs.appendFileSync(file, event(20)); vi.advanceTimersByTime(750); expect(telemetry.list()[0].output).toBe(30); expect(stop).toHaveBeenCalledTimes(1); telemetry.close();

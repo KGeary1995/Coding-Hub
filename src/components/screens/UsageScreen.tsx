@@ -93,7 +93,7 @@ export function UsageScreen() {
           return <tr key={record.runId}>
             <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{session ? `CH${index + 1}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
             <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}{record.machine && <span className="tr-cell-machine"> · {record.machine}</span>}</td>
-            <td className="tr-cell-mono">{record.model}</td>
+            <td className="tr-cell-mono">{record.model}{record.incomplete && <span className="dim" title="Trace could not read all of this run's usage log, so its totals may be low."> · incomplete</span>}</td>
             <td className="tr-cell-mono">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
             <td className="num">{compact(record.input)}</td><td className="num">{compact(record.output)}</td><td className="num">{compact(record.cached)}</td>
             <td>{context === null ? <span className="tr-cell-mono dim">—</span> : <span className="tr-peak"><span className={`tr-peak-bar ${context >= LIMIT_THRESHOLD ? 'hot' : ''}`}><i style={{ width: `${Math.min(100, context * 100)}%` }} /></span><span className="tnum">{percent(context)}</span></span>}</td>

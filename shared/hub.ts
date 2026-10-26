@@ -28,7 +28,8 @@ export type HubRequest =
 export interface MemoryNote { id: string; project: string; title: string; content: string; author: CLIEngine | 'human'; createdAt: string; supersedes?: string }
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 /** `machine` names the other computer a record was synced from; it is absent for this computer's own runs. */
-export interface UsageRecord { machine?: string; conversationId?: string; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
+/** `incomplete`: Trace could not read all of the run's usage log, so its totals may be low. */
+export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
 export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; syncDevices?: boolean }
 export type SyncedDocument = 'settings' | 'rules';
