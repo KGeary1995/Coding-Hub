@@ -65,3 +65,11 @@ footer { padding: 16px; text-align: center; }
 .alerts h2 { margin: 0 0 6px; font: 600 16px/22px var(--tr-font-ui); color: var(--tr-fg-strong); }
 .alerts p { margin: 0 0 10px; font-size: 14px; }
 .alerts button { width: 100%; }
+
+/* Switch between computers: shown once channels from more than one computer are listed. */
+.switcher { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 12px; }
+.switcher[hidden] { display: none; }
+.switcher button { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.switcher button.active { background: var(--tr-raised, var(--tr-panel)); border-color: var(--tr-line-strong, var(--tr-line)); font-weight: 600; }
+.switcher .count:empty { display: none; }
+.switcher .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--tr-st-waiting); color: var(--tr-on-waiting, #120b10); font-size: 12px; line-height: 18px; text-align: center; }

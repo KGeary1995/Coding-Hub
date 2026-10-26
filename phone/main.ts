@@ -76,7 +76,7 @@ function showList() {
   disposeTerminal(); current = null; run = null;
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
   renderList(); listen(null);
 }
 
@@ -96,12 +96,29 @@ function alertsPanel() {
   return panel;
 }
 
+/** Which computer's channels the list shows (`''` for every computer); remembered on the phone. */
+const COMPUTER_KEY = 'trace-remote-computer';
+let shownComputer = localStorage.getItem(COMPUTER_KEY) ?? '';
+function computerSwitcher() {
+  const computers = [...new Map(channels.flatMap((channel) => channel.computer ? [[channel.computer.id, channel.computer.name] as const] : [])).entries()];
+  const switcher = document.getElementById('computer-switcher'); if (!switcher) return;
+  switcher.hidden = computers.length < 2;
+  // A computer that is off (or unlinked) is not offered; the list falls back to every computer.
+  if (shownComputer && !computers.some(([id]) => id === shownComputer)) shownComputer = '';
+  const choose = (id: string) => { shownComputer = id; localStorage.setItem(COMPUTER_KEY, id); renderList(); };
+  switcher.replaceChildren(...[['', 'All'] as const, ...computers].map(([id, name]) => h('button', { className: id === shownComputer ? 'active' : '', aria: { pressed: String(id === shownComputer) }, onclick: () => choose(id) }, name,
+    h('span', { className: 'count' }, String(channels.filter((channel) => (!id || channel.computer?.id === id) && channel.attention).length || '')))));
+}
+
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
-  list.replaceChildren(...channels.map((channel) => h('li', {},
+  computerSwitcher();
+  const shown = channels.filter((channel) => !shownComputer || channel.computer?.id === shownComputer);
+  const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;
+  list.replaceChildren(...shown.map((channel) => h('li', {},
     h('button', { className: `channel ${state(channel)}`, onclick: () => showChannel(channel.sessionId) },
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
-      h('span', { className: 'name' }, channel.title, channel.title !== ENGINE[channel.engine] && h('small', {}, ENGINE[channel.engine])),
+      h('span', { className: 'name' }, channel.title, (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
       h('span', { className: 'tag' }, word[state(channel)]),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;

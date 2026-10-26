@@ -2,9 +2,15 @@ import type { ChannelEngine } from './types';
 
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
-export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: ChannelEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null }
+export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: ChannelEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null;
+  /** Set on a channel that runs on another of the person's computers and is passed on by this one (phones only). */
+  computer?: { id: string; name: string } }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
-export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean }
+/** `kind` is `computer` for another Trace linked to this one, which may also start and stop channels. */
+export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }
+export type RemoteDeviceKind = 'phone' | 'computer';
+/** What a linked computer may ask this one to do with a channel, beyond typing into it. */
+export type ChannelControl = 'start' | 'stop' | 'restart';
 export interface TailscaleState {
   /** The tailscale CLI was found. */
   installed: boolean;
@@ -27,7 +33,7 @@ export interface RemoteStatus {
   devices: RemoteDevice[];
   tailscale: TailscaleState;
   /** A pairing code waiting to be used, with the link a phone opens to use it. */
-  pairing: { code: string; url: string; expiresAt: string } | null;
+  pairing: { code: string; url: string; expiresAt: string; kind: RemoteDeviceKind } | null;
   /** Why the last `tailscale serve` failed, until HTTPS on the tailnet works. */
   serveProblem: ServeProblem | null;
 }
@@ -40,7 +46,7 @@ export interface ServeProblem { kind: 'certificates' | 'approve' | 'permission' 
 export type RemoteRequest =
   | { action: 'remote-status' }
   | { action: 'remote-enable'; enabled: boolean }
-  | { action: 'remote-pair' }
+  | { action: 'remote-pair'; kind?: RemoteDeviceKind }
   | { action: 'remote-cancel-pairing' }
   | { action: 'remote-revoke'; id: string }
   | { action: 'remote-test-alert'; id: string }
@@ -50,3 +56,23 @@ export type RemoteRequest =
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;
+
+/** Another of the person's computers as this one sees it: found through the Drive sync folder, and linked or not. */
+export interface LinkedComputer {
+  id: string; name: string; url: string | null;
+  linked: boolean; connected: boolean; error: string | null;
+  channels: RemoteChannel[];
+}
+export type LinkedComputerRequest =
+  | { action: 'linked-status' }
+  | { action: 'linked-link'; id: string; code: string }
+  | { action: 'linked-unlink'; id: string }
+  | { action: 'linked-input'; id: string; sessionId: string; runId: string; data: string }
+  | { action: 'linked-control'; id: string; sessionId: string; control: ChannelControl }
+  | { action: 'linked-watch'; id: string };
+/** Live updates about linked computers for the desktop window. */
+export type LinkedComputerEvent =
+  | { type: 'computers'; computers: LinkedComputer[] }
+  | { type: 'output'; id: string; sessionId: string; runId: string; data: string }
+  | { type: 'replay'; id: string; sessionId: string; runId: string; data: string; cols: number; rows: number }
+  | { type: 'resize'; id: string; sessionId: string; runId: string; cols: number; rows: number };

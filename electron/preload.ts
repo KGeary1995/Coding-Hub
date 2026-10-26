@@ -3,6 +3,7 @@ import type { CodingHubHost, SessionEvent } from '../shared/ipc';
 import type { AccountEvent } from '../shared/accounts';
 import type { UpdateStatus } from '../shared/updates';
 import type { UsageRecord } from '../shared/hub';
+import type { ChannelControl, LinkedComputerEvent } from '../shared/remote';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
@@ -64,5 +65,16 @@ const host: CodingHubHost = {
   },
   clipboardImage: () => ipcRenderer.invoke('coding-hub:clipboard-image'),
   pathForFile: (file) => webUtils.getPathForFile(file),
+  onLinkedEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: LinkedComputerEvent) => listener(value);
+    ipcRenderer.on('coding-hub:linked-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:linked-event', receive);
+  },
+  onRemoteControl: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: { requestId: string; sessionId: string; control: ChannelControl }) => listener(value);
+    ipcRenderer.on('coding-hub:remote-control', receive);
+    return () => ipcRenderer.removeListener('coding-hub:remote-control', receive);
+  },
+  finishRemoteControl: (result) => ipcRenderer.invoke('coding-hub:finish-remote-control', result),
 };
 contextBridge.exposeInMainWorld('codingHub', host);

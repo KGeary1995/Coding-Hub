@@ -63,6 +63,8 @@ export function PhoneAccessCard() {
   }, [fixable]);
   if (!status) return error ? <p role="alert" className="error-message">{error}</p> : null;
   const { tailscale } = status; const ready = status.listening && tailscale.serving && !tailscale.funnel;
+  // Computers linked to this one, and codes for linking one, belong to the Other computers card.
+  const phones = status.devices.filter((device) => device.kind === 'phone'); const pairing = status.pairing?.kind === 'phone' ? status.pairing : null;
   return <article className="storage-card phone-access" aria-labelledby="phone-access-title">
     <header><h2 id="phone-access-title"><Smartphone size={16} aria-hidden="true" />Phone access</h2><span className={`storage-status ${ready ? 'saved' : ''}`}>{!status.enabled ? 'Off' : ready ? 'Ready' : status.listening ? 'Needs Tailscale' : 'Not running'}</span></header>
     <p>Read and type into running channels from your phone, including answering approval prompts, and get an alert when one needs you. Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
@@ -76,21 +78,21 @@ export function PhoneAccessCard() {
           {tailscale.serving ? <>Your phone opens <code>{status.url}</code>.</> : status.serveProblem
             ? <ServeGuide problem={status.serveProblem} busy={busy} open={() => void run({ action: 'remote-open-tailscale' })} retry={() => void run({ action: 'remote-serve' })} />
             : <>Trace asks Tailscale to pass HTTPS on your tailnet to this computer’s phone page. <button className="button secondary" disabled={busy || !tailscale.running} onClick={() => void run({ action: 'remote-serve' })}>Set up Tailscale HTTPS</button></>}</li>
-        <li className={status.devices.length ? 'done' : ''}><strong>Pair your phone.</strong>{' '}
-          {status.pairing ? null : <button className="button primary" disabled={busy || !status.listening} onClick={() => void run({ action: 'remote-pair' })}>Pair a phone</button>}</li>
+        <li className={phones.length ? 'done' : ''}><strong>Pair your phone.</strong>{' '}
+          {pairing ? null : <button className="button primary" disabled={busy || !status.listening} onClick={() => void run({ action: 'remote-pair' })}>Pair a phone</button>}</li>
       </ol>
       {tailscale.funnel && <p role="alert" className="error-message">Tailscale Funnel is on for this address, which would put it on the public internet. Trace refuses Funnel requests; turn Funnel off with “tailscale funnel reset”.</p>}
-      {status.pairing && <div className="phone-pairing" role="group" aria-label="Pairing code">
-        <QrCode text={status.pairing.url} label="QR code that opens the pairing page on your phone" />
+      {pairing && <div className="phone-pairing" role="group" aria-label="Pairing code">
+        <QrCode text={pairing.url} label="QR code that opens the pairing page on your phone" />
         <div>
           <p>Scan with your phone’s camera, or open {status.url ? <code>{status.url}</code> : 'the phone page'} and enter:</p>
-          <p className="phone-code" aria-label="Pairing code">{status.pairing.code.replace(/(.{5})/, '$1 ')}</p>
-          <p className="control-note">Expires in {left(status.pairing.expiresAt, now)}. Works once.</p>
+          <p className="phone-code" aria-label="Pairing code">{pairing.code.replace(/(.{5})/, '$1 ')}</p>
+          <p className="control-note">Expires in {left(pairing.expiresAt, now)}. Works once.</p>
           <button className="quiet-button" disabled={busy} onClick={() => void run({ action: 'remote-cancel-pairing' })}>Cancel</button>
           {!tailscale.serving && <p className="control-note">Until Tailscale HTTPS is set up, this code only works from a browser on this computer.</p>}
         </div>
       </div>}
-      {status.devices.length > 0 && <ul className="hub-list phone-devices" aria-label="Paired phones">{status.devices.map((device) => <li key={device.id} className="extension-row">
+      {phones.length > 0 && <ul className="hub-list phone-devices" aria-label="Paired phones">{phones.map((device) => <li key={device.id} className="extension-row">
         <strong>{device.name}</strong><span className="muted">Paired {new Date(device.createdAt).toLocaleDateString()} · {device.lastSeen ? `last used ${new Date(device.lastSeen).toLocaleString()}` : 'not used yet'} · {device.notifications ? 'alerts on' : 'alerts off'}</span>
         {device.notifications && <button className="quiet-button" disabled={busy} onClick={() => void run({ action: 'remote-test-alert', id: device.id })}>Send test alert</button>}
         <button className="quiet-button" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void run({ action: 'remote-revoke', id: device.id })}><X size={14} />Remove</button>

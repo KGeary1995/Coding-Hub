@@ -90,3 +90,8 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
   .tr-narrow-icon { display: block; } .tr-wide-label { display: none; }
 }
 @container shell (max-width: 1024px) { .tr-wordmark-text, .tr-divider { display: none; } .tr-wordmark { margin-right: 4px; } .tr-tabs > button, .tr-menu-button { padding: 0 7px; } }
+
+/* Linked computers get tabs after the main views; a dot of colour marks channels there that need the person. */
+.tr-tabs > button.tr-computer-tab { gap: 6px; }
+.tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-off); }
+.tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }

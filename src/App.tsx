@@ -1,3 +1,4 @@
+import { LinkedComputerView } from './components/screens/LinkedComputerView';
 import { useState } from 'react';
 import { useAccessibility } from './components/AccessibilityControls';
 import { EmptyWorkspace, useProjectSetup } from './components/workspace/EmptyWorkspace';
@@ -39,6 +40,7 @@ export function App() {
         {(persistenceError || logError) && <div className="persistence-alert" role="alert">{persistenceError || logError}</div>}
         {!persistenceReady ? <div className="history-empty">Restoring local workspace…</div>
           : activeView === 'workspace' ? <WorkspaceView explorer={explorer} onCloseExplorer={() => setExplorer(false)} />
+          : activeView === 'computer' ? <LinkedComputerView />
           : activeView === 'history' ? <SessionHistory />
             : activeView === 'files' || activeView === 'diff' ? <RepositoryPanel mode={activeView} />
               : <FeaturePanel />}

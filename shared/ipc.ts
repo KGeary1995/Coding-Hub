@@ -1,3 +1,4 @@
+import type { ChannelControl, LinkedComputerEvent } from './remote';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
@@ -85,6 +86,10 @@ export interface CodingHubHost {
   stopSession(request: RunReference): Promise<HostResult<null>>;
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
   clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
+  onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
+  /** A linked computer asks this window to start, stop or restart a channel; answer with finishRemoteControl. */
+  onRemoteControl(listener: (request: { requestId: string; sessionId: string; control: ChannelControl }) => void): () => void;
+  finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
   /** The local path of a file dropped on the page, or '' when it has none. */
   pathForFile(file: File): string;
 }
@@ -124,4 +129,7 @@ export const IPC_CHANNELS = {
   stopSession: 'coding-hub:stop-session',
   sessionEvent: 'coding-hub:session-event',
   clipboardImage: 'coding-hub:clipboard-image',
+  linkedEvent: 'coding-hub:linked-event',
+  remoteControl: 'coding-hub:remote-control',
+  finishRemoteControl: 'coding-hub:finish-remote-control',
 } as const;

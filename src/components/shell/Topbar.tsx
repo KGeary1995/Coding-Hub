@@ -1,4 +1,5 @@
-import { CircleHelp, Columns2, Grid2X2, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
+import { useLinkedStore, waitingOn } from '../../state/linked-store';
+import { CircleHelp, Columns2, Grid2X2, Monitor, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
@@ -38,6 +39,7 @@ function Wordmark() {
 
 export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onToggleExplorer: () => void }) {
   const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore();
+  const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string }[]): MenuItem[] => views.map(({ view, label }) => ({ label, current: activeView === view, onSelect: () => setView(view) }));
   const insight = INSIGHT_VIEWS.find((item) => item.view === activeView) ?? (MORE_TOOLS.some((item) => item.view === activeView) ? INSIGHT_VIEWS.find((item) => item.view === 'tools') : undefined);
@@ -51,6 +53,9 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
       : <button className="tr-project tr-menu-button" onClick={() => void openProjectFolder()}>Open project</button>}
     <nav className="tr-tabs" aria-label="Main views">
       {PRIMARY_VIEWS.map(({ view, label }) => <button key={view} className={activeView === view ? 'active' : ''} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>{label}</button>)}
+      {linkedComputers.filter((computer) => computer.linked).map((computer) => { const current = activeView === 'computer' && computerId === computer.id; const waiting = waitingOn(computer);
+        return <button key={computer.id} className={`tr-computer-tab ${current ? 'active' : ''} ${computer.connected ? '' : 'offline'}`} aria-current={current ? 'page' : undefined} title={computer.connected ? `${computer.name}: ${computer.channels.length} channels` : `${computer.name}: not connected`} onClick={() => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' })}>
+          <Monitor size={13} aria-hidden="true" />{computer.name}{waiting > 0 && <span className="tr-tab-badge" aria-label={`${waiting} waiting`}>{waiting}</span>}</button>; })}
     </nav>
     <span className="tr-divider" aria-hidden="true" />
     <MenuButton ariaLabel="Insight views" active={Boolean(insight)} label={<span className="tr-menu-label">{insight?.label ?? 'Insight'}</span>} items={toItems(INSIGHT_VIEWS)} />

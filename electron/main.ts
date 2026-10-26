@@ -43,6 +43,7 @@ import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
+import { LinkedComputers } from './services/remote/linked-computers';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
@@ -68,6 +69,9 @@ let projectChecks: ProjectChecks | null = null;
 let storage: WorkspaceStorage | null = null;
 let hub: HubService | null = null;
 let remote: RemoteServer | null = null;
+let linked: LinkedComputers | null = null;
+/** Start/stop requests from linked computers, waiting for the desktop window to carry them out. */
+const pendingControls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 let autoMemory: AutoMemory | null = null;
 let storageFailure = 'Local storage is unavailable. Check access to ~/.coding-hub.';
 let workspaceLoaded = false;
@@ -132,6 +136,34 @@ function sendToRenderer(channel: string, value: unknown, owner?: number): boolea
   } catch { hostHealth?.record('renderer-event-delivery-failed', channel); return false; }
 }
 function reportStorageError(message: string) { sendToRenderer(IPC_CHANNELS.storageError, message); }
+const linkedSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('linked-status') }).strict(),
+  z.object({ action: z.literal('linked-link'), id: z.uuid(), code: z.string().min(1).max(40) }).strict(),
+  z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
+  z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict(),
+  z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
+]);
+async function linkedRequest(payload: unknown) {
+  if (!linked) throw new HubError('LINK_UNAVAILABLE', 'Linking computers needs writable local storage.');
+  const request = linkedSchema.parse(payload);
+  if (request.action === 'linked-link') return linked.link(request.id, request.code);
+  if (request.action === 'linked-unlink') return linked.unlink(request.id);
+  if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
+  if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
+  if (request.action === 'linked-watch') { linked.watch(request.id); return null; }
+  return linked.status();
+}
+/** A linked computer asked to start, stop or restart one of this computer's channels; the desktop window does it. */
+function controlChannel(sessionId: string, control: 'start' | 'stop' | 'restart'): Promise<void> {
+  if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
+  const requestId = randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pendingControls.delete(requestId); reject(new HubError('REMOTE_CONTROL_TIMEOUT', 'This computer did not finish in time. Check the channel there.')); }, 45000);
+    pendingControls.set(requestId, { resolve, reject, timer });
+    if (!sendToRenderer(IPC_CHANNELS.remoteControl, { requestId, sessionId, control })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
+  });
+}
 /**
  * Asks what to do when channels could not be stopped. Closing or quitting anyway leaves them running with no Trace
  * controls, so that is a choice the person makes with the process IDs in front of them, never a silent default.
@@ -337,15 +369,24 @@ else app.whenReady().then(() => {
     sessions: () => (storage?.load()?.sessions ?? []).map((session) => ({ id: session.id, title: session.title, engine: session.config.engine })),
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
+    control: (sessionId, control) => controlChannel(sessionId, control),
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
+  // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
+  if (hub) {
+    const devices = hub.devices; phone.identity = devices.machine;
+    devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
+    linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
+      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() });
+    phone.setRelay(linked); linked.start();
+  }
   const refreshTailscale = async () => { if (!phone.enabled) return; phone.tailscale = await tailscaleState(runTailscale, phone.port); if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; } };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   setInterval(() => void refreshTailscale().catch(() => {}), 60000).unref();
   const remoteControl = async (payload: unknown) => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
-      z.object({ action: z.literal('remote-pair') }).strict(), z.object({ action: z.literal('remote-cancel-pairing') }).strict(),
+      z.object({ action: z.literal('remote-pair'), kind: z.enum(['phone', 'computer']).optional() }).strict(), z.object({ action: z.literal('remote-cancel-pairing') }).strict(),
       z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve'), automatic: z.boolean().optional() }).strict(),
       z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
@@ -371,7 +412,7 @@ else app.whenReady().then(() => {
       }
     }
     await refreshTailscale().catch(() => {});
-    return request.action === 'remote-pair' ? phone.pair() : phone.status();
+    return request.action === 'remote-pair' ? phone.pair(request.kind) : phone.status();
   };
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
@@ -381,6 +422,7 @@ else app.whenReady().then(() => {
     if (action === 'codex-models') return modelCatalog.execute(payload);
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if (action.startsWith('remote-')) return remoteControl(payload);
+    if (action.startsWith('linked-')) return linkedRequest(payload);
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
@@ -478,6 +520,13 @@ else app.whenReady().then(() => {
     finally { pendingFlush.resolve(); }
     return null;
   });
+  handle(IPC_CHANNELS.finishRemoteControl, (_owner, payload) => {
+    const result = z.object({ requestId: z.uuid(), error: z.string().max(500).optional() }).strict().parse(payload);
+    const pending = pendingControls.get(result.requestId); if (!pending) return null;
+    pendingControls.delete(result.requestId); clearTimeout(pending.timer);
+    if (result.error) pending.reject(new HubError('REMOTE_CONTROL', result.error)); else pending.resolve();
+    return null;
+  });
   ipcMain.handle(IPC_CHANNELS.pickDirectory, async (event) => {
     assertSender(event);
     const result = await dialog.showOpenDialog(window!, { title: 'Choose a local project folder — files are hidden in this view', buttonLabel: 'Use this folder', properties: ['openDirectory', 'createDirectory'] });
@@ -542,6 +591,6 @@ app.on('before-quit', (event) => {
     if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
-    try { void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import type { ChannelControl } from '../../shared/remote';
+import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
@@ -46,6 +48,10 @@ export function useNativeHost() {
       catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
+    const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
+    const unsubscribeControl = host.onRemoteControl(({ requestId, sessionId, control }) => {
+      void remoteControl(sessionId, control).then((error) => host.finishRemoteControl({ requestId, ...(error ? { error } : {}) })).catch(() => {});
+    });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
       void host.finishWorkspaceFlush({ requestId, ...(loaded ? { workspace: savedWorkspace() } : {}) }).catch(() => {});
     });
@@ -74,7 +80,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeControl(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -111,4 +117,24 @@ export async function stopSession(id: string): Promise<boolean> {
     if (!result.ok) useWorkspaceStore.getState().setSessionError(id, result.error.message);
     return result.ok;
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The session could not be stopped.'); return false; }
+}
+
+/**
+ * Carries out a linked computer's request to start, stop or restart one of this computer's channels, the same way the
+ * buttons on its tile would. Returns why it could not, for the other computer to show.
+ */
+export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {
+  const current = () => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
+  const session = current(); if (!session) return 'That channel is no longer on this computer.';
+  if (control !== 'start' && session.status === 'running') {
+    if (!(await stopSession(id))) return current()?.error ?? 'The channel could not be stopped.';
+    // The exit event can arrive just after the stop request returns.
+    for (let i = 0; i < 50 && current()?.status === 'running'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (control === 'stop') return undefined;
+  const ready = current(); if (!ready) return 'That channel is no longer on this computer.';
+  if (ready.status === 'running' || ready.status === 'starting') return control === 'start' ? undefined : 'The channel is still running.';
+  await startSession(id);
+  const after = current();
+  return after && (after.status === 'running' || after.status === 'starting') ? undefined : after?.error ?? 'The channel could not start.';
 }

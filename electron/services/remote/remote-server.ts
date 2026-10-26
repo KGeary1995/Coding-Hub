@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
-import { PAIRING_PREFIX, REMOTE_PORT, type RemoteChannel, type RemoteDevice, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -17,12 +17,27 @@ export interface RemoteHost {
   sessions(): { id: string; title: string; engine: ChannelEngine }[];
   running(): (RunningSession & { cols?: number; rows?: number })[];
   write(reference: RunReference, data: string): void;
+  /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
+  control?(sessionId: string, control: ChannelControl): Promise<void>;
 }
-/** `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. */
-interface Stream { device: string; response: http.ServerResponse; sessionId: string | null; held?: string[] }
+/** Channels running on linked computers, which this computer passes on to its phones. */
+export interface RemoteRelay {
+  /** Each with `computer` set. */
+  channels(): RemoteChannel[];
+  /** Calls back with the channel's screen and returns true, or returns false when no linked computer runs it. */
+  snapshot(sessionId: string, callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void): boolean;
+  write(sessionId: string, runId: string, data: string): Promise<void>;
+}
+/**
+ * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
+ * computer's stream (`all`) carries every channel's output; phones follow one channel at a time.
+ */
+interface Stream { device: string; kind: RemoteDeviceKind; response: http.ServerResponse; sessionId: string | null; all?: boolean; held?: string[] }
 
 const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(pushEndpoint, 'Not a push service.'), p256dh: z.string().regex(/^[A-Za-z0-9_-]{87}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/) }).strict();
-const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional() }).strict();
+const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional(),
+  /** Absent on phones paired before computers could link. */
+  kind: z.enum(['phone', 'computer']).optional(), machineId: z.uuid().optional() }).strict();
 const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
 /** What a browser's `PushSubscription.toJSON()` gives (`expirationTime` is usually null and is not needed to send). */
 const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
@@ -30,7 +45,8 @@ const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTim
 const ALERT_INTERVAL = 20000;
 type Device = z.infer<typeof deviceSchema>;
 const settingsSchema = z.object({ enabled: z.boolean() }).strict();
-const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200) }).strict();
+const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
+const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -45,14 +61,18 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
  * adds HTTPS and admits only devices on the person's tailnet. On top of that every request needs a device key, given
  * once to a phone that presents a short-lived pairing code shown on this computer. Only key hashes are stored, and a
  * key can be revoked at any time. A phone can read channel output and type into running CLIs; it cannot start, stop
- * or reconfigure anything.
+ * or reconfigure anything. Another of the person's computers, linked with a code made for computers, can also start,
+ * stop and restart channels; phones see linked computers' channels through this one (RemoteRelay).
  */
 export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
   private replay = new Map<string, ScreenMirror>();
   private attention = new Map<string, { runId: string; message: string }>();
-  private pairing: { code: string; expires: number; attempts: number } | null = null;
+  private pairing: { code: string; expires: number; attempts: number; kind: RemoteDeviceKind } | null = null;
+  private relay: RemoteRelay | null = null;
+  /** This computer's sync identity, given to a computer that links to it so it can recognise this one in Drive. */
+  identity: { id: string; name: string } | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
@@ -120,11 +140,15 @@ export class RemoteServer {
   get address() { return this.server ? (this.server.address() as AddressInfo).port : null; }
 
   /** Starts pairing: a code good for five minutes and ten tries, shown on this computer as a QR link. */
-  pair() {
+  /**
+   * The code decides what pairs: a phone (watch and type) or another computer (also start and stop channels). What the
+   * other side asks for does not, so a phone's code can never link a computer.
+   */
+  pair(kind: RemoteDeviceKind = 'phone') {
     if (!this.server) throw new HubError('REMOTE_OFF', 'Turn on phone access first.');
-    if (this.devices().length >= 20) throw new HubError('REMOTE_LIMIT', 'Up to 20 phones can be paired. Remove one first.');
+    if (this.devices().length >= 20) throw new HubError('REMOTE_LIMIT', 'Up to 20 phones and computers can be paired. Remove one first.');
     const bytes = randomBytes(10); const code = [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('');
-    this.pairing = { code, expires: Date.now() + PAIRING_MINUTES * 60000, attempts: 0 };
+    this.pairing = { code, expires: Date.now() + PAIRING_MINUTES * 60000, attempts: 0, kind };
     return this.status();
   }
   cancelPairing() { this.pairing = null; return this.status(); }
@@ -136,9 +160,9 @@ export class RemoteServer {
   }
   status(): RemoteStatus {
     const base = this.tailscale.serving && this.tailscale.host ? `https://${this.tailscale.host}/` : null;
-    const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString() } : null;
+    const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString(), kind: this.pairing.kind } : null;
     return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing, serveProblem: this.tailscale.serving ? null : this.serveProblem,
-      devices: this.devices().map(({ id, name, createdAt, lastSeen, push }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push) })) };
+      devices: this.devices().map(({ id, name, createdAt, lastSeen, push, kind }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push), kind: kind ?? 'phone' })) };
   }
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
@@ -162,7 +186,7 @@ export class RemoteServer {
   private output(sessionId: string, runId: string, data: string) {
     const mirror = this.replay.get(sessionId); if (mirror?.runId === runId) mirror.write(data);
     const payload = `event: output\ndata: ${JSON.stringify({ sessionId, runId, data })}\n\n`;
-    for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload);
+    for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload);
   }
   /** Screens are kept only while phone access is on; turned on mid-run, a channel's screen starts from that point. */
   private mirror(sessionId: string, runId: string) {
@@ -190,20 +214,47 @@ export class RemoteServer {
    */
   resized(sessionId: string) {
     const run = this.host.running().find((item) => item.sessionId === sessionId);
-    if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId) this.write(stream, payload); }
+    if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload); }
     this.channelsChanged();
   }
   /** The person typed on the desktop: a waiting prompt is answered there. */
   personInput(sessionId: string, data: string) { if (isPersonInput(data) && this.attention.delete(sessionId)) this.broadcastChannels(); }
 
-  channels(): RemoteChannel[] {
+  /**
+   * This computer's channels, and for phones also those of linked computers. A linked computer is never given channels
+   * this one passes on, so two linked computers cannot echo each other's channels back and forth.
+   */
+  channels(kind: RemoteDeviceKind = 'phone'): RemoteChannel[] {
     const running = new Map(this.host.running().map((run) => [run.sessionId, run]));
-    return this.host.sessions().map((session, index) => {
+    const local = this.host.sessions().map((session, index): RemoteChannel => {
       const run = running.get(session.id); const waiting = this.attention.get(session.id);
       return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, cols: run?.cols ?? null, rows: run?.rows ?? null };
     });
+    if (kind !== 'phone') return local;
+    // Phones are told which computer each channel is on, so one app can switch between them.
+    const own = this.identity ? local.map((channel) => ({ ...channel, computer: this.identity! })) : local;
+    return this.relay ? [...own, ...this.relay.channels()] : own;
   }
-  private broadcastChannels() { if (!this.streams.size) return; this.sentChannels = JSON.stringify(this.channels()); const payload = `event: channels\ndata: ${this.sentChannels}\n\n`; for (const stream of this.streams) this.write(stream, payload); }
+  private broadcastChannels() {
+    if (!this.streams.size) return;
+    const phone = JSON.stringify(this.channels('phone')); const computer = JSON.stringify(this.channels('computer')); this.sentChannels = phone;
+    for (const stream of this.streams) this.write(stream, `event: channels\ndata: ${stream.kind === 'computer' ? computer : phone}\n\n`);
+  }
+
+  /** Linked computers' channels are passed on to phones through this. */
+  setRelay(relay: RemoteRelay | null) { this.relay = relay; this.relayChanged(); }
+  /** A linked computer's channel list changed. */
+  relayChanged() { if (this.channelsTimer || !this.streams.size) return; this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250); }
+  /** Output from a channel on a linked computer, for phones watching it. */
+  relayOutput(sessionId: string, runId: string, data: string) {
+    const payload = `event: output\ndata: ${JSON.stringify({ sessionId, runId, data })}\n\n`;
+    for (const stream of this.streams) if (stream.kind === 'phone' && stream.sessionId === sessionId) this.write(stream, payload);
+  }
+  relayResize(sessionId: string, runId: string, cols: number, rows: number) {
+    const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId, cols, rows })}\n\n`;
+    for (const stream of this.streams) if (stream.kind === 'phone' && stream.sessionId === sessionId) this.write(stream, payload);
+  }
+  private local(sessionId: string) { return this.host.sessions().some((session) => session.id === sessionId); }
   private write(stream: Stream, text: string) {
     if (stream.held) { stream.held.push(text); return; }
     // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay.
@@ -255,30 +306,35 @@ export class RemoteServer {
       if (!parsed.success || !pairing || pairing.expires < Date.now()) return this.send(response, 401, { error: 'This pairing code has expired. Start pairing again on the computer.' });
       if (++pairing.attempts > PAIRING_ATTEMPTS) { this.pairing = null; return this.send(response, 401, { error: 'Too many tries. Start pairing again on the computer.' }); }
       if (!same(hash(parsed.data.code.toUpperCase()), hash(pairing.code))) return this.send(response, 401, { error: 'That pairing code is not right.' });
-      this.pairing = null;
-      const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || 'Phone';
-      const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null };
-      save(this.root, 'remote-devices.json', [...this.devices(), device]);
-      return this.send(response, 200, { token, device: { id: device.id, name: device.name } });
+      this.pairing = null; const kind = pairing.kind; const machineId = kind === 'computer' ? parsed.data.machineId : undefined;
+      const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || (kind === 'computer' ? 'Computer' : 'Phone');
+      const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, ...(kind === 'computer' ? { kind, ...(machineId ? { machineId } : {}) } : {}) };
+      // Linking the same computer again replaces its old key rather than leaving it working too.
+      const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
+      for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
+      save(this.root, 'remote-devices.json', [...kept, device]);
+      return this.send(response, 200, { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) });
     }
     if (!url.pathname.startsWith('/api/')) return this.send(response, 404, { error: 'Not found.' });
     const device = this.device(request); if (!device) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
-    if (request.method === 'GET' && url.pathname === '/api/channels') return this.send(response, 200, this.channels());
+    const kind: RemoteDeviceKind = device.kind ?? 'phone';
+    if (request.method === 'GET' && url.pathname === '/api/channels') return this.send(response, 200, this.channels(kind));
     if (request.method === 'GET' && url.pathname === '/api/stream') {
-      const sessionId = url.searchParams.get('sessionId');
+      const sessionId = url.searchParams.get('sessionId'); const all = url.searchParams.get('all') === '1';
+      if (all && kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can follow every channel.' });
       response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
-      const stream: Stream = { device: device.id, response, sessionId }; this.streams.add(stream);
+      const stream: Stream = { device: device.id, kind, response, sessionId: all ? null : sessionId, all }; this.streams.add(stream);
       request.on('close', () => this.streams.delete(stream));
-      this.write(stream, `event: channels\ndata: ${JSON.stringify(this.channels())}\n\n`);
-      // The channel's screen as it is now, then everything that came after it.
-      const mirror = sessionId ? this.replay.get(sessionId) : undefined;
-      if (mirror) {
-        stream.held = [];
-        mirror.snapshot((screen) => {
-          const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return;
-          this.write(stream, `event: replay\ndata: ${JSON.stringify({ sessionId, runId: mirror.runId, ...screen })}\n\n`);
-          for (const text of later) this.write(stream, text);
-        });
+      this.write(stream, `event: channels\ndata: ${JSON.stringify(this.channels(kind))}\n\n`);
+      // Each channel's screen as it is now, then everything that came after it.
+      const screens: { sessionId: string; take: (callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void) => boolean }[] = all
+        ? [...this.replay].map(([id, mirror]) => ({ sessionId: id, take: (callback) => { mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; } }))
+        : sessionId && this.replay.has(sessionId) ? [{ sessionId, take: (callback) => { const mirror = this.replay.get(sessionId)!; mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; } }]
+        : sessionId && kind === 'phone' && this.relay && !this.local(sessionId) ? [{ sessionId, take: (callback) => this.relay?.snapshot(sessionId, callback) ?? false }] : [];
+      if (screens.length) {
+        stream.held = []; let waiting = screens.length; const ready: string[] = [];
+        const done = () => { if (--waiting) return; const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return; for (const text of [...ready, ...later]) this.write(stream, text); };
+        for (const screen of screens) if (!screen.take((value) => { ready.push(`event: replay\ndata: ${JSON.stringify({ sessionId: screen.sessionId, ...value })}\n\n`); done(); })) done();
       }
       return;
     }
@@ -286,9 +342,20 @@ export class RemoteServer {
       const parsed = inputSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid input.' });
       // The phone may have been removed while its request body was arriving.
       if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
-      try { this.host.write({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, parsed.data.data); }
-      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
+      try {
+        if (kind === 'phone' && this.relay && !this.local(parsed.data.sessionId)) await this.relay.write(parsed.data.sessionId, parsed.data.runId, parsed.data.data);
+        else this.host.write({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, parsed.data.data);
+      } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
+      return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/control') {
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can start or stop channels.' });
+      const parsed = controlSchema.safeParse(await this.body(request)); if (!parsed.success || !this.local(parsed.data.sessionId)) return this.send(response, 400, { error: 'Unknown channel.' });
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      if (!this.host.control) return this.send(response, 409, { error: 'This computer cannot start or stop channels right now.' });
+      try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/unpair') { this.revoke(device.id); return this.send(response, 200, { ok: true }); }

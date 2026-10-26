@@ -37,6 +37,7 @@ const documentSchema = <T extends z.ZodType>(value: T) => z.object({ version: z.
  * synced; two computers that each published while Drive was offline therefore show as a conflict, not a silent overwrite.
  */
 const versionedSchema = <T extends z.ZodType>(value: T) => documentSchema(value).extend({ history: hashes.default([]) });
+const addressDocument = documentSchema(z.object({ url: z.string().max(500).nullable() }).strict());
 const settingsDocument = versionedSchema(settingsSchema); const rulesDocument = versionedSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
 type Machine = z.infer<typeof machineSchema>;
 type SyncedValue = { settings: z.infer<typeof settingsSchema>; rules: z.infer<typeof rulesSchema> };
@@ -78,6 +79,9 @@ export class DeviceSync {
   private syncing = false; private error: string | null = null; private identityError: string | null = null;
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
+  private addresses = new Map<string, { id: string; name: string; url: string | null }>();
+  /** This computer's phone remote address on the tailnet, when it has one; other computers link to it there. */
+  advertise: () => string | null = () => null;
   constructor(private root: string, private preferences: () => HubPreferences, private savePreferences: (preferences: HubPreferences) => void, private rules: RulesService, private localUsage: () => UsageRecord[]) {
     const name = (os.hostname() || 'This computer').slice(0, 100);
     // A damaged identity file must not stop the rest of the hub: keep the file, report it, and leave sync off. A
@@ -94,7 +98,7 @@ export class DeviceSync {
     if (this.identityError) throw new HubError('SYNC_IDENTITY', this.identityError);
     let drive: string; try { drive = fs.realpathSync(preferences.driveDirectory); if (!fs.statSync(drive).isDirectory()) return null; } catch { return null; }
     const folder = path.join(drive, SYNC_FOLDER);
-    for (const sub of ['', 'templates', 'usage']) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
+    for (const sub of ['', 'templates', 'usage', 'computers']) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
     return folder;
   }
   private value<D extends SyncedDocument>(document: D): SyncedValue[D] {
@@ -171,6 +175,23 @@ export class DeviceSync {
     }
     for (const id of this.remoteUsage.keys()) if (!present.has(id)) this.remoteUsage.delete(id);
   }
+  /**
+   * Each computer writes where its phone remote can be reached (an address on the person's tailnet, never a key) and
+   * reads where the others can, so Settings → Other computers can offer to link them.
+   */
+  private addressBook(folder: string) {
+    const own = path.join(folder, 'computers', this.machine.id + '.json'); const url = this.advertise();
+    const current = readJson(own, addressDocument);
+    if (!current || current.value.url !== url || current.machine.name !== this.machine.name) writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: { url } });
+    this.addresses.clear();
+    for (const name of fs.readdirSync(path.join(folder, 'computers'))) {
+      if (!/^[0-9a-f-]{36}\.json$/.test(name) || name === this.machine.id + '.json') continue;
+      try { const document = readJson(path.join(folder, 'computers', name), addressDocument); if (document && name === document.machine.id + '.json') { this.addresses.set(document.machine.id, { id: document.machine.id, name: document.machine.name, url: document.value.url }); this.seen(document.machine, document.updatedAt); } }
+      catch { /* An unreadable record is skipped; the others still link. */ }
+    }
+  }
+  /** Other computers in the sync folder and their remote addresses, as of the last sync. */
+  advertised() { return [...this.addresses.values()]; }
   private seen(machine: Machine, updatedAt: string) { if (machine.id !== this.machine.id) this.computers.set(machine.id, { id: machine.id, name: machine.name, updatedAt }); }
   /** Usage recorded on the other computers, labelled with each computer's name. */
   otherUsage(): UsageRecord[] {
@@ -187,7 +208,7 @@ export class DeviceSync {
     try {
       const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
-      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state)]) {
+      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state), () => this.addressBook(folder)]) {
         try { step(); } catch (error) { this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);
