@@ -15,7 +15,9 @@ export function spawnChatProcess(file: string, args: string[], options: IPtyFork
   // A process that cannot be started (its program or folder gone since it was found) also reports that as an `error`
   // event after this returns; unhandled, that event would bring down the whole app. The failure is reported below.
   child.on('error', () => {});
-  if (!child.pid) { child.kill(); throw new Error('The CLI could not be started.'); }
+  // A process that never started has nothing to stop. Calling kill() here would be harmful: on Linux the failed child
+  // still has a handle with process id 0, and signalling 0 reaches every process in this one's group (the app itself).
+  if (!child.pid) throw new Error('The CLI could not be started.');
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   // A closed stdin (the CLI exiting) must not crash the host.
   child.stdin.on('error', () => {});

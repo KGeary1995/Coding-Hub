@@ -26,7 +26,8 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
     if (alive(pty.pid)) throw new HubError('STOP_FAILED', 'The CLI process is still running after Stop. Check its displayed PID in Task Manager before restarting.');
     return !reported;
   }
-  const group = dependencies.signalGroup ?? ((pid, signal) => { try { process.kill(-pid, signal); } catch { /* Group already exited. */ } });
+  // Only a real process id: signalling group 0 would reach every process in the app's own group.
+  const group = dependencies.signalGroup ?? ((pid, signal) => { if (!Number.isInteger(pid) || pid <= 0) return; try { process.kill(-pid, signal); } catch { /* Group already exited. */ } });
   group(pty.pid, 'SIGTERM'); killPty('SIGTERM');
   if (await wait(dependencies.waitMilliseconds ?? 1500)) {
     // Parent exit does not imply its process group exited: descendants can
