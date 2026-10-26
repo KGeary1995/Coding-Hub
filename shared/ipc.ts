@@ -83,6 +83,8 @@ export interface CodingHubHost {
   startSession(request: StartSessionRequest): Promise<HostResult<RunningSession>>;
   writeSession(request: RunReference & { data: string }): Promise<HostResult<null>>;
   resizeSession(request: RunReference & { cols: number; rows: number }): Promise<HostResult<null>>;
+  /** The window drew this much of a run's output (flow control). */
+  ackSession(request: RunReference & { bytes: number }): Promise<HostResult<null>>;
   stopSession(request: RunReference): Promise<HostResult<null>>;
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
   clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
@@ -126,6 +128,7 @@ export const IPC_CHANNELS = {
   startSession: 'coding-hub:start-session',
   writeSession: 'coding-hub:write-session',
   resizeSession: 'coding-hub:resize-session',
+  ackSession: 'coding-hub:ack-session',
   stopSession: 'coding-hub:stop-session',
   sessionEvent: 'coding-hub:session-event',
   clipboardImage: 'coding-hub:clipboard-image',

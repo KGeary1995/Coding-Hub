@@ -131,9 +131,26 @@ export function writeTerminal(id: string, data: string): Promise<boolean> {
   });
 }
 
+/**
+ * Flow control: the host pauses a CLI whose output the window has not drawn yet (see PtyManager), so every piece of
+ * output is acknowledged once xterm has parsed it, or at once if it is not shown. Acknowledgements are batched.
+ */
+const pendingAcks = new Map<string, { sessionId: string; runId: string; bytes: number }>();
+let ackTimer: ReturnType<typeof setTimeout> | null = null;
+function flushAcks() {
+  if (ackTimer) clearTimeout(ackTimer); ackTimer = null;
+  for (const ack of pendingAcks.values()) void window.codingHub?.ackSession(ack).catch(() => {});
+  pendingAcks.clear();
+}
+function acknowledge(sessionId: string, runId: string, bytes: number) {
+  const key = sessionId + ':' + runId; const ack = pendingAcks.get(key) ?? { sessionId, runId, bytes: 0 };
+  ack.bytes += bytes; pendingAcks.set(key, ack);
+  if (ack.bytes >= 64 * 1024) flushAcks(); else ackTimer ??= setTimeout(flushAcks, 50);
+}
+
 export function routeTerminalEvent(event: SessionEvent) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-  if (!session || session.runId !== event.runId) return;
+  if (!session || session.runId !== event.runId) { if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length); return; }
   const entry = getTerminal(session);
   if (event.type === 'started') {
     entry.terminal.reset();
@@ -147,7 +164,7 @@ export function routeTerminalEvent(event: SessionEvent) {
     sendSize(event.sessionId, entry, entry.terminal.cols, entry.terminal.rows);
   } else if (event.type === 'data') {
     recordActivity(event.sessionId, event.data.length);
-    entry.terminal.write(event.data);
+    entry.terminal.write(event.data, () => acknowledge(event.sessionId, event.runId, event.data.length));
   } else if (event.type === 'exit') {
     entry.run = null;
     entry.terminal.options.disableStdin = true;

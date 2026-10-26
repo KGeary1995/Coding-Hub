@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
 import { MAX_CHANNELS } from '../../../shared/schemas';
-import { isWithinDirectory, PtyManager, shellProgram } from './pty-manager';
+import { HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,7 @@ class FakePty {
   write = vi.fn();
   resize = vi.fn();
   kill = vi.fn(() => { queueMicrotask(() => this.exit({ exitCode: 0 })); });
+  pause = vi.fn(); resume = vi.fn();
   onData = (listener: typeof this.data) => { this.data = listener; return { dispose() {} }; };
   onExit = (listener: typeof this.exit) => { this.exit = listener; return { dispose() {} }; };
 }
@@ -202,5 +203,32 @@ describe('Stopping that fails', () => {
     await expect(manager.start(7, request('session-two'))).resolves.toMatchObject({ sessionId: 'session-two' });
     // Let the fixture's cleanup finish: the processes "exit" once asked again.
     for (const pty of stubborn) pty.exit({ exitCode: 0 });
+  });
+});
+
+describe('Output flow control', () => {
+  it('pauses a CLI whose output the window has not drawn, and resumes once the window catches up', async () => {
+    const { manager, processes } = fixture();
+    const session = await manager.start(1, request()); const pty = processes[0];
+    const ack = (bytes: number) => manager.ack(1, { sessionId: session.sessionId, runId: session.runId, bytes });
+    const chunk = 'x'.repeat(64 * 1024);
+    for (let sent = 0; sent <= HIGH_WATER; sent += chunk.length) pty.data(chunk);
+    expect(pty.pause).toHaveBeenCalledTimes(1);
+    // Still too much waiting: stays paused. Under the low-water mark: resumes.
+    ack(HIGH_WATER - LOW_WATER); expect(pty.resume).not.toHaveBeenCalled();
+    ack(HIGH_WATER); expect(pty.resume).toHaveBeenCalledTimes(1);
+    // Acknowledgements for another run, another window or nonsense are ignored or refused.
+    manager.ack(1, { sessionId: session.sessionId, runId: crypto.randomUUID(), bytes: 1 }); manager.ack(2, { sessionId: session.sessionId, runId: session.runId, bytes: 1 });
+    expect(() => manager.ack(1, { sessionId: session.sessionId, runId: session.runId, bytes: -1 })).toThrow();
+  });
+  it('never leaves a channel frozen when the window stops acknowledging', async () => {
+    const processes: FakePty[] = []; let stalls = 0;
+    const manager = new PtyManager(() => {}, { spawn: () => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; }, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, stallMilliseconds: 20, onStall: () => { stalls++; } });
+    managers.push(manager);
+    await manager.start(1, request());
+    processes[0].data('y'.repeat(HIGH_WATER + 1));
+    expect(processes[0].pause).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(processes[0].resume).toHaveBeenCalledTimes(1); expect(stalls).toBe(1);
   });
 });

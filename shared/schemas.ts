@@ -25,6 +25,7 @@ export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.str
 export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.'), config: channelConfigSchema, ...dimensions }).strict();
 export const writeSessionSchema = runReferenceSchema.extend({ data: z.string().max(64 * 1024) }).strict();
 export const resizeSessionSchema = runReferenceSchema.extend(dimensions).strict();
+export const ackSessionSchema = runReferenceSchema.extend({ bytes: z.number().int().min(0).max(64 * 1024 * 1024) }).strict();
 
 const directory = z.string().max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.');
 export const savedWorkspaceSchema = z.object({

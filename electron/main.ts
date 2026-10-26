@@ -101,7 +101,7 @@ const manager = new PtyManager((owner, event) => {
   if (event.type === 'exit') try { hub?.telemetry?.end(event.runId); } catch { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); }
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
-}, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
+}, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
@@ -561,6 +561,7 @@ else app.whenReady().then(() => {
     const input = payload as { sessionId?: unknown; data?: unknown }; if (typeof input.sessionId === 'string' && typeof input.data === 'string') remote?.personInput(input.sessionId, input.data);
     return null;
   });
+  handle(IPC_CHANNELS.ackSession, (owner, payload) => { manager.ack(owner, payload); return null; });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => {
     manager.resize(owner, payload);
     const sessionId = (payload as { sessionId?: unknown }).sessionId; if (typeof sessionId === 'string') remote?.desktopResized(sessionId);

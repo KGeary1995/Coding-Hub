@@ -8,7 +8,7 @@ import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
-import { MAX_CHANNELS, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
+import { MAX_CHANNELS, ackSessionSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
@@ -38,6 +38,13 @@ export function shellProgram(env: Record<string, string>, platform: NodeJS.Platf
 }
 
 type Spawn = (file: string, args: string[], options: IPtyForkOptions) => IPty;
+
+/**
+ * Flow control (xterm.js's flow-control guide): output the window has not yet drawn is counted, and past HIGH_WATER
+ * the CLI is paused (it simply waits to write, nothing is lost) until the window's acknowledgements bring it under
+ * LOW_WATER. A window that stops acknowledging cannot freeze a channel: after STALL_MS the CLI resumes regardless.
+ */
+export const HIGH_WATER = 1024 * 1024; export const LOW_WATER = 256 * 1024; const STALL_MS = 5000;
 interface ManagedRun {
   owner: number;
   /** Codex reports approval requests as OSC 9 notifications in its output. */
@@ -52,6 +59,8 @@ interface ManagedRun {
   resolveExit: () => void;
   stopping: Promise<void> | null;
   finished: boolean;
+  /** Output sent to the window and not yet acknowledged as drawn. */
+  unacked: number; paused: boolean; stall?: ReturnType<typeof setTimeout>;
 }
 
 export class PtyManager {
@@ -64,7 +73,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -171,7 +180,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run);
       pty.onData((data) => {
         if (run.finished) return;
@@ -199,6 +208,27 @@ export class PtyManager {
     for (let offset = 0; offset < data.length; offset += 16 * 1024) {
       this.send(run.owner, { type: 'data', sessionId: run.session.sessionId, runId: run.session.runId, data: data.slice(offset, offset + 16 * 1024) });
     }
+    run.unacked += data.length;
+    if (!run.paused && !run.finished && run.unacked > HIGH_WATER) {
+      run.paused = true; try { run.pty.pause(); } catch { /* Exited. */ }
+      run.stall = setTimeout(() => { run.unacked = 0; this.resume(run); this.dependencies.onStall?.(); }, this.dependencies.stallMilliseconds ?? STALL_MS);
+    }
+  }
+  private resume(run: ManagedRun) {
+    if (run.stall) clearTimeout(run.stall); run.stall = undefined;
+    if (!run.paused) return; run.paused = false;
+    if (!run.finished) try { run.pty.resume(); } catch { /* Exited. */ }
+  }
+
+  /** The window drew this much of a run's output; a paused CLI resumes once little enough is waiting. */
+  ack(owner: number, payload: unknown) {
+    const parsed = ackSessionSchema.safeParse(payload);
+    if (!parsed.success) throw new HubError('INVALID_ACK', 'Invalid output acknowledgement.');
+    const run = this.runs.get(parsed.data.sessionId);
+    // Acknowledgements for a run that ended or was replaced are expected and ignored.
+    if (!run || run.owner !== owner || run.session.runId !== parsed.data.runId) return;
+    run.unacked = Math.max(0, run.unacked - parsed.data.bytes);
+    if (run.paused && run.unacked < LOW_WATER) this.resume(run);
   }
 
   private ownedRun(owner: number, reference: { sessionId: string; runId: string }): ManagedRun {
@@ -240,7 +270,7 @@ export class PtyManager {
 
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
-    run.finished = true;
+    run.finished = true; if (run.stall) clearTimeout(run.stall);
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
     // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.
