@@ -195,7 +195,30 @@ function showChannel(sessionId: string) {
   // own replies to the CLI's queries (cursor position and the like, also raised by replayed output) are left out: the
   // desktop's terminal already answers them, and they are not the person answering a prompt.
   terminal.onData((data) => { const typed = withoutTerminalReplies(data); if (typed) void type(typed); });
+  scrollBySwipe(output, terminal);
   renderChannel(); listen(sessionId);
+}
+
+/**
+ * Claude Code draws full screen (the alternate screen, which has no scrollback) and scrolls its conversation itself
+ * when the terminal reports the mouse wheel. A phone has no wheel, so a swipe over a full-screen CLI that takes mouse
+ * reports is sent as wheel reports instead, one per line swiped (SGR encoding, which Claude Code asks for). A CLI drawn
+ * in the normal screen keeps the terminal's own scrolling.
+ */
+function scrollBySwipe(element: HTMLElement, screen: Terminal) {
+  let last: number | null = null; let swiped = 0;
+  const fullScreen = () => screen.buffer.active.type === 'alternate' && screen.modes.mouseTrackingMode !== 'none';
+  element.addEventListener('touchstart', (event) => { last = event.touches.length === 1 && fullScreen() ? event.touches[0].clientY : null; swiped = 0; }, { capture: true, passive: true });
+  element.addEventListener('touchmove', (event) => {
+    if (last === null || event.touches.length !== 1 || !fullScreen()) return;
+    event.preventDefault(); event.stopPropagation();
+    const y = event.touches[0].clientY; swiped += last - y; last = y;
+    const line = element.clientHeight / screen.rows; const lines = Math.trunc(swiped / line); if (!lines || terminal !== screen) return;
+    swiped -= lines * line;
+    // Moving the finger up shows newer lines (wheel down, 65); moving it down shows older ones (wheel up, 64).
+    void type(`\x1b[<${lines > 0 ? 65 : 64};${Math.ceil(screen.cols / 2)};${Math.ceil(screen.rows / 2)}M`.repeat(Math.abs(lines)));
+  }, { capture: true, passive: false });
+  element.addEventListener('touchend', () => { last = null; }, { capture: true, passive: true });
 }
 
 function renderChannel() {
