@@ -1,10 +1,8 @@
 ## What's new
 
-- **Use one computer from the other.** Link your computers in **Settings → Other computers**: click **Show link code** on one and type the code on the other. The linked computer gets its own tab, showing its channels live. Type into them, answer prompts, and start, stop or restart them from either computer.
-- **One phone app for all your computers.** Pair your phone with one computer and it shows every linked computer's channels, with a switcher between them. If that computer is off, the app still opens and connects straight to your other computer, then switches back by itself.
-- **Phone screens that fit.** A channel open on your phone is redrawn at the phone's size, so the text is readable and fills the screen. **A− / A+** change the text size. The desktop gets its own size back when you leave the channel on the phone, or type in it at the desk.
-- **Signed and notarized for Mac.** The Mac downloads are signed with a Developer ID and notarized by Apple, so they open without **Open Anyway**.
-- **Smaller, cleaner downloads.** The app now contains only what it runs.
+- **Steadier under heavy output.** Each channel's CLI is held to the pace the window can draw, so a channel printing huge amounts of output no longer piles up work that makes Trace sluggish. Nothing is lost; the CLI just waits to write.
+- **Accurate usage for long sessions.** When a session ends, Trace now reads all of its usage, not just the first few megabytes. A run whose usage could not be read completely is marked **incomplete** in Usage, and if usage cannot be read during a session you are told, including when a session token limit cannot be enforced.
+- **Faster start.** Screens you don't need at start (Settings, Usage, Help and the like) load in the background, making the start-up bundle about a third smaller.
 
 ## Install
 
