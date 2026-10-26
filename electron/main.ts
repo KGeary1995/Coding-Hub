@@ -197,7 +197,7 @@ function controlChannel(sessionId: string, control: 'start' | 'stop' | 'restart'
 async function leftRunningChoice(parent: BrowserWindow | null, pids: number[], leave: string, keep: string): Promise<'retry' | 'quit' | 'keep'> {
   const options: Electron.MessageBoxOptions = {
     type: 'warning', title: 'Some channels are still running', buttons: ['Try stopping again', leave, keep], defaultId: 0, cancelId: 2,
-    message: pids.length === 1 ? 'A channel could not be stopped.' : `${pids.length} channels could not be stopped.`,
+    message: pids.length === 1 ? 'A channel or sign-in terminal could not be stopped.' : `${pids.length} channels or sign-in terminals could not be stopped.`,
     detail: `Process ${pids.length === 1 ? 'ID' : 'IDs'}: ${pids.join(', ')}. If you ${leave.toLowerCase()}, ${pids.length === 1 ? 'it keeps' : 'they keep'} running without Trace; end ${pids.length === 1 ? 'it' : 'them'} in ${process.platform === 'win32' ? 'Task Manager' : 'Activity Monitor'} later.`,
   };
   try { const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options); return response === 0 ? 'retry' : response === 1 ? 'quit' : 'keep'; }
@@ -278,7 +278,7 @@ function createWindow() {
     hostHealth?.record('renderer-process-gone', details.reason, details.exitCode);
     void Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)]).then(async () => {
       if (current.isDestroyed() || quitting) return;
-      if (manager.ownedProcessIds(owner).length) throw new HubError('STOP_FAILED', 'A CLI process is still owned by this window.');
+      if (manager.ownedProcessIds(owner).length || accounts.processIds(owner).length) throw new HubError('STOP_FAILED', 'A CLI or sign-in process is still owned by this window.');
       const answer = await dialog.showMessageBox(current, { type: 'error', title: 'Workspace display stopped', message: 'The application display stopped unexpectedly. Coding and login terminals have been stopped.', detail: 'Reload restores the last saved workspace as idle tiles. Local lifecycle diagnostics are available in Settings.', buttons: ['Reload workspace', 'Close'], defaultId: 0, cancelId: 1 });
       if (current.isDestroyed()) return;
       if (answer.response === 0) current.webContents.reload(); else current.close();
@@ -304,7 +304,7 @@ function createWindow() {
     livePreview?.close();
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).then(async () => {
       // Closing the window takes away every control for a channel, so never do that silently while one still runs.
-      const left = manager.ownedProcessIds(owner);
+      const left = [...manager.ownedProcessIds(owner), ...accounts.processIds(owner)];
       if (left.length && !current.isDestroyed()) {
         hostHealth?.record('shutdown-processes-left', String(left.length));
         const choice = await leftRunningChoice(current, left, 'Close anyway', 'Keep the window open');
@@ -618,7 +618,7 @@ app.on('before-quit', (event) => {
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed'))
     .then(async () => {
       // Quitting would leave these running with nothing to control them; let the person decide.
-      const left = manager.processIds();
+      const left = [...manager.processIds(), ...accounts.processIds()];
       if (!left.length) return true;
       hostHealth?.record('shutdown-processes-left', String(left.length));
       const choice = await leftRunningChoice(window && !window.isDestroyed() ? window : null, left, 'Quit anyway', 'Keep Trace open');

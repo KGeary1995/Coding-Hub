@@ -28,11 +28,13 @@ describe('account setup independent of project sessions', () => {
     expect(login && !Array.isArray(login) && 'runId' in login).toBe(true);
     const runId = (login as { runId: string }).runId;
     expect(spawn.mock.calls[0][1]).toEqual(LOGIN_ARGUMENTS.claude); expect(manager.active).toBe(true);
+    // Closing and quitting count the sign-in process among those left running.
+    expect(manager.processIds(7)).toEqual([pty.pid]); expect(manager.processIds()).toEqual([pty.pid]); expect(manager.processIds(8)).toEqual([]);
     pty.data('Private one-time login code');
     await manager.execute(7, { action: 'write', runId, data: 'confirm\r' }); expect(pty.write).toHaveBeenCalledWith('confirm\r');
     await expect(manager.execute(8, { action: 'write', runId, data: 'bad' })).rejects.toMatchObject({ code: 'STALE_LOGIN' });
     await expect(manager.execute(7, { action: 'login', provider: 'codex', cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'LOGIN_BUSY' });
-    await manager.execute(7, { action: 'stop', runId }); expect(manager.active).toBe(false);
+    await manager.execute(7, { action: 'stop', runId }); expect(manager.active).toBe(false); expect(manager.processIds()).toEqual([]);
     expect(events.map((event) => event.type)).toEqual(['started', 'data', 'exit']);
     await expect(manager.execute(7, { action: 'write', runId, data: 'bad' })).rejects.toMatchObject({ code: 'STALE_LOGIN' });
     await manager.close();

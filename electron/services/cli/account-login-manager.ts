@@ -75,6 +75,8 @@ export class AccountLoginManager {
   }
   private finish(run: Run, exitCode: number) { if (run.finished) return; run.finished = true; if (this.run === run) this.run = null; this.send(run.owner, { type: 'exit', ...run.login, exitCode }); run.resolve(); }
 
+  /** The sign-in process still running (for one window, or any), so closing and quitting can say it was left behind. */
+  processIds(owner?: number): number[] { const run = this.run; return run && !run.finished && (owner === undefined || run.owner === owner) ? [run.pty.pid] : []; }
   /** Undoes close() when the person cancels quitting, so logins work again. */
   reopen() { this.closing = false; }
   async close() { this.closing = true; if (this.pending) this.pending.cancelled = true; if (this.run) await this.stopOwner(this.run.owner); }
