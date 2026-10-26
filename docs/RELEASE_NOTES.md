@@ -3,6 +3,7 @@
 - **Terminal channels.** **+ Channel → Terminal** opens your normal shell in the project folder: zsh or bash on a Mac, PowerShell on Windows. It sits in the grid next to Claude Code and Codex and shows up on the phone page. Nothing it prints is saved to history.
 - **See the images you paste.** Paste a screenshot into a Claude Code or Codex channel (Ctrl+V, or Cmd+V on a Mac) and a thumbnail appears under the terminal; click it to see it full size. Dropping a file on a channel types its path, and dropped images join the strip.
 - **Phone access on Macs with Tailscale from the App Store.** Setup no longer fails with "Unexpected token 'T' … is not valid JSON" when Trace is opened from the Dock.
+- **No more channels left running unseen.** If a channel can't be stopped when you close the window or quit, Trace says so, names its process ID, and lets you try again, close anyway or keep Trace open. Before, the window closed regardless.
 - **Security updates.** Electron 44.9.3 and zod 4.6.7 fix published security advisories.
 
 ## Install
