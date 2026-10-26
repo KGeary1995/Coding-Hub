@@ -29,13 +29,17 @@ describe('backup and restore integrity', () => {
   it('rebases app-managed paths in restored SQLite while preserving external repositories', async () => {
     const root = fixture(); const active = path.join(root, 'data'); fs.mkdirSync(active); const report = path.join(active, 'coaching/reports/report');
     const db = new DatabaseSync(path.join(active, 'storage.db')); db.exec('CREATE TABLE workspace(id INTEGER PRIMARY KEY,snapshot TEXT); CREATE TABLE runs(runId TEXT,cwd TEXT);');
-    db.prepare('INSERT INTO workspace VALUES(1,?)').run(JSON.stringify({ rootDirectory: root, sessions: [{ binding: { mode: 'independent', cwd: report } }] }));
+    const profileResume = { binding: { mode: 'independent', cwd: root }, config: { engine: 'claude', accountProfileId: 'work', resumeId: '11111111-2222-4333-8444-555555555555' } };
+    const defaultResume = { binding: { mode: 'independent', cwd: root }, config: { engine: 'claude', resumeId: '11111111-2222-4333-8444-666666666666' } };
+    db.prepare('INSERT INTO workspace VALUES(1,?)').run(JSON.stringify({ rootDirectory: root, sessions: [{ binding: { mode: 'independent', cwd: report } }, profileResume, defaultResume] }));
     db.prepare('INSERT INTO runs VALUES(?,?)').run('recorded', report);
     const service = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
     try {
       const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any; const restored = await service.execute({ action: 'backup-restore', id: created.record.id }) as any;
       const read = new DatabaseSync(path.join(restored.restoredPath, 'storage.db'));
-      try { const workspace = JSON.parse(String(read.prepare('SELECT snapshot FROM workspace').get()?.snapshot)); expect(workspace.rootDirectory).toBe(root); expect(workspace.sessions[0].binding.cwd).toBe(path.join(restored.restoredPath, 'coaching/reports/report')); expect(read.prepare('SELECT cwd FROM runs').get()?.cwd).toBe(workspace.sessions[0].binding.cwd); } finally { read.close(); }
+      try { const workspace = JSON.parse(String(read.prepare('SELECT snapshot FROM workspace').get()?.snapshot)); expect(workspace.rootDirectory).toBe(root); expect(workspace.sessions[0].binding.cwd).toBe(path.join(restored.restoredPath, 'coaching/reports/report')); expect(read.prepare('SELECT cwd FROM runs').get()?.cwd).toBe(workspace.sessions[0].binding.cwd);
+        // A named profile's conversations are not in backups, so its channel starts afresh; the default account's still resumes.
+        expect(workspace.sessions[1].config).toEqual({ engine: 'claude', accountProfileId: 'work' }); expect(workspace.sessions[2].config.resumeId).toBe(defaultResume.config.resumeId); } finally { read.close(); }
       expect(db.prepare('SELECT cwd FROM runs').get()?.cwd).toBe(report);
     } finally { db.close(); }
   });

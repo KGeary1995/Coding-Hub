@@ -17,6 +17,20 @@ export function resolveStorageRoot(base: string, profile: string) {
   try { const pointer = JSON.parse(fs.readFileSync(path.join(profile, 'storage-location.json'), 'utf8')); const prefix = path.join(base, 'restores') + path.sep; if (pointer.base === base && typeof pointer.directory === 'string' && pointer.directory.startsWith(prefix) && pointer.directory === path.join(base, 'restores', path.basename(pointer.directory)) && z.uuid().safeParse(path.basename(pointer.directory)).success && !fs.lstatSync(pointer.directory).isSymbolicLink() && fs.statSync(pointer.directory).isDirectory()) return pointer.directory; } catch {}
   return base;
 }
+/**
+ * A backup keeps Claude account profiles' names but not their conversations (they live in each profile's own folder,
+ * beside its credentials), so a restored channel on a named profile cannot resume one: it starts a new conversation
+ * instead of refusing to start.
+ */
+function withoutProfileResumes(workspace: unknown): unknown {
+  if (!workspace || typeof workspace !== 'object' || !Array.isArray((workspace as { sessions?: unknown }).sessions)) return workspace;
+  const sessions = (workspace as { sessions: unknown[] }).sessions.map((session) => {
+    const config = session && typeof session === 'object' ? (session as { config?: Record<string, unknown> }).config : undefined;
+    if (!config || config.engine !== 'claude' || !config.accountProfileId || !config.resumeId) return session;
+    const { resumeId: _resumeId, ...rest } = config; return { ...(session as object), config: rest };
+  });
+  return { ...(workspace as object), sessions };
+}
 export class Backups {
   restartRequired = false;
   busy = false;
@@ -45,7 +59,7 @@ export class Backups {
       const target = path.join(restored, file); if (!fs.existsSync(target)) continue; const db = new DatabaseSync(target);
       try {
         const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => String(row.name)));
-        if (tables.has('workspace')) { const row = db.prepare('SELECT snapshot FROM workspace WHERE id=1').get(); if (row) db.prepare('UPDATE workspace SET snapshot=? WHERE id=1').run(JSON.stringify(walk(JSON.parse(String(row.snapshot))))); }
+        if (tables.has('workspace')) { const row = db.prepare('SELECT snapshot FROM workspace WHERE id=1').get(); if (row) db.prepare('UPDATE workspace SET snapshot=? WHERE id=1').run(JSON.stringify(withoutProfileResumes(walk(JSON.parse(String(row.snapshot)))))); }
         if (tables.has('runs')) for (const row of db.prepare('SELECT runId,cwd FROM runs').all()) db.prepare('UPDATE runs SET cwd=? WHERE runId=?').run(convert(String(row.cwd)), String(row.runId));
         if (file.endsWith('usage.db') && tables.has('metadata')) for (const row of db.prepare('SELECT run,value FROM metadata').all()) db.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify(walk(JSON.parse(String(row.value)))), String(row.run));
       } finally { db.close(); }
