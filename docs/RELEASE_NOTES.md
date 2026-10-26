@@ -1,9 +1,9 @@
 ## What's new
 
-- **Chat channels for Claude and Codex.** **+ Channel → Claude chat** or **Codex chat** shows the agent as a conversation instead of a terminal: paste, drop or attach screenshots and they appear in the thread and go to the agent as real images; replies stream in formatted (headings, lists, tables, code); every command, file read and edit is a card with its output; approvals are buttons (**Allow**, **Allow for this session/run**, **Deny**), and a waiting approval alerts you on your phone too. Each chat runs in its channel's folder with its account, model, shared rules and memory.
-- **Your plan limits, always in view.** The status bar shows how much of Claude's 5-hour session and weekly limits, and Codex's limits, you have used, turning amber and then red as they fill. Hover for reset times, or open **Usage → Plan limits** for every account. Checking uses no tokens.
+- **No more lag while agents work.** Trace was redrawing a busy channel's tile many times a second (each frame of the CLI's spinner); it now updates only when something changes. Plan-limit checks run every five minutes rather than each time you return to Trace.
+- **The model is back on every channel**, in plain words (Opus 5.5, GPT-6.1 Sol), including right after a restart, before the channel's first reply.
 
-Also new in 1.9.2: typing from your phone no longer comes out garbled, token counts agree everywhere, channels are named after their repo, and pasted images behave like attachments.
+Also in 1.10.0: chat channels for Claude and Codex with images in the thread, and your plan limits always in view.
 
 ## Install
 
