@@ -89,6 +89,8 @@ export interface CodingHubHost {
   stopSession(request: RunReference): Promise<HostResult<null>>;
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
   clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
+  /** Puts text on the clipboard: what a full-screen CLI copied when the person selected text in it. */
+  copyText(text: string): Promise<HostResult<null>>;
   onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
@@ -101,6 +103,8 @@ export interface CodingHubHost {
 }
 /** An image on the system clipboard, as PNG data URLs: a small one for the strip and one capped at 2000px to enlarge. */
 export interface ClipboardImage { thumbnail: string; full: string; width: number; height: number; hasText: boolean }
+/** The most a CLI can put on the clipboard at once. */
+export const COPY_LIMIT = 1024 * 1024;
 export const IPC_CHANNELS = {
   workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
@@ -136,6 +140,7 @@ export const IPC_CHANNELS = {
   stopSession: 'coding-hub:stop-session',
   sessionEvent: 'coding-hub:session-event',
   clipboardImage: 'coding-hub:clipboard-image',
+  copyText: 'coding-hub:copy-text',
   linkedEvent: 'coding-hub:linked-event',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',

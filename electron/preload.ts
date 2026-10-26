@@ -66,6 +66,7 @@ const host: CodingHubHost = {
     return () => { ipcRenderer.removeListener('coding-hub:session-event', receive); };
   },
   clipboardImage: () => ipcRenderer.invoke('coding-hub:clipboard-image'),
+  copyText: (text) => ipcRenderer.invoke('coding-hub:copy-text', text),
   pathForFile: (file) => webUtils.getPathForFile(file),
   onLinkedEvent: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: LinkedComputerEvent) => listener(value);

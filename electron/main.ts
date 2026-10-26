@@ -27,7 +27,7 @@ import { UpdateService, updatesEnabled } from './services/updates/update-service
 import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { IPC_CHANNELS, type HostResult } from '../shared/ipc';
+import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { adoptLoginShellPath, discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
@@ -576,6 +576,7 @@ else app.whenReady().then(() => {
     const full = Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image;
     return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
   });
+  handle(IPC_CHANNELS.copyText, (_owner, text) => { clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');

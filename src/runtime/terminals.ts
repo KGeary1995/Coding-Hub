@@ -10,7 +10,7 @@ import { forgetActivity, isPersonInput, recordActivity } from '../state/activity
 import { exitNotice } from '../../shared/terminal-input';
 import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } from '../state/pasted-images';
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
-import { unwrapCopied, type CopiedRow } from './copy-text';
+import { osc52Text, unwrapCopied, type CopiedRow } from './copy-text';
 
 const MAC = /Mac/.test(navigator.userAgent);
 const WINDOWS = /Windows/.test(navigator.userAgent);
@@ -119,6 +119,15 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     event.preventDefault(); event.stopPropagation();
     event.clipboardData.setData('text/plain', unwrapCopied(rows, terminal.cols));
   }, true);
+  // Claude Code's full-screen view selects text itself (a drag there goes to the CLI, not the terminal) and copies it
+  // with an OSC 52 request. It is honoured only just after the person used the mouse or keyboard in this channel, so a
+  // CLI cannot change the clipboard on its own.
+  let touched = 0; const touch = () => { touched = Date.now(); };
+  element.addEventListener('mouseup', touch, true); element.addEventListener('keydown', touch, true);
+  terminal.parser.registerOscHandler(52, (data) => {
+    const text = osc52Text(data); if (text !== null && Date.now() - touched < 3000) void window.codingHub?.copyText(text);
+    return true;
+  });
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');

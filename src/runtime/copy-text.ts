@@ -1,3 +1,5 @@
+import { COPY_LIMIT } from '../../shared/ipc';
+
 /**
  * Text copied from a channel, with the line breaks the CLI added only to fit the window taken out again.
  *
@@ -7,6 +9,17 @@
  * (that is why the CLI broke there) and the next line continues at the text's indent. Short lines, list items,
  * blank lines and code that stops well before the edge keep their line breaks.
  */
+/**
+ * The text of an OSC 52 "set the clipboard" request (`ESC ] 52 ; c ; <base64> BEL`, given here without its `52;`), as
+ * Claude Code sends when the person selects text in its full-screen view. Requests to read the clipboard (`?`), and
+ * anything that is not valid UTF-8 text within the limit, give null.
+ */
+export function osc52Text(data: string): string | null {
+  const split = data.indexOf(';'); if (split < 0) return null;
+  const payload = data.slice(split + 1); if (payload === '?' || payload.length > COPY_LIMIT * 4 / 3 + 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)) return null;
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(payload), (char) => char.charCodeAt(0))); } catch { return null; }
+}
+
 /** `text` is what was selected on a screen row, `startColumn` where on the row it starts, `line` the whole row. */
 export interface CopiedRow { text: string; startColumn: number; line?: string }
 

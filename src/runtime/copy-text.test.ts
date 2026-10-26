@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unwrapCopied } from './copy-text';
+import { osc52Text, unwrapCopied } from './copy-text';
 
 const rows = (...texts: string[]) => texts.map((text) => ({ text, startColumn: 0 }));
 
@@ -32,5 +32,14 @@ describe('copying from a channel', () => {
     expect(unwrapCopied([{ text: 'the end of a long sentence that reached the', startColumn: 34, line }, { text: 'edge of the window.', startColumn: 0, line: 'edge of the window.' }], 80)).toBe('the end of a long sentence that reached the edge of the window.');
     // A short line stays its own line, wherever the selection started.
     expect(unwrapCopied([{ text: 'short', startColumn: 4, line: '    short' }, { text: '    next', startColumn: 0, line: '    next' }], 80)).toBe('short\n    next');
+  });
+  it('reads the text a full-screen CLI copies (OSC 52), and nothing else', () => {
+    const encode = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+    expect(osc52Text('c;' + encode('23\n24\n25'))).toBe('23\n24\n25');
+    expect(osc52Text(';' + encode('héllo ✳'))).toBe('héllo ✳');
+    expect(osc52Text('c;?')).toBeNull();
+    expect(osc52Text('c;not base64!')).toBeNull();
+    expect(osc52Text('c;' + btoa('\xff\xfe'))).toBeNull();
+    expect(osc52Text('no separator')).toBeNull();
   });
 });

@@ -113,6 +113,16 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
       const data = window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('');
       return data.includes('ECHO:desktop-first') && data.includes('ECHO:desktop-second');
     });
+    // Text a full-screen CLI copies (OSC 52) reaches the clipboard, lines and all, just after the person used the channel;
+    // a CLI copying on its own later does not change it.
+    const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
+    await app.evaluate(({ clipboard }) => clipboard.writeText('before'));
+    await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('copy-lines'); await page.keyboard.press('Enter');
+    for (let i = 0; i < 50 && (await clipboardText()) === 'before'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(await clipboardText(), 'first line\nsecond line');
+    await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
+    await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line');
     const starts = await page.evaluate(() => window.testEvents.filter((event) => event.type === 'started'));
     assert.deepEqual(starts.map((event) => event.cwd).sort(), projects.sort());
     await (await tileControl(page, 'Engine settings for session 1')).click();
