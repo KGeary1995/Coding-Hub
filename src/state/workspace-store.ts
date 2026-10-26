@@ -80,6 +80,8 @@ interface WorkspaceState {
   setView: (view: NavigationView) => void;
   restoreRun: (run: SessionHistoryRun) => boolean;
   addSession: (engine: ChannelEngine, sourceSessionId?: string) => void;
+  /** A Claude channel shown as a conversation (chat) rather than a terminal. */
+  addChatSession: () => void;
   removeSession: (id: string) => void;
   updateConfig: (id: string, config: CLIEngineConfig) => void;
   resetCodexConfig: (id: string) => void;
@@ -141,6 +143,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null, activeView: 'workspace' });
     return true;
   },
+  addChatSession: () => { useWorkspaceStore.getState().addSession('claude'); useWorkspaceStore.setState((state) => { const last = state.sessions.at(-1); return last?.config.engine === 'claude' ? { sessions: state.sessions.map((session) => session.id === last.id && session.config.engine === 'claude' ? { ...session, config: { ...session.config, chat: true } } : session) } : {}; }); },
   addSession: (engine, sourceSessionId) => set((state) => {
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);

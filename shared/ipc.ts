@@ -1,4 +1,5 @@
 import type { ChannelControl, LinkedComputerEvent } from './remote';
+import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
@@ -89,6 +90,9 @@ export interface CodingHubHost {
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
   clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
   onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
+  /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
+  chat(request: ChatRequest): Promise<HostResult<null>>;
+  onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
   /** A linked computer asks this window to start, stop or restart a channel; answer with finishRemoteControl. */
   onRemoteControl(listener: (request: { requestId: string; sessionId: string; control: ChannelControl }) => void): () => void;
   finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
@@ -133,6 +137,8 @@ export const IPC_CHANNELS = {
   sessionEvent: 'coding-hub:session-event',
   clipboardImage: 'coding-hub:clipboard-image',
   linkedEvent: 'coding-hub:linked-event',
+  chat: 'coding-hub:chat',
+  chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',
   finishRemoteControl: 'coding-hub:finish-remote-control',
 } as const;

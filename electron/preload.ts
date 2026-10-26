@@ -4,6 +4,7 @@ import type { AccountEvent } from '../shared/accounts';
 import type { UpdateStatus } from '../shared/updates';
 import type { UsageRecord } from '../shared/hub';
 import type { ChannelControl, LinkedComputerEvent } from '../shared/remote';
+import type { ChatEnvelope } from '../shared/chat';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
@@ -77,5 +78,11 @@ const host: CodingHubHost = {
     return () => ipcRenderer.removeListener('coding-hub:remote-control', receive);
   },
   finishRemoteControl: (result) => ipcRenderer.invoke('coding-hub:finish-remote-control', result),
+  chat: (request) => ipcRenderer.invoke('coding-hub:chat', request),
+  onChatEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: ChatEnvelope) => listener(value);
+    ipcRenderer.on('coding-hub:chat-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:chat-event', receive);
+  },
 };
 contextBridge.exposeInMainWorld('codingHub', host);

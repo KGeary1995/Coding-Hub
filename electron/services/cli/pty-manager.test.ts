@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
+import type { ChatEnvelope } from '../../../shared/chat';
+import { spawnChatProcess } from '../chat/chat-process';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import { HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
 import fs from 'node:fs';
@@ -230,5 +232,53 @@ describe('Output flow control', () => {
     expect(processes[0].pause).toHaveBeenCalledTimes(1);
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(processes[0].resume).toHaveBeenCalledTimes(1); expect(stalls).toBe(1);
+  });
+});
+
+describe('Chat channels', () => {
+  const fixtureScript = path.join(__dirname, '../../../scripts/fixtures/claude-stream-fixture.cjs');
+  const chatEngine = (): DiscoveredEngine => { const engine = engines('claude'); engine.executable = { file: process.execPath, prefixArgs: [fixtureScript], extraEnv: {}, displayPath: 'claude' }; return engine; };
+  const chatRequest = (sessionId = 'chat-one') => ({ sessionId, cwd: process.cwd(), config: { engine: 'claude' as const, chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, cols: 80, rows: 24 });
+  it('runs Claude in structured mode: messages with images, streamed replies, approvals in the window, and the waiting state', async () => {
+    const chats: ChatEnvelope[] = []; const events: SessionEvent[] = []; let launched: string[] = [];
+    const manager = new PtyManager((_owner, event) => events.push(event), { discover: async () => chatEngine(), environment: () => ({ ...process.env } as Record<string, string>), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
+      prepareLaunch: (_session, _config, _info, launch) => { launch.args.push('--session-id', 'fixture'); },
+      spawnChat: (file, args, options) => { launched = args; return spawnChatProcess(file, args, options); } });
+    managers.push(manager);
+    const session = await manager.start(1, chatRequest());
+    expect(launched).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-prompt-tool', 'stdio', '--session-id', 'fixture']));
+    const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10)); expect(check()).toBe(true); };
+    const kinds = () => chats.map((chat) => chat.event.type);
+
+    manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'look at this', images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] });
+    await until(() => kinds().includes('done'));
+    expect(chats[0].event).toEqual({ type: 'ready', conversationId: '11111111-2222-4333-8444-555555555555', model: 'fixture-model' });
+    expect(chats.filter((chat) => chat.event.type === 'delta').map((chat) => (chat.event as { text: string }).text).join('')).toBe('I see 1 image. look at this');
+    expect(chats.find((chat) => chat.event.type === 'assistant')?.event).toMatchObject({ messageId: 'msg-1', blocks: [{ type: 'text', text: 'I see 1 image. look at this' }] });
+
+    chats.length = 0;
+    manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'please write a file', images: [] });
+    await until(() => kinds().includes('permission'));
+    const permission = chats.find((chat) => chat.event.type === 'permission')!.event as { requestId: string; toolName: string; canAllowEdits: boolean };
+    expect(permission).toMatchObject({ toolName: 'Write', canAllowEdits: true });
+    // Thinking and the tool call arrive as separate messages with the same id.
+    expect(chats.filter((chat) => chat.event.type === 'assistant').map((chat) => (chat.event as { blocks: { type: string }[] }).blocks[0].type)).toEqual(['thinking', 'tool']);
+    expect(events.at(-1)).toMatchObject({ type: 'attention', message: 'Approve Write: notes.txt' });
+    manager.chat(1, { action: 'answer', sessionId: session.sessionId, runId: session.runId, requestId: permission.requestId, allow: true });
+    await until(() => kinds().includes('done'));
+    expect(kinds()).toContain('permission-done'); expect(events.some((event) => event.type === 'answered')).toBe(true);
+    expect(chats.find((chat) => chat.event.type === 'tool-result')?.event).toMatchObject({ text: 'File written.', isError: false });
+    expect(() => manager.chat(1, { action: 'answer', sessionId: session.sessionId, runId: session.runId, requestId: permission.requestId, allow: true })).toThrow(/already answered/);
+
+    chats.length = 0;
+    manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'fail please', images: [] });
+    await until(() => kinds().includes('done'));
+    expect(chats.at(-1)?.event).toEqual({ type: 'done', isError: true, error: 'Fixture failure.' });
+    // A phone cannot type raw keys into a chat; another window cannot use it; an empty message is refused.
+    expect(() => manager.writeRemote({ sessionId: session.sessionId, runId: session.runId }, 'y')).toThrow(/chat channel/);
+    expect(() => manager.chat(2, { action: 'interrupt', sessionId: session.sessionId, runId: session.runId })).toThrow();
+    expect(() => manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: '  ', images: [] })).toThrow(/Write a message/);
+    await manager.stop(1, { sessionId: session.sessionId, runId: session.runId });
+    expect(events.at(-1)).toMatchObject({ type: 'exit' });
   });
 });

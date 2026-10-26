@@ -184,7 +184,12 @@ export function terminalDimensions(id: string) {
   const terminal = terminals.get(id)?.terminal;
   return { cols: Math.min(500, Math.max(2, terminal?.cols ?? 100)), rows: Math.min(300, Math.max(1, terminal?.rows ?? 24)) };
 }
-export function focusTerminal(id: string) { terminals.get(id)?.terminal.focus(); }
+export function focusTerminal(id: string) {
+  // A chat channel has no terminal: go to its waiting approval (its Allow button), or else its message box.
+  const chat = document.querySelector<HTMLElement>(`[data-chat-session="${CSS.escape(id)}"]`);
+  if (chat) { const target = chat.querySelector<HTMLElement>('.chat-permission.open button') ?? chat.querySelector<HTMLElement>('textarea'); target?.scrollIntoView({ block: 'nearest' }); target?.focus(); return; }
+  terminals.get(id)?.terminal.focus();
+}
 export function releaseRemovedTerminals(ids: string[]) {
   const retained = new Set(ids);
   for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); clearPastedImages(id); }

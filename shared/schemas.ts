@@ -15,7 +15,7 @@ export function modelValue(value: string): string | null {
 const model = z.string().max(MAX_MODEL_LENGTH).refine((value) => value === '' || MODEL_PATTERN.test(value), 'Use a model identifier, or leave blank for the CLI default.');
 const tokens = z.number().int().min(0).max(MAX_TOKEN_SETTING).nullable();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
-  z.object({ engine: z.literal('claude'), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
+  z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
   z.object({ engine: z.literal('codex'), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
 /** Every channel type: the agents plus a plain terminal, which takes no settings. */
@@ -61,3 +61,11 @@ export const openRepositorySchema = z.object({ directory: directory.min(1) }).st
 export const repositoryReferenceSchema = z.object({ repositoryId: z.string().uuid() }).strict();
 export const repositoryPathSchema = repositoryReferenceSchema.extend({ path: directory }).strict();
 export const gitDiffSchema = repositoryPathSchema.extend({ path: directory.min(1), area: z.enum(['working', 'staged', 'untracked']) }).strict();
+
+const chatImage = z.object({ mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), data: z.string().min(1).max(14 * 1024 * 1024).regex(/^[A-Za-z0-9+/=]+$/) }).strict();
+/** Requests from the window to a chat run. Images are base64 (Claude's limit is about 5 MB each; 10 per message). */
+export const chatRequestSchema = z.discriminatedUnion('action', [
+  runReferenceSchema.extend({ action: z.literal('send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
+]);

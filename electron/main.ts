@@ -102,7 +102,7 @@ const manager = new PtyManager((owner, event) => {
   if (event.type === 'exit') void hub?.telemetry?.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
-}, { onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
+}, { onChat: (owner, envelope) => { sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner); }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
@@ -566,6 +566,7 @@ else app.whenReady().then(() => {
     return null;
   });
   handle(IPC_CHANNELS.ackSession, (owner, payload) => { manager.ack(owner, payload); return null; });
+  handle(IPC_CHANNELS.chat, (owner, payload) => { manager.chat(owner, payload); return null; });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => {
     const parsed = resizeSessionSchema.safeParse(payload);
     // A channel a phone is showing keeps the phone's size; the desktop's new size is applied when the phone lets go.

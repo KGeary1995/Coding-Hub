@@ -5,6 +5,8 @@ export type ReasoningEffort = string;
 export interface ClaudeCLIEngineConfig {
   engine: 'claude';
   resumeId?: string;
+  /** A chat channel: Claude Code in structured mode, drawn by Trace as a conversation (with images) instead of a terminal. */
+  chat?: boolean;
   /** Absent selects the existing host CLI login; named profiles are host-owned IDs. */
   accountProfileId?: string;
   model: string;

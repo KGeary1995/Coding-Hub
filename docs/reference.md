@@ -162,6 +162,15 @@ With the tile focused, Enter starts an idle channel or moves into its terminal.
 
 **Pasted images:** Ctrl+V (and Alt+V) still go straight to the CLI, which attaches the clipboard image itself. On a Mac, Cmd+V with only an image on the clipboard sends Ctrl+V for you. Trace also reads the image and shows it under the terminal as **Attached**, numbered in the order pasted in that run (matching Claude's `[Image #N]` for clipboard pastes). Pressing Enter in the channel moves attached images to a smaller **Sent** row with the time. Click a thumbnail to enlarge it; × removes an attached one from the strip (the agent keeps what it was given). Dropping files on a channel types their paths, quoted when needed, and dropped images are attached too. The strip clears when the channel restarts.
 
+## Chat channels
+
+**+ Channel → Claude chat** runs Claude Code in its structured mode (`--print --input-format stream-json --output-format stream-json`) instead of its terminal screen, and Trace draws the conversation: your messages with images inline, replies formatted (headings, lists, tables, code), tool calls as cards with their results (edits as before/after), and Claude's thinking folded away. It runs in the channel's folder with the channel's account profile, model, shared rules, shared memory and MCP tools, as a terminal channel does, and usage is recorded the same way.
+
+- **Images:** paste, drop or attach (button) up to 10 per message. They go to Claude as images, not file paths. Images over about 5 MB, or in other formats, are redrawn as JPEG at most 2000 px.
+- **Approvals:** when Claude asks to use a tool your permission settings do not already allow, a card offers **Allow**, **Allow edits this run** (when Claude suggests it) or **Deny**. The channel shows as waiting (status bar, notice, phone alert) until you answer; **Answer** goes to the card.
+- **Stop** interrupts the reply; Claude keeps what it has done. A restarted chat continues the conversation.
+- Terminal-only screens such as `/config` or the model picker are not part of chat; use a terminal channel for those. Chat channels are not yet shown on the phone.
+
 ## Approval alerts
 
 When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.

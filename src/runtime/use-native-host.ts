@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { ChannelControl } from '../../shared/remote';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
+import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
@@ -42,7 +43,12 @@ export function useNativeHost() {
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
     const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
+    const unsubscribeChat = host.onChatEvent(applyChatEvent);
     const unsubscribe = host.onSessionEvent((event) => {
+      // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
+      const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
+      if (event.type === 'started' && before?.config.engine === 'claude' && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
+      if (event.type === 'exit' && before?.config.engine === 'claude' && before.config.chat) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
       catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
@@ -80,7 +86,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeControl(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }

@@ -8,11 +8,14 @@ import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
-import { MAX_CHANNELS, ackSessionSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
+import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
+import { CHAT_ARGS, ClaudeStream } from '../chat/claude-stream';
+import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
+import type { ChatEnvelope } from '../../../shared/chat';
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -63,6 +66,8 @@ interface ManagedRun {
   unacked: number; paused: boolean; stall?: ReturnType<typeof setTimeout>;
   /** The latest title the CLI gave its terminal (OSC 0/2): Claude Code's task summary, for phones. */
   title?: string;
+  /** A chat channel: Claude's structured messages, turned into chat events for the window. */
+  chat?: ClaudeStream;
 }
 
 export class PtyManager {
@@ -75,7 +80,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number } = {},
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -101,6 +106,7 @@ export class PtyManager {
     const run = this.runs.get(reference.sessionId);
     if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
     if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    if (run.chat) throw new HubError('CHAT_REMOTE', 'This is a chat channel. Open it on the computer to write to it.');
     try { run.pty.write(data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
     if (isPersonInput(data)) this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId: run.session.runId, at: new Date().toISOString() });
@@ -154,6 +160,7 @@ export class PtyManager {
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
       const baseEnvironment = this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession;
+      const chat = request.config.engine === 'claude' && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const program = shellProgram(baseEnvironment);
@@ -173,18 +180,19 @@ export class PtyManager {
         this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...launch.args];
+        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(chat ? CHAT_ARGS : []), ...launch.args];
       }
       let pty: IPty;
       try {
-        pty = this.spawn(file, args, { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
+        pty = (chat ? this.dependencies.spawnChat ?? spawnChatProcess : this.spawn)(file, args, { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
       } catch (error) { throw new HubError('PTY_START_FAILED', `The terminal process could not start (${String((error as Error).message ?? error).split('\n')[0].slice(0, 200)}). Run npm run rebuild:native, then verify the CLI runs in your system terminal.`); }
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run);
-      pty.onData((data) => {
+      if (chat) this.attachChat(run, pty as ChatProcess);
+      else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-8192);
         if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
@@ -200,6 +208,38 @@ export class PtyManager {
     } finally {
       if (this.pending.get(request.sessionId) === reservation) this.pending.delete(request.sessionId);
     }
+  }
+
+  /**
+   * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
+   * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
+   */
+  private attachChat(run: ManagedRun, child: ChatProcess) {
+    const { sessionId, runId } = run.session;
+    const stream = new ClaudeStream((line) => { try { child.write(line); } catch { /* Exited. */ } }, (event) => {
+      if (run.finished && event.type !== 'permission-done') return;
+      if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
+      if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
+      try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
+    });
+    run.chat = stream;
+    child.onData((data) => { if (!run.finished) stream.push(data); });
+    // Claude's own error messages explain a failed start, as a terminal's last lines do.
+    child.onStderr((data) => { run.outputTail = (run.outputTail + data).slice(-8192); });
+    stream.start();
+  }
+
+  /** The window's messages, approvals and interruptions for a chat run. */
+  chat(owner: number, payload: unknown) {
+    const parsed = chatRequestSchema.safeParse(payload);
+    if (!parsed.success) throw new HubError('INVALID_CHAT', 'Invalid chat request.');
+    const run = this.ownedRun(owner, parsed.data);
+    if (!run.chat || run.finished) throw new HubError('NOT_CHAT', 'This channel is not a running chat.');
+    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    const request = parsed.data;
+    if (request.action === 'send') { if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.'); run.chat.send(request.text, request.images); }
+    else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
+    else run.chat.interrupt();
   }
 
   private flush(run: ManagedRun) {
@@ -273,7 +313,7 @@ export class PtyManager {
 
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
-    run.finished = true; if (run.stall) clearTimeout(run.stall);
+    run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
     // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.
