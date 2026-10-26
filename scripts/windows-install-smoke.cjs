@@ -6,6 +6,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { _electron } = require('playwright-core');
 const { artifactNames, installBaselineVersion } = require('./release-paths.cjs');
+const { product, LEGACY } = require('./product.cjs');
 const { waitForPage } = require('./lib/wait.cjs');
 const command = promisify(execFile);
 const version = require('../package.json').version;
@@ -27,7 +28,8 @@ async function nativeResult(page, method, request) {
   const install = path.join(root, 'application'); const data = path.join(root, 'data'); const profile = path.join(root, 'profile'); const project = path.join(root, 'project'); const bin = path.join(root, 'bin');
   assert.equal(/\s/.test(install), false, 'Use a Windows TEMP path without spaces for the NSIS /D argument.');
   const baselineVersion = installBaselineVersion();
-  const baseline = path.resolve(__dirname, '../release/baseline', artifactNames(baselineVersion)[0]);
+  // The baseline is built under the app's old name (TRACE_LEGACY_PRODUCT_NAME=1), as installs from before the rename are.
+  const baseline = path.resolve(__dirname, '../release/baseline', artifactNames(baselineVersion, LEGACY.prefix)[0]);
   const candidate = path.resolve(__dirname, '../release', artifactNames(version)[0]);
   assert.notEqual(version, baselineVersion, 'Candidate must have a higher version than the baseline.');
   assert.ok(await exists(baseline), 'Build the baseline installer first.'); assert.ok(await exists(candidate), 'Build the candidate installer first.');
@@ -42,13 +44,13 @@ async function nativeResult(page, method, request) {
   const env = { ...process.env, CODING_HUB_STORAGE_DIR: data, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
-  const installedExecutable = path.join(install, 'AI Coding Hub.exe'); const args = ['--user-data-dir=' + profile];
+  const baselineExecutable = path.join(install, `${LEGACY.name}.exe`); const installedExecutable = path.join(install, `${product().name}.exe`); const args = ['--user-data-dir=' + profile];
   let app; let uninstalled = false;
   const report = { baselineVersion, candidateVersion: version, platform: process.platform, passed: false, checks: [], fixtureCLIs: true, authenticatedProviderCompletion: false, publishedFeedUpdate: false, error: null };
   try {
-    await command(baseline, ['/S', '/D=' + install], { timeout: 120_000 }); await waitFor(() => exists(installedExecutable), 'Baseline installer did not produce its executable.');
+    await command(baseline, ['/S', '/D=' + install], { timeout: 120_000 }); await waitFor(() => exists(baselineExecutable), 'Baseline installer did not produce its executable.');
     report.checks.push('baseline-install');
-    app = await _electron.launch({ executablePath: installedExecutable, args, env }); let page = await app.firstWindow();
+    app = await _electron.launch({ executablePath: baselineExecutable, args, env }); let page = await app.firstWindow();
     // No project is open yet, so the workspace shows the "Open a project" screen instead of channel tiles.
     await page.waitForFunction(() => window.codingHub && document.querySelector('.tr-empty'));
     const status = await nativeResult(page, 'updates', { action: 'status' }); assert.equal(status.version, baselineVersion); assert.notEqual(status.phase, 'disabled');
@@ -85,6 +87,10 @@ async function nativeResult(page, method, request) {
     await app.close(); app = null;
     report.checks.push('installed-preload-pty-usage-history-rules-memory');
     await command(candidate, ['/S', '/D=' + install], { timeout: 120_000 });
+    // Installing Trace replaces the old-name app (same app ID): its executable is gone, not left beside the new one.
+    await waitFor(() => exists(installedExecutable), 'The Trace installer did not produce its executable.');
+    assert.equal(await exists(baselineExecutable), false, `Installing ${product().name} left the old ${LEGACY.name} executable in place.`);
+    report.checks.push('renamed-upgrade-replaces-old-name');
     app = await _electron.launch({ executablePath: installedExecutable, args, env }); page = await app.firstWindow();
     await page.waitForFunction(() => window.codingHub && document.querySelectorAll('.session-tile').length === 2);
     assert.equal((await nativeResult(page, 'updates', { action: 'status' })).version, version);
@@ -96,7 +102,7 @@ async function nativeResult(page, method, request) {
     for (const [i, file] of ['CLAUDE.md', 'AGENTS.md', '.mcp.json', '.codex/config.toml'].entries()) assert.deepEqual(await fs.readFile(path.join(project, file)), instructions[i]);
     report.checks.push('installer-upgrade-preserves-data-and-config');
     await app.close(); app = null;
-    await command(path.join(install, 'Uninstall AI Coding Hub.exe'), ['/S'], { timeout: 120_000 });
+    await command(path.join(install, `Uninstall ${product().name}.exe`), ['/S'], { timeout: 120_000 });
     await waitFor(async () => !await exists(installedExecutable), 'Uninstaller did not remove the app executable.');
     uninstalled = true;
     for (const file of ['storage.db', 'preferences.json', 'shared-rules.json', 'updates.json', 'memory/upgrade-fixture/' + before.memory[0].id + '.json', 'telemetry/usage.db']) assert.ok(await exists(path.join(data, file)), `Uninstall removed retained data: ${file}`);

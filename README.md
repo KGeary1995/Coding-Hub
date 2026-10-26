@@ -16,9 +16,11 @@ Download from the **[downloads page](https://github.com/KGeary1995/trace-release
 
 | Computer | File | First launch |
 |---|---|---|
-| Windows | `AI-Coding-Hub-<version>-Windows-x64-Setup.exe` | Windows may say it doesn't recognize the app (the installer isn't code-signed yet). Choose **More info → Run anyway**. |
-| Mac with Apple silicon (M1 and later) | `AI-Coding-Hub-<version>-macOS-arm64.dmg` | Drag the app to Applications. macOS blocks the first launch because the app isn't notarized by Apple. Open **System Settings → Privacy & Security** and click **Open Anyway**. |
-| Intel Mac | `AI-Coding-Hub-<version>-macOS-x64.dmg` | Same as above. |
+| Windows | `Trace-<version>-Windows-x64-Setup.exe` | Windows may say it doesn't recognize the app (the installer isn't code-signed yet). Choose **More info → Run anyway**. |
+| Mac with Apple silicon (M1 and later) | `Trace-<version>-macOS-arm64.dmg` | Drag the app to Applications. macOS blocks the first launch because the app isn't notarized by Apple. Open **System Settings → Privacy & Security** and click **Open Anyway**. |
+| Intel Mac | `Trace-<version>-macOS-x64.dmg` | Same as above. |
+
+**Upgrading from a version called AI Coding Hub:** on Windows, the Trace installer replaces it. On a Mac, Trace.app installs beside the old AI Coding Hub.app, and Trace offers once to move the old copy to the Trash. Your settings, channels and history carry over either way.
 
 Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M…" means arm64, "Processor: Intel" means x64.
 

@@ -1,3 +1,5 @@
+const { product } = require('./scripts/product.cjs');
+const { name: productName, prefix } = product();
 const macIdentity = process.env.MAC_SIGNING_IDENTITY;
 // Only the built app ships. A platform's own `files` replaces this list rather than adding to it (a list of only
 // exclusions there packed the whole source tree), so each platform repeats it before its exclusions.
@@ -18,7 +20,8 @@ const common = [
 
 module.exports = {
   appId: 'com.codinghub.desktop',
-  productName: 'AI Coding Hub',
+  // The app ID stays as it was, so installs from before the rename to Trace upgrade in place.
+  productName,
   forceCodeSigning: Boolean(process.env.CSC_LINK),
   directories: { output: 'release', buildResources: 'assets' },
   // node-pty starts workers and a console-list helper from real filesystem paths.
@@ -52,7 +55,7 @@ module.exports = {
     notarize: Boolean(macIdentity && (process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID)),
   },
   // A signed disk image, so Gatekeeper accepts the download itself; notarize it after the build (see README).
-  dmg: { artifactName: 'AI-Coding-Hub-${version}-macOS-${arch}.${ext}', sign: Boolean(macIdentity) },
+  dmg: { artifactName: prefix + '-${version}-macOS-${arch}.${ext}', sign: Boolean(macIdentity) },
   // Installers are published to a public downloads repository so installed copies can check it without credentials;
   // the source repository stays private. See docs/windows-releases.md.
   publish: [{ provider: 'github', owner: 'KGeary1995', repo: 'trace-releases', releaseType: 'release' }],
@@ -64,7 +67,7 @@ module.exports = {
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
     deleteAppDataOnUninstall: false,
-    artifactName: 'AI-Coding-Hub-${version}-Windows-${arch}-Setup.${ext}',
+    artifactName: prefix + '-${version}-Windows-${arch}-Setup.${ext}',
   },
-  portable: { requestExecutionLevel: 'user', artifactName: 'AI-Coding-Hub-${version}-Windows-${arch}-Portable.${ext}' },
+  portable: { requestExecutionLevel: 'user', artifactName: prefix + '-${version}-Windows-${arch}-Portable.${ext}' },
 };

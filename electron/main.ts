@@ -50,6 +50,9 @@ import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
+// The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
+// a restored data folder) stays in the folder that name gave it, so the rename loses nothing.
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'AI Coding Hub'));
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
 const storageRoot = resolveStorageRoot(storageBase, profileRoot);
 let hostHealth: HostHealth | null = null;
@@ -140,6 +143,19 @@ function sendToRenderer(channel: string, value: unknown, owner?: number): boolea
   } catch { hostHealth?.record('renderer-event-delivery-failed', channel); return false; }
 }
 function reportStorageError(message: string) { sendToRenderer(IPC_CHANNELS.storageError, message); }
+/**
+ * On a Mac, installing Trace.app does not replace the copy named AI Coding Hub.app from before the rename (Windows'
+ * installer does, by the shared app ID). Once, Trace offers to move that old copy to the Trash.
+ */
+async function offerToRemoveOldApp() {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  const old = '/Applications/AI Coding Hub.app'; const asked = path.join(app.getPath('userData'), 'old-app-offered');
+  if (!fs.existsSync(old) || fs.existsSync(asked) || app.getPath('exe').startsWith(old + '/')) return;
+  // Nothing is moved unless the person clicks Move to Trash: Return, Escape or closing the question keeps the old copy.
+  const { response } = await dialog.showMessageBox({ type: 'question', buttons: ['Keep it', 'Move to Trash'], defaultId: 0, cancelId: 0, title: 'Remove the old copy?', message: 'An older copy of this app, named AI Coding Hub, is still in Applications.', detail: 'Trace replaces it and keeps all your settings, channels and history. If AI Coding Hub is in your Dock, remove it and add Trace instead.' });
+  fs.writeFileSync(asked, new Date().toISOString());
+  if (response === 1) await shell.trashItem(old);
+}
 const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-status') }).strict(),
   z.object({ action: z.literal('linked-link'), id: z.uuid(), code: z.string().min(1).max(40) }).strict(),
@@ -302,6 +318,7 @@ function createWindow() {
 if (process.platform === 'darwin' && app.isPackaged) adoptLoginShellPath();
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
+  void offerToRemoveOldApp().catch(() => {});
   void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   hostHealth = new HostHealth(storageRoot);
   try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); }

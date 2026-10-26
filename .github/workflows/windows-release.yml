@@ -35,8 +35,11 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-      - name: Build upgrade baseline (same source, previous package version)
+      # The baseline installs under the app's old name (AI Coding Hub), so the test covers upgrading to Trace.
+      - name: Build upgrade baseline (same source, previous package version and name)
         run: node scripts/build-windows.cjs --output release/baseline --version 1.2.0
+        env:
+          TRACE_LEGACY_PRODUCT_NAME: '1'
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}

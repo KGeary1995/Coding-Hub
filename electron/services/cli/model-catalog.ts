@@ -79,7 +79,7 @@ export class ModelCatalog {
           } catch { fail(); return; }
         }
       });
-      send('initialize', { clientInfo: { name: 'ai_coding_hub', title: 'AI Coding Hub', version: this.dependencies.clientVersion ?? '1.0.0' }, capabilities: null }, expected);
+      send('initialize', { clientInfo: { name: 'ai_coding_hub', title: 'Trace', version: this.dependencies.clientVersion ?? '1.0.0' }, capabilities: null }, expected);
     });
   }
   close() { this.closing = true; for (const child of this.children) this.stop(child); }

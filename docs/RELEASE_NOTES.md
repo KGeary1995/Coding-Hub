@@ -6,7 +6,7 @@ Also in 1.10.1: no more lag while agents work, and the model (Opus 5.5, GPT-6.1 
 
 ## Install
 
-- **Windows:** download `AI-Coding-Hub-<version>-Windows-x64-Setup.exe` and run it. Windows may warn about an unrecognized app because the installer is not code-signed yet: choose **More info → Run anyway**.
+- **Windows:** download `Trace-<version>-Windows-x64-Setup.exe` and run it. Windows may warn about an unrecognized app because the installer is not code-signed yet: choose **More info → Run anyway**.
 - **Mac:** download the `.dmg` for your Mac (Apple menu → About This Mac shows Chip: Apple = arm64, Intel = x64), open it and drag the app to Applications.
 
 Your settings, history, rules and memory stay in `~/.coding-hub` and carry over between versions.

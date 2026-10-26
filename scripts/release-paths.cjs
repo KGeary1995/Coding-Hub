@@ -1,3 +1,4 @@
+const { product } = require('./product.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -8,9 +9,9 @@ function releaseVersion(value) {
   if (typeof value !== 'string' || !/^\d+\.\d+\.\d+$/.test(value)) throw new Error('Use a stable release version such as 1.2.1.');
   return value;
 }
-function artifactNames(version) {
+function artifactNames(version, prefix = product().prefix) {
   releaseVersion(version);
-  return [`AI-Coding-Hub-${version}-Windows-x64-Setup.exe`, `AI-Coding-Hub-${version}-Windows-x64-Setup.exe.blockmap`, `AI-Coding-Hub-${version}-Windows-x64-Portable.exe`, 'latest.yml'];
+  return [`${prefix}-${version}-Windows-x64-Setup.exe`, `${prefix}-${version}-Windows-x64-Setup.exe.blockmap`, `${prefix}-${version}-Windows-x64-Portable.exe`, 'latest.yml'];
 }
 function installBaselineVersion(environment = process.env) {
   return releaseVersion(environment.CODING_HUB_BASELINE_VERSION ?? '1.2.0');

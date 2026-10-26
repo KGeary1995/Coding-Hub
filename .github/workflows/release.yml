@@ -61,7 +61,7 @@ jobs:
       - run: npm run test:pty
       - run: npm run dist:mac
       - name: Start a CLI in the packaged app (Apple silicon)
-        run: node scripts/packaged-smoke.cjs "release/mac/mac-arm64/AI Coding Hub.app/Contents/MacOS/AI Coding Hub"
+        run: node scripts/packaged-smoke.cjs "release/mac/mac-arm64/Trace.app/Contents/MacOS/Trace"
       - uses: actions/upload-artifact@v4
         with:
           name: release-mac

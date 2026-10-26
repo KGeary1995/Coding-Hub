@@ -6,12 +6,13 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const { releaseVersion } = require('./release-paths.cjs');
+const { product } = require('./product.cjs');
 const root = path.resolve(__dirname, '..');
 const run = (file, args) => { const result = spawnSync(file, args, { cwd: root, stdio: 'inherit', shell: false }); if (result.error) throw result.error; if (result.status !== 0) throw new Error(`${path.basename(file)} failed with exit ${result.status ?? result.signal}.`); };
 
 const notarizing = () => Boolean(process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID);
 
-/** Checks one packaged app folder (AI Coding Hub.app on a Mac); returns its executable. */
+/** Checks one packaged app folder (Trace.app on a Mac); returns its executable. */
 function verifyApp(app, arch) {
   const resources = path.join(app, 'Contents/Resources/app');
   // Only the built app ships: source folders here would publish the private source on the public downloads page.
@@ -45,8 +46,8 @@ if (require.main === module) {
     const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');
     run(process.execPath, [builder, '--config', 'electron-builder.cjs', '--mac', '--publish', 'never', `--config.directories.output=${output}`, `--config.extraMetadata.version=${version}`]);
     for (const [arch, folder] of [['arm64', 'mac-arm64'], ['x64', 'mac']]) {
-      verifyApp(path.join(output, folder, 'AI Coding Hub.app'), arch);
-      const image = path.join(output, `AI-Coding-Hub-${version}-macOS-${arch}.dmg`);
+      verifyApp(path.join(output, folder, `${product().name}.app`), arch);
+      const image = path.join(output, `${product().prefix}-${version}-macOS-${arch}.dmg`);
       assert.ok(fs.statSync(image).size > 50_000_000, `${arch}: disk image is missing or unexpectedly small`);
     }
     console.log(`Verified Mac disk images: ${output}`);

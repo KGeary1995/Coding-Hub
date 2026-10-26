@@ -8,9 +8,9 @@ Each attempt packages into a unique `release/.build-<id>/` staging folder. The p
 
 Outputs in `release/`:
 
-- `AI-Coding-Hub-<version>-Windows-x64-Setup.exe`: per-user installer, adjustable install directory, shortcuts, uninstaller.
-- `AI-Coding-Hub-<version>-Windows-x64-Setup.exe.blockmap`: differential update data.
-- `AI-Coding-Hub-<version>-Windows-x64-Portable.exe`: optional manual-update edition.
+- `Trace-<version>-Windows-x64-Setup.exe`: per-user installer, adjustable install directory, shortcuts, uninstaller.
+- `Trace-<version>-Windows-x64-Setup.exe.blockmap`: differential update data.
+- `Trace-<version>-Windows-x64-Portable.exe`: optional manual-update edition.
 - `latest.yml`: stable update metadata with SHA-512 integrity hashes.
 
 `npm run verify:win` validates installer hashes, metadata version/provider, Windows PE architecture, node-pty helper binaries, renderer assets, host/preload, and packaged updater dependencies. It does not execute the installer. Linux cross-packaging needs a functioning Wine runtime as well as verified electron-builder helper downloads. In this cloud run, Wine failed while extracting the generated uninstaller, so a complete Windows package was not verified. Use the provided Windows workflow or a native Windows desktop for the release candidate. This limitation does not affect source builds.
@@ -43,7 +43,7 @@ Running **Release** by hand without **Publish** builds and tests only. Asset nam
 
 ## Mac disk images
 
-`npm run dist:mac` (on a Mac) builds `AI-Coding-Hub-<version>-macOS-arm64.dmg` (Apple silicon) and `…-macOS-x64.dmg` (Intel) into `release/mac` and checks each app: renderer, phone app, the node-pty binding for its processor, and an executable `spawn-helper` (without it no terminal starts). `npm run test:packaged -- "<app>/Contents/MacOS/AI Coding Hub"` then starts a fixture CLI in the packaged app.
+`npm run dist:mac` (on a Mac) builds `Trace-<version>-macOS-arm64.dmg` (Apple silicon) and `…-macOS-x64.dmg` (Intel) into `release/mac` and checks each app: renderer, phone app, the node-pty binding for its processor, and an executable `spawn-helper` (without it no terminal starts). `npm run test:packaged -- "<app>/Contents/MacOS/AI Coding Hub"` then starts a fixture CLI in the packaged app.
 
 The apps are ad-hoc signed, not signed with an Apple Developer ID or notarized, so macOS blocks the first launch; **System Settings → Privacy & Security → Open Anyway** allows it once. A Developer ID ($99/year Apple Developer Program) plus notarization would remove that step and is also what in-app updates on macOS require; until then the Mac edition is updated from the downloads page (Settings → Application updates → Open downloads page). Opened from Finder, the app reads the login shell's PATH so it finds CLIs installed through Homebrew, nvm, Volta or a shell profile.
 

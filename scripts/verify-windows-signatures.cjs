@@ -8,7 +8,7 @@ try {
  const args = process.argv.slice(2); if (args.length !== 2 || args[0] !== '--directory') throw new Error('Use --directory <verified build folder>.');
  const root = path.resolve(args[1]); const expected = process.env.WINDOWS_PUBLISHER_NAME; if (!expected) throw new Error('Set the public WINDOWS_PUBLISHER_NAME before verification.');
  const artifacts = fs.readdirSync(root).filter((name) => /-(Setup|Portable)\.exe$/.test(name)); if (artifacts.length !== 2) throw new Error('Expected one installer and one portable executable.');
- const appFiles=[]; for(const name of fs.readdirSync(root)){const candidate=path.join(root,name,'AI Coding Hub.exe');if(fs.existsSync(candidate))appFiles.push(candidate);}
+ const appFiles=[]; for(const name of fs.readdirSync(root)){const candidate=path.join(root,name,`${require('./product.cjs').product().name}.exe`);if(fs.existsSync(candidate))appFiles.push(candidate);}
  if(appFiles.length!==1)throw new Error('Expected one unpacked application executable.');
  const files=[...artifacts.map((name)=>path.join(root,name)),...appFiles]; const temp=fs.mkdtempSync(path.join(os.tmpdir(),'hub-signature-'));
  try {

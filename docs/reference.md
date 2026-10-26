@@ -127,7 +127,7 @@ Trace replaces the sidebar with a top bar and a status bar:
   - U Usage, H History, F Files, L More tools, T Tasks, V Verification, D Design, O Coaching;
   - A Accounts, M Memory, R Rules, S Settings.
 
-The installed program, its data folders (`~/.coding-hub`) and its update channel keep their original names, so existing installs upgrade in place.
+The app installs as **Trace** (Trace.app, Trace.exe, Start Menu and desktop shortcuts). Before 1.11 it installed as AI Coding Hub. The app ID, the Electron profile folder (still named `AI Coding Hub`), the data folder (`~/.coding-hub`), the Drive folders (`AI-Coding-Hub-Sync`, `AI-Coding-Hub-Memory`) and the update channel keep their original names, so existing installs upgrade in place and computers on different versions keep syncing. On Windows the Trace installer replaces the old-name install; on a Mac, Trace offers once to move AI Coding Hub.app to the Trash (only if you click **Move to Trash**).
 
 ## Screens
 

@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { product } = require('./product.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -32,10 +33,10 @@ function verifyPE(relativePath, machine) {
   return buffer;
 }
 
-const executable = verifyPE('AI Coding Hub.exe', 0x8664);
+const executable = verifyPE(`${product().name}.exe`, 0x8664);
 const entries = NtExecutableResource.from(NtExecutable.from(executable, { ignoreCert: true })).entries;
 const version = Resource.VersionInfo.fromEntries(entries)[0];
-assert.equal(version.getStringValues({ lang: 1033, codepage: 1200 }).ProductName, 'AI Coding Hub');
+assert.equal(version.getStringValues({ lang: 1033, codepage: 1200 }).ProductName, product().name);
 assert.ok(entries.some((entry) => entry.type === 14), 'Application icon is missing');
 
 const pty = 'resources/app/node_modules/node-pty';
@@ -72,7 +73,7 @@ const phone = fs.readFileSync(path.join(resources, 'dist/phone/index.html'), 'ut
 for (const match of phone.matchAll(/(?:src|href)="\/([^"?#]+)"/g)) {
   assert.ok(fs.existsSync(path.join(resources, 'dist/phone', match[1])), `Missing phone app file: ${match[1]}`);
 }
-const artifact = `AI-Coding-Hub-${expectedVersion}-Windows-x64-Portable.exe`;
+const artifact = `${product().prefix}-${expectedVersion}-Windows-x64-Portable.exe`;
 assert.ok(fs.existsSync(path.join(output, artifact)), 'Current-version portable Windows executable is missing');
 const artifactBuffer = fs.readFileSync(path.join(output, artifact));
 assert.equal(artifactBuffer.toString('ascii', 0, 2), 'MZ');
