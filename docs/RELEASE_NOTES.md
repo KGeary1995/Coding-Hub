@@ -1,10 +1,9 @@
 ## What's new
 
-- **Mac app.** Trace now comes as a Mac disk image: `macOS-arm64` for Apple silicon (M1 and later), `macOS-x64` for Intel Macs. Terminals start in the packaged app, and it finds Claude Code, Codex and Node.js where your terminal does.
-- **Up to eight channels.** Add up to eight Claude Code or Codex channels. Past four, the grid goes three or four across; each channel runs its own CLI, so more channels use more memory.
-- **Phone access: guided Tailscale HTTPS.** When Tailscale needs HTTPS certificates turned on (or Serve approved), Trace shows the steps, opens the right Tailscale page, and finishes setup by itself when you come back.
-- **Simpler menus.** Design workspace, AI coaching, Task coordination and Verification profiles moved to **Insight → More tools**. Nothing in them changed.
-- **Updates.** Settings → Application updates has an **Open downloads page** button. Installed Windows copies check this page for new versions.
+- **Terminal channels.** **+ Channel → Terminal** opens your normal shell in the project folder: zsh or bash on a Mac, PowerShell on Windows. It sits in the grid next to Claude Code and Codex and shows up on the phone page. Nothing it prints is saved to history.
+- **See the images you paste.** Paste a screenshot into a Claude Code or Codex channel (Ctrl+V, or Cmd+V on a Mac) and a thumbnail appears under the terminal; click it to see it full size. Dropping a file on a channel types its path, and dropped images join the strip.
+- **Phone access on Macs with Tailscale from the App Store.** Setup no longer fails with "Unexpected token 'T' … is not valid JSON" when Trace is opened from the Dock.
+- **Security updates.** Electron 44.9.3 and zod 4.6.7 fix published security advisories.
 
 ## Install
 
