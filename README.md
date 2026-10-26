@@ -73,7 +73,16 @@ A paired phone can read and type into running channels and nothing else. Remove 
 
 ## Use Trace on more than one computer
 
-Turn on **Settings → Sync settings, rules, templates and usage between computers** on each computer, and point every computer at the same Google Drive folder. Running sessions and sign-ins stay on each computer.
+**Sync:** turn on **Settings → Sync settings, rules, templates and usage between computers** on each computer, and point every computer at the same Google Drive folder.
+
+**See and control one computer's channels from another:**
+1. On each computer, turn on sync (same Drive folder) and **Phone access** with Tailscale HTTPS.
+2. Within a minute, each appears on the other under **Settings → Other computers**.
+3. On the computer you want to reach, click **Show link code**. On the other, type that code next to its name and click **Link**.
+
+The linked computer gets its own tab next to **Projects**, showing its channels live: type into them, answer prompts, and **Start**, **Stop**, **Restart** or **Interrupt** them. Link in both directions to do the same the other way. Running sessions and sign-ins stay on the computer that runs them.
+
+**One phone app for every computer:** pair your phone with one computer. Its channel list then shows every linked computer's channels too, with a switcher to show one computer at a time. If that computer is off, the app still opens and connects straight to your other computer, and switches back by itself. Alerts come from the computer you added the app from.
 
 ## Troubleshooting
 

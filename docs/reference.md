@@ -280,6 +280,16 @@ How it is protected:
 - Requests must name this computer or its tailnet address, and Tailscale Funnel (public internet) requests are refused.
 - A paired phone can read channel output and type into channels that are already running, the same as typing at the desktop. It cannot start, stop or reconfigure channels, or reach any other part of Trace. Treat a paired phone like an unlocked keyboard on this computer, and remove phones you no longer use.
 
+## Other computers
+
+Trace on each of your computers can link to the others and show their channels.
+
+- **Finding each other.** With sync between computers on, each computer writes its phone remote's tailnet address (never a key) to `AI-Coding-Hub-Sync/computers/<machine id>.json` in the Drive folder. **Settings → Other computers** lists the others. Only `https://<name>.ts.net` addresses are used, so a record in Drive cannot send a code or key anywhere else.
+- **Linking.** **Show link code** on the computer to be reached gives a code for computers (five minutes, one use). The code decides what is created: a computer code gives a key that may also start, stop and restart channels; a phone's code cannot link a computer. The key is kept in `linked-computers.json` in this computer's data folder, and the other computer stores only its hash. **Unlink** removes it on both computers; the other computer can also **Remove** it.
+- **What a linked computer can do:** follow every channel's output (one stream), type into channels, and start, stop or restart them. The desktop window on the computer that runs a channel carries the request out, as its own buttons would. If that window is closed, the request is refused.
+- **The tab.** Each linked computer gets a tab after the main views. Terminals there keep the other computer's columns and rows and scroll instead of being resized. A count on the tab shows channels there that need you.
+- **Phones.** A computer passes linked computers' channels on to its phones, never to other computers, so channels cannot loop. Every channel the phone sees names its computer, and the phone can switch between computers. The phone also asks its computer for a phone key to each other linked computer (issued as "<phone> (through <computer>)"; asking again replaces it). When its own computer does not answer, the phone app opens from its saved copy and connects straight to another computer with that key, then switches back when its computer answers. Those computers accept requests from the phone app's origin only when it is one of your computers' tailnet addresses, and still require a key. Phone keys never start or stop channels.
+
 ## Workspace
 
 - Open a local project and launch each engine independently. CLIs inherit local authentication, environment, Git context, hooks, and tools. There are no direct model API requests or approval-bypass flags.
