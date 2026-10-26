@@ -61,20 +61,26 @@ export function useNativeHost() {
       useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info);
       loaded = true;
       let previous = JSON.stringify(savedWorkspace());
-      let generation = 0;
-      unsubscribeSave = useWorkspaceStore.subscribe((state) => {
-        const workspace = savedWorkspace(state);
-        const next = JSON.stringify(workspace);
-        if (next === previous) return;
+      let generation = 0; let timer: ReturnType<typeof setTimeout> | null = null;
+      // Changes come in bursts (typing a name, dragging a tile); the latest is saved once they settle. Closing the
+      // app does not wait for this: the host asks for the current workspace directly (onWorkspaceFlush).
+      const save = () => {
+        timer = null;
+        const workspace = savedWorkspace(); const next = JSON.stringify(workspace);
+        if (next === previous) { useWorkspaceStore.setState({ persistenceStatus: 'saved' }); return; }
         previous = next;
         const current = ++generation;
-        useWorkspaceStore.setState({ persistenceStatus: 'saving' });
         void host.saveWorkspace(workspace).then((saved) => {
           if (cancelled || current !== generation) return;
           useWorkspaceStore.setState({ persistenceStatus: saved.ok ? 'saved' : 'error', persistenceError: saved.ok ? null : saved.error.message });
         }).catch(() => {
           if (!cancelled && current === generation) useWorkspaceStore.setState({ persistenceStatus: 'error', persistenceError: 'The native storage connection is unavailable.' });
         });
+      };
+      unsubscribeSave = useWorkspaceStore.subscribe((state) => {
+        if (JSON.stringify(savedWorkspace(state)) === previous) return;
+        if (state.persistenceStatus !== 'saving') useWorkspaceStore.setState({ persistenceStatus: 'saving' });
+        if (timer) clearTimeout(timer); timer = setTimeout(save, 400);
       });
     }).catch(() => {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
