@@ -224,7 +224,9 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     assert.equal(usage.value.find((u) => u.engine === 'codex').context.limit, 1000);
     // Usage another computer wrote to the Drive folder appears labelled with that computer, and stays out of today's total here.
     const other = { id: '6f1c2b9e-1d2a-4c3b-8e4f-5a6b7c8d9e0f', name: 'laptop' };
-    await writeFile(path.join(driveFolder, 'AI-Coding-Hub-Sync', 'usage', other.id + '.json'), JSON.stringify({ version: 1, machine: other, updatedAt: new Date().toISOString(), value: [{ ...usage.value[0], runId: 'laptop-run', sessionId: 'laptop-session', source: usage.value[0].source, confidence: 'reported' }] }));
+    // A synced record as Trace writes it: usage by day stays on the computer that recorded it.
+    const synced = ({ days: _days, ...record }) => record;
+    await writeFile(path.join(driveFolder, 'AI-Coding-Hub-Sync', 'usage', other.id + '.json'), JSON.stringify({ version: 1, machine: other, updatedAt: new Date().toISOString(), value: [{ ...synced(usage.value[0]), runId: 'laptop-run', sessionId: 'laptop-session', source: usage.value[0].source, confidence: 'reported' }] }));
     const today = page.locator('.tr-sb-cell').filter({ hasText: 'Σ today' }); const todayBefore = await today.textContent();
     assert.equal((await page.evaluate(() => window.codingHub.hub({ action: 'device-sync-now' }))).value.computers[0].name, 'laptop');
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();

@@ -89,6 +89,24 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     const phoneCols = await width(); assert.ok(phoneCols >= 20 && phoneCols <= 60, `the channel is drawn at the phone's width (${phoneCols} columns)`);
+    // Typing at the desktop takes the channel back, and the phone does not take it again by itself (its screen changing
+    // size, as when the address bar hides), only when it is used.
+    await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('z'); await page.keyboard.press('Backspace');
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'typing at the desktop gives the desktop its size back');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith('http://127.0.0.1:47821'))?.setSize(390, 700)); await phone.waitForTimeout(600);
+    assert.ok((await width()) > 60, 'a phone screen change does not take the channel back');
+    await phone.locator('#output').click();
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) <= 60, 'touching the channel on the phone draws it at the phone\'s size again');
+    // A locked phone (or one showing another app) gives it back; coming back takes it again.
+    const visibility = (state) => phone.evaluate((value) => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value }); document.dispatchEvent(new Event('visibilitychange')); }, state);
+    await visibility('hidden');
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'a locked phone gives the desktop its size back');
+    await visibility('visible');
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) <= 60, 'unlocking the phone draws the channel at its size again');
     // A message that cannot be delivered stays in the field instead of being lost.
     const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
