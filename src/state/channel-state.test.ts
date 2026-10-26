@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
-import type { UsageRecord } from '../../shared/hub';
+import { localDay, type UsageRecord } from '../../shared/hub';
 import { CHANNEL_STATES, channelAlerts, channelState, todayTotals } from './channel-state';
 import { ACTIVITY_WINDOW, activitySamples, forgetActivity, isPersonInput, recordActivity, tickActivity, useActivityStore } from './activity-store';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
@@ -46,6 +46,8 @@ describe('alerts and totals', () => {
     expect(todayTotals([usage({ engine: 'claude', timestamp: now.toISOString(), cached: 9999 }), usage({ timestamp: yesterday.toISOString() })], now)).toEqual({ tokens: 120, cost: null });
     expect(todayTotals([usage({ timestamp: now.toISOString(), input: 100, cached: 40, output: 20 })], now)).toEqual({ tokens: 80, cost: null });
     expect(todayTotals([usage({ timestamp: now.toISOString(), cost: 0.25 }), usage({ timestamp: now.toISOString(), cost: 0.5 })], now)).toEqual({ tokens: 240, cost: 0.75 });
+    // A run that started yesterday counts only what it used today; a run with nothing today adds nothing.
+    expect(todayTotals([usage({ timestamp: yesterday.toISOString(), days: { [localDay(yesterday)]: { tokens: 500, cost: 1 }, [localDay(now)]: { tokens: 70, cost: 0.1 } } }), usage({ timestamp: now.toISOString(), days: { [localDay(yesterday)]: { tokens: 9, cost: null } } })], now)).toEqual({ tokens: 70, cost: 0.1 });
   });
 });
 

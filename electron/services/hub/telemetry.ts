@@ -4,13 +4,20 @@ import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
-import { newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
+import { localDay, newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
 
 type Json = Record<string, any>;
-interface Snapshot { key: string; model: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: UsageRecord['context'] }
+interface Snapshot { key: string; model: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: UsageRecord['context'];
+  /** The local day the event was logged on. Codex reports a running total, so a Codex run counts on its latest day. */
+  day?: string }
 const reported = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 const number = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0;
 export function parseUsage(engine: 'claude' | 'codex', raw: Json, fallbackModel: string): Snapshot | null {
+  const snapshot = parseSnapshot(engine, raw, fallbackModel); const at = new Date(typeof raw.timestamp === 'string' ? raw.timestamp : NaN);
+  if (snapshot && !Number.isNaN(at.getTime())) snapshot.day = localDay(at);
+  return snapshot;
+}
+function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: string): Snapshot | null {
   if (engine === 'claude') {
     if (raw.type !== 'assistant' || !raw.message?.id || !raw.message?.usage) return null;
     const u = raw.message.usage;
@@ -138,12 +145,13 @@ export class TelemetryService {
     const meta = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (!meta) return null;
     const rows = this.database.prepare('SELECT snapshot FROM usage WHERE run=? ORDER BY rowid').all(runId); if (!rows.length) return null;
     const usage: UsageRecord = { ...JSON.parse(String(meta.value)), input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: null, context: null, cost: null };
-    let cost = 0; let priced = true;
+    let cost = 0; let priced = true; const days: NonNullable<UsageRecord['days']> = {}; const started = localDay(new Date(usage.timestamp));
     for (const row of rows) { const snapshot = JSON.parse(String(row.snapshot)) as Snapshot;
       // Claude writes zero-usage `<synthetic>` entries for API errors; they cost nothing and are not the run's model.
       if (!snapshot.input && !snapshot.output && !snapshot.cached && !snapshot.cacheWrite && !snapshot.reasoning) continue;
-      const event = { ...usage, ...snapshot }; const eventCost = usageCost(event, rates); if (eventCost === null) priced = false; else cost += eventCost; usage.model = snapshot.model; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += snapshot[key]; if (snapshot.reasoning !== null) usage.reasoning = (usage.reasoning ?? 0) + snapshot.reasoning; if (snapshot.context) usage.context = snapshot.context; }
-    usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; return usage;
+      const event = { ...usage, ...snapshot }; const eventCost = usageCost(event, rates); if (eventCost === null) priced = false; else cost += eventCost;
+      const day = days[snapshot.day ?? started] ??= { tokens: 0, cost: 0 }; day.tokens += newTokens(event); day.cost = eventCost === null || day.cost === null ? null : day.cost + eventCost; usage.model = snapshot.model; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += snapshot[key]; if (snapshot.reasoning !== null) usage.reasoning = (usage.reasoning ?? 0) + snapshot.reasoning; if (snapshot.context) usage.context = snapshot.context; }
+    usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
   /** The CLI's own session file for a run, once it has been located. */

@@ -1,5 +1,5 @@
 import type { Session } from '../../shared/types';
-import { freshInput, newTokens, type UsageRecord } from '../../shared/hub';
+import { freshInput, localDay, newTokens, type UsageRecord } from '../../shared/hub';
 
 /** What a session is doing, as the Trace design shows it (docs/design/trace/README.md). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
@@ -72,13 +72,15 @@ export { freshInput };
 
 /** This computer's reported input + output tokens today (cache excluded) and cost, by local date. Cost is null when nothing is priced. */
 export function todayTotals(records: UsageRecord[], now = new Date()) {
-  const day = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-  const today = day(now); let tokens = 0; let cost: number | null = null;
+  const today = localDay(now); let tokens = 0; let cost: number | null = null;
   for (const record of records) {
+    if (record.machine) continue;
+    // Usage by day, where the run reports it; older records count on the day the run started.
     const started = new Date(record.timestamp);
-    if (record.machine || Number.isNaN(started.getTime()) || day(started) !== today) continue;
-    tokens += newTokens(record);
-    if (record.cost !== null) cost = (cost ?? 0) + record.cost;
+    const day = record.days ? record.days[today] : !Number.isNaN(started.getTime()) && localDay(started) === today ? { tokens: newTokens(record), cost: record.cost } : undefined;
+    if (!day) continue;
+    tokens += day.tokens;
+    if (day.cost !== null) cost = (cost ?? 0) + day.cost;
   }
   return { tokens, cost };
 }

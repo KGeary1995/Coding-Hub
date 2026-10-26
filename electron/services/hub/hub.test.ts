@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService } from './memory';
 import { DriveMirror } from './drive';
-import { DEFAULT_PREFERENCES, type UsageRecord } from '../../../shared/hub';
+import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
 import { parseUsage, TelemetryService, totalTokens, usageCost } from './telemetry';
 import { hubRequestSchema } from './service';
 const roots: string[] = [];
@@ -99,6 +99,16 @@ describe('structured telemetry', () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl'); const publish = vi.fn(); const stop = vi.fn(); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], publish, stop, home, path.join(root, 'codex'));
     telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 120 } }); const event = (output: number) => JSON.stringify({ type: 'assistant', message: { id: 'same-message', model: 'actual-model', usage: { input_tokens: 100, output_tokens: output, cache_read_input_tokens: 20, cache_creation_input_tokens: 10 } } }) + '\n'; fs.writeFileSync(file, event(10) + event(30)); vi.advanceTimersByTime(750); expect(telemetry.list()[0]).toMatchObject({ input: 100, output: 30, cached: 20, cacheWrite: 10, model: 'actual-model', reasoning: null }); expect(totalTokens(telemetry.list()[0])).toBe(130); expect(stop).toHaveBeenCalledTimes(1); fs.appendFileSync(file, event(20)); vi.advanceTimersByTime(750); expect(telemetry.list()[0].output).toBe(30); expect(stop).toHaveBeenCalledTimes(1); telemetry.close();
     const restored = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home); expect(restored.list()[0].output).toBe(30); restored.close();
+  });
+  it('counts each reply on the day it was used, so a run that spans midnight adds to today', () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [{ model: 'm', input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }], () => {}, () => {}, home, path.join(root, 'codex'));
+    try {
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      const today = new Date(); today.setHours(12, 0, 0, 0); const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+      const event = (id: string, at: Date, output: number) => JSON.stringify({ type: 'assistant', timestamp: at.toISOString(), message: { id, model: 'm', usage: { input_tokens: 100, output_tokens: output, cache_read_input_tokens: 5000 } } }) + '\n';
+      fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), event('a', yesterday, 10) + event('b', today, 30) + event('c', today, 20)); vi.advanceTimersByTime(750);
+      expect(telemetry.list()[0].days).toEqual({ [localDay(yesterday)]: { tokens: 110, cost: 0.00011 }, [localDay(today)]: { tokens: 250, cost: 0.00025 } });
+    } finally { telemetry.close(); vi.useRealTimers(); }
   });
   it('correlates Codex thread IDs and refuses ambiguous same-directory sessions', () => {
     vi.useFakeTimers(); const { root } = setup(); const codex = path.join(root, 'codex'); const now = new Date(); const dir = path.join(codex, 'sessions', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), String(now.getUTCDate()).padStart(2, '0')); fs.mkdirSync(dir, { recursive: true }); const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, path.join(root, 'claude'), codex); const a = { ...run, runId: randomUUID(), engine: 'codex' as const }; const b = { ...a, runId: randomUUID(), sessionId: 'second' }; const config = { engine: 'codex' as const, model: '', reasoningEffort: null }; const thread = randomUUID(); fs.writeFileSync(path.join(dir, `rollout-${thread}.jsonl`), JSON.stringify({ type: 'session_meta', timestamp: now.toISOString(), payload: { id: thread, cwd: a.cwd } }) + '\n' + JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-actual' } }) + '\n' + JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 25 } } } }) + '\n');

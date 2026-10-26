@@ -29,7 +29,9 @@ export interface MemoryNote { id: string; project: string; title: string; conten
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 /** `machine` names the other computer a record was synced from; it is absent for this computer's own runs. */
 /** `incomplete`: Trace could not read all of the run's usage log, so its totals may be low. */
-export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null }
+export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null;
+  /** New tokens and cost by the local day they were used on (`localDay`), for runs that span midnight. */
+  days?: Record<string, { tokens: number; cost: number | null }> }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
 export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; syncDevices?: boolean }
 export type SyncedDocument = 'settings' | 'rules';
@@ -50,4 +52,6 @@ export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOL
  * its cached input; Claude's does not.
  */
 export const freshInput = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached'>) => usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
+/** A computer's local calendar day, as `days` keys it: 2026-10-26. */
+export const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'>) => freshInput(usage) + usage.output;

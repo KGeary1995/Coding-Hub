@@ -158,7 +158,7 @@ export class DeviceSync {
     if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared template file${unreadable === 1 ? '' : 's'} could not be read; copies on this computer were kept.`);
   }
   private usage(folder: string, state: State) {
-    const records = this.localUsage().filter((record) => !record.machine).slice(0, 2000).flatMap((record) => { const parsed = usageSchema.safeParse(record); return parsed.success ? [parsed.data] : []; });
+    const records = this.localUsage().filter((record) => !record.machine).slice(0, 2000).flatMap(({ days: _days, ...record }) => { const parsed = usageSchema.safeParse(record); return parsed.success ? [parsed.data] : []; });
     // The cache names the folder too, so a new Drive folder (or a deleted usage file) gets this computer's history again.
     const own = path.join(folder, 'usage', this.machine.id + '.json'); const hash = digest([folder, records]);
     if (hash !== state.usage || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: records }); state.usage = hash; }
