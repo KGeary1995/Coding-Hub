@@ -73,7 +73,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     // Account login works before selecting a project; fixture output is never saved as a coding run.
     await openView(page, 'Accounts & connections');
     await page.waitForFunction(() => document.querySelectorAll('.account-card button.button.primary:not(:disabled)').length >= 2);
-    assert.equal(await page.getByRole('heading', { name: 'Accounts & connections', exact: true }).isVisible(), true);
+    await page.getByRole('heading', { name: 'Accounts & connections', exact: true }).waitFor();
     const initialAccounts = await page.evaluate(() => window.codingHub.accounts({ action: 'status' }));
     assert.equal(initialAccounts.ok, true); assert.equal(initialAccounts.value.find((item) => item.provider === 'claude').state, 'not-authenticated');
     for (const provider of ['claude', 'codex']) {
@@ -194,8 +194,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.keyboard.press('Control+Shift+P');
     await page.getByLabel('Search commands', { exact: true }).fill('settings');
     await page.keyboard.press('Enter');
-    assert.equal(await page.getByRole('heading', { name: 'Workspace settings', exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole('heading', { name: 'Application updates', exact: true }).isVisible(), true);
+    await page.getByRole('heading', { name: 'Workspace settings', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Application updates', exact: true }).waitFor();
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'status' }))).value.phase, 'disabled');
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'check' }))).error.code, 'UPDATES_DISABLED');
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'check', url: 'https://untrusted.invalid' }))).error.code, 'INVALID_UPDATE_REQUEST');
@@ -391,7 +391,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     assert.equal(await restored.locator('.session-tile').count(), 3);
     assert.equal(await restored.getByRole('button', { name: 'Start session', exact: true }).count(), 3);
     await restored.keyboard.press('F1');
-    assert.equal(await restored.getByRole('heading', { name: 'Help & AI guide', exact: true }).isVisible(), true);
+    await restored.getByRole('heading', { name: 'Help & AI guide', exact: true }).waitFor();
     await openView(restored, 'Settings');
     await restored.getByLabel('Interface scale', { exact: true }).selectOption('110');
     await restored.getByLabel('Information density', { exact: true }).selectOption('compact');
@@ -413,7 +413,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     assert.equal(audit.ok, true); assert.equal(audit.value.rulesApplied, true);
     await openView(restored, 'Shared memory');
     await restored.getByLabel('Search handoffs', { exact: true }).fill('no-such-handoff');
-    assert.equal(await restored.getByRole('heading', { name: 'No matching handoffs', exact: true }).isVisible(), true);
+    // The list filters as the person types; wait for that render rather than checking at once.
+    await restored.getByRole('heading', { name: 'No matching handoffs', exact: true }).waitFor();
     await restored.getByLabel('Search handoffs', { exact: true }).fill('');
     await restored.locator('.memory-history .extension-row').first().click();
     await restored.getByRole('button', { name: 'Revise as a new handoff', exact: true }).click();
@@ -440,7 +441,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await restored.getByLabel('Initialize a Git repository (requires Git)', { exact: true }).uncheck();
     await restored.getByRole('button', { name: 'Create and open project', exact: true }).click();
     await restored.waitForFunction(() => document.querySelector('.tr-detail-facts')?.textContent.includes('new-desktop-project'));
-    assert.equal((await restored.evaluate(() => window.codingHub.loadWorkspace())).value.workspace.rootDirectory, path.join(root, 'new-desktop-project'));
+    // The workspace is saved once changes settle.
+    await restored.waitForFunction(async (expected) => (await window.codingHub.loadWorkspace()).value.workspace.rootDirectory === expected, path.join(root, 'new-desktop-project'));
     if (process.env.CODING_HUB_TEST_SCREENSHOT) await restored.screenshot({ path: process.env.CODING_HUB_TEST_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
     await app.close();

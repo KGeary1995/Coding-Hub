@@ -1,7 +1,10 @@
 import { lazy, Suspense } from 'react';
 const WorkflowCenter = lazy(() => import('./WorkflowCenter').then((module) => ({ default: module.WorkflowCenter })));
 import { useWorkspaceStore } from '../state/workspace-store';
-// Screens load when first opened, keeping the window's start-up bundle to the workspace itself.
+// Screens load when first opened, keeping the window's start-up bundle to the workspace itself. Once the window has
+// settled they are fetched in the background (preloadScreens), so opening one is still instant.
+const screens = [() => import('./TasksPanel'), () => import('./VerificationPanel'), () => import('./CoachingPanel'), () => import('./DesignPanel'), () => import('./ProjectsPanel'), () => import('./AccountsPanel'), () => import('./RulesPanel'), () => import('./HelpPanel'), () => import('./HubPanels'), () => import('./screens/UsageScreen'), () => import('./WorkflowCenter')];
+export function preloadScreens() { for (const load of screens) void load().catch(() => {}); }
 const TasksPanel = lazy(() => import('./TasksPanel').then((module) => ({ default: module.TasksPanel })));
 const VerificationPanel = lazy(() => import('./VerificationPanel').then((module) => ({ default: module.VerificationPanel })));
 const CoachingPanel = lazy(() => import('./CoachingPanel').then((module) => ({ default: module.CoachingPanel })));

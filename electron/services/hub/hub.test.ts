@@ -89,8 +89,8 @@ describe('structured telemetry', () => {
       fs.writeFileSync(file, '');
       telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: 1000 } });
       vi.advanceTimersByTime(750);
-      // The log becomes unreadable (here: replaced by a folder).
-      fs.rmSync(file); fs.mkdirSync(file); fs.writeFileSync(path.join(file, 'x'), 'x'.repeat(10));
+      // The log becomes unreadable (here: it disappears, which fails the same way on every platform).
+      fs.rmSync(file);
       vi.advanceTimersByTime(750 * 5);
       expect(errors).toHaveLength(1); expect(errors[0]).toMatch(/usage may be incomplete and its session token limit is not being enforced/);
     } finally { telemetry.close(); vi.useRealTimers(); }

@@ -1,9 +1,9 @@
 import { LinkedComputerView } from './components/screens/LinkedComputerView';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAccessibility } from './components/AccessibilityControls';
 import { EmptyWorkspace, useProjectSetup } from './components/workspace/EmptyWorkspace';
 import { SessionGrid } from './components/SessionGrid';
-import { FeaturePanel } from './components/FeaturePanel';
+import { FeaturePanel, preloadScreens } from './components/FeaturePanel';
 import { useWorkspaceStore } from './state/workspace-store';
 import { useNativeHost } from './runtime/use-native-host';
 import { useViewShortcuts } from './runtime/view-shortcuts';
@@ -32,6 +32,8 @@ export function App() {
   useViewShortcuts();
   const [explorer, setExplorer] = useState(false);
   const { activeView, persistenceReady, persistenceError, logError } = useWorkspaceStore();
+  // Once the workspace is up, fetch the other screens in the background so they open instantly.
+  useEffect(() => { if (!persistenceReady) return; const timer = setTimeout(preloadScreens, 1500); return () => clearTimeout(timer); }, [persistenceReady]);
   return (
     <div className="app-shell" data-view={activeView}>
       <a className="skip-link" href="#main-content">Skip to workspace content</a>
