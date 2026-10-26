@@ -12,6 +12,9 @@ export interface ChatProcess extends IPty { onStderr(listener: (data: string) =>
  */
 export function spawnChatProcess(file: string, args: string[], options: IPtyForkOptions): ChatProcess {
   const child = spawn(file, args, { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true });
+  // A process that cannot be started (its program or folder gone since it was found) also reports that as an `error`
+  // event after this returns; unhandled, that event would bring down the whole app. The failure is reported below.
+  child.on('error', () => {});
   if (!child.pid) { child.kill(); throw new Error('The CLI could not be started.'); }
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   // A closed stdin (the CLI exiting) must not crash the host.

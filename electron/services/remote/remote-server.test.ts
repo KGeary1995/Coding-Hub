@@ -37,6 +37,12 @@ async function paired(server: RemoteServer) {
   const response = await fetch(base(server) + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, name: 'Test phone' }) });
   return (await response.json() as { token: string }).token;
 }
+/** Links a computer (pairing with its machine id), returning its key. */
+async function computer(server: RemoteServer) {
+  const code = server.pair('computer').pairing!.code;
+  const response = await fetch(base(server) + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, name: 'Laptop', machineId: '6f1c2b9e-1d2a-4c3b-8e4f-5a6b7c8d9e0f' }) });
+  return (await response.json() as { token: string }).token;
+}
 /** Reads server-sent events from the stream until `count` have arrived. */
 async function events(server: RemoteServer, token: string, sessionId: string | null, count: number, during?: () => void) {
   const controller = new AbortController(); const response = await fetch(base(server) + '/api/stream' + (sessionId ? `?sessionId=${sessionId}` : ''), { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
@@ -131,6 +137,22 @@ describe('phone remote', () => {
       setTimeout(() => { server.revoke(server.status().devices[0].id); req.end('"data":"y"}'); }, 100);
     });
     expect(await result).toBe(401); expect(writes).toEqual([]);
+  });
+
+  it('gives no phone key to a computer removed while its request was still arriving', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await computer(server);
+    const result = new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: server.address!, path: '/api/phone-key', method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }, (response) => { response.resume(); resolve(response.statusCode!); });
+      req.on('error', reject); req.write('{"name":"Phone",');
+      setTimeout(() => { server.revoke(server.status().devices[0].id); req.end('"relayKey":"k"}'); }, 100);
+    });
+    expect(await result).toBe(401); expect(server.status().devices).toEqual([]);
+  });
+
+  it('keeps the paired devices readable whatever relay key a linked computer sends', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await computer(server);
+    const response = await fetch(base(server) + '/api/phone-key', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Phone', relayKey: 'k'.repeat(100) }) });
+    expect(response.status).toBe(200); expect(server.status().devices).toHaveLength(2);
   });
 
   it('tells connected phones when the saved channels change, and only when the list they see is different', async () => {

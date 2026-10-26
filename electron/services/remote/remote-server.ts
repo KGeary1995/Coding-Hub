@@ -45,8 +45,9 @@ const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(push
 const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional(),
   /** Absent on phones paired before computers could link. */
   kind: z.enum(['phone', 'computer']).optional(), machineId: z.uuid().optional(),
-  /** A phone key a linked computer asked for on behalf of its phone: asking again replaces it. */
-  relayKey: z.string().max(100).optional() }).strict();
+  /** A phone key a linked computer asked for on behalf of its phone (`<computer id>:<its key>`): asking again replaces it. */
+  relayKey: z.string().max(36 + 1 + 100).optional() }).strict();
+const devicesSchema = z.array(deviceSchema).max(20);
 const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
 /** What a browser's `PushSubscription.toJSON()` gives (`expirationTime` is usually null and is not needed to send). */
 const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTime: z.number().nullable().optional(), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }).strict() }).strict();
@@ -112,7 +113,7 @@ export class RemoteServer {
   }
   private setPush(id: string, push: z.infer<typeof subscriptionSchema> | undefined) {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) return false;
-    if (push) device.push = push; else delete device.push; save(this.root, 'remote-devices.json', devices); return true;
+    if (push) device.push = push; else delete device.push; this.saveDevices(devices); return true;
   }
   /** Sends an alert to every phone that turned alerts on; a subscription the push service reports gone is forgotten. */
   private async alert(sessionId: string, kind: 'waiting' | 'failed' | 'test', title: string, body: string, only?: string) {
@@ -136,7 +137,9 @@ export class RemoteServer {
     return this.status();
   }
 
-  private devices(): Device[] { return load(this.root, 'remote-devices.json', z.array(deviceSchema).max(20), []); }
+  private devices(): Device[] { return load(this.root, 'remote-devices.json', devicesSchema, []); }
+  /** Writes the paired devices only if the whole list reads back: a bad entry leaves the previous file as it was. */
+  private saveDevices(devices: Device[]) { save(this.root, 'remote-devices.json', devicesSchema.parse(devices)); }
   private settings() { return load(this.root, 'remote.json', settingsSchema, { enabled: false }); }
   get enabled() { return this.settings().enabled; }
 
@@ -177,7 +180,7 @@ export class RemoteServer {
   cancelPairing() { this.pairing = null; return this.status(); }
   revoke(id: string) {
     const devices = this.devices(); if (!devices.some((device) => device.id === id)) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
-    save(this.root, 'remote-devices.json', devices.filter((device) => device.id !== id));
+    this.saveDevices(devices.filter((device) => device.id !== id));
     for (const stream of this.streams) if (stream.device === id) { stream.response.end(); this.streams.delete(stream); }
     return this.status();
   }
@@ -329,7 +332,7 @@ export class RemoteServer {
     const header = request.headers.authorization; if (!header?.startsWith('Bearer ')) return null;
     const token = header.slice(7).trim(); if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
     const tokenHash = hash(token); const devices = this.devices(); const device = devices.find((item) => same(item.tokenHash, tokenHash)) ?? null;
-    if (device && (!device.lastSeen || Date.now() - Date.parse(device.lastSeen) > 300000)) { device.lastSeen = new Date().toISOString(); save(this.root, 'remote-devices.json', devices); }
+    if (device && (!device.lastSeen || Date.now() - Date.parse(device.lastSeen) > 300000)) { device.lastSeen = new Date().toISOString(); this.saveDevices(devices); }
     return device;
   }
   /**
@@ -374,7 +377,7 @@ export class RemoteServer {
       // Linking the same computer again replaces its old key rather than leaving it working too.
       const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
       for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
-      save(this.root, 'remote-devices.json', [...kept, device]);
+      this.saveDevices([...kept, device]);
       return this.send(response, 200, { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) });
     }
     if (!url.pathname.startsWith('/api/')) return this.send(response, 404, { error: 'Not found.' });
@@ -419,11 +422,13 @@ export class RemoteServer {
       // A linked computer passing on a phone of its own: the phone gets a phone's key here, never more.
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can ask for a phone key.' });
       const parsed = phoneKeySchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+      // The computer may have been removed while its request body was arriving: it is given nothing.
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
       const relayKey = `${device.id}:${parsed.data.relayKey}`; const kept = this.devices().filter((item) => item.relayKey !== relayKey);
       if (kept.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
       const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || 'Phone';
       for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device) && stream.device !== device.id) { stream.response.end(); this.streams.delete(stream); }
-      save(this.root, 'remote-devices.json', [...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]);
+      this.saveDevices([...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]);
       return this.send(response, 200, { token, computer: this.identity, url: this.status().url });
     }
     if (request.method === 'GET' && url.pathname === '/api/computers') {
@@ -434,11 +439,13 @@ export class RemoteServer {
     if (request.method === 'POST' && url.pathname === '/api/computer-key') {
       if (kind !== 'phone' || !this.relay || !this.identity) return this.send(response, 403, { error: 'Only a phone can ask for a key to another computer.' });
       const parsed = computerKeySchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
     }
     if (url.pathname === '/api/size' && (request.method === 'POST' || request.method === 'DELETE')) {
       const body = await this.body(request);
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try {
         if (request.method === 'DELETE') {
           const parsed = releaseSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
