@@ -41,7 +41,8 @@ if (require.main === module) {
   try {
     if (process.platform !== 'darwin') throw new Error('Build the Mac disk images on a Mac (the release workflow uses a macOS runner).');
     const version = releaseVersion(require('../package.json').version);
-    const output = path.join(root, 'release/mac');
+    // TRACE_MAC_OUTPUT builds elsewhere (relative to the repository), leaving an app that is running from release/mac alone.
+    const output = path.resolve(root, process.env.TRACE_MAC_OUTPUT || 'release/mac');
     fs.rmSync(output, { recursive: true, force: true });
     const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');
     run(process.execPath, [builder, '--config', 'electron-builder.cjs', '--mac', '--publish', 'never', `--config.directories.output=${output}`, `--config.extraMetadata.version=${version}`]);
