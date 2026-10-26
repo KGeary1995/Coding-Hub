@@ -53,7 +53,10 @@ export class LivePreview {
     }
     if (request.action === 'preview-capture') {
       if (!this.window || this.window.isDestroyed()) throw new HubError('PREVIEW_CLOSED', 'Open an approved local preview first.');
-      const image = await this.window.webContents.capturePage(); const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-preview-')); const file = path.join(temporary, 'Live preview.png');
+      // Captured at the preview's size in CSS pixels, whatever the display's scale (a Retina capture has 4x the
+      // pixels): screenshots of the same viewport compare on any computer, within the comparison limit.
+      const captured = await this.window.webContents.capturePage(); const [width, height] = this.window.getContentSize();
+      const image = captured.getSize().width === width && captured.getSize().height === height ? captured : captured.resize({ width, height, quality: 'best' }); const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-preview-')); const file = path.join(temporary, 'Live preview.png');
       try { fs.writeFileSync(file, image.toPNG(), { mode: 0o600 }); return await this.archive.execute({ action: 'import', title: request.title, notes: request.notes, projectDirectory: request.projectDirectory, ...(request.designId ? { designId: request.designId } : {}) }, file); }
       finally { fs.rmSync(temporary, { recursive: true, force: true }); }
     }
