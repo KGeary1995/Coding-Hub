@@ -73,9 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Not "assets": that folder in the checkout holds the app icons and entitlements, which would be published too.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: release-assets
           merge-multiple: true
       - name: Publish on the downloads repository
         env:
@@ -84,5 +85,5 @@ jobs:
           if [ -z "$GH_TOKEN" ]; then echo "::error::Add the RELEASES_TOKEN secret: a token that can write to KGeary1995/trace-releases (see docs/windows-releases.md)."; exit 1; fi
           # A tag names the release; a manual run on main takes the version from package.json. An existing release is never replaced.
           tag="$GITHUB_REF_NAME"; [ "$GITHUB_REF_TYPE" = tag ] || tag="v$(node -p "require('./package.json').version")"
-          ls -l assets
-          gh release create "$tag" --repo KGeary1995/trace-releases --title "Trace ${tag#v}" --notes-file docs/RELEASE_NOTES.md assets/*
+          ls -l release-assets
+          gh release create "$tag" --repo KGeary1995/trace-releases --title "Trace ${tag#v}" --notes-file docs/RELEASE_NOTES.md release-assets/*
