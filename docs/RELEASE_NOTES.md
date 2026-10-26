@@ -1,9 +1,8 @@
 ## What's new
 
-- **No more lag while agents work.** Trace was redrawing a busy channel's tile many times a second (each frame of the CLI's spinner); it now updates only when something changes. Plan-limit checks run every five minutes rather than each time you return to Trace.
-- **The model is back on every channel**, in plain words (Opus 5.5, GPT-6.1 Sol), including right after a restart, before the channel's first reply.
+- **Copying from a channel keeps sentences whole.** Claude Code and Codex break long text into lines to fit the window, so copied text used to have line breaks in the middle of sentences. Copying now joins those lines back up, while keeping real line breaks (lists, short lines, code).
 
-Also in 1.10.0: chat channels for Claude and Codex with images in the thread, and your plan limits always in view.
+Also in 1.10.1: no more lag while agents work, and the model (Opus 5.5, GPT-6.1 Sol) shown on every channel. In 1.10.0: chat channels for Claude and Codex with images in the thread, and your plan limits always in view.
 
 ## Install
 
