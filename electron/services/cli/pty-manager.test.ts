@@ -247,6 +247,8 @@ describe('Chat channels', () => {
     managers.push(manager);
     const session = await manager.start(1, chatRequest());
     expect(launched).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--permission-prompt-tool', 'stdio', '--session-id', 'fixture']));
+    // Raw terminal input (a Ctrl+C byte) never reaches the chat's JSON stdin.
+    expect(() => manager.write(1, { sessionId: session.sessionId, runId: session.runId, data: '\x03' })).toThrow(/chat channel/);
     const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10)); expect(check()).toBe(true); };
     const kinds = () => chats.map((chat) => chat.event.type);
 

@@ -47,6 +47,10 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const claude = engine === 'claude';
   const shell = engine === 'shell';
   const chat = session.config.engine !== 'shell' && session.config.chat === true;
+  // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
+  const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
+  const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); return Boolean(run && (await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] })).ok); };
+  const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
   const engineName = chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
   const resumeId = session.config.engine === 'shell' ? undefined : session.config.resumeId;
   const model = session.config.engine === 'shell' ? '' : session.config.model;
@@ -109,7 +113,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
         <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (marker at 80%)` : `Session budget ${Math.round((barRatio ?? 0) * 100)}% used (marker at 80%)`} />
         <div className="tr-tile-detail">
           <span className="tr-detail-facts" title={cwd ?? undefined}>{facts}</span>
-          {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${channel}`} onClick={() => void writeTerminal(session.id, '\x03')} disabled={stopping}><OctagonPause size={13} /></button>}
+          {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${channel}`} onClick={interrupt} disabled={stopping}><OctagonPause size={13} /></button>}
           {session.status === 'running'
             ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
@@ -127,7 +131,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
         <WorktreeControls session={session} />
         {busy && <p className="control-note">Stop the session to change its next launch settings.</p>}
       </fieldset>}
-      {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void writeTerminal(session.id, prompt + '\r').then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
+      {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {session.status === 'running' && session.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{session.attention.message}</span></div>}
       {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}

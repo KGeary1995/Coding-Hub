@@ -290,6 +290,8 @@ export class PtyManager {
     if (!parsed.success) throw new HubError('INVALID_INPUT', 'Invalid terminal input.');
     const run = this.ownedRun(owner, parsed.data);
     if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    // A chat run's stdin is its JSON protocol: raw keystrokes (a Ctrl+C byte) would corrupt the next message.
+    if (run.chat) throw new HubError('CHAT_INPUT', 'This is a chat channel: send messages and interruptions through the chat.');
     try { run.pty.write(parsed.data.data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
   }
