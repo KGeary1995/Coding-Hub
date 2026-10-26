@@ -7,7 +7,7 @@ import { MemoryService, projectSchema } from './memory';
 import { DriveMirror } from './drive';
 import { projectMemoryKey } from './auto-memory';
 import { HubError } from '../cli/engine-adapter';
-import type { TelemetryService } from './telemetry';
+import { repriced, type TelemetryService } from './telemetry';
 import { RulesService } from './rules';
 import { preferencesSchema } from './preferences';
 import { DeviceSync } from './device-sync';
@@ -69,7 +69,12 @@ export class HubService {
       case 'memory-install': this.memory.install(request.directory, request.project, path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
-      case 'usage': { const local = this.telemetry?.list() ?? []; const runs = new Set(local.map((record) => record.runId)); return [...local, ...this.devices.otherUsage().filter((record) => !runs.has(record.runId))]; }
+      case 'usage': {
+        const local = this.telemetry?.list() ?? []; const runs = new Set(local.map((record) => record.runId)); const rates = this.preferences().prices;
+        // Other computers' runs are priced with this computer's rates, like its own (by the run's last model).
+        const others = this.devices.otherUsage().filter((record) => !runs.has(record.runId)).map((record) => repriced(record, rates));
+        return [...local, ...others];
+      }
       case 'device-sync-status': return this.devices.status();
       case 'device-sync-now': return this.devices.sync();
       case 'device-sync-resolve': return this.devices.resolve(request.document, request.keep);

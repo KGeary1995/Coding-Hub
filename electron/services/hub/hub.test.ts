@@ -7,7 +7,7 @@ import { ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService } from './memory';
 import { DriveMirror } from './drive';
 import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
-import { parseUsage, TelemetryService, totalTokens, usageCost } from './telemetry';
+import { parseUsage, repriced, TelemetryService, totalTokens, usageCost } from './telemetry';
 import { hubRequestSchema } from './service';
 const roots: string[] = [];
 function setup() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-integrations-')); roots.push(root); const project = path.join(root, 'project'); fs.mkdirSync(project); return { root, project }; }
@@ -67,7 +67,9 @@ describe('memory installation rollback', () => {
 describe('structured telemetry', () => {
   const run = { runId: randomUUID(), sessionId: 'session', engine: 'claude' as const, cwd: '/project', pid: 1 };
   it('parses actual engine formats without treating reasoning as additional output', () => {
-    const event = parseUsage('codex', { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 60, output_tokens: 40, reasoning_output_tokens: 20 }, last_token_usage: { input_tokens: 90, output_tokens: 30 }, model_context_window: 1000 } } }, 'model')!; expect(event.context).toEqual({ used: 120, limit: 1000 }); const record = { ...run, ...event, timestamp: new Date().toISOString(), engine: 'codex', cost: null } as UsageRecord; expect(totalTokens(record)).toBe(80); expect(usageCost(record, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }])).toBeCloseTo(0.00054); expect(usageCost(record, [])).toBeNull(); expect(parseUsage('claude', { type: 'user', message: {} }, '')).toBeNull();
+    const event = parseUsage('codex', { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 60, output_tokens: 40, reasoning_output_tokens: 20 }, last_token_usage: { input_tokens: 90, output_tokens: 30 }, model_context_window: 1000 } } }, 'model')!; expect(event.context).toEqual({ used: 120, limit: 1000 }); const record = { ...run, ...event, timestamp: new Date().toISOString(), engine: 'codex', cost: null } as UsageRecord; expect(totalTokens(record)).toBe(80); expect(usageCost(record, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }])).toBeCloseTo(0.00054); expect(usageCost(record, [])).toBeNull();
+    // Another computer's run follows this computer's rates, not the price it was given there.
+    expect(repriced({ ...record, cost: 1 }, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }])).toMatchObject({ costBasis: 'configured-model-rates' }); expect(repriced({ ...record, cost: 1 }, [{ model: 'model', input: 2, output: 10, cacheRead: 1, cacheWrite: 2 }]).cost).toBeCloseTo(0.00054); expect(repriced({ ...record, cost: 1 }, [])).toMatchObject({ cost: null, costBasis: 'unpriced' }); expect(parseUsage('claude', { type: 'user', message: {} }, '')).toBeNull();
   });
   it('reads the whole rest of a usage log when a run ends, however much is left', async () => {
     const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
@@ -81,6 +83,20 @@ describe('structured telemetry', () => {
       await telemetry.end(run.runId);
       expect(telemetry.list()[0]).toMatchObject({ output: 42 }); expect(telemetry.list()[0].incomplete).toBeUndefined();
     } finally { telemetry.close(); }
+  });
+  it.skipIf(process.platform === 'win32')('tells the window at once when a run ends with usage it could not read', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const published: UsageRecord[] = []; const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], (usage) => published.push(usage), () => {}, home, path.join(root, 'codex'));
+    try {
+      const usage = (id: string, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: 1, output_tokens: output } } }) + '\n';
+      fs.writeFileSync(file, usage('first', 10));
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      vi.advanceTimersByTime(750); expect(published.at(-1)?.incomplete).toBeUndefined();
+      // More usage is written, but the log can no longer be read (locked).
+      fs.appendFileSync(file, usage('second', 20)); fs.chmodSync(file, 0);
+      await telemetry.end(run.runId);
+      expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
+    } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
   });
   it('says so when a run’s usage log keeps failing to read, including that its token limit is not enforced', () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');

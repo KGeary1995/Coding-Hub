@@ -150,9 +150,10 @@ describe('device sync', () => {
   });
 
   it('shares usage labelled with the computer it came from, and never rewrites another computer’s file', () => {
-    const drive = temporary(); const a = computer(drive, 'desk', [record('run-a')]); const b = computer(drive, 'laptop', [record('run-b')]);
+    const drive = temporary(); const a = computer(drive, 'desk', [record('run-a')]); const b = computer(drive, 'laptop', [record('run-b'), { ...record('run-c'), incomplete: true }]);
     a.sync.sync(); b.sync.sync(); a.sync.sync();
-    expect(a.sync.otherUsage()).toEqual([expect.objectContaining({ runId: 'run-b', machine: 'laptop' })]);
+    // A run whose usage could not all be read is shared with its warning, not left out.
+    expect(a.sync.otherUsage()).toEqual([expect.objectContaining({ runId: 'run-b', machine: 'laptop' }), expect.objectContaining({ runId: 'run-c', incomplete: true })]);
     expect(b.sync.otherUsage()).toEqual([expect.objectContaining({ runId: 'run-a', machine: 'desk' })]);
     expect(fs.readdirSync(path.join(drive, SYNC_FOLDER, 'usage'))).toHaveLength(2);
     a.preferences = { ...a.preferences, syncDevices: false }; expect(a.sync.otherUsage()).toEqual([]);

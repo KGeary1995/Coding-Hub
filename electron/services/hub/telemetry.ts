@@ -34,6 +34,13 @@ export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null
   const input = usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
+/**
+ * Another computer's run priced with this computer's rates, so every estimate follows the rates configured here. Its
+ * tokens are priced at its last model's rate (a synced run keeps only totals); a model with no rate leaves it unpriced.
+ */
+export function repriced(usage: UsageRecord, rates: PriceRate[]): UsageRecord {
+  const cost = usageCost(usage, rates); return { ...usage, cost, costBasis: cost === null ? 'unpriced' : 'configured-model-rates' };
+}
 /** The tokens a session limit counts: new tokens, as shown everywhere in Trace (cache re-reads are not counted). */
 export function totalTokens(usage: UsageRecord) { return newTokens(usage); }
 interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
@@ -49,7 +56,7 @@ export class TelemetryService {
     if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
     this.baselines.set(runId, { file, offset: size, usage });
   }
-  private assigned = new Set<string>(); private closed = false;
+  private assigned = new Set<string>(); private closed = false; private closing = false;
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
   onError: (run: AgentRunningSession, message: string) => void = () => {};
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
@@ -177,6 +184,7 @@ export class TelemetryService {
   }
   /** On quit every log is read to its end before the database closes. */
   close() {
+    this.closing = true;
     for (const w of [...this.watches.values()]) { clearInterval(w.timer); w.stopped = true; this.poll(w); const target = Math.max(this.size(w), w.offset); for (let before = -1; w.file && w.offset < target && w.offset !== before;) { before = w.offset; this.poll(w); } this.finish(w, target); }
     this.closed = true; this.database.close();
   }
@@ -185,6 +193,8 @@ export class TelemetryService {
     if (w.file && w.offset < target) try {
       const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId);
       if (record) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...JSON.parse(String(record.value)), incomplete: true }), w.run.runId);
+      // The window shows the warning now, not only after its next reload of usage.
+      const usage = this.closing ? null : this.runUsage(w.run.runId); if (usage) this.publish(usage);
     } catch { /* Storage is closing. */ }
     this.watches.delete(w.run.runId);
     try { fs.rmSync(w.logDir, { recursive: true, force: true }); } catch { /* A locked Windows TUI log can be removed after the next restart. */ }

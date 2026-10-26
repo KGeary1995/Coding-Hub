@@ -25,7 +25,7 @@ const rulesSchema = z.object({ content: z.string().max(60000) }).strict();
 const machineSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100) }).strict();
 const usageSchema = z.object({
   conversationId: z.string().max(200).optional(), source: z.enum(['claude-session-jsonl', 'codex-rollout-jsonl']).optional(), confidence: z.literal('reported').optional(),
-  costBasis: z.enum(['configured-model-rates', 'unpriced']).optional(), eventCount: z.number().int().min(0).optional(), runId: z.string().min(1).max(100), sessionId: z.string().min(1).max(100),
+  costBasis: z.enum(['configured-model-rates', 'unpriced']).optional(), incomplete: z.literal(true).optional(), eventCount: z.number().int().min(0).optional(), runId: z.string().min(1).max(100), sessionId: z.string().min(1).max(100),
   engine: z.enum(['claude', 'codex']), model: z.string().max(200), cwd: z.string().max(4096), timestamp: z.iso.datetime(), input: z.number().min(0), output: z.number().min(0), cached: z.number().min(0),
   cacheWrite: z.number().min(0), reasoning: z.number().min(0).nullable(), context: z.object({ used: z.number().min(0), limit: z.number().min(0) }).strict().nullable(), cost: z.number().min(0).nullable(),
 }).strict();
