@@ -44,6 +44,7 @@ import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
+import { PlanLimitsService } from './services/hub/plan-limits';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
@@ -79,6 +80,8 @@ let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
 const rendererFile = path.join(__dirname, '../../dist/index.html');
 const claudeProfiles = new ClaudeProfiles(storageRoot);
+/** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
+const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id));
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 const nativeSessions = new NativeSessions(claudeProfiles);
 const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
@@ -430,6 +433,7 @@ else app.whenReady().then(() => {
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if (action.startsWith('remote-')) return remoteControl(payload);
     if (action.startsWith('linked-')) return linkedRequest(payload);
+    if (action === 'plan-limits') { const request = z.object({ action: z.literal('plan-limits'), force: z.boolean().optional() }).strict().parse(payload); return planLimits.refresh(request.force); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');

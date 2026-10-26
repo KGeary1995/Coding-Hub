@@ -1,3 +1,4 @@
+import { PlanLimitsCard } from './PlanLimitsCard';
 import { useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { UsageRecord } from '../../../shared/hub';
@@ -58,6 +59,7 @@ export function UsageScreen() {
       <button className="tr-ghost-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={13} className={busy ? 'spin' : ''} />Refresh</button>
     </header>
     {error && <p role="alert" className="error-message">{error}</p>}
+    <PlanLimitsCard />
     <div className="tr-kpis" role="list" aria-label={`Totals for ${windowLabel}`}>{kpis.map((kpi) => <div key={kpi.label} role="listitem" className="tr-kpi"><span className="tr-kpi-label">{kpi.label}</span><strong className="tnum">{kpi.value}</strong><span className="tr-kpi-sub">{kpi.sub}</span></div>)}</div>
     <div className="tr-usage-mid">
       <article className="tr-chart" aria-label="Daily tokens">

@@ -330,6 +330,14 @@ Add stdio or HTTP servers, toggle enablement, or explicitly remove them. Claude 
 
 **Skills & plugins** inspects local `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, skill folders, installed plugin metadata/cache manifests, configured plugin activation, and hook event names. Supported Codex skill and configured plugin activation can be toggled. Instruction files and Claude skills are inspected in place; hook commands are never executed by discovery. Inspection is bounded and does not resolve remote marketplaces or install third-party packages.
 
+## Plan limits
+
+The status bar shows how much of each subscription's limits is used, for example **Claude 5h 6% · wk 12%** and **Codex wk 3%**, amber from 75% and red from 90%. Hover for every limit, account and reset time; click for **Usage**, whose **Plan limits** card shows each limit as a bar, the plan, and **Check now**.
+
+- **Claude:** Trace runs Claude Code's own `/usage` (`claude -p /usage --no-session-persistence`) for the default login and each connected account profile. It makes no model request and saves no session.
+- **Codex:** Trace asks Codex's app server for `account/rateLimits/read`, also without a model request. Codex names its limits by length (a 5-hour session on plans that have one, and the week).
+- Limits are read when Trace opens, every five minutes, and when you return to the window (at most once a minute). Accounts billed by API usage have no session or weekly limit to show.
+
 ## Usage and prices
 
 Usage comes from the CLIs' **local structured JSONL session logs**. Claude sessions are correlated by the app's generated UUID; Codex uses a per-run TUI log directory and thread ID to locate its rollout. CODEX_HOME and CLI authentication are inherited unchanged. Same-directory Codex sessions are not assigned usage when their thread association is ambiguous. Unsupported versions, disabled transcript logging, or missing usage events display unknown values.

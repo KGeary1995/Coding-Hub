@@ -95,3 +95,8 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-tabs > button.tr-computer-tab { gap: 6px; }
 .tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-off); }
 .tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }
+
+/* Subscription limits in the status bar: amber nearing a limit, red nearly out. */
+.tr-sb-limits { gap: 6px; }
+.tr-sb-limits.warning .tnum { color: var(--tr-st-limit); }
+.tr-sb-limits.critical .tnum { color: var(--tr-st-failed); font-weight: 600; }

@@ -20,7 +20,7 @@ export interface VerificationStep { label: string; tool: VerificationTool; args:
 export interface VerificationProfile { id: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number; createdAt: string }
 export interface VerificationResult { id: string; profileId: string; directory: string; profileName: string; startedAt: string; endedAt: string; passed: boolean; cancelled: boolean; steps: { label: string; exitCode: number | null; output: string; timedOut: boolean; truncated: boolean }[] }
 export interface VerificationData { profiles: VerificationProfile[]; results: VerificationResult[]; running: boolean }
-export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remote').LinkedComputerRequest
+export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remote').LinkedComputerRequest | { action: 'plan-limits'; force?: boolean }
  | import('./productivity').WorkflowRequest
  | { action: 'runtime' } | { action: 'restart' }
  | { action: 'codex-models'; directory: string | null }
@@ -36,4 +36,4 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | { action: 'backup-list' } | { action: 'backup-create'; includeLogs: boolean } | { action: 'backup-export'; id: string } | { action: 'backup-restore'; id: string } | { action: 'backup-import' }
  | { action: 'task-list' } | { action: 'task-save'; id?: string; title: string; directory: string; sessionId: string | null; scope: string[]; status: Task['status']; notes: string; verificationId: string | null } | { action: 'task-audit' }
  | { action: 'verification-list' } | { action: 'verification-save'; id?: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number } | { action: 'verification-run'; id: string } | { action: 'verification-cancel' };
-export type WorkbenchResponse = import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | Annotation[] | Annotation | PreparedRequest | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationData | VerificationProfile | VerificationResult | import('./design').DesignPreview | null;
+export type WorkbenchResponse = import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./plan-limits').PlanLimits[] | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | Annotation[] | Annotation | PreparedRequest | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationData | VerificationProfile | VerificationResult | import('./design').DesignPreview | null;

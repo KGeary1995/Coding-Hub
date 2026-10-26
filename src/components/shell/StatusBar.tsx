@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { channelNameNow } from '../../state/channel-names';
+import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, tokens, formatNumber, dollars } from '../../state/hub-store';
 import { CHANNEL_STATES, channelAlerts, channelState, todayTotals, usageFor } from '../../state/channel-state';
@@ -13,6 +15,34 @@ export function jumpToChannel(id: string) {
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
   if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
   state.setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
+}
+
+const SHORT: Record<string, string> = { Session: '5h', Week: 'wk' };
+/**
+ * Each agent's subscription limits, always in view: the 5-hour session and the week, as used percentages that turn
+ * amber and then red as they fill. Hover for every limit, account and reset; click for Usage.
+ */
+function PlanLimitCells() {
+  const limits = usePlanLimits((state) => state.limits);
+  useEffect(() => {
+    if (!window.codingHub) return;
+    void refreshPlanLimits();
+    const timer = setInterval(() => void refreshPlanLimits(true), 5 * 60000);
+    const focus = () => void refreshPlanLimits();
+    window.addEventListener('focus', focus);
+    return () => { clearInterval(timer); window.removeEventListener('focus', focus); };
+  }, []);
+  return <>{(['claude', 'codex'] as const).map((engine) => {
+    const all = limits.filter((item) => item.engine === engine); const main = all.find((item) => item.account === 'Default') ?? all[0];
+    if (!main) return null;
+    const shown = main.windows.filter((window) => window.label in SHORT);
+    const worst = Math.max(0, ...shown.map((window) => window.usedPercent));
+    const title = all.map((item) => `${engine === 'claude' ? 'Claude' : 'Codex'}${all.length > 1 || item.account !== 'Default' ? ` · ${item.account}` : ''}${item.plan ? ` (${item.plan})` : ''}\n${item.error ?? item.windows.map((window) => `  ${window.label}: ${window.usedPercent}% used${resetText(window) ? `, resets ${resetText(window)}` : ''}`).join('\n')}`).join('\n\n');
+    return <button key={engine} className={`tr-sb-cell tr-sb-limits ${limitLevel(worst)}`} title={title} onClick={() => useWorkspaceStore.getState().setView('usage')}>
+      <i className="tr-engine-square" style={{ background: `var(--tr-ch-${engine})` }} aria-hidden="true" />{engine === 'claude' ? 'Claude' : 'Codex'}
+      <span className="tnum">{shown.length ? shown.map((window) => `${SHORT[window.label]} ${Math.round(window.usedPercent)}%`).join(' · ') : '—'}</span>
+    </button>;
+  })}</>;
 }
 
 /** The one global status layer: every channel's state, the project, today's usage, alerts and the host. */
@@ -35,6 +65,7 @@ export function StatusBar() {
     })}
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>
     <span className="tr-spacer" />
+    <PlanLimitCells />
     <span className="tr-sb-cell tnum" title="New tokens reported today on this computer: input outside the cache, plus output">Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => jump(alerts[0].sessionId)} title="Go to the first channel that needs you">

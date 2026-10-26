@@ -232,3 +232,16 @@
 .tr-step-note { margin: auto 0 0; font: 400 12px/16px var(--tr-font-ui); color: var(--tr-fg-faint); }
 .tr-delivery-result pre { max-height: 160px; overflow: auto; }
 @container shell (max-width: 1180px) { .tr-changes-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; } .delivery-panel.tr-delivery { max-height: 40vh; border-left: 0; border-top: 1px solid var(--tr-line); } .tr-changes .repository-workbench { grid-template-columns: 220px minmax(0, 1fr); } }
+
+/* Plan limits on Usage: one row per limit, a bar that turns amber and then red as it fills. */
+.tr-plan-limits { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel, 8px); background: var(--tr-panel); }
+.tr-plan-limits > header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.tr-plan-limits h2 { margin: 0; font: var(--tr-t-heading); font-size: 16px; }
+.tr-plan-limits > header .tr-ghost-button { margin-left: auto; }
+.tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px 24px; }
+.tr-plan-account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; }
+.tr-plan-window { display: grid; grid-template-columns: 9em 1fr 3em auto; align-items: center; gap: 10px; padding: 3px 0; font-size: 13px; }
+.tr-plan-bar { height: 6px; border-radius: 3px; background: var(--tr-line); overflow: hidden; }
+.tr-plan-bar i { display: block; height: 100%; background: var(--tr-add); }
+.tr-plan-window.warning .tr-plan-bar i { background: var(--tr-st-limit); }
+.tr-plan-window.critical .tr-plan-bar i { background: var(--tr-st-failed); }
