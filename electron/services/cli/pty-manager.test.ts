@@ -183,3 +183,24 @@ describe('Terminal channels', () => {
     expect(shellProgram({ SHELL: '/missing/zsh' }, 'linux', () => false).file).toBe('/bin/bash');
   });
 });
+
+describe('Stopping that fails', () => {
+  it('reports the process still running after a window or quit stop, and starts again once quitting is cancelled', async () => {
+    const stubborn: FakePty[] = [];
+    const spawn = vi.fn(() => { const pty = new FakePty(); pty.kill = vi.fn(); stubborn.push(pty); return pty as unknown as IPty; });
+    const events: SessionEvent[] = [];
+    const manager = new PtyManager((_owner, event) => events.push(event), { spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {}, isAlive: () => true, waitMilliseconds: 5 } });
+    managers.push(manager);
+    const session = await manager.start(7, request());
+    await manager.stopOwner(7);
+    expect(manager.ownedProcessIds(7)).toEqual([session.pid]);
+    expect(events.at(-1)).toMatchObject({ type: 'error', sessionId: session.sessionId });
+    await manager.dispose();
+    expect(manager.processIds()).toEqual([session.pid]);
+    await expect(manager.start(7, request('session-two'))).rejects.toMatchObject({ code: 'HOST_CLOSING' });
+    manager.reopen();
+    await expect(manager.start(7, request('session-two'))).resolves.toMatchObject({ sessionId: 'session-two' });
+    // Let the fixture's cleanup finish: the processes "exit" once asked again.
+    for (const pty of stubborn) pty.exit({ exitCode: 0 });
+  });
+});

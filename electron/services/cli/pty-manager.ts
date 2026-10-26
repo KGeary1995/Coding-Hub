@@ -105,6 +105,10 @@ export class PtyManager {
   usesProfile(id: string): boolean { return [...this.runs.values()].some((run) => run.session.accountProfileId === id) || [...this.pending.values()].some((run) => run.profileId === id); }
 
   get hasSessions(): boolean { return this.runs.size > 0 || this.pending.size > 0; }
+  /** Every process still running, whichever window owns it: what quitting would leave behind. */
+  processIds(): number[] { return [...this.runs.values()].map((run) => run.session.pid); }
+  /** Undoes dispose() when the person cancels quitting, so channels can start again. */
+  reopen() { this.closing = false; }
   ownedProcessIds(owner: number): number[] { return [...this.runs.values()].filter((run) => run.owner === owner).map((run) => run.session.pid); }
 
   async start(owner: number, payload: unknown): Promise<RunningSession> {

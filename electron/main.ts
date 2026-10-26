@@ -132,6 +132,19 @@ function sendToRenderer(channel: string, value: unknown, owner?: number): boolea
   } catch { hostHealth?.record('renderer-event-delivery-failed', channel); return false; }
 }
 function reportStorageError(message: string) { sendToRenderer(IPC_CHANNELS.storageError, message); }
+/**
+ * Asks what to do when channels could not be stopped. Closing or quitting anyway leaves them running with no Trace
+ * controls, so that is a choice the person makes with the process IDs in front of them, never a silent default.
+ */
+async function leftRunningChoice(parent: BrowserWindow | null, pids: number[], leave: string, keep: string): Promise<'retry' | 'quit' | 'keep'> {
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning', title: 'Some channels are still running', buttons: ['Try stopping again', leave, keep], defaultId: 0, cancelId: 2,
+    message: pids.length === 1 ? 'A channel could not be stopped.' : `${pids.length} channels could not be stopped.`,
+    detail: `Process ${pids.length === 1 ? 'ID' : 'IDs'}: ${pids.join(', ')}. If you ${leave.toLowerCase()}, ${pids.length === 1 ? 'it keeps' : 'they keep'} running without Trace; end ${pids.length === 1 ? 'it' : 'them'} in ${process.platform === 'win32' ? 'Task Manager' : 'Activity Monitor'} later.`,
+  };
+  try { const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options); return response === 0 ? 'retry' : response === 1 ? 'quit' : 'keep'; }
+  catch { return 'keep'; }
+}
 function localStorage() {
   if (!storage) throw new HubError('STORAGE_UNAVAILABLE', storageFailure);
   return storage;
@@ -231,7 +244,18 @@ function createWindow() {
     closing = true;
     // The preview is a separate top-level window; left open it would keep the app alive with no main window.
     livePreview?.close();
-    void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => { repositoryFiles.closeOwner(owner); current.destroy(); });
+    void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).then(async () => {
+      // Closing the window takes away every control for a channel, so never do that silently while one still runs.
+      const left = manager.ownedProcessIds(owner);
+      if (left.length && !current.isDestroyed()) {
+        hostHealth?.record('shutdown-processes-left', String(left.length));
+        const choice = await leftRunningChoice(current, left, 'Close anyway', 'Keep the window open');
+        closing = false;
+        if (choice === 'retry') { current.close(); return; }
+        if (choice === 'keep') return;
+      }
+      repositoryFiles.closeOwner(owner); if (!current.isDestroyed()) current.destroy();
+    });
   });
   window.on('closed', () => { window = null; });
 }
@@ -502,9 +526,22 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
   quitting = true;
-  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()]))
+  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed'))
+    .then(async () => {
+      // Quitting would leave these running with nothing to control them; let the person decide.
+      const left = manager.processIds();
+      if (!left.length) return true;
+      hostHealth?.record('shutdown-processes-left', String(left.length));
+      const choice = await leftRunningChoice(window && !window.isDestroyed() ? window : null, left, 'Quit anyway', 'Keep Trace open');
+      if (choice === 'quit') return true;
+      quitting = false; manager.reopen(); accounts.reopen();
+      if (choice === 'retry') app.quit();
+      return false;
+    })
+    .then(async (quit) => {
+    if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
-    .then(() => autoMemory?.drain(10000)).catch(() => hostHealth?.record('shutdown-stop-failed')).finally(() => {
+    await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
     try { void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });
