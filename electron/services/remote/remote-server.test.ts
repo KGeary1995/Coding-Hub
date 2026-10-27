@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
-import { serveFailure, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscaleState } from './tailscale';
+import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -268,6 +268,14 @@ describe('tailscale state', () => {
     expect(tailscaleEnvironment({ TERM: 'xterm-256color' }).TERM).toBe('xterm-256color');
   });
   const runner = (outputs: Record<string, string | Error>) => async (args: string[]) => { const value = outputs[args.join(' ')]; if (value instanceof Error) throw value; if (value === undefined) throw new Error('unexpected ' + args.join(' ')); return value; };
+  it('takes Trace off the tailnet when phone access is turned off, and leaves a handler that is not Trace’s', async () => {
+    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }); const calls: string[] = [];
+    const recording = (serve: unknown) => { const run = runner({ 'status --json': status, 'serve status --json': JSON.stringify(serve), 'serve --https=443 off': '' }); return async (args: string[]) => { calls.push(args.join(' ')); return run(args); }; };
+    await stopServing(recording({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:47821' } } } } }), 47821);
+    expect(calls).toContain('serve --https=443 off');
+    calls.length = 0; await stopServing(recording({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:3000' } } } } }), 47821);
+    expect(calls).not.toContain('serve --https=443 off');
+  });
   it('reports not installed, stopped, serving and funnel', async () => {
     expect(await tailscaleState(runner({ 'status --json': Object.assign(new Error('spawn tailscale ENOENT'), { code: 'ENOENT' }) }), 47821)).toMatchObject({ installed: false });
     expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Stopped', Self: { DNSName: 'desk.ts.net.' } }) }), 47821)).toMatchObject({ installed: true, running: false });

@@ -87,6 +87,18 @@ describe('device sync', () => {
     expect(b.sync.sync().conflicts).toEqual([]); expect(b.rules.content()).toBe('Desk offline.');
   });
 
+  it('keeps every template when the shared folder comes back empty, but still takes one deleted on another computer', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const one = template('Web app'); const two = template('API');
+    save(a.root, 'project-templates.json', [one, two]); a.sync.sync();
+    const shared = path.join(drive, SYNC_FOLDER, 'templates');
+    // Drive signed in to another account, or still downloading: the folder is there but empty.
+    fs.rmSync(path.join(drive, SYNC_FOLDER), { recursive: true }); a.sync.sync();
+    expect(templates(a.root).map((entry) => entry.name)).toEqual(['Web app', 'API']);
+    expect(fs.readdirSync(shared).sort()).toEqual([one.id + '.json', two.id + '.json'].sort());
+    // One deleted on another computer (its file removed while the other is still there) is removed here too.
+    fs.unlinkSync(path.join(shared, one.id + '.json')); a.sync.sync();
+    expect(templates(a.root).map((entry) => entry.name)).toEqual(['API']);
+  });
   it('keeps a template whose shared file cannot be read, and repairs the shared copy', () => {
     const drive = temporary(); const a = computer(drive, 'desk'); const item = template('Web app');
     save(a.root, 'project-templates.json', [item]); a.sync.sync();

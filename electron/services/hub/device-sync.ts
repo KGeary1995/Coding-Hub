@@ -148,8 +148,11 @@ export class DeviceSync {
     const known = new Set(state.templates); const localIds = new Set(local.map((item) => item.id));
     // Removed here since the last sync: remove it for every computer.
     for (const id of known) if (!localIds.has(id) && present.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); present.delete(id); remote.delete(id); }
-    // Removed on another computer, or new there.
-    let next = local.filter((item) => !known.has(item.id) || present.has(item.id));
+    // Removed on another computer, or new there. When every template this computer last synced is missing at once, the
+    // folder itself is the likelier cause (Drive signed in to another account, still downloading after a reinstall, the
+    // folder moved and recreated empty): keep this computer's templates, and write them back, rather than delete them all.
+    const folderLost = known.size > 0 && ![...known].some((id) => present.has(id));
+    let next = folderLost ? local : local.filter((item) => !known.has(item.id) || present.has(item.id));
     for (const item of remote.values()) if (!next.some((other) => other.id === item.id) && next.length < 50) next = [...next, portable(item)];
     // New here, or a shared copy that could not be read: this computer's copy is written (templates never change once saved).
     for (const item of next) if (!remote.has(item.id)) writeJson(path.join(directory, item.id + '.json'), item);
