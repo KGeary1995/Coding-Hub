@@ -141,7 +141,7 @@ The app installs as **Trace** (Trace.app, Trace.exe, Start Menu and desktop shor
 ## Channel tiles
 
 Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile shows:
-- **Header:** the channel badge in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, a named Claude profile, `ctx` (context used; Codex only, since Claude Code does not report its window) and `tok` (new tokens: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
+- **Header:** the channel badge in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, a named Claude profile, `ctx` (context used: a percentage for Codex; for Claude Code, the tokens in context after the last reply, with no percentage because Claude Code does not record its window size) and `tok` (new tokens: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
 - **Scope strip:** the terminal's output per second over the last two minutes, a dashed limit rail and, along the bottom, a bar for the context or session budget used, with a marker at 80%. The trace only ever shows real output.
 - **Detail row:** point at the header, or tab into it, to swap the strip for the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Settings, Duplicate, Maximize and Close buttons.
 - **The terminal.**
@@ -174,9 +174,9 @@ With the tile focused, Enter starts an idle channel or moves into its terminal.
 
 ## Approval alerts
 
-When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal.
+When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal, or, for Claude Code, when it reports that a tool finished or its turn ended, so a prompt you answered before the alert arrived does not stay on HOLD.
 
-- **Claude Code 2.1.63 or later:** the app adds an HTTP notification hook that reports to a local endpoint (127.0.0.1) only the app knows.
+- **Claude Code 2.1.63 or later:** the app adds HTTP hooks (Notification, PostToolUse and Stop) that report to a local endpoint (127.0.0.1) only the app knows. Tool results sent to it are never read.
 - **Codex:** the app turns on its approval notifications and reads them from the terminal output.
 
 Older Claude Code versions, `--bare`, or organisation settings that disable hooks leave a tile without alerts.

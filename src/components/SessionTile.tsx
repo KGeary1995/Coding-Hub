@@ -59,6 +59,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const busy = session.status === 'running' || session.status === 'starting';
   const state = channelState(session, usage); const meta = CHANNEL_STATES[state];
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
+  // Claude reports the tokens in context but not its window, so only the amount can be shown.
+  const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
   // The bar and ctx readout show the context window when the CLI reports one; the budget fills the bar only otherwise.
   // The channel state still uses the larger of the two (limitRatio).
   const contextRatio = context ? context.used / context.limit : null;
@@ -89,7 +91,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
     stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
     cwd ? `cwd ${folderName(cwd)}` : 'no working directory',
     usage ? `cost ${dollars(usage.cost)}` : null,
-    context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : null,
+    context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : contextUsed !== null ? `ctx ${compact(contextUsed)}` : null,
   ].filter(Boolean).join(' · ');
   return (
     <article className={`session-tile tr-tile ${engine} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
@@ -103,7 +105,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
           {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
           <span className="tr-spacer" />
-          {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : claude ? 'Claude Code does not report its context window' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : '—'}</b></span>
+          {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
           <span className="tr-tile-metric tnum" title={usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
