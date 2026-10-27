@@ -13,7 +13,8 @@ export function useViewShortcuts() {
     const handler = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
       // Never steal keys typed into fields or a terminal.
-      if ((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [role="menu"], [role="dialog"]')) { armedAt = 0; return; }
+      // An open native <dialog> (the image viewer) has no role attribute and may leave focus on the page itself.
+      if ((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [role="menu"], [role="dialog"], dialog') || document.querySelector('dialog[open]')) { armedAt = 0; return; }
       const key = event.key.toLowerCase();
       if (armedAt && Date.now() - armedAt < 1500 && VIEW_KEYS[key]) { event.preventDefault(); armedAt = 0; useWorkspaceStore.getState().setView(VIEW_KEYS[key]); return; }
       armedAt = key === 'g' && !event.shiftKey ? Date.now() : 0;
