@@ -49,6 +49,7 @@ Packages contain exactly `dist/`, `dist-electron/`, `package.json` and `node_mod
 | `test:memory` | The memory MCP server over stdio: negotiation, tools, malformed input, persistence | no |
 | `test:desktop` | Largest end-to-end smoke: PTYs, restore, unavailable storage, files, Git review, usage, MCP, skills, Drive mirror, rules, help | yes |
 | `test:design`, `test:profiles`, `test:workbench`, `test:enterprise`, `test:productivity`, `test:models-stability`, `test:remote` | Feature smoke tests (layout at several sizes, Claude profiles, design and coaching, diagnostics/verification/preview, Git delivery and backups, model catalog and crash recovery, phone pairing) | yes |
+| `test:paste` | Windows only: Ctrl+V and Alt+V with an image or text on the real system clipboard, in a terminal channel and a chat channel (records what reaches the CLI) | yes |
 | `test:packaged -- <executable>` | Starts a fixture CLI inside a packaged app | yes |
 | `test:install` | Windows install → upgrade → uninstall with data checks. Only on CI (`GITHUB_ACTIONS=true`) or with `--isolated-windows-vm`, because it changes system registration | yes |
 | `build` | typecheck, renderer, phone, host | no |

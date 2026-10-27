@@ -31,7 +31,8 @@
     "dist:win:signed": "npm run build && node scripts/build-windows.cjs --signed",
     "test:productivity": "npm run build && node scripts/productivity-smoke.cjs",
     "test:models-stability": "npm run build && node scripts/models-stability-smoke.cjs",
-    "test:remote": "npm run build && node scripts/remote-smoke.cjs"
+    "test:remote": "npm run build && node scripts/remote-smoke.cjs",
+    "test:paste": "npm run build && node scripts/paste-smoke.cjs"
   },
   "engines": {
     "node": ">=22.13.0"
