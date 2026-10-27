@@ -19,7 +19,8 @@ function useSetupStatus() {
   useEffect(() => { void window.codingHub?.updates({ action: 'status' }).then((result) => { if (result.ok) setVersion(result.value.version); }).catch(() => {}); }, []);
   const connected = accounts?.filter((item) => item.state === 'authenticated').length ?? 0;
   const status: Partial<Record<NavigationView, { text: string; tone?: 'ok' | 'warn' }>> = {
-    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: connected === accounts.length ? 'ok' : 'warn' } : { text: 'checking local CLIs…' },
+    // GitHub is optional (project cloning only): it alone not being signed in is no warning.
+    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'ok' : 'warn' } : { text: 'checking local CLIs…' },
     memory: { text: automaticMemory ? 'automatic for every project' : 'automatic memory off', tone: automaticMemory ? 'ok' : undefined },
     rules: { text: 'CLAUDE.md + AGENTS.md' },
     connectors: { text: 'claude + codex' },

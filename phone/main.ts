@@ -15,6 +15,8 @@ const KEYS: { label: string; name?: string; data: string }[] = [
   { label: 'Enter', data: '\r' }, { label: 'Esc', data: '\x1b' }, { label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' },
   { label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' },
   { label: 'Tab', data: '\t' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }, { label: 'Ctrl C', data: '\x03' },
+  // Shift+Tab switches Claude Code's mode (plan, auto-accept); a phone keyboard has neither it nor a reliable Backspace here.
+  { label: '⇧Tab', name: 'Shift Tab', data: '\x1b[Z' }, { label: '⌫', name: 'Backspace', data: '\x7f' },
 ];
 const ENGINE = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 

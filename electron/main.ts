@@ -266,6 +266,8 @@ function createWindow() {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   // file:// pages never receive response headers, so production also ships this policy as a <meta> tag (vite.config.ts).
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  // Checks (navigator.permissions.query, HID, serial, USB) are refused too, not left to Chromium's defaults.
+  window.webContents.session.setPermissionCheckHandler(() => false); window.webContents.session.setDevicePermissionHandler(() => false);
   window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const scripts = production ? "'self'" : "'self' 'unsafe-inline'";
     const connections = production ? "'self'" : "'self' http://127.0.0.1:5173 ws://127.0.0.1:5173";
