@@ -80,7 +80,7 @@ Before you call a change done, run `typecheck`, `test` and the smoke test neares
 
 1. `npm version <x.y.z> --no-git-tag-version`, and rewrite `docs/RELEASE_NOTES.md`. It becomes the public release description.
 2. Merge to `main` through a PR, and wait for **CI** and **Windows release candidate** to pass on the merge commit. Release doesn't check this. Windows runners sometimes time out in heavy tests: rerun the failed job once (`gh run rerun <id> --failed`), and investigate if it fails again.
-3. Run **Release** on `main` with **Publish** (`gh workflow run release.yml --ref main -f publish=true`), or push the tag `v<x.y.z>`. It builds Windows and both Mac disk images and publishes them all to `trace-releases`. A published version is never replaced.
+3. Push the tag on the exact commit that passed: `git tag v<x.y.z> <sha> && git push origin v<x.y.z>`. That starts **Release**, which builds Windows and both Mac disk images and publishes them all to `trace-releases` as `Trace-<x.y.z>-…`. A manual run (`gh workflow run release.yml --ref main -f publish=true`) also works, but it builds whatever `main` holds when it starts, so don't merge anything else in between. A published version is never replaced.
 
 Windows installs update themselves from that feed. Macs download new versions from the downloads page.
 

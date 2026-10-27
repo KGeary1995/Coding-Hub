@@ -91,9 +91,22 @@ The active `gh` account can't see the repository. With several accounts signed i
 $env:GH_TOKEN = (gh auth token --user <owner>); git push; Remove-Item Env:GH_TOKEN
 ```
 
-### `gh issue create --body "…"` fails with "unknown argument" in PowerShell
+### `git push` is refused: "refusing to allow an OAuth App to create or update workflow … without `workflow` scope"
 
-Windows PowerShell 5.1 splits arguments that contain quotes and backticks. Write the body to a file and use `--body-file`.
+A push that changes `.github/workflows/` needs a token with the `workflow` scope. `gh auth refresh` has **no `--user` flag**; it refreshes the active account. So switch to the right account, refresh, then switch back:
+
+```sh
+gh auth switch -h github.com --user <owner>
+gh auth refresh -h github.com -s workflow    # browser sign-in: authorize as <owner>
+gh auth switch -h github.com --user <your usual account>
+gh auth status                                # <owner>'s scopes now include 'workflow'
+```
+
+The refresh waits for the browser, so run it in your own terminal. If that terminal says `gh` isn't recognized, it was opened before the GitHub CLI was installed: open a new one, or run `& "C:\Program Files\GitHub CLI\gh.exe" …`.
+
+### `gh issue create --body "…"` or `git commit -m "…"` fails with "unknown argument" or "pathspec … did not match" in PowerShell
+
+Windows PowerShell 5.1 splits arguments to native programs at embedded double quotes, even inside a here-string. Write the text to a file and use `gh … --body-file <file>` or `git commit -F <file>`.
 
 ### Claude Code rejects `--settings` JSON from a script
 
