@@ -12,6 +12,22 @@ function codex(options = { cwd: '/p', model: '', reasoningEffort: null as string
 }
 
 describe('Codex chat protocol', () => {
+  it('answers every message with an error once the thread could not start, instead of leaving it waiting', () => {
+    const { stream, events, reply } = codex(); stream.start(); reply(1, {});
+    stream.push(JSON.stringify({ id: 2, error: { message: 'Unknown model' } }) + '\n');
+    expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'Unknown model' });
+    stream.send('hello', []);
+    expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'Unknown model Restart the channel to try again.' });
+  });
+  it('applies a Stop pressed before Codex named the turn as soon as it does', () => {
+    const { stream, sent, reply, notify } = codex(); stream.start(); reply(1, {}); reply(2, { thread: { id: 'thread-1' } });
+    stream.send('long task', []); const start = sent.at(-1) as { id: number }; expect(start).toMatchObject({ method: 'turn/start' });
+    stream.interrupt(); expect(sent.at(-1)).toBe(start);
+    // The turn/started notification can come before turn/start's reply; either names the turn once.
+    notify('turn/started', { turn: { id: 'turn-9' } });
+    expect(sent.at(-1)).toMatchObject({ method: 'turn/interrupt', params: { threadId: 'thread-1', turnId: 'turn-9' } });
+    reply(start.id, { turn: { id: 'turn-9' } }); expect(sent.filter((message) => message.method === 'turn/interrupt')).toHaveLength(1);
+  });
   it('starts a thread after initialize, sends images as data URLs, and turns items into chat events', () => {
     const { stream, sent, events, reply, notify } = codex({ cwd: '/p', model: 'gpt-x', reasoningEffort: 'high' });
     stream.start();

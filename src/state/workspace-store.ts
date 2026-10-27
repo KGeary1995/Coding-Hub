@@ -128,7 +128,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (event.runId !== session.runId) return session;
     if (event.type === 'answered') return session.attention && session.attention.at <= event.at ? { ...session, attention: null } : session;
     if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
-    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, error: event.diagnostic ?? session.error, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
+    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
     if (event.type === 'error') return { ...session, error: event.message };
     return session;
   }) })),
