@@ -14,7 +14,7 @@ export type HubRequest =
   | { action: 'memory-list'; project: string }
   | { action: 'memory-key'; directory: string }
   | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
-  | { action: 'memory-install'; directory: string; project: string }
+  | { action: 'memory-install'; directory: string; project?: string }
   | { action: 'usage' }
   | { action: 'preferences' }
   | { action: 'save-preferences'; preferences: HubPreferences }

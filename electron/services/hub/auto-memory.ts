@@ -7,7 +7,7 @@ import type { CLIEngine } from '../../../shared/types';
 import type { EngineInfo, AgentRunningSession } from '../../../shared/ipc';
 import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
-import { readConfig } from './config';
+import { readConfig, updateConfig } from './config';
 
 const SERVER = 'coding-hub-memory';
 const CONTEXT_LIMIT = 6000;
@@ -116,7 +116,9 @@ function codexInstructions(cwd: string, context: string): string {
 }
 
 interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void> }
-export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void }
+export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void }
+/** A memory server the project configured itself; `key` is null when the entry is not one Trace wrote. */
+interface Configured { file: string; key: string | null }
 
 /**
  * Gives every Trace session the project's shared memory without editing project files:
@@ -126,15 +128,35 @@ export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boole
 export class AutoMemory {
   private runs = new Map<string, Tracked>();
   private pending = new Set<Promise<MemoryNote | null>>();
+  private noticed = new Set<string>();
   constructor(private options: AutoMemoryOptions) {}
 
-  /** True when the project already installed the server itself, so a second copy would clash. */
-  private installed(engine: CLIEngine, directory: string): boolean {
+  private notice(id: string, message: string) { if (this.noticed.has(id)) return; this.noticed.add(id); try { this.options.onNotice?.(message); } catch { /* Notices are best effort. */ } }
+
+  /**
+   * The server entry the project installed itself, so a second copy would clash. An entry Trace wrote whose
+   * program paths no longer exist (the app moved, as with the rename to Trace) is pointed at this install first.
+   */
+  private configured(engine: CLIEngine, directory: string): Configured | null {
     const root = gitLocation(directory)?.root ?? directory;
-    try {
-      const data = readConfig(engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml')).data as Record<string, any>;
-      return Boolean((engine === 'claude' ? data.mcpServers : data.mcp_servers)?.[SERVER]);
-    } catch { return false; }
+    const file = engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
+    const slot = engine === 'claude' ? 'mcpServers' : 'mcp_servers';
+    let inspected: ReturnType<typeof readConfig>;
+    try { inspected = readConfig(file); } catch { return null; }
+    const entry = (inspected.data as Record<string, any>)[slot]?.[SERVER];
+    if (!entry) return null;
+    const args = entry.args;
+    const ours = typeof entry.command === 'string' && Array.isArray(args) && args.length === 3 && args.every((arg: unknown) => typeof arg === 'string') && path.basename(args[0]) === 'memory-server.js';
+    if (!ours) return { file, key: null };
+    const { executable, server } = this.options;
+    const stale = !fs.existsSync(entry.command) || !fs.existsSync(args[0]);
+    if (stale && (entry.command !== executable || args[0] !== server) && fs.existsSync(executable) && fs.existsSync(server)) {
+      try {
+        updateConfig(file, inspected.hash, (data) => { const target = data[slot][SERVER]; target.command = executable; target.args = [server, ...target.args.slice(1)]; });
+        this.notice(`repaired:${file}`, `Trace updated the memory server paths in ${file}, which pointed at a program that no longer exists. Restart CLIs started outside Trace to use it.`);
+      } catch { this.notice(`repair-failed:${file}`, `The memory server in ${file} points at a program that no longer exists, and Trace could not update it. Fix or remove the coding-hub-memory entry.`); }
+    }
+    return { file, key: args[2] };
   }
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
@@ -148,10 +170,16 @@ export class AutoMemory {
       context = memoryContext(key, this.options.memory.list(key));
     } catch { return; }
     const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    const configured = this.configured(run.engine, run.cwd);
+    // A project entry with another key would read and write a different set of notes than the context above.
+    if (configured?.key && configured.key !== key) {
+      context += `\n\nNote: this project's ${path.basename(configured.file)} starts ${SERVER} with the key ${configured.key}, so read_memory and write_handoff use those notes, not the ${key} notes above.`;
+      this.notice(`key:${configured.file}`, `${configured.file} configures ${SERVER} with the memory key ${configured.key}, but Trace's notes for this folder use ${key}. Sessions there read and write the other key. Remove the entry to use automatic memory, or reinstall it with the automatic key.`);
+    }
     const extra: string[] = [];
     if (run.engine === 'claude') {
       if (info.supportsAppendSystemPrompt) extra.push('--append-system-prompt', context);
-      if (info.supportsMcpConfig && !this.installed('claude', run.cwd)) {
+      if (info.supportsMcpConfig && !configured) {
         try {
           fs.mkdirSync(this.options.scratch, { recursive: true, mode: 0o700 });
           const file = path.join(this.options.scratch, `${run.runId}.mcp.json`);
@@ -162,7 +190,7 @@ export class AutoMemory {
       }
     } else if (info.supportsConfig) {
       extra.push('--config', `developer_instructions=${JSON.stringify(codexInstructions(run.cwd, context))}`);
-      if (!this.installed('codex', run.cwd)) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
+      if (!configured) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
     }
     if (!extra.length) return;
     launch.args.push(...extra);

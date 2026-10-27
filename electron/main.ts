@@ -351,6 +351,7 @@ else app.whenReady().then(() => {
       scratch: path.join(storageRoot, 'auto-memory'),
       onWrite: (key) => memoryHub.trackProject(key),
       refresh: (key) => memoryHub.trackProject(key),
+      onNotice: (message) => { hostHealth?.record('auto-memory-notice'); reportStorageError(message); },
     });
   }
   const designs = new DesignArchive(storageRoot, async () => {
