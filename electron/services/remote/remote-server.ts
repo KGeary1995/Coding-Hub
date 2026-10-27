@@ -32,6 +32,8 @@ export interface RemoteRelay {
   write(sessionId: string, runId: string, data: string): Promise<void>;
   /** Asks a linked computer for a phone key for one of this computer's phones, so that phone can reach it directly. */
   phoneKey(computerId: string, name: string, relayKey: string): Promise<{ id: string; name: string; url: string; token: string }>;
+  /** Asks every linked computer to forget the keys it gave one of this computer's phones (`relayKey`), now removed. */
+  revokePhone?(relayKey: string): Promise<void>;
   /** Draws a linked computer's channel at a phone's size, or (null) gives it back. */
   size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
 }
@@ -57,7 +59,11 @@ type Device = z.infer<typeof deviceSchema>;
 const settingsSchema = z.object({ enabled: z.boolean() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
 const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
+const phoneKeyRevokeSchema = z.object({ relayKey: z.string().min(1).max(100) }).strict();
 const computerKeySchema = z.object({ id: z.uuid() }).strict();
+/** JSON for one server-sent event line. U+2028/U+2029 are escaped: JSON allows them raw, but phone and computer apps
+ * from before 1.11.4 read events with a pattern that ends lines there, which broke the stream. */
+export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200) }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
@@ -179,9 +185,13 @@ export class RemoteServer {
   }
   cancelPairing() { this.pairing = null; return this.status(); }
   revoke(id: string) {
-    const devices = this.devices(); if (!devices.some((device) => device.id === id)) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
-    this.saveDevices(devices.filter((device) => device.id !== id));
-    for (const stream of this.streams) if (stream.device === id) { stream.response.end(); this.streams.delete(stream); }
+    const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
+    // A linked computer's phones were given keys here through it (relayKey `<its id>:<phone>`): they go with it.
+    const removed = new Set([id, ...devices.filter((item) => item.relayKey?.startsWith(id + ':')).map((item) => item.id)]);
+    this.saveDevices(devices.filter((item) => !removed.has(item.id)));
+    for (const stream of this.streams) if (removed.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    // A phone of this computer was given keys on linked computers through this one: ask them to forget those too.
+    if (!device.kind || device.kind === 'phone') void this.relay?.revokePhone?.(id).catch(() => {});
     return this.status();
   }
   status(): RemoteStatus {
@@ -212,7 +222,7 @@ export class RemoteServer {
   }
   private output(sessionId: string, runId: string, data: string) {
     const mirror = this.replay.get(sessionId); if (mirror?.runId === runId) mirror.write(data);
-    const payload = `event: output\ndata: ${JSON.stringify({ sessionId, runId, data })}\n\n`;
+    const payload = `event: output\ndata: ${eventJSON({ sessionId, runId, data })}\n\n`;
     for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload);
   }
   /** Screens are kept only while phone access is on; turned on mid-run, a channel's screen starts from that point. */
@@ -241,7 +251,7 @@ export class RemoteServer {
    */
   resized(sessionId: string) {
     const run = this.host.running().find((item) => item.sessionId === sessionId);
-    if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload); }
+    if (run?.cols && run.rows) { const mirror = this.replay.get(sessionId); if (mirror?.runId === run.runId) mirror.resize(run.cols, run.rows); const payload = `event: resize\ndata: ${eventJSON({ sessionId, runId: run.runId, cols: run.cols, rows: run.rows })}\n\n`; for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload); }
     this.channelsChanged();
   }
   /** The person typed on the desktop: a waiting prompt is answered there, and a channel a phone resized is given back. */
@@ -304,11 +314,11 @@ export class RemoteServer {
   relayChanged() { if (this.channelsTimer || !this.streams.size) return; this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250); }
   /** Output from a channel on a linked computer, for phones watching it. */
   relayOutput(sessionId: string, runId: string, data: string) {
-    const payload = `event: output\ndata: ${JSON.stringify({ sessionId, runId, data })}\n\n`;
+    const payload = `event: output\ndata: ${eventJSON({ sessionId, runId, data })}\n\n`;
     for (const stream of this.streams) if (stream.kind === 'phone' && stream.sessionId === sessionId) this.write(stream, payload);
   }
   relayResize(sessionId: string, runId: string, cols: number, rows: number) {
-    const payload = `event: resize\ndata: ${JSON.stringify({ sessionId, runId, cols, rows })}\n\n`;
+    const payload = `event: resize\ndata: ${eventJSON({ sessionId, runId, cols, rows })}\n\n`;
     for (const stream of this.streams) if (stream.kind === 'phone' && stream.sessionId === sessionId) this.write(stream, payload);
   }
   private local(sessionId: string) { return this.host.sessions().some((session) => session.id === sessionId); }
@@ -394,7 +404,7 @@ export class RemoteServer {
         // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
         if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone' && this.relay) void this.relay.size(sessionId, '', null).catch(() => {}); }
       });
-      this.write(stream, `event: channels\ndata: ${JSON.stringify(this.channels(kind))}\n\n`);
+      this.write(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
       const screens: { sessionId: string; take: (callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void) => boolean }[] = all
         ? [...this.replay].map(([id, mirror]) => ({ sessionId: id, take: (callback) => { mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; } }))
@@ -403,7 +413,7 @@ export class RemoteServer {
       if (screens.length) {
         stream.held = []; let waiting = screens.length; const ready: string[] = [];
         const done = () => { if (--waiting) return; const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return; for (const text of [...ready, ...later]) this.write(stream, text); };
-        for (const screen of screens) if (!screen.take((value) => { ready.push(`event: replay\ndata: ${JSON.stringify({ sessionId: screen.sessionId, ...value })}\n\n`); done(); })) done();
+        for (const screen of screens) if (!screen.take((value) => { ready.push(`event: replay\ndata: ${eventJSON({ sessionId: screen.sessionId, ...value })}\n\n`); done(); })) done();
       }
       return;
     }
@@ -417,6 +427,14 @@ export class RemoteServer {
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
       return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/phone-key/revoke') {
+      // A linked computer removed one of its phones: the key this computer gave that phone through it stops working.
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can withdraw a phone key.' });
+      const parsed = phoneKeyRevokeSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
+      const relayKey = `${device.id}:${parsed.data.relayKey}`; const gone = this.devices().filter((item) => item.relayKey === relayKey).map((item) => item.id);
+      if (gone.length) { this.saveDevices(this.devices().filter((item) => !gone.includes(item.id))); for (const stream of this.streams) if (gone.includes(stream.device)) { stream.response.end(); this.streams.delete(stream); } }
+      return this.send(response, 200, { ok: true, removed: gone.length });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-key') {
       // A linked computer passing on a phone of its own: the phone gets a phone's key here, never more.

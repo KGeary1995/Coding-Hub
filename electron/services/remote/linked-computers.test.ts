@@ -122,6 +122,25 @@ describe('linked computers', () => {
     expect(pc.server.status().devices.filter((device) => device.kind === 'phone')).toHaveLength(1);
     // A linked computer cannot use the phone route, and a phone cannot use the computer route.
     expect((await fetch(`${mac.url}api/phone-key`, { method: 'POST', headers: auth, body: JSON.stringify({ name: 'x', relayKey: 'y' }) })).status).toBe(403);
+    expect((await fetch(`${mac.url}api/phone-key/revoke`, { method: 'POST', headers: auth, body: JSON.stringify({ relayKey: 'y' }) })).status).toBe(403);
+  });
+
+  it('withdraws the keys a phone got on linked computers when it is removed, or its computer is unlinked', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const mac = await computer(MAC, 'MacBook', 'mac-1');
+    const link = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => mac.server.relayChanged() });
+    cleanup.push(() => link.stop()); mac.server.setRelay(link);
+    await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
+    const keyOnPc = async () => { const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' }; return (await (await fetch(`${mac.url}api/computer-key`, { method: 'POST', headers: auth, body: JSON.stringify({ id: PC }) })).json() as { token: string }).token; };
+    const works = async (token: string) => (await fetch(`${pc.url}api/channels`, { headers: { Authorization: `Bearer ${token}` } })).status === 200;
+    // Removing the phone on the Mac (lost, replaced) also stops the key the PC gave it.
+    const lost = await keyOnPc(); expect(await works(lost)).toBe(true);
+    const phoneId = mac.server.status().devices.find((device) => device.kind === 'phone')!.id; mac.server.revoke(phoneId);
+    for (let i = 0; i < 100 && await works(lost); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await works(lost)).toBe(false);
+    // Unlinking the Mac from the PC (from either side) takes every key the PC gave the Mac's phones with it.
+    const kept = await keyOnPc(); expect(await works(kept)).toBe(true);
+    const macOnPc = pc.server.status().devices.find((device) => device.kind === 'computer')!.id; pc.server.revoke(macOnPc);
+    expect(await works(kept)).toBe(false); expect(pc.server.status().devices).toEqual([]);
   });
 
   it('lets the phone app from the other computer call this one directly, and no other site', async () => {

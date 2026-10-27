@@ -136,7 +136,8 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
             buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-              const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1];
+              // Split on newlines only: a regular expression's line ends also include U+2028/U+2029, which JSON leaves unescaped in a CLI's output.
+              const lines = block.split(/\r?\n/); const type = lines.find((line) => line.startsWith('event: '))?.slice(7); const data = lines.find((line) => line.startsWith('data: '))?.slice(6);
               if (type && data) onEvent({ type, data: JSON.parse(data) } as StreamEvent);
             }
           }
