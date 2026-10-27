@@ -8,10 +8,23 @@ self.addEventListener('fetch', (event) => {
   const key = request.mode === 'navigate' ? '/' : request;
   event.respondWith((async () => {
     const cache = await caches.open(SHELL);
-    try { const response = await fetch(request); if (response.ok) await cache.put(key, response.clone()); return response; }
+    try {
+      const response = await fetch(request);
+      if (response.ok) { await cache.put(key, response.clone()); if (key === '/') await prune(cache, response.clone()); return response; }
+      // The computer is on but Trace is not answering (Tailscale serve replies 502 while Trace is closed or starting):
+      // open the saved app, which can then reach the person's other computer, rather than an error page.
+      if (response.status >= 500) return (await cache.match(key)) || response;
+      return response;
+    }
     catch { return (await cache.match(key)) || Response.error(); }
   })());
 });
+/** Each update ships new hashed files: once a new app page is saved, forget saved assets it no longer uses. */
+async function prune(cache, page) {
+  const html = await page.text(); const used = new Set([...html.matchAll(/(?:src|href)="\.?\/?(assets\/[^"]+)"/g)].map((match) => '/' + match[1]));
+  // Scripts and styles only: fonts are named in the styles, not the page, and change rarely.
+  for (const request of await cache.keys()) { const path = new URL(request.url).pathname; if (/^\/assets\/.+\.(js|css)$/.test(path) && !used.has(path)) await cache.delete(request); }
+}
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 

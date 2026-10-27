@@ -326,7 +326,8 @@ async function type(data: string) {
   if (!channel?.runId || channel.runId !== run) { if (problem) problem.textContent = 'This channel is not running. Start it in Trace on your computer.'; return false; }
   if (data.length > INPUT_LIMIT) { if (problem) problem.textContent = `Messages sent from the phone can be at most ${(INPUT_LIMIT - 1).toLocaleString('en-US')} characters.`; return false; }
   try { await send(channel.sessionId, run, data); return true; }
-  catch (e) { if (e instanceof Unpaired) showPair(e.message); else if (problem) problem.textContent = (e as Error).message; return false; }
+  // Only this app's own computer unpairing the phone means pairing again; another computer's key being removed does not.
+  catch (e) { if (e instanceof Unpaired && e.home) showPair(e.message); else if (problem) problem.textContent = e instanceof Unpaired ? 'That computer no longer accepts this phone. Remove and add it again under Settings → Phone access there.' : (e as Error).message; return false; }
 }
 
 function onEvent(event: StreamEvent) {

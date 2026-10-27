@@ -4,6 +4,7 @@ import { useLinkedStore } from '../state/linked-store';
 import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { workbench } from './workbench';
+import { withoutTerminalReplies } from '../../shared/terminal-input';
 
 /**
  * Terminals showing channels that run on a linked computer. Each is drawn at that CLI's own size (the other computer
@@ -21,8 +22,11 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
   const entry: Entry = { terminal, element, runId: null, queue: Promise.resolve() };
   // Keystrokes go out one at a time and in order, so "y" then Enter cannot arrive reversed.
   terminal.onData((data) => {
-    const runId = entry.runId; if (!runId) return;
-    entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data })).catch(() => {});
+    // The computer running the CLI answers its queries (cursor position, device attributes, colours) and focus
+    // reports itself; this view's own answers would reach the CLI twice, as stray input like ^[[12;1R.
+    const typed = withoutTerminalReplies(data).replace(/\x1b\[[IO]/g, '');
+    const runId = entry.runId; if (!runId || !typed) return;
+    entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: typed })).catch(() => {});
   });
   terminals.set(id, entry);
   return entry;

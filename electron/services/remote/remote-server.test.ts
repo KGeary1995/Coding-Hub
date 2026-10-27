@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
-import { RemoteServer, type RemoteHost } from './remote-server';
+import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
 import { serveFailure, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -201,6 +201,16 @@ describe('phone remote', () => {
     server.personInput('s1', '\x1b[I'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', '\x1b[12;40R\x1b[?1;2c'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', 'y'); expect(server.channels()[0].attention).toBeNull();
+  });
+});
+
+describe('stream events', () => {
+  it('escapes Unicode line and paragraph separators, which older phones read as line ends', () => {
+    const LS = String.fromCharCode(0x2028); const PS = String.fromCharCode(0x2029); const raw = 'a' + LS + 'b' + PS + 'c';
+    const text = eventJSON({ data: raw });
+    expect(text.includes(LS) || text.includes(PS)).toBe(false); expect(JSON.parse(text)).toEqual({ data: raw });
+    // The pattern phones and computers from before this change used finds the whole object.
+    expect(JSON.parse(/^data: (.*)$/m.exec(`event: output\ndata: ${text}`)![1])).toEqual({ data: raw });
   });
 });
 

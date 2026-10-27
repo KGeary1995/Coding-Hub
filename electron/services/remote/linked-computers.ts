@@ -109,6 +109,12 @@ export class LinkedComputers implements RemoteRelay {
     if (!body.token || !url) throw new HubError('LINK_PHONE_KEY', `${link.name} did not give a key.`);
     return { id, name: link.name, url, token: body.token };
   }
+  /** One of this computer's phones was removed: every linked computer forgets the key it gave that phone through this one. */
+  async revokePhone(relayKey: string) {
+    // Best effort and in parallel; a computer that is off, or on a Trace without this request, keeps the key until
+    // this computer is unlinked there.
+    await Promise.allSettled(this.links().map((link) => this.request(link, 'api/phone-key/revoke', { method: 'POST', body: JSON.stringify({ relayKey }), signal: AbortSignal.timeout(5000) })));
+  }
   /** A phone of this computer shows a linked computer's channel at its size, or (null) leaves it. */
   async size(sessionId: string, runId: string, size: { cols: number; rows: number } | null) {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
@@ -176,7 +182,8 @@ export class LinkedComputers implements RemoteRelay {
             buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-              const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1];
+              // Split on newlines only: a regular expression's line ends also include U+2028/U+2029, which JSON leaves unescaped in a CLI's output.
+              const lines = block.split(/\r?\n/); const type = lines.find((line) => line.startsWith('event: '))?.slice(7); const data = lines.find((line) => line.startsWith('data: '))?.slice(6);
               if (type && data) try { this.event(connection, type, JSON.parse(data)); } catch { /* One bad event is skipped. */ }
             }
           }
@@ -203,7 +210,9 @@ export class LinkedComputers implements RemoteRelay {
   private event(connection: Connection, type: string, data: unknown) {
     const id = connection.link.id;
     if (type === 'channels') {
-      connection.channels = z.array(channelSchema).max(64).parse(data).map((channel) => ({ ...channel }));
+      // One channel at a time: a computer on a newer Trace may list channels this one cannot show (a new engine, a new
+            // field), which must not hide all of that computer's channels.
+            connection.channels = z.array(z.unknown()).max(64).parse(data).flatMap((item) => { const channel = channelSchema.safeParse(item); return channel.success ? [{ ...channel.data }] : []; });
       const current = new Map(connection.channels.map((channel) => [channel.sessionId, channel.runId]));
       for (const [sessionId, mirror] of connection.mirrors) if (current.get(sessionId) !== mirror.runId) { mirror.dispose(); connection.mirrors.delete(sessionId); }
       this.notify(); this.sink.changed(); return;
