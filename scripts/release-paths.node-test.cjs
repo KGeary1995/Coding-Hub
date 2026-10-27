@@ -44,6 +44,9 @@ test('signed upgrade build and installation check use the same validated baselin
   const job = workflow.jobs['signed-windows'];
   assert.equal(installBaselineVersion({}), '1.2.0');
   assert.equal(installBaselineVersion(job.env), '1.6.1');
-  assert.ok(job.steps.find((step) => step.name === 'Build signed upgrade baseline').run.includes('${{ env.CODING_HUB_BASELINE_VERSION }}'));
+  const baselineStep = job.steps.find((step) => step.name === 'Build signed upgrade baseline');
+  assert.ok(baselineStep.run.includes('${{ env.CODING_HUB_BASELINE_VERSION }}'));
+  // windows-install-smoke looks for the baseline under the legacy name.
+  assert.equal(baselineStep.env?.TRACE_LEGACY_PRODUCT_NAME, '1');
   assert.throws(() => installBaselineVersion({ CODING_HUB_BASELINE_VERSION: '../escape' }));
 });
