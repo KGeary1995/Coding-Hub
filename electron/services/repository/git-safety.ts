@@ -7,8 +7,10 @@ import { execFile } from 'node:child_process';
  * them to run anything as soon as Trace looks at it. These options turn off fsmonitor and hooks, and blank out the
  * filter drivers the repository itself defines. Filters from the person's own global or system config (Git LFS) stay.
  */
+/** fsmonitor and hooks off: enough for commands that never read file contents (`rev-parse`), without a lookup first. */
+export const noHookGitOptions = () => ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`];
 export async function readOnlyGitOptions(cwd: string): Promise<string[]> {
-  const options = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`];
+  const options = noHookGitOptions();
   const listed = await new Promise<string>((resolve) => execFile('git', ['-C', cwd, 'config', '--show-scope', '--name-only', '--get-regexp', '^filter\\.'], { timeout: 8000, maxBuffer: 256 * 1024, windowsHide: true }, (_error, stdout) => resolve(String(stdout ?? ''))));
   const drivers = new Set<string>();
   for (const line of listed.split(/\r?\n/)) {

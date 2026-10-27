@@ -10,7 +10,7 @@ import { directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 import { hostEnvironment } from '../cli/discovery';
 import { parseStatus } from '../repository/git';
-import { readOnlyGitOptions } from '../repository/git-safety';
+import { noHookGitOptions, readOnlyGitOptions } from '../repository/git-safety';
 import { validateRelativePath } from '../repository/filesystem';
 const run = promisify(execFile);
 const reference = { directory: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/) };
@@ -39,7 +39,7 @@ export class Delivery {
   });
  }
  async inspect(input: string): Promise<DeliveryStatus> {
-  const cwd = directory(input); const root = directory((await this.command(cwd, 'git', [...await readOnlyGitOptions(cwd), 'rev-parse','--show-toplevel'])).toString().trim());
+  const cwd = directory(input); const root = directory((await this.command(cwd, 'git', [...noHookGitOptions(), 'rev-parse','--show-toplevel'])).toString().trim());
   // The review only reads: the repository's own config must not run programs (fsmonitor, filters) before the person
   // has confirmed anything. The confirmed commit and push below run the repository's hooks as usual.
   const safe = await readOnlyGitOptions(root);
