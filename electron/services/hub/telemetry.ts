@@ -46,7 +46,9 @@ export function repriced(usage: UsageRecord, rates: PriceRate[]): UsageRecord {
 }
 /** The tokens a session limit counts: new tokens, as shown everywhere in Trace (cache re-reads are not counted). */
 export function totalTokens(usage: UsageRecord) { return newTokens(usage); }
-interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
+interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string;
+  /** Claude subagent transcripts read so far, by file name. */
+  subagents?: Map<string, { offset: number; partial: Buffer }>; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
   /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
   errors?: number; reported?: boolean }
 export class TelemetryService {
@@ -121,21 +123,14 @@ export class TelemetryService {
       const conversationId = path.basename(w.file).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
       if (conversationId) { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId); if (record) { const metadata = JSON.parse(String(record.value)); if (metadata.conversationId !== conversationId) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...metadata, conversationId }), w.run.runId); } }
 
-      const size = fs.statSync(w.file).size; if (size < w.offset) { w.offset = 0; w.partial = Buffer.alloc(0); }
-      const count = Math.min(512000, size - w.offset); if (count <= 0) return;
-      const buffer = Buffer.alloc(count); const fd = fs.openSync(w.file, 'r'); let read: number; try { read = fs.readSync(fd, buffer, 0, count, w.offset); } finally { fs.closeSync(fd); } w.offset += read;
-      const data = Buffer.concat([w.partial, buffer.subarray(0, read)]); let start = 0; let changed = false;
-      for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
-        if (end - start <= 2 * 1024 * 1024) try {
-          const raw = JSON.parse(data.subarray(start, end).toString()); if (raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
-          const parsed = parseUsage(w.run.engine, raw, w.model);
-          if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
-            this.database.prepare('INSERT INTO usage(run,event,snapshot) VALUES(?,?,?) ON CONFLICT(run,event) DO UPDATE SET snapshot=excluded.snapshot').run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
-          }
-        } catch { /* Non-usage events and malformed partial records are ignored. */ }
-        start = end + 1;
+      let changed = this.ingest(w, w.file, w, false);
+      // Claude Code writes subagents' (the Task tool's) turns to their own transcripts beside the conversation's,
+      // `<conversation>/subagents/agent-*.jsonl`. They are this run's usage too, and count toward its token limit.
+      if (w.run.engine === 'claude' && conversationId) {
+        const folder = path.join(path.dirname(w.file), conversationId, 'subagents');
+        let names: string[] = []; try { names = fs.readdirSync(folder).filter((name) => /^agent-[\w-]+\.jsonl$/.test(name)).slice(0, 500); } catch { /* No subagents yet. */ }
+        for (const name of names) { w.subagents ??= new Map(); let state = w.subagents.get(name); if (!state) { state = { offset: 0, partial: Buffer.alloc(0) }; w.subagents.set(name, state); } changed = this.ingest(w, path.join(folder, name), state, true) || changed; }
       }
-      w.partial = data.subarray(start).length <= 2 * 1024 * 1024 ? data.subarray(start) : Buffer.alloc(0);
       if (changed) { const usage = this.runUsage(w.run.runId); if (usage) { this.publish(usage); if (w.config.engine === 'claude' && w.config.tokenLimits.maxSessionTokens && totalTokens(usage) >= w.config.tokenLimits.maxSessionTokens && !w.stopped) { w.stopped = true; this.stopAtLimit(w.run); } } }
       w.errors = 0;
     } catch (error) {
@@ -148,6 +143,28 @@ export class TelemetryService {
       }
     }
     finally { w.polling = false; }
+  }
+  /**
+   * Reads what a transcript gained since `state.offset` and records its usage. A subagent's replies count toward the
+   * run's tokens and cost, but its context is its own, not the channel's, so it never sets the run's context.
+   */
+  private ingest(w: Watcher, file: string, state: { offset: number; partial: Buffer }, subagent: boolean): boolean {
+    const size = fs.statSync(file).size; if (size < state.offset) { state.offset = 0; state.partial = Buffer.alloc(0); }
+    const count = Math.min(512000, size - state.offset); if (count <= 0) return false;
+    const buffer = Buffer.alloc(count); const fd = fs.openSync(file, 'r'); let read: number; try { read = fs.readSync(fd, buffer, 0, count, state.offset); } finally { fs.closeSync(fd); } state.offset += read;
+    const data = Buffer.concat([state.partial, buffer.subarray(0, read)]); let start = 0; let changed = false;
+    for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
+      if (end - start <= 2 * 1024 * 1024) try {
+        const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
+        const parsed = parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
+        if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
+          this.database.prepare('INSERT INTO usage(run,event,snapshot) VALUES(?,?,?) ON CONFLICT(run,event) DO UPDATE SET snapshot=excluded.snapshot').run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
+        }
+      } catch { /* Non-usage events and malformed partial records are ignored. */ }
+      start = end + 1;
+    }
+    state.partial = data.subarray(start).length <= 2 * 1024 * 1024 ? data.subarray(start) : Buffer.alloc(0);
+    return changed;
   }
   /** Unreadable preferences leave usage unpriced; they must not stop usage recording or token limits. */
   private safeRates(): PriceRate[] { try { return this.rates(); } catch { return []; } }
