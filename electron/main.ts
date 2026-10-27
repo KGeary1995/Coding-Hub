@@ -18,7 +18,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -407,6 +407,9 @@ else app.whenReady().then(() => {
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
+    // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
+    // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
+    idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.

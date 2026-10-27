@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import type { ChannelControl, LinkedComputerEvent } from '../../../shared/remote';
-import { RemoteServer, type RemoteHost } from './remote-server';
+import { DESKTOP_IDLE_SECONDS, RemoteServer, type RemoteHost } from './remote-server';
 import { LinkedComputers, linkableAddress } from './linked-computers';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -13,7 +13,7 @@ const until = async (check: () => boolean, what: string) => { for (let i = 0; i 
 const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true })); return root; };
 
 /** A computer's remote with one running Claude channel, standing in for Trace on the other computer. */
-async function computer(id: string, name: string, sessionId: string) {
+async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = [];
   const size = { cols: 100, rows: 30 }; const sizes: string[] = [];
@@ -23,6 +23,7 @@ async function computer(id: string, name: string, sessionId: string) {
     resize: (_reference, cols, rows) => { Object.assign(size, { cols, rows }); sizes.push(`${cols}x${rows}`); },
     write: (reference, data) => { writes.push({ reference, data }); },
     control: async (target, control) => { controls.push({ sessionId: target, control }); },
+    ...(idle ? { idleSeconds: () => idle.seconds } : {}),
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
@@ -166,6 +167,26 @@ describe('linked computers', () => {
     expect(pc.sizes).toEqual(['40x22', '100x30']); expect(mac.sizes.slice(-1)).toEqual(['120x40']);
     // Out-of-range sizes are refused.
     expect((await size('mac-1', 5, 2)).status).toBe(400);
+  });
+
+  it('keeps the desktop size while the computer is in use, and gives the phone its size once it is idle or asked', async () => {
+    const idle = { seconds: 5 }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
+    const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
+    const size = async (cols: number, rows: number, force?: boolean) => (await (await fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: 'mac-1', runId: 'run-mac-1', cols, rows, ...(force ? { force } : {}) }) })).json()) as { held: boolean };
+    // The person is at the computer: the phone's request waits, and the desktop tile keeps its size.
+    expect(await size(44, 30)).toEqual({ ok: true, held: false }); expect(mac.sizes).toEqual([]);
+    // Two minutes without keyboard or mouse: the phone gets its size.
+    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes).toEqual(['44x30']);
+    // The person is back: the desktop size returns at once, and the phone's size waits for the next idle spell.
+    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes).toEqual(['44x30', '100x30']);
+    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
+    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    // "Fit to phone" applies it now and keeps it while the computer is used, until the person types in that channel.
+    expect(await size(44, 30, true)).toEqual({ ok: true, held: true }); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
+    mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
+    mac.server.personInput('mac-1', 'a'); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    // Typing at the desktop also drops the waiting request: an idle spell does not shrink the channel again by itself.
+    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
   });
 
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {
