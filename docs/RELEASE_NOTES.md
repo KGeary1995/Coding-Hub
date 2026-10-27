@@ -1,11 +1,17 @@
 ## What's new
 
-1.11.3 fixes two things on Claude Code channels:
+1.11.4 is a round of fixes from an audit of the whole app.
 
-- **Approval alerts clear when Claude moves on.** A channel no longer stays on HOLD ("needs approval") after you've answered. Before, if you answered before the alert reached Trace, it stayed until you typed in that channel again. Now it also clears when Claude finishes the tool or its turn.
-- **See how much context Claude is using.** The channel header shows the tokens in Claude's context after its last reply, for example `ctx 241K`. Claude Code doesn't report its window size, so there's no percentage; Codex channels still show one.
+- **Pasting images on Windows.** Ctrl+V in a Claude Code or Codex channel now attaches an image when the clipboard holds only an image. Text still pastes as before.
+- **Phone: scroll, copy and size.** Swipe to scroll a channel's history, and copy its text from a sheet. While you use the computer, its size wins. The phone can switch between **Fit to phone** and **Desktop size**, and shrinks text to fit.
+- **Safer Git reads.** Trace's own Git checks no longer run a repository's hooks, fsmonitor or filter programs.
+- **Usage includes subagents.** Tokens used by Claude Code subagents now count toward usage, and the memory panel opens on the project's automatic key.
+- **Chat channels.** A Codex chat that fails or is stopped now says so. Chat channels report when the CLI exits, and copying waits until the clipboard is written.
+- **Phone and linked computers.** Removing a phone also removes the keys it was given on linked computers. The phone app keeps working offline when the computer returns a server error. Streams no longer break on unusual characters in text. A link that goes quiet for a minute reconnects.
+- **Sync, updates and startup.** Sync stops if its folder disappears. Memory notes are written before an update restarts Trace. Opening Trace a second time brings up the running window. Turning off phone access also stops sharing it over Tailscale.
+- **Smaller fixes.** Search in the workflow center opens what it found. The worktree picker can go back to the workspace. Shortcuts don't fire while a dialog is open. The phone key row adds Shift+Tab and Backspace. The memory server answers newer MCP clients and oversized requests correctly.
 
-Also in 1.11.2: memory keeps working in projects where it was installed before the rename, Trace warns when a project's memory uses a separate set of notes, and installing memory uses the automatic key. Also in 1.11.1: chat channels keep their conversation and behave, a chat CLI that fails to start can no longer crash Trace, the phone reconnects by itself, security fixes for linked computers, complete conversation history, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
+Also in 1.11.3: approval alerts clear when Claude moves on, and Claude channels show how much context is in use. Also in 1.11.2: memory keeps working in projects where it was installed before the rename. Also in 1.11.1: chat channels keep their conversation, the phone reconnects by itself, security fixes for linked computers, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, and copying several lines from Claude Code. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
 
 ## Install
 
