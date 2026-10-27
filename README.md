@@ -98,6 +98,8 @@ The linked computer gets its own tab next to **Projects**, showing its channels 
 
 ## Run from source
 
+**Changing, building or releasing Trace?** Read [AGENTS.md](AGENTS.md) first. It's the short guide for people and AI coding agents, and links to [architecture](docs/architecture.md), [development](docs/development.md), [releases](docs/windows-releases.md) and [troubleshooting](docs/troubleshooting.md).
+
 You need Node.js 22.13 or later and Git.
 
 ```sh
@@ -120,5 +122,5 @@ On Windows, use `npm.cmd` in PowerShell. Run these commands inside the project f
 ## More
 
 - [Reference](docs/reference.md): how each part works, what is stored where, and the release history.
-- [Architecture](docs/architecture.md).
-- [Releases and signing](docs/windows-releases.md).
+- [Architecture](docs/architecture.md), [development](docs/development.md), [releases and signing](docs/windows-releases.md), [troubleshooting](docs/troubleshooting.md).
+- [All documentation](docs/README.md), including which docs are historical.
