@@ -23,7 +23,8 @@ afterAll(()=>{for(const [key,value] of Object.entries(savedIdentity)){if(value==
 function root(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hub-productivity-'));roots.push(dir);return dir;}
 const git=(cwd:string,...args:string[])=>execFileSync('git',['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false',...args],{cwd,encoding:'utf8',stdio:'pipe'}).trim();
 function workspace(cwd:string):SavedWorkspace {const ids=[randomUUID(),randomUUID()];return {version:1,rootDirectory:cwd,sessions:ids.map((id,index)=>({id,title:index?'Codex':'Claude',createdAt:new Date().toISOString(),config:index?{engine:'codex',model:'',reasoningEffort:null,resumeId:randomUUID()}:{engine:'claude',model:'',thinking:{budget_tokens:null},tokenLimits:{maxOutputTokens:null,maxSessionTokens:null}},binding:{mode:'workspace'},budget:{tokens:100,costUSD:null,contextPercent:85},preparedRequest:{label:'Send request',prompt:'Private prepared request'}})),tiles:ids.map((sessionId,index)=>({sessionId,x:index*6,y:0,w:6,h:12,minW:3,minH:10})),layoutMode:'columns',focusedSessionId:null};}
-describe('reviewed Git delivery',()=>{
+// Each review runs several Git commands, which take a while to start on Windows CI runners.
+describe('reviewed Git delivery',{timeout:30000},()=>{
  it('preserves the index on cancellation and commits only explicitly staged literal paths',async()=>{
   const cwd=root();git(cwd,'init','-b','main');fs.writeFileSync(path.join(cwd,'--literal.txt'),'selected');fs.writeFileSync(path.join(cwd,'other.txt'),'leave alone');let approved=false;const service=new Delivery(async()=>approved,()=>{});
   let state=await service.inspect(cwd);expect(await service.execute({action:'flow-git-stage',directory:cwd,revision:state.revision,paths:['--literal.txt']})).toBeNull();expect(git(cwd,'diff','--cached','--name-only')).toBe('');approved=true;
