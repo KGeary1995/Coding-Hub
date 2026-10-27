@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ConfigService, readConfig, updateConfig } from './config';
+import { claudeProjectKey, ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService } from './memory';
 import { DriveMirror } from './drive';
 import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
@@ -24,7 +24,9 @@ describe('native configuration management', () => {
   it('uses Claude project disable settings and user project-scoped disable lists', () => {
     const { root, project } = setup(); fs.writeFileSync(path.join(project, '.mcp.json'), '{"mcpServers":{"project-server":{"command":"x"}}}'); fs.writeFileSync(path.join(root, '.claude.json'), '{"mcpServers":{"user-server":{"command":"y"}},"unknown":true}'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project);
     service.mutate({ action: 'toggle-server', id: inventory.servers.find((s) => s.name === 'project-server')!.id, enabled: false }); expect(readConfig(path.join(project, '.claude', 'settings.local.json')).data.disabledMcpjsonServers).toEqual(['project-server']);
-    service.mutate({ action: 'toggle-server', id: service.inventory(project).servers.find((s) => s.name === 'user-server')!.id, enabled: false }); const data = readConfig(path.join(root, '.claude.json')).data; expect(data.projects[project].disabledMcpServers).toEqual(['user-server']); expect(data.unknown).toBe(true); expect(service.inventory(project).servers.every((s) => !s.enabled)).toBe(true);
+    service.mutate({ action: 'toggle-server', id: service.inventory(project).servers.find((s) => s.name === 'user-server')!.id, enabled: false }); const data = readConfig(path.join(root, '.claude.json')).data;
+    // Under the key Claude Code reads: forward slashes on Windows (C:/…), the path as it is elsewhere.
+    const key = process.platform === 'win32' ? project.replace(/\\/g, '/') : project; expect(Object.keys(data.projects)).toEqual([key]); expect(data.projects[key].disabledMcpServers).toEqual(['user-server']); expect(data.unknown).toBe(true); expect(service.inventory(project).servers.every((s) => !s.enabled)).toBe(true);
   });
   it('removes the selected local Claude server when a same-name user server exists', () => {
     const { root, project } = setup(); const file = path.join(root, '.claude.json'); fs.writeFileSync(file, JSON.stringify({ mcpServers: { duplicate: { command: 'user' } }, projects: { [project]: { mcpServers: { duplicate: { command: 'local' } } } } }));
@@ -97,6 +99,31 @@ describe('structured telemetry', () => {
       await telemetry.end(run.runId);
       expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
     } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
+  });
+  it('finds a folder in .claude.json projects however Claude Code wrote its Windows path', () => {
+    const projects = { 'C:/Users/me/App': { mcpServers: {} }, '/home/me/app': {} };
+    // Claude Code writes C:/…; Trace's paths are C:\…, and on Windows the case may differ.
+    expect(claudeProjectKey(projects, 'C:\\Users\\me\\App')).toBe('C:/Users/me/App');
+    expect(claudeProjectKey(projects, 'c:\\users\\me\\app\\')).toBe('C:/Users/me/App');
+    // A folder with no entry yet gets one the way Claude Code writes it.
+    expect(claudeProjectKey(projects, 'D:\\Work\\New')).toBe('D:/Work/New');
+    expect(claudeProjectKey(projects, '/home/me/app')).toBe('/home/me/app');
+  });
+  it('counts subagent (Task tool) usage from their own transcripts, without taking over the channel’s context', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const published: UsageRecord[] = []; const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], (usage) => published.push(usage), () => {}, home, path.join(root, 'codex'));
+    try {
+      const usage = (id: string, input: number, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: input, output_tokens: output } } }) + '\n';
+      fs.writeFileSync(file, usage('main', 100, 10));
+      const subagents = path.join(dir, run.runId, 'subagents'); fs.mkdirSync(subagents, { recursive: true });
+      fs.writeFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-1', 5000, 300)); fs.writeFileSync(path.join(subagents, 'agent-a1.meta.json'), '{}');
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      vi.advanceTimersByTime(750);
+      expect(published.at(-1)).toMatchObject({ input: 5100, output: 310 }); expect(published.at(-1)?.context).toEqual({ used: 110, limit: 0 });
+      // A second subagent, and more from the first, are picked up as they are written.
+      fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-2', 10, 20)); fs.writeFileSync(path.join(subagents, 'agent-b2.jsonl'), usage('sub-3', 1, 2));
+      vi.advanceTimersByTime(750); expect(published.at(-1)).toMatchObject({ input: 5111, output: 332 });
+    } finally { telemetry.close(); vi.useRealTimers(); }
   });
   it('hands over a short run’s transcript found only by the last read, for its memory summary', async () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
