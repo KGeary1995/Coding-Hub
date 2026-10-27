@@ -22,7 +22,11 @@ export interface RemoteHost {
   control?(sessionId: string, control: ChannelControl): Promise<void>;
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
   resize?(reference: RunReference, cols: number, rows: number): void;
+  /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
+  idleSeconds?(): number;
 }
+/** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
+export const DESKTOP_IDLE_SECONDS = 120;
 /** Channels running on linked computers, which this computer passes on to its phones. */
 export interface RemoteRelay {
   /** Each with `computer` set. */
@@ -58,7 +62,7 @@ const settingsSchema = z.object({ enabled: z.boolean() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
 const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
 const computerKeySchema = z.object({ id: z.uuid() }).strict();
-const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200) }).strict();
+const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
@@ -102,7 +106,10 @@ export class RemoteServer {
    * Channels a phone is showing at its own size, like tmux: the CLI redraws for the phone, and the desktop's size is
    * kept to put back when the phone leaves the channel or disconnects, or the person types at the desktop.
    */
-  private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number } }>();
+  private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number }; cols: number; rows: number; forced: boolean }>();
+  /** Phone sizes asked for while the person was using this computer, applied once it goes idle. */
+  private wants = new Map<string, { device: string; runId: string; cols: number; rows: number }>();
+  private desktopTimer: ReturnType<typeof setInterval> | null = null;
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
 
@@ -157,7 +164,7 @@ export class RemoteServer {
     }
   }
   async stop() {
-    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
+    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
     for (const id of [...this.replay.keys()]) this.forget(id);
     const server = this.server; this.server = null; this.pairing = null;
@@ -193,7 +200,7 @@ export class RemoteServer {
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
   onSessionEvent(event: SessionEvent) {
-    if (event.type === 'started' || event.type === 'exit') this.phoneSizes.delete(event.sessionId);
+    if (event.type === 'started' || event.type === 'exit') { this.phoneSizes.delete(event.sessionId); this.wants.delete(event.sessionId); }
     if (event.type === 'started') {
       this.forget(event.sessionId); if (this.server) this.mirror(event.sessionId, event.runId);
       this.attention.delete(event.sessionId); this.broadcastChannels(); return;
@@ -259,17 +266,43 @@ export class RemoteServer {
     const hold = this.phoneSizes.get(sessionId); if (!hold || hold.runId !== runId) return false;
     hold.desktop = { cols, rows }; return true;
   }
-  /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
-  private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number) {
+  /**
+   * A phone asking to draw a channel at its own size. The desktop wins while the person is using this computer: the
+   * request is kept and applied once the computer has gone unused for DESKTOP_IDLE_SECONDS, and given back as soon as it
+   * is used again (`checkDesktop`). `force` (the phone's "Fit to phone") applies it at once, until the person types in
+   * that channel on the desktop. Returns whether the phone now has its size.
+   */
+  private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
     if (!run || !this.host.resize) throw new HubError('STALE_SESSION', 'This channel is not running.');
+    if (!force && !this.desktopAway()) { this.wants.set(sessionId, { device, runId, cols, rows }); this.watchDesktop(); return false; }
+    this.wants.delete(sessionId); this.apply(device, sessionId, runId, cols, rows, force); return true;
+  }
+  /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
+  private apply(device: string, sessionId: string, runId: string, cols: number, rows: number, forced: boolean) {
+    const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId); if (!run || !this.host.resize) return;
     const hold = this.phoneSizes.get(sessionId);
     const desktop = hold?.runId === runId ? hold.desktop : { cols: run.cols ?? 80, rows: run.rows ?? 24 };
-    this.phoneSizes.set(sessionId, { device, runId, desktop });
+    this.phoneSizes.set(sessionId, { device, runId, desktop, cols, rows, forced });
     if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
+    this.watchDesktop();
+  }
+  private desktopAway() { const idle = this.host.idleSeconds?.(); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
+  /** While phones want or hold a size, follows whether the person is at this computer. */
+  private watchDesktop() {
+    if (this.desktopTimer || !this.host.idleSeconds) return;
+    this.desktopTimer = setInterval(() => this.checkDesktop(), 2000); this.desktopTimer.unref?.();
+  }
+  /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
+  checkDesktop() {
+    const idle = this.host.idleSeconds?.(); if (idle === undefined) return;
+    if (idle < 3) for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows }); this.release(sessionId, hold.device, true); }
+    if (idle >= DESKTOP_IDLE_SECONDS) for (const [sessionId, want] of [...this.wants]) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
+    if (!this.wants.size && ![...this.phoneSizes.values()].some((hold) => !hold.forced) && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
   }
   /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
-  private release(sessionId: string, device: string) {
+  private release(sessionId: string, device: string, keepWant = false) {
+    if (!keepWant && this.wants.get(sessionId)?.device === device) this.wants.delete(sessionId);
     const hold = this.phoneSizes.get(sessionId); if (!hold || hold.device !== device) return;
     this.phoneSizes.delete(sessionId);
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === hold.runId);
@@ -452,8 +485,9 @@ export class RemoteServer {
           if (this.local(parsed.data.sessionId)) this.release(parsed.data.sessionId, device.id); else if (kind === 'phone' && this.relay) await this.relay.size(parsed.data.sessionId, '', null);
         } else {
           const parsed = sizeSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid size.' });
-          const { sessionId, runId, cols, rows } = parsed.data;
-          if (this.local(sessionId)) this.phoneSize(device.id, sessionId, runId, cols, rows);
+          const { sessionId, runId, cols, rows, force } = parsed.data;
+          // `held`: whether the channel is now drawn at the phone's size (false while the desktop is in use).
+          if (this.local(sessionId)) return this.send(response, 200, { ok: true, held: this.phoneSize(device.id, sessionId, runId, cols, rows, force) });
           else if (kind === 'phone' && this.relay) await this.relay.size(sessionId, runId, { cols, rows });
           else return this.send(response, 400, { error: 'Unknown channel.' });
         }

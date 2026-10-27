@@ -52,7 +52,12 @@ export function send(sessionId: string, runId: string, data: string) {
   return delivery;
 }
 /** Asks the computer to draw a channel at this phone's size (it gives it back to the desktop when asked or when the phone leaves). */
-export const sizeChannel = (sessionId: string, runId: string, cols: number, rows: number) => api('/api/size', { method: 'POST', body: JSON.stringify({ sessionId, runId, cols, rows }) });
+/** Resolves true when the channel is now drawn at the phone's size; false while the computer is in use (it wins). */
+export const sizeChannel = async (sessionId: string, runId: string, cols: number, rows: number, force = false) => {
+  const response = await api('/api/size', { method: 'POST', body: JSON.stringify({ sessionId, runId, cols, rows, ...(force ? { force } : {}) }) });
+  // Computers from before this change apply every request.
+  return (await response.json().catch(() => ({})) as { held?: boolean }).held !== false;
+};
 export const releaseChannel = (sessionId: string) => api('/api/size', { method: 'DELETE', body: JSON.stringify({ sessionId }) });
 
 /** Removes this phone from its computer and from every other computer it could reach directly. */
