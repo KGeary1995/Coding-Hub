@@ -1,13 +1,11 @@
 ## What's new
 
-1.11.2 fixes shared memory for projects where memory was installed by hand:
+1.11.3 fixes two things on Claude Code channels:
 
-- **Memory keeps working after Trace moves.** A project's own memory server entry (in `.mcp.json` or `.codex/config.toml`) that still points at the old AI Coding Hub program is updated to this install the next time a channel starts there, so its CLIs stop reporting "Connection closed".
-- **No more silently separate notes.** If a project's memory server uses a different key from the folder's automatic one, Trace tells you, and so does the session, instead of reading and writing a separate set of notes without saying so.
-- **Installing memory uses the automatic key**, so CLIs started from other terminals share notes with channels started in Trace.
-- **A chat CLI that cannot start shows the real reason** on Windows, instead of `kill EINVAL`.
+- **Approval alerts clear when Claude moves on.** A channel no longer stays on HOLD ("needs approval") after you've answered. Before, if you answered before the alert reached Trace, it stayed until you typed in that channel again. Now it also clears when Claude finishes the tool or its turn.
+- **See how much context Claude is using.** The channel header shows the tokens in Claude's context after its last reply, for example `ctx 241K`. Claude Code doesn't report its window size, so there's no percentage; Codex channels still show one.
 
-Also in 1.11.1: chat channels keep their conversation and behave, a chat CLI that fails to start can no longer crash Trace, the phone reconnects by itself, security fixes for linked computers, complete conversation history, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
+Also in 1.11.2: memory keeps working in projects where it was installed before the rename, Trace warns when a project's memory uses a separate set of notes, and installing memory uses the automatic key. Also in 1.11.1: chat channels keep their conversation and behave, a chat CLI that fails to start can no longer crash Trace, the phone reconnects by itself, security fixes for linked computers, complete conversation history, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
 
 ## Install
 
