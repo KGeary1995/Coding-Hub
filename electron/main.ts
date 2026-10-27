@@ -585,7 +585,8 @@ else app.whenReady().then(() => {
     const full = Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image;
     return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
   });
-  handle(IPC_CHANNELS.copyText, (_owner, text) => { clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
+  // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
+  handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
