@@ -1,19 +1,13 @@
 ## What's new
 
-1.11.1 fixes the problems found in a review of 1.11.0:
+1.11.2 fixes shared memory for projects where memory was installed by hand:
 
-- **Chat channels keep their conversation.** A chat is saved in the channel's history, so it can be searched and exported, and resuming a saved conversation shows its earlier messages instead of an empty thread.
-- **Chat channels behave.** The channel header's interrupt button and "Send prepared request" now go through the chat instead of breaking it, approval buttons close when a reply is interrupted, and closed chats no longer hold on to their messages and images.
-- **A chat CLI that fails to start can no longer crash Trace.**
-- **Phone and linked computers:** chat channels are labelled as chat and explain that they are answered on their computer, instead of showing an empty screen. The phone reconnects by itself when its connection goes silent, instead of showing "live" indefinitely.
-- **Security:** a computer you remove can no longer finish asking for a phone key it started requesting just before, and an unusual request from a linked computer can no longer make the list of paired devices unreadable.
-- **Conversation history** lists the newest conversations from Claude, Codex and every Claude profile, however large one history is, and resuming a saved channel finds its conversation however old it is.
-- **Usage:** a run whose usage could not all be read shows its warning at once and is shared with your other computers; other computers' usage is priced with this computer's rates; the daily bars count tokens on the day they were used.
-- **Restoring a backup:** channels on a named Claude profile start a new conversation instead of refusing to start (backups don't include those profiles' conversations).
-- **Closing and quitting** also ask about a sign-in terminal that could not be stopped, and **design screenshots** compare correctly on Retina displays.
-- **Memory summaries** are no longer missed for short conversations.
+- **Memory keeps working after Trace moves.** A project's own memory server entry (in `.mcp.json` or `.codex/config.toml`) that still points at the old AI Coding Hub program is updated to this install the next time a channel starts there, so its CLIs stop reporting "Connection closed".
+- **No more silently separate notes.** If a project's memory server uses a different key from the folder's automatic one, Trace tells you, and so does the session, instead of reading and writing a separate set of notes without saying so.
+- **Installing memory uses the automatic key**, so CLIs started from other terminals share notes with channels started in Trace.
+- **A chat CLI that cannot start shows the real reason** on Windows, instead of `kill EINVAL`.
 
-Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
+Also in 1.11.1: chat channels keep their conversation and behave, a chat CLI that fails to start can no longer crash Trace, the phone reconnects by itself, security fixes for linked computers, complete conversation history, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, channels no longer shrink by themselves, copying several lines from Claude Code, and today's token count including channels started yesterday. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
 
 ## Install
 
