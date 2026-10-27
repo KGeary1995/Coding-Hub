@@ -45,7 +45,16 @@ describe('Claude attention endpoint', () => {
     expect(seen).toEqual([]);
   });
   it('builds Claude settings with an HTTP Notification hook', () => {
-    expect(JSON.parse(claudeAttentionSettings('http://127.0.0.1:1/hook/x/y'))).toEqual({ hooks: { Notification: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y', timeout: 5 }] }] } });
+    const resolved = [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y/resolved', timeout: 5 }] }];
+    expect(JSON.parse(claudeAttentionSettings('http://127.0.0.1:1/hook/x/y'))).toEqual({ hooks: { Notification: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y', timeout: 5 }] }], PostToolUse: resolved, Stop: resolved } });
+  });
+  it('reports a finished tool or turn as resolved without reading its body, only for a valid token', async () => {
+    const resolved: string[] = []; const seen: [string, string][] = [];
+    const server = new AttentionServer((runId, message) => seen.push([runId, message]), (runId) => resolved.push(runId)); servers.push(server); await server.start();
+    const runId = randomUUID(); const url = server.register(runId)!;
+    expect((await post(url + '/resolved', JSON.stringify({ hook_event_name: 'PostToolUse', tool_response: 'x'.repeat(200 * 1024) }))).status).toBe(200);
+    expect((await post(url.replace(/[0-9a-f]{64}$/, '0'.repeat(64)) + '/resolved', {})).status).toBe(404);
+    expect(resolved).toEqual([runId]); expect(seen).toEqual([]);
   });
 });
 

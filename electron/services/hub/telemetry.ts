@@ -22,7 +22,10 @@ function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: str
     if (raw.type !== 'assistant' || !raw.message?.id || !raw.message?.usage) return null;
     const u = raw.message.usage;
     if (!reported(u.input_tokens) || !reported(u.output_tokens)) return null;
-    return { key: String(raw.message.id).slice(0, 200), model: String(raw.message.model ?? fallbackModel), input: number(u.input_tokens), output: number(u.output_tokens), cached: number(u.cache_read_input_tokens), cacheWrite: number(u.cache_creation_input_tokens), reasoning: typeof u.reasoning_tokens === 'number' ? number(u.reasoning_tokens) : null, context: null };
+    // The reply's whole prompt (new, cached and newly cached input) plus its output is what the next turn carries.
+    // Claude Code does not record its window size, so the limit stays 0 (unknown) and no percentage is derived.
+    const used = number(u.input_tokens) + number(u.cache_read_input_tokens) + number(u.cache_creation_input_tokens) + number(u.output_tokens);
+    return { key: String(raw.message.id).slice(0, 200), model: String(raw.message.model ?? fallbackModel), input: number(u.input_tokens), output: number(u.output_tokens), cached: number(u.cache_read_input_tokens), cacheWrite: number(u.cache_creation_input_tokens), reasoning: typeof u.reasoning_tokens === 'number' ? number(u.reasoning_tokens) : null, context: used > 0 ? { used, limit: 0 } : null };
   }
   const event = raw.type === 'event_msg' ? raw.payload : raw;
   if (event?.type !== 'token_count' || !event.info?.total_token_usage) return null;

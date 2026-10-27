@@ -98,6 +98,13 @@ export class PtyManager {
     this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message, at: new Date().toISOString() });
   }
 
+  /** Tells the owning window the CLI carried on, so a waiting prompt clears even if no keystroke came after it. */
+  notifyResolved(runId: string) {
+    const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
+    if (!run || run.finished) return;
+    this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId, at: new Date().toISOString() });
+  }
+
   /** Runs still going, for the phone remote. */
   running(): (RunningSession & { cols: number; rows: number; title?: string })[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session, cols: run.pty.cols, rows: run.pty.rows, ...(run.title ? { title: run.title } : {}) })); }
 

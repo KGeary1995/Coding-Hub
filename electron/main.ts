@@ -92,7 +92,7 @@ const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 // Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
-const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message));
+const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId) => manager.notifyResolved(runId));
 const manager = new PtyManager((owner, event) => {
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);

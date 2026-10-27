@@ -240,3 +240,11 @@ describe('Drive sync regressions', () => {
     expect(() => mirror.sync('shared')).toThrow(); expect(remote.list('shared').map((note) => note.id)).toEqual([older.id]);
   });
 });
+
+describe('Claude context in use', () => {
+  it('counts the whole prompt and the reply, without inventing a window size', () => {
+    const event = parseUsage('claude', { type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', usage: { input_tokens: 5, cache_read_input_tokens: 200000, cache_creation_input_tokens: 40000, output_tokens: 761 } } }, 'fallback')!;
+    expect(event.context).toEqual({ used: 240766, limit: 0 });
+    expect(parseUsage('claude', { type: 'assistant', message: { id: 'm2', usage: { input_tokens: 0, output_tokens: 0 } } }, 'm')!.context).toBeNull();
+  });
+});

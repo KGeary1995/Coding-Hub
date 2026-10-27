@@ -43,7 +43,8 @@ export class AttentionServer {
   private server: http.Server | null = null;
   private port: number | null = null;
   private runs = new Map<string, Buffer>();
-  constructor(private onAttention: (runId: string, message: string) => void) {}
+  /** `onResolved` hears that the agent carried on (a tool finished or the turn ended), so a waiting prompt was answered. */
+  constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string) => void = () => {}) {}
 
   /** Starts listening on a random loopback port. Sessions started before it is ready run without attention hooks. */
   start() {
@@ -56,9 +57,11 @@ export class AttentionServer {
 
   private handle(request: http.IncomingMessage, response: http.ServerResponse) {
     const done = (status: number) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end('{}'); };
-    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})$/.exec(request.url ?? '');
+    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})(\/resolved)?$/.exec(request.url ?? '');
     const token = match && this.runs.get(match[1]);
     if (request.method !== 'POST' || !match || !token || !timingSafeEqual(token, Buffer.from(match[2], 'hex'))) { request.resume(); done(404); return; }
+    // The path alone says the agent moved on; tool results can be large, so the body is never read.
+    if (match[3]) { request.resume(); done(200); this.onResolved(match[1]); return; }
     let size = 0; const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= 64 * 1024) chunks.push(chunk); });
     request.on('end', () => {
@@ -81,9 +84,13 @@ export class AttentionServer {
   close() { this.runs.clear(); this.server?.close(); this.server = null; this.port = null; }
 }
 
-/** Claude `--settings` JSON that sends Notification hooks to the app; the type is filtered on arrival. */
+/**
+ * Claude `--settings` JSON that sends Notification hooks to the app (the type is filtered on arrival), and reports
+ * finished tools and turns so a permission prompt answered before its notification arrived still clears.
+ */
 export function claudeAttentionSettings(url: string) {
-  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }] } });
+  const resolved = [{ hooks: [{ type: 'http', url: `${url}/resolved`, timeout: 5 }] }];
+  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: resolved } });
 }
 
 /** Codex config that reports approval requests as OSC 9 notifications in its terminal. */
