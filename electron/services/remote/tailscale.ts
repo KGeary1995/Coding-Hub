@@ -75,3 +75,9 @@ export async function tailscaleState(run: RunTailscale, port: number): Promise<T
 
 /** Points HTTPS on the tailnet (port 443 of this computer's tailnet name) at the remote. It stays set across restarts. */
 export async function serveRemote(run: RunTailscale, port: number) { await run(['serve', '--bg', '--https=443', `http://127.0.0.1:${port}`]); }
+/**
+ * Turning phone access off also takes Trace's address off the tailnet: `serve` stays set across restarts, and would
+ * otherwise go on publishing whatever listens on the port next. Only a handler that points at Trace's port is removed;
+ * one the person set up for something else is left alone.
+ */
+export async function stopServing(run: RunTailscale, port: number) { if ((await tailscaleState(run, port)).serving) await run(['serve', '--https=443', 'off']); }

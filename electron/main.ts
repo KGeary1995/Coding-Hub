@@ -43,7 +43,7 @@ import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
-import { serveFailure, serveRemote, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
+import { serveFailure, serveRemote, stopServing, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { channelName } from '../shared/channel-name';
@@ -325,6 +325,8 @@ function createWindow() {
 
 // Opened from Finder or the Dock, the Mac app lacks the shell's PATH, where the CLIs and Node.js usually are.
 if (process.platform === 'darwin' && app.isPackaged) adoptLoginShellPath();
+// Opening Trace again (Start menu, shortcut, Dock) while it runs shows the window it already has, instead of nothing.
+app.on('second-instance', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void offerToRemoveOldApp().catch(() => {});
@@ -419,9 +421,17 @@ else app.whenReady().then(() => {
     // The phone app the other computer served may call this one directly while that one is off.
     phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
   }
-  const refreshTailscale = async () => { if (!phone.enabled) return; phone.tailscale = await tailscaleState(runTailscale, phone.port); if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; } };
+  // Phones are accepted only on this computer's tailnet name: one failed `tailscale status` (a timeout, say) must not
+  // forget it, or every phone request gets "Unknown host" until the next check.
+  let checkedTailscale = 0;
+  const refreshTailscale = async () => {
+    if (!phone.enabled) return; checkedTailscale = Date.now(); const next = await tailscaleState(runTailscale, phone.port);
+    phone.tailscale = !next.host && next.error && phone.tailscale.host ? { ...next, host: phone.tailscale.host } : next;
+    if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; }
+  };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
-  setInterval(() => void refreshTailscale().catch(() => {}), 60000).unref();
+  // Every minute, and every ten seconds while the tailnet name is not known yet.
+  setInterval(() => { if (Date.now() - checkedTailscale >= 60000 || (phone.enabled && !phone.tailscale.host)) void refreshTailscale().catch(() => {}); }, 10000).unref();
   const remoteControl = async (payload: unknown) => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
@@ -430,7 +440,7 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
     ]).parse(payload);
-    if (request.action === 'remote-enable') await phone.setEnabled(request.enabled);
+    if (request.action === 'remote-enable') { await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
     if (request.action === 'remote-test-alert') return phone.testAlert(request.id);
@@ -529,6 +539,9 @@ else app.whenReady().then(() => {
         if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy || delivery?.running || workflows?.running || worktrees?.active) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
         if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'The workspace could not be saved. Resolve the storage issue before updating.'); }
         else throw new HubError('UPDATE_SAVE_FAILED', 'Load the local workspace successfully before updating.');
+        // The installer closes Trace about two seconds after it starts and then ends it by force, so nothing slow may be
+        // left for quitting: memory summaries of sessions that just ended are saved now, while Trace is still running.
+        await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
         return true;
       } catch (error) { updateRestart = false; throw error; }
     },
