@@ -191,7 +191,8 @@ it('refuses the next handoff before exceeding the readable project limit', () =>
  for(let i=0;i<5000;i++)fs.writeFileSync(path.join(dir,randomUUID()+'.json'),'{}');
  expect(()=>memory.write('full','One too many','Preserve existing records','human')).toThrow('5,000');
  expect(fs.readdirSync(dir)).toHaveLength(5000);expect(()=>memory.list('full')).not.toThrow();
-});
+// 5,000 real files: Windows runners with on-access scanning take 6-10 s, past the 5 s default.
+}, 30_000);
 
 it('does not rescan every handoff for every unchanged note during Drive sync', () => {
  const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
