@@ -166,8 +166,13 @@ export class LinkedComputers implements RemoteRelay {
           const response = await this.request(link, 'api/stream?all=1', { signal: connection.controller.signal });
           connection.connected = true; connection.error = null; delay = 2000; this.notify();
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
+          // The other computer sends at least a ping every 25 seconds. A minute of silence means it slept or the network
+          // dropped without a reset: reconnect, rather than show its channels as live while typing into them fails.
+          const controller = connection.controller; let silence: ReturnType<typeof setTimeout> | undefined;
           for (;;) {
-            const { value, done } = await reader.read(); if (done) break;
+            silence = setTimeout(() => controller.abort(), 60000); let next: ReadableStreamReadResult<Uint8Array>;
+            try { next = await reader.read(); } finally { clearTimeout(silence); }
+            const { value, done } = next; if (done) break;
             buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
