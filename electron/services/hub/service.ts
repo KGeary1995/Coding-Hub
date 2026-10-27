@@ -26,7 +26,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('memory-list'), project: projectSchema }).strict(),
   z.object({ action: z.literal('memory-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
-  z.object({ action: z.literal('memory-install'), project: projectSchema, directory: dir }).strict(),
+  z.object({ action: z.literal('memory-install'), project: projectSchema.optional(), directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
   z.object({ action: z.literal('device-sync-resolve'), document: z.enum(['settings', 'rules']), keep: z.enum(['local', 'remote']) }).strict(),
   ...(['usage', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
@@ -66,7 +66,8 @@ export class HubService {
       case 'memory-list': this.projects.add(request.project); return this.memory.list(request.project);
       case 'memory-key': return projectMemoryKey(request.directory);
       case 'memory-write': { this.projects.add(request.project); const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); try { this.drive.sync(request.project); } catch { /* Offline notes sync on next retry. */ } return note; }
-      case 'memory-install': this.memory.install(request.directory, request.project, path.join(__dirname, 'memory-server.js'), process.execPath); return null;
+      // Without a key, use the automatic one so sessions started in Trace and from other terminals share notes.
+      case 'memory-install': this.memory.install(request.directory, request.project ?? projectMemoryKey(request.directory), path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
       case 'usage': {
