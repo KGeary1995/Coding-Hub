@@ -7,6 +7,8 @@ import type { Task, TaskAudit } from '../../../shared/workbench';
 import type { Verification } from './verification';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
+import { hostEnvironment } from '../cli/discovery';
+import { readOnlyGitOptions } from '../repository/git-safety';
 const scope = z.string().trim().min(1).max(300).refine((s) => !s.includes('\\') && !s.startsWith('/') && !s.replace(/\/$/, '').split('/').some((part) => part === '..' || part === '.' || part === '') && !s.includes('\0') && !/^[a-z]:/i.test(s) && !/[?\[\]]/.test(s) && (!s.includes('*') || s === '*' || s === '**' || s.endsWith('/**') && !s.slice(0, -3).includes('*')), 'Use relative paths such as src/** or README.md.');
 const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('task-list') }).strict(), z.object({ action: z.literal('task-audit') }).strict(), task.omit({ createdAt: true, id: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
@@ -31,8 +33,11 @@ export class Tasks {
     const active = tasks.filter((t) => t.status !== 'done'); const report: TaskAudit = { tasks, overlaps: [], changes: [], warnings: ['Git changes can come from humans, either agent, or earlier work. This audit identifies scope conflicts, not edit authorship or enforced permissions.'] };
     for (let i = 0; i < active.length; i++) for (const other of active.slice(i + 1)) if (active[i].directory === other.directory && scopesOverlap(active[i].scope, other.scope)) report.overlaps.push(`${active[i].title} ↔ ${other.title}`);
     for (const cwd of [...new Set(active.map((t) => t.directory))]) try {
-      const command = promisify(execFile); const { stdout: repository } = await command('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { timeout: 8000, maxBuffer: 65536 });
-      const { stdout } = await command('git', ['--no-optional-locks', '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { timeout: 8000, maxBuffer: 1048576 });
+      // Hidden console, the host's PATH and no prompts, as for every other Git call; and the repository's own config
+      // must not run programs while it is only read (readOnlyGitOptions).
+      const command = promisify(execFile); const safe = await readOnlyGitOptions(cwd); const options = { timeout: 8000, windowsHide: true, env: { ...hostEnvironment(), GIT_TERMINAL_PROMPT: '0' } };
+      const { stdout: repository } = await command('git', [...safe, '-C', cwd, 'rev-parse', '--show-toplevel'], { ...options, maxBuffer: 65536 });
+      const { stdout } = await command('git', ['--no-optional-locks', ...safe, '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { ...options, maxBuffer: 1048576 });
       const entries = stdout.split('\0'); const prefix = path.relative(repository.trim(), cwd).replace(/\\/g, '/');
       for (let i = 0; i < entries.length; i++) {
         if (!entries[i]) continue;
