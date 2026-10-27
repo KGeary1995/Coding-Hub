@@ -22,6 +22,10 @@ export class CodexStream implements ChatStream {
   private threadId: string | null = null; private turnId: string | null = null;
   /** Messages written before the thread exists wait for it. */
   private queued: (() => void)[] = [];
+  /** Why the thread could not start: later messages fail at once instead of waiting for a thread that never comes. */
+  private failed: string | null = null;
+  /** Stop was pressed before Codex named the turn; it is interrupted as soon as it has an id. */
+  private interruptWanted = false;
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) {}
 
   start() {
@@ -31,7 +35,11 @@ export class CodexStream implements ChatStream {
       const settings = { cwd, ...(model ? { model } : {}), ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}) };
       this.request(resumeId ? 'thread/resume' : 'thread/start', resumeId ? { threadId: resumeId, ...settings } : settings, (response) => {
         const result = record(response.result); const thread = record(result.thread);
-        if (response.error || !text(thread.id)) { this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex could not start the conversation.' }); return; }
+        if (response.error || !text(thread.id)) {
+          this.failed = text(record(response.error).message) || 'Codex could not start the conversation.'; this.emit({ type: 'done', isError: true, error: this.failed });
+          // Anything already written fails too, so the window is not left "working" on it.
+          this.queued.splice(0); return;
+        }
         this.threadId = text(thread.id);
         this.emit({ type: 'ready', conversationId: this.threadId, model: text(result.model) || null });
         for (const run of this.queued.splice(0)) run();
@@ -41,13 +49,20 @@ export class CodexStream implements ChatStream {
   send(message: string, images: ChatImage[]) {
     const go = () => {
       const input = [...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` })), ...(message ? [{ type: 'text', text: message, text_elements: [] }] : [])];
+      this.turnId = null; this.interruptWanted = false;
       this.request('turn/start', { threadId: this.threadId, input }, (response) => {
         const turn = record(record(response.result).turn);
         if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not accept the message.' });
-        else if (text(turn.id)) this.turnId = text(turn.id);
+        else if (text(turn.id)) this.started(text(turn.id));
       });
     };
+    if (this.failed) { this.emit({ type: 'done', isError: true, error: `${this.failed} Restart the channel to try again.` }); return; }
     if (this.threadId) go(); else this.queued.push(go);
+  }
+  /** The turn has an id (from turn/start's reply or the turn/started notification): a Stop pressed meanwhile applies. */
+  private started(turnId: string) {
+    if (this.turnId === turnId) return; this.turnId = turnId;
+    if (this.interruptWanted) { this.interruptWanted = false; this.interrupt(); }
   }
   answer(requestId: string, allow: boolean, allowEdits = false) {
     const approval = this.approvals.get(requestId); if (!approval) return false;
@@ -59,7 +74,10 @@ export class CodexStream implements ChatStream {
     this.emit({ type: 'permission-done', requestId });
     return true;
   }
-  interrupt() { if (this.threadId && this.turnId) this.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }, () => {}); }
+  interrupt() {
+    if (this.threadId && this.turnId) this.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }, () => {});
+    else if (this.threadId) this.interruptWanted = true;
+  }
   close() { for (const requestId of this.approvals.keys()) this.emit({ type: 'permission-done', requestId }); this.approvals.clear(); }
 
   push(data: string) {
@@ -97,11 +115,12 @@ export class CodexStream implements ChatStream {
       } else this.line({ id: message.id, error: { code: -32601, message: `Trace does not handle ${method}.` } });
       return;
     }
+    if (method === 'turn/started') { const id = text(record(params.turn).id); if (id) this.started(id); return; }
     if (method === 'item/agentMessage/delta') { this.emit({ type: 'delta', messageId: text(params.itemId), text: text(params.delta) }); return; }
     if (method === 'item/started' || method === 'item/completed') { this.item(record(params.item), method === 'item/completed'); return; }
     if (method === 'turn/completed') {
       const turn = record(params.turn); const failed = turn.status === 'failed';
-      this.turnId = null;
+      this.turnId = null; this.interruptWanted = false;
       // Approvals belong to their turn: one that ended (an interruption, say) leaves nothing to approve.
       this.close();
       this.emit({ type: 'done', isError: failed || turn.status === 'interrupted', error: failed ? text(record(turn.error).message) || 'Codex ended the turn with an error.' : turn.status === 'interrupted' ? 'Interrupted.' : null });

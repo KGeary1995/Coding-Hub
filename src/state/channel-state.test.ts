@@ -85,6 +85,18 @@ describe('attention in the workspace store', () => {
     state.applyEvent({ type: 'exit', sessionId: id, runId: 'r1', exitCode: 0 });
     expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
   });
+  it('does not show a stopped channel as failed because of an input error from while it ran', () => {
+    const state = useWorkspaceStore.getState(); const id = state.sessions[0].id;
+    state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });
+    state.setSessionError(id, 'The native terminal connection was lost.');
+    // Stop exits with 130 and no diagnostic.
+    state.applyEvent({ type: 'exit', sessionId: id, runId: 'r1', exitCode: 130 });
+    expect(channelState(useWorkspaceStore.getState().sessions[0])).toBe('finished');
+    // A run that fails with a diagnostic is still shown as failed.
+    state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r2', engine: 'claude', pid: 1, cwd: '/p' });
+    state.applyEvent({ type: 'exit', sessionId: id, runId: 'r2', exitCode: 1, diagnostic: 'Claude Code exited: invalid model' });
+    expect(channelState(useWorkspaceStore.getState().sessions[0])).toBe('failed');
+  });
   it('orders a phone answer against the time the host saw the prompt, not when the window processed it', () => {
     const state = useWorkspaceStore.getState(); const id = state.sessions[0].id;
     state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });

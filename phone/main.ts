@@ -151,6 +151,11 @@ let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) |
 let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
 /** Whether the phone wants the channel at its size, and the size it last asked for. */
 let holding = false; let asked: { cols: number; rows: number } | null = null;
+/**
+ * Whether the channel is drawn at the phone's size right now. While the person uses the computer it keeps the
+ * desktop's size (the desktop wins), and the phone shows that layout with its text shrunk to fit the screen's width.
+ */
+let granted = false; let forceNext = false;
 /** The person is using the phone: the channel is drawn at the phone's size again. */
 function useChannel() { if (holding && sentSize) return; holding = true; sentSize = ''; requestSize(); }
 function requestSize() {
@@ -158,22 +163,43 @@ function requestSize() {
   if (sizeTimer) clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => {
     sizeTimer = null; const dims = fit?.proposeDimensions();
-    if (!current || !run || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
-    const cols = Math.max(20, Math.min(300, dims.cols)); const rows = Math.max(6, Math.min(200, dims.rows)); const key = `${current}:${run}:${cols}x${rows}`;
-    if (key === sentSize) return; sentSize = key; asked = { cols, rows };
-    void sizeChannel(current, run, cols, rows).catch(() => { sentSize = ''; });
+    if (!current || !run || !terminal || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
+    // What fits at the chosen text size, even while the text is shrunk to show the desktop's layout.
+    const scale = (terminal.options.fontSize ?? textSize) / textSize;
+    const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const force = forceNext; forceNext = false;
+    const key = `${current}:${run}:${cols}x${rows}`;
+    if (key === sentSize && !force) return; sentSize = key; asked = { cols, rows };
+    const channel = current; const asking = run;
+    void sizeChannel(channel, asking, cols, rows, force).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
   }, 200);
 }
 /** Gives the channel being left back to the desktop's size. */
-function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; }
+function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
-  if (terminal) { terminal.options.fontSize = textSize; holding = true; requestSize(); }
+  if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
+}
+/** At the phone's size, the chosen text size; at the desktop's size, small enough that its width fits the screen. */
+function fitText() {
+  if (!terminal || !fit) return;
+  document.getElementById('fit-phone')?.replaceChildren(granted ? 'Desktop size' : 'Fit to phone');
+  if (granted) { if (terminal.options.fontSize !== textSize) terminal.options.fontSize = textSize; return; }
+  const dims = fit.proposeDimensions(); if (!dims || !Number.isFinite(dims.cols) || dims.cols <= 0) return;
+  const fits = (terminal.options.fontSize ?? textSize) * dims.cols / terminal.cols;
+  // Below 6 px the text cannot be read; the screen then pans sideways instead.
+  const size = Math.max(6, Math.min(textSize, Math.floor(fits * 2) / 2));
+  if (terminal.options.fontSize !== size) terminal.options.fontSize = size;
+}
+/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. */
+function toggleFit() {
+  if (!current) return;
+  if (granted) { void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
+  holding = true; forceNext = true; sentSize = ''; requestSize();
 }
 
 function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
-  current = sessionId; run = null; holding = true; disposeTerminal();
+  current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   // A chat channel's conversation is not passed on to phones yet: say so rather than show an empty screen.
   if (channel?.chat) {
@@ -200,7 +226,9 @@ function showChannel(sessionId: string) {
     if (drafts.get(sessionId) === value) drafts.delete(sessionId);
   };
   const keys = h('div', { className: 'keys', aria: { label: 'Keys' } }, ...KEYS.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)));
-  const size = [h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
+  const size = [h('button', { className: 'icon small', type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
+    h('button', { className: 'icon small', id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'While you use the computer, the channel keeps its desktop size. Fit to phone redraws it at this screen\'s size until you type in it on the computer.' }, 'Fit to phone'),
+    h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, output, problem, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
@@ -218,25 +246,53 @@ function showChannel(sessionId: string) {
 }
 
 /**
- * Claude Code draws full screen (the alternate screen, which has no scrollback) and scrolls its conversation itself
- * when the terminal reports the mouse wheel. A phone has no wheel, so a swipe over a full-screen CLI that takes mouse
- * reports is sent as wheel reports instead, one per line swiped (SGR encoding, which Claude Code asks for). A CLI drawn
- * in the normal screen keeps the terminal's own scrolling.
+ * Swiping scrolls the channel. xterm 6 scrolls only for the mouse wheel (it has no touch scrolling), so the phone does
+ * it: a CLI drawn in the normal screen scrolls the terminal's own scrollback, and a full-screen CLI that takes mouse
+ * reports (Claude Code's full-screen view, whose alternate screen has no scrollback) is sent wheel reports instead, one
+ * per line swiped (SGR encoding, which Claude Code asks for). A horizontal swipe is left to the browser, which pans a
+ * desktop-sized channel that is wider than the screen.
  */
 function scrollBySwipe(element: HTMLElement, screen: Terminal) {
-  let last: number | null = null; let swiped = 0;
+  let last: { x: number; y: number } | null = null; let swiped = 0; let vertical: boolean | null = null;
   const fullScreen = () => screen.buffer.active.type === 'alternate' && screen.modes.mouseTrackingMode !== 'none';
-  element.addEventListener('touchstart', (event) => { last = event.touches.length === 1 && fullScreen() ? event.touches[0].clientY : null; swiped = 0; }, { capture: true, passive: true });
+  element.addEventListener('touchstart', (event) => { last = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null; swiped = 0; vertical = null; }, { capture: true, passive: true });
   element.addEventListener('touchmove', (event) => {
-    if (last === null || event.touches.length !== 1 || !fullScreen()) return;
+    if (last === null || event.touches.length !== 1) return;
+    const { clientX: x, clientY: y } = event.touches[0];
+    vertical ??= Math.abs(y - last.y) >= Math.abs(x - last.x) ? true : Math.abs(x - last.x) > 4 ? false : null;
+    if (vertical !== true) { if (vertical === false) last = null; return; }
     event.preventDefault(); event.stopPropagation();
-    const y = event.touches[0].clientY; swiped += last - y; last = y;
+    swiped += last.y - y; last = { x, y };
     const line = element.clientHeight / screen.rows; const lines = Math.trunc(swiped / line); if (!lines || terminal !== screen) return;
     swiped -= lines * line;
     // Moving the finger up shows newer lines (wheel down, 65); moving it down shows older ones (wheel up, 64).
-    void type(`\x1b[<${lines > 0 ? 65 : 64};${Math.ceil(screen.cols / 2)};${Math.ceil(screen.rows / 2)}M`.repeat(Math.abs(lines)));
+    if (fullScreen()) void type(`\x1b[<${lines > 0 ? 65 : 64};${Math.ceil(screen.cols / 2)};${Math.ceil(screen.rows / 2)}M`.repeat(Math.abs(lines)));
+    else screen.scrollLines(lines);
   }, { capture: true, passive: false });
   element.addEventListener('touchend', () => { last = null; }, { capture: true, passive: true });
+}
+
+/**
+ * The channel's text in a sheet the phone can select from: xterm has no touch selection, and tapping the terminal
+ * opens the message box. Shows the whole scrollback (a full-screen CLI's alternate screen has only what is shown).
+ */
+function showCopy() {
+  if (!terminal) return;
+  const buffer = terminal.buffer.active; const lines: string[] = [];
+  for (let index = 0; index < buffer.length; index++) lines.push(buffer.getLine(index)?.translateToString(true) ?? '');
+  while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+  const text = lines.join('\n');
+  const body = h('pre', { className: 'copy-text', tabIndex: 0 }, text || '(Nothing to copy yet.)');
+  const status = h('span', { className: 'dim', aria: { live: 'polite' } });
+  const close = () => sheet.remove();
+  const copyAll = h('button', { className: 'primary', type: 'button', onclick: async () => {
+    try { await navigator.clipboard.writeText(text); status.textContent = 'Copied.'; }
+    catch { const range = document.createRange(); range.selectNodeContents(body); const selection = getSelection(); selection?.removeAllRanges(); selection?.addRange(range); status.textContent = 'Selected: use Copy from the menu.'; }
+  } }, 'Copy all');
+  const sheet = h('div', { className: 'copy-sheet', aria: { role: 'dialog', modal: 'true', label: 'Copy text' } },
+    h('div', { className: 'copy-bar' }, h('strong', {}, 'Copy text'), status, copyAll, h('button', { className: 'icon small', type: 'button', onclick: close }, 'Done')),
+    h('p', { className: 'dim' }, 'Press and hold to select part of it, or copy it all.'), body);
+  document.body.append(sheet); body.scrollTop = body.scrollHeight;
 }
 
 function renderChannel() {
@@ -258,7 +314,7 @@ function inOrder(change: (screen: Terminal) => void) {
   const screen = terminal; screen?.write('', () => { if (terminal === screen) change(screen); });
 }
 function resizeTo(cols: number, rows: number) {
-  inOrder((screen) => { if (screen.cols !== cols || screen.rows !== rows) screen.resize(cols, rows); });
+  inOrder((screen) => { if (screen.cols !== cols || screen.rows !== rows) screen.resize(cols, rows); fitText(); });
 }
 
 /** Sends input to the channel being shown; true once the computer has taken it. */
@@ -282,6 +338,8 @@ function onEvent(event: StreamEvent) {
   if (event.data.sessionId !== current || !terminal) return;
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
+    // The computer applied the phone's size (it went idle, or "Fit to phone"), or took it back (the person is there).
+    if (event.data.runId === run) granted = Boolean(asked && event.data.cols === asked.cols && event.data.rows === asked.rows);
     if (event.data.runId === run) resizeTo(event.data.cols, event.data.rows);
     // The desktop took the channel back (the person typed there): the phone leaves it at that size until it is used.
     if (event.data.runId === run && holding && asked && sentSize && (event.data.cols !== asked.cols || event.data.rows !== asked.rows)) { holding = false; sentSize = ''; }

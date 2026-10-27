@@ -11,6 +11,17 @@ type ObjectMap = Record<string, any>;
 interface Source { file: string; engine: CLIEngine; scope: 'user' | 'project'; directory: string | null; slot: string; hash: string; kind: 'server' | 'skill' | 'plugin'; local?: boolean }
 const digest = (s: string) => createHash('sha256').update(s).digest('hex');
 const object = (v: unknown): ObjectMap => v && typeof v === 'object' && !Array.isArray(v) ? v as ObjectMap : {};
+/**
+ * The key of a folder in `.claude.json`'s `projects`. Claude Code writes Windows folders with forward slashes
+ * (`C:/Users/me/app`), while Trace's paths use backslashes; on Windows the case may differ too. An existing entry is
+ * found whichever way it is written; a new one is written the way Claude Code writes it.
+ */
+export function claudeProjectKey(projects: unknown, directory: string): string {
+  const windows = process.platform === 'win32' || /^[a-zA-Z]:[\\/]/.test(directory);
+  const normal = (value: string) => { const slashed = value.replace(/\\/g, '/').replace(/\/+$/, ''); return windows ? slashed.toLowerCase() : slashed; };
+  const wanted = normal(directory);
+  return Object.keys(object(projects)).find((key) => normal(key) === wanted) ?? (windows ? directory.replace(/\\/g, '/') : directory);
+}
 function checkFile(file: string) {
   let cursor = path.resolve(file);
   for (;;) {
@@ -61,7 +72,7 @@ export class ConfigService {
         let disabled: string[] = [];
         if (engine === 'claude' && directory) {
           const user = readConfig(this.file('claude', 'user', directory)).data;
-          disabled = scope === 'user' ? object(object(user.projects)[directory]).disabledMcpServers ?? [] : readConfig(path.join(directory, '.claude', 'settings.local.json')).data.disabledMcpjsonServers ?? [];
+          disabled = scope === 'user' ? object(object(user.projects)[claudeProjectKey(user.projects, directory)]).disabledMcpServers ?? [] : readConfig(path.join(directory, '.claude', 'settings.local.json')).data.disabledMcpjsonServers ?? [];
         }
         for (const [name, value] of Object.entries(servers)) {
           const raw = object(value); const id = randomUUID(); this.handles.set(id, { file, engine, scope, directory, slot: name, hash, kind: 'server' });
@@ -69,7 +80,7 @@ export class ConfigService {
           result.servers.push({ id, name, engine, enabled: engine === 'codex' ? raw.enabled !== false : !disabled.includes(name), transport, source: { path: file, scope, format: engine === 'codex' ? 'toml' : 'json' }, status: 'unknown' });
         }
         if (engine === 'claude' && scope === 'user' && directory) {
-          for (const [name, rawValue] of Object.entries(object(object(object(data.projects)[directory]).mcpServers))) {
+          for (const [name, rawValue] of Object.entries(object(object(object(data.projects)[claudeProjectKey(data.projects, directory)]).mcpServers))) {
             const raw = object(rawValue); const id = randomUUID(); this.handles.set(id, { file, engine, scope, directory, slot: name, hash, kind: 'server', local: true });
             result.servers.push({ id, name, engine, enabled: !disabled.includes(name), transport: raw.url ? { type: 'http', url: publicURL(String(raw.url)), headerSecretNames: Object.keys(object(raw.headers)) } : { type: 'stdio', command: String(raw.command ?? ''), args: publicArgs(raw.args), envVariableNames: Object.keys(object(raw.env)) }, source: { path: file, scope: 'project', format: 'json' }, status: 'unknown' });
           }
@@ -125,8 +136,8 @@ export class ConfigService {
     if (request.action === 'toggle-server' && source.engine === 'claude') {
       if (!source.directory) throw new HubError('PROJECT_REQUIRED', 'Claude server enablement is scoped to a project. Select a project first.');
       const target = source.scope === 'project' ? path.join(source.directory, '.claude', 'settings.local.json') : this.file('claude', 'user', source.directory);
-      updateConfig(target, target === source.file ? source.hash : null, (data) => { let config = data; let key = 'disabledMcpjsonServers'; if (source.scope === 'user') { data.projects ??= {}; data.projects[source.directory!] ??= {}; config = data.projects[source.directory!]; key = 'disabledMcpServers'; } const names = new Set<string>(config[key] ?? []); request.enabled ? names.delete(source.slot) : names.add(source.slot); config[key] = [...names]; });
-    } else updateConfig(source.file, source.hash, (data) => { const key = source.engine === 'claude' ? 'mcpServers' : 'mcp_servers'; const servers = source.local && source.directory ? object(object(object(data.projects)[source.directory]).mcpServers) : object(data[key]); if (request.action === 'remove-server') delete servers[source.slot]; else servers[source.slot].enabled = request.enabled; });
+      updateConfig(target, target === source.file ? source.hash : null, (data) => { let config = data; let key = 'disabledMcpjsonServers'; if (source.scope === 'user') { data.projects ??= {}; const project = claudeProjectKey(data.projects, source.directory!); data.projects[project] ??= {}; config = data.projects[project]; key = 'disabledMcpServers'; } const names = new Set<string>(config[key] ?? []); request.enabled ? names.delete(source.slot) : names.add(source.slot); config[key] = [...names]; });
+    } else updateConfig(source.file, source.hash, (data) => { const key = source.engine === 'claude' ? 'mcpServers' : 'mcp_servers'; const servers = source.local && source.directory ? object(object(object(data.projects)[claudeProjectKey(data.projects, source.directory)]).mcpServers) : object(data[key]); if (request.action === 'remove-server') delete servers[source.slot]; else servers[source.slot].enabled = request.enabled; });
     this.handles.delete(request.id);
   }
   add(request: Extract<HubRequest, { action: 'add-server' }>) {

@@ -18,8 +18,9 @@ const WINDOWS = /Windows/.test(navigator.userAgent);
 const pastedLabel = () => `Pasted ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 
 /**
- * Claude Code and Codex read an image straight from the clipboard when they receive Ctrl+V (Alt+V on Windows), which
- * never reaches the page as a paste. So after any paste shortcut Trace looks at the clipboard too, and shows the image.
+ * Claude Code and Codex read an image straight from the clipboard when they receive their image key (Ctrl+V on a Mac,
+ * Alt+V on Windows), which never reaches the page as a paste. So when Trace sends that key it reads the clipboard too,
+ * and shows the image.
  */
 async function showClipboardImage(id: string) {
   if (!terminals.get(id)?.run || !window.codingHub) return;
@@ -102,15 +103,22 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   // The CLI's terminal title says what it is working on (Claude Code's task summary).
   terminal.onTitleChange((title) => setTerminalTitle(session.id, title));
   terminal.attachCustomKeyEventHandler((event) => {
-    if (event.type === 'keydown' && event.code === 'KeyV' && !event.shiftKey && (event.ctrlKey || event.metaKey || event.altKey)) void showClipboardImage(session.id);
+    if (event.type !== 'keydown' || event.code !== 'KeyV' || event.shiftKey) return true;
+    // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing in either CLI (Claude Code 2.1.311 ignores it;
+    // Codex 0.164 pastes only text). Let the browser paste instead, as Windows Terminal does; the listener below
+    // sends Alt+V when the clipboard holds only an image.
+    if (WINDOWS && event.ctrlKey && !event.altKey && !event.metaKey) return false;
+    if (event.ctrlKey || event.metaKey || event.altKey) void showClipboardImage(session.id);
     return true;
   });
-  // Cmd+V with only an image on the clipboard pastes no text, so nothing would reach the CLI. Send the Ctrl+V that
-  // Claude Code and Codex treat as "attach the clipboard image" instead, as a Mac terminal user would type.
+  // A paste with only an image on the clipboard has no text, so nothing would reach the CLI. Send the key Claude Code
+  // and Codex treat as "attach the clipboard image" instead: Alt+V on Windows, Ctrl+V on a Mac.
   element.addEventListener('paste', (event) => {
-    const data = event.clipboardData; if (!MAC || !data || data.getData('text/plain') || ![...data.items].some((item) => item.type.startsWith('image/'))) return;
+    const data = event.clipboardData; if (!(MAC || WINDOWS) || !data || data.getData('text/plain') || ![...data.items].some((item) => item.type.startsWith('image/'))) return;
     event.preventDefault(); event.stopPropagation();
-    void writeTerminal(session.id, '\x16');
+    if (useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config.engine === 'shell') return;
+    void writeTerminal(session.id, WINDOWS ? '\x1bv' : '\x16');
+    if (WINDOWS) void showClipboardImage(session.id);
   }, true);
   attachDrop(session.id, element);
   // Claude Code and Codex break long text into separate lines to fit the window; copying joins those lines again.

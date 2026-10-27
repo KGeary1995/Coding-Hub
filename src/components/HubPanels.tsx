@@ -53,7 +53,7 @@ export function MemoryPanel() {
   async function refresh() { setNotes(await hubCall<MemoryNote[]>({ action: 'memory-list', project })); }
   // Automatic memory files notes under a key derived from the repository, so show it for the selected project.
   const [autoKey, setAutoKey] = useState<string | null>(null);
-  useEffect(() => { let active = true; setAutoKey(null); if (directory) hubCall<string>({ action: 'memory-key', directory }).then((key) => { if (active) setAutoKey(key); }).catch(() => {}); return () => { active = false; }; }, [directory]);
+  useEffect(() => { let active = true; setAutoKey(null); if (directory) hubCall<string>({ action: 'memory-key', directory }).then((key) => { if (!active) return; setAutoKey(key); /* Open on the notes sessions in this folder actually use, unless another key was chosen. */ setProject((current) => current === 'coding-hub' ? key : current); }).catch(() => {}); return () => { active = false; }; }, [directory]);
   // A note picked in the command menu switches to its project key and reloads it. The pick belongs to that one load: an
   // earlier load (one that answered before React discarded it, as on a slow computer) neither takes it nor clears it.
   const requested = useWorkspaceStore((s) => s.openMemoryNote); const pendingNote = useRef<{ id: string; load: number } | null>(null); const loads = useRef(0); const [load, setLoad] = useState(0);

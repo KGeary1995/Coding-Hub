@@ -8,6 +8,7 @@ import type { EngineInfo, AgentRunningSession } from '../../../shared/ipc';
 import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
 import { readConfig, updateConfig } from './config';
+import { readOnlyGitOptions } from '../repository/git-safety';
 
 const SERVER = 'coding-hub-memory';
 const CONTEXT_LIMIT = 6000;
@@ -101,8 +102,10 @@ export function lastAssistantMessage(engine: CLIEngine, file: string): string | 
   return last;
 }
 
-function git(cwd: string, args: string[]): Promise<string[]> {
-  return new Promise((resolve) => execFile('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: 8000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map((line) => line.trimEnd()).filter(Boolean))));
+/** Runs at every launch and session end, unasked, so the repository's own config must not run programs here either. */
+async function git(cwd: string, args: string[]): Promise<string[]> {
+  const safe = await readOnlyGitOptions(cwd);
+  return new Promise((resolve) => execFile('git', ['--no-optional-locks', ...safe, '-C', cwd, ...args], { timeout: 8000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map((line) => line.trimEnd()).filter(Boolean))));
 }
 const changedFiles = (cwd: string) => git(cwd, ['status', '--porcelain=v1', '--untracked-files=normal']);
 

@@ -5,13 +5,15 @@ import { gitDiffSchema } from '../../../shared/schemas';
 import { HubError } from '../cli/engine-adapter';
 import { hostEnvironment } from '../cli/discovery';
 import { readTextFile, RepositoryFiles, validateRelativePath } from './filesystem';
+import { readOnlyGitOptions } from './git-safety';
 
 const GIT_OUTPUT_LIMIT = 2 * 1024 * 1024;
 const STATUS_ENTRY_LIMIT = 1000;
 
-function git(directory: string, args: string[]): Promise<Buffer> {
+async function git(directory: string, args: string[]): Promise<Buffer> {
+  const safe = await readOnlyGitOptions(directory);
   return new Promise((resolve, reject) => {
-    execFile('git', ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false', ...args], {
+    execFile('git', ['--no-pager', '--no-optional-locks', ...safe, ...args], {
       cwd: directory, env: { ...hostEnvironment(), GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
       encoding: 'buffer', windowsHide: true, timeout: 10000, maxBuffer: GIT_OUTPUT_LIMIT,
     }, (error, stdout) => {
