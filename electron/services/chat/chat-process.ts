@@ -25,9 +25,15 @@ export function spawnChatProcess(file: string, args: string[], options: IPtyFork
   const shaped = {
     pid: child.pid, cols: options.cols ?? 80, rows: options.rows ?? 24, process: file, handleFlowControl: false,
     onData: (listener: (data: string) => void) => { child.stdout.on('data', listener); return { dispose: () => child.stdout.off('data', listener) }; },
+    // 'exit' comes before stdout and stderr have drained, so a CLI that prints its error and exits at once would lose
+    // that last output (and the exit diagnostic its stderr). Report the exit on 'close', once the pipes are empty, or
+    // two seconds after 'exit' if a process the CLI left behind keeps a pipe open.
     onExit: (listener: (event: { exitCode: number; signal?: number }) => void) => {
-      const handler = (code: number | null, signal: NodeJS.Signals | null) => listener({ exitCode: code ?? (signal ? 0 : 1), signal: signal ? os.constants.signals[signal] : undefined });
-      child.on('exit', handler); return { dispose: () => child.off('exit', handler) };
+      let done = false; let timer: ReturnType<typeof setTimeout> | undefined;
+      const report = (code: number | null, signal: NodeJS.Signals | null) => { if (done) return; done = true; clearTimeout(timer); listener({ exitCode: code ?? (signal ? 0 : 1), signal: signal ? os.constants.signals[signal] : undefined }); };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => { timer = setTimeout(() => report(code, signal), 2000); timer.unref?.(); };
+      child.on('exit', onExit); child.on('close', report);
+      return { dispose: () => { clearTimeout(timer); child.off('exit', onExit); child.off('close', report); } };
     },
     onStderr: (listener: (data: string) => void) => { child.stderr.on('data', listener); },
     write: (data: string) => { if (!exited && child.stdin.writable) child.stdin.write(data); },

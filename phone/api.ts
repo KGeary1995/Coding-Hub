@@ -52,7 +52,12 @@ export function send(sessionId: string, runId: string, data: string) {
   return delivery;
 }
 /** Asks the computer to draw a channel at this phone's size (it gives it back to the desktop when asked or when the phone leaves). */
-export const sizeChannel = (sessionId: string, runId: string, cols: number, rows: number) => api('/api/size', { method: 'POST', body: JSON.stringify({ sessionId, runId, cols, rows }) });
+/** Resolves true when the channel is now drawn at the phone's size; false while the computer is in use (it wins). */
+export const sizeChannel = async (sessionId: string, runId: string, cols: number, rows: number, force = false) => {
+  const response = await api('/api/size', { method: 'POST', body: JSON.stringify({ sessionId, runId, cols, rows, ...(force ? { force } : {}) }) });
+  // Computers from before this change apply every request.
+  return (await response.json().catch(() => ({})) as { held?: boolean }).held !== false;
+};
 export const releaseChannel = (sessionId: string) => api('/api/size', { method: 'DELETE', body: JSON.stringify({ sessionId }) });
 
 /** Removes this phone from its computer and from every other computer it could reach directly. */
@@ -136,7 +141,8 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
             buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-              const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1];
+              // Split on newlines only: a regular expression's line ends also include U+2028/U+2029, which JSON leaves unescaped in a CLI's output.
+              const lines = block.split(/\r?\n/); const type = lines.find((line) => line.startsWith('event: '))?.slice(7); const data = lines.find((line) => line.startsWith('data: '))?.slice(6);
               if (type && data) onEvent({ type, data: JSON.parse(data) } as StreamEvent);
             }
           }

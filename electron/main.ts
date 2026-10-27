@@ -18,7 +18,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -409,6 +409,9 @@ else app.whenReady().then(() => {
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
+    // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
+    // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
+    idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
@@ -595,7 +598,8 @@ else app.whenReady().then(() => {
     const full = Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image;
     return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
   });
-  handle(IPC_CHANNELS.copyText, (_owner, text) => { clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
+  // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
+  handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');

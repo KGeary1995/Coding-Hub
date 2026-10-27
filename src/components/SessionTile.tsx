@@ -13,6 +13,7 @@ import { TerminalViewport } from './TerminalViewport';
 import { useChannelName } from '../state/channel-names';
 import { modelLabel } from '../../shared/model-name';
 import { ChatView } from './chat/ChatView';
+import { chatFailed, chatSent } from '../state/chat-store';
 import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
@@ -49,7 +50,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const chat = session.config.engine !== 'shell' && session.config.chat === true;
   // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
-  const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); return Boolean(run && (await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] })).ok); };
+  const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
   const engineName = chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
   const resumeId = session.config.engine === 'shell' ? undefined : session.config.resumeId;

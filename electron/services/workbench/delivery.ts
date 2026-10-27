@@ -10,6 +10,7 @@ import { directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 import { hostEnvironment } from '../cli/discovery';
 import { parseStatus } from '../repository/git';
+import { readOnlyGitOptions } from '../repository/git-safety';
 import { validateRelativePath } from '../repository/filesystem';
 const run = promisify(execFile);
 const reference = { directory: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/) };
@@ -38,12 +39,15 @@ export class Delivery {
   });
  }
  async inspect(input: string): Promise<DeliveryStatus> {
-  const cwd = directory(input); const root = directory((await this.command(cwd, 'git', ['rev-parse','--show-toplevel'])).toString().trim());
+  const cwd = directory(input); const root = directory((await this.command(cwd, 'git', [...await readOnlyGitOptions(cwd), 'rev-parse','--show-toplevel'])).toString().trim());
+  // The review only reads: the repository's own config must not run programs (fsmonitor, filters) before the person
+  // has confirmed anything. The confirmed commit and push below run the repository's hooks as usual.
+  const safe = await readOnlyGitOptions(root);
   // --no-optional-locks: never take index.lock while agents may be running their own git commands.
-  const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks','status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
+  const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks',...safe,'status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
   if (status.limited) throw new HubError('DELIVERY_LIMIT', 'Too many changes for a safe delivery review. Use local Git tools.');
   const hash = createHash('sha256').update(JSON.stringify(status));
-  await this.hashOutput(root, ['diff','--no-ext-diff','--no-textconv','--binary'], hash); hash.update('\0cached\0'); await this.hashOutput(root, ['diff','--cached','--no-ext-diff','--no-textconv','--binary'], hash);
+  await this.hashOutput(root, [...safe,'diff','--no-ext-diff','--no-textconv','--binary'], hash); hash.update('\0cached\0'); await this.hashOutput(root, [...safe,'diff','--cached','--no-ext-diff','--no-textconv','--binary'], hash);
   let reviewedBytes = 0;
   for (const item of status.changes.filter((change) => change.untracked)) {
    // Git lists an untracked nested repository or worktree as a directory with a trailing slash.

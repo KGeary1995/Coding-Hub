@@ -74,3 +74,10 @@ footer { padding: 16px; text-align: center; }
 .switcher .count:empty { display: none; }
 .switcher .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--tr-st-waiting); color: var(--tr-on-waiting, #120b10); font-size: 12px; line-height: 18px; text-align: center; }
 .channel .topic { grid-column: 1 / -1; color: var(--tr-fg-muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Copy text: the channel's text where the phone's own press-and-hold selection works. */
+.copy-sheet { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 8px; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); background: var(--tr-bg); }
+.copy-bar { display: flex; align-items: center; gap: 8px; }
+.copy-bar strong { flex: 1; }
+.copy-sheet > p { margin: 0; }
+.copy-text { flex: 1; margin: 0; overflow: auto; padding: 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control, 6px); background: var(--tr-term); color: var(--tr-fg); font: 12px/1.4 var(--tr-font-mono, monospace); white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }

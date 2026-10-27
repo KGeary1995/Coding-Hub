@@ -49,13 +49,14 @@ Packages contain exactly `dist/`, `dist-electron/`, `package.json` and `node_mod
 | `test:memory` | The memory MCP server over stdio: negotiation, tools, malformed input, persistence | no |
 | `test:desktop` | Largest end-to-end smoke: PTYs, restore, unavailable storage, files, Git review, usage, MCP, skills, Drive mirror, rules, help | yes |
 | `test:design`, `test:profiles`, `test:workbench`, `test:enterprise`, `test:productivity`, `test:models-stability`, `test:remote` | Feature smoke tests (layout at several sizes, Claude profiles, design and coaching, diagnostics/verification/preview, Git delivery and backups, model catalog and crash recovery, phone pairing) | yes |
+| `test:paste` | Windows only: Ctrl+V and Alt+V with an image or text on the real system clipboard, in a terminal channel and a chat channel (records what reaches the CLI) | yes |
 | `test:packaged -- <executable>` | Starts a fixture CLI inside a packaged app | yes |
 | `test:install` | Windows install → upgrade → uninstall with data checks. Only on CI (`GITHUB_ACTIONS=true`) or with `--isolated-windows-vm`, because it changes system registration | yes |
 | `build` | typecheck, renderer, phone, host | no |
 | `dist:win`, `dist:win:signed`, `dist:mac`, `verify:win` | Package and verify. See [windows-releases.md](windows-releases.md) | no |
 | `rebuild:native` | `npm rebuild node-pty` | no |
 
-The `test:<feature>` scripts all run `npm run build` first. They launch Electron through Playwright's `_electron`, with an isolated `--user-data-dir`, `CODING_HUB_STORAGE_DIR`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and with the fixture CLI standing in for `claude` and `codex`. On restricted Linux runners, set `CODING_HUB_TEST_NO_SANDBOX=1` (test-only; it adds `--no-sandbox --disable-gpu --disable-dev-shm-usage`) and run under `xvfb-run -a`. `CODING_HUB_*_SCREENSHOT` variables make individual smokes save screenshots.
+The `test:<feature>` scripts all run `npm run build` first. They launch Electron through Playwright's `_electron`, with an isolated `--user-data-dir`, `CODING_HUB_STORAGE_DIR`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and with the fixture CLI standing in for `claude` and `codex`. On restricted Linux runners, set `CODING_HUB_TEST_NO_SANDBOX=1` (test-only; it adds `--no-sandbox --disable-gpu --disable-dev-shm-usage`) and run under `xvfb-run -a`. `CODING_HUB_*_SCREENSHOT` variables make individual smokes save screenshots. `CODING_HUB_TEST_DESKTOP_IDLE=<seconds>` (test-only) sets how long the computer counts as idle, which decides whether a phone gets its own channel size; the remote smoke sets it.
 
 Never start the GUI with `ELECTRON_RUN_AS_NODE` set: it makes Electron behave as plain Node.
 
