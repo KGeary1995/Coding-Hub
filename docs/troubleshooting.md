@@ -20,6 +20,12 @@ User-facing basics (CLI not found, Codex exits at once, Tailscale) are in the [R
 
 **Fix:** from 1.11.2, Trace warns about the mismatch at launch. Remove the entry, or reinstall it from the memory panel, which now uses the automatic key. To move notes between keys, copy the JSON file into the other key's folder and change its `"project"` field to match. `MemoryService.list` drops notes whose `project` doesn't match their folder.
 
+### `write_handoff` fails with "Verify the project key, field lengths, and local file permissions"
+
+**Cause:** before 1.11.5 the memory server answered every failed call with this one message, including calls it rejected for bad arguments. The usual one is a missing `author`: `write_handoff` needs `title`, `content` and `author` (`"claude"` or `"codex"`). A session that saw the message went looking for a permissions problem in `~/.coding-hub/memory`, while reads kept working.
+
+**Fix:** from 1.11.5 the server says what was wrong ("Handoff rejected: author must be "claude" or "codex"", "Handoff rejected: title: Too small…"); the generic message is only for unexpected failures such as a disk error (`failure()` in `electron/services/hub/memory-server.ts`). On older versions, check the call's arguments before the folder.
+
 ### A memory note you deleted comes back
 
 Sync is additive (`electron/services/hub/drive.ts`, and device sync). A note that still exists in the Drive mirror or on another computer is copied back. Remove it everywhere, or leave it.
