@@ -186,7 +186,8 @@ function resizeText(step: number) {
 function fitText() {
   if (!terminal || !fit) return;
   document.getElementById('fit-phone')?.replaceChildren(granted ? 'Desktop size' : 'Fit to phone');
-  if (granted) { if (terminal.options.fontSize !== textSize) terminal.options.fontSize = textSize; return; }
+  // Back at the chosen text size, ask again: the size asked for while the text was shrunk can be a row or column short.
+  if (granted) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
   const dims = fit.proposeDimensions(); if (!dims || !Number.isFinite(dims.cols) || dims.cols <= 0) return;
   const fits = (terminal.options.fontSize ?? textSize) * dims.cols / terminal.cols;
   // Below 6 px the text cannot be read; the screen then pans sideways instead.

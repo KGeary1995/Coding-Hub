@@ -53,6 +53,8 @@ footer { padding: 16px; text-align: center; }
 
 .channel-view { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; gap: 8px; }
 .ask-banner { margin: 0; padding: 10px 12px; border: 1px solid var(--tr-st-waiting); border-radius: var(--tr-r-control, 6px); color: var(--tr-st-waiting); font-weight: 600; }
+/* No send error: its line takes no room under the screen, but stays in the page so screen readers still announce one. */
+.channel-view .error:empty { min-height: 0; margin: 0; }
 .terminal { flex: 1; min-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control, 6px); background: var(--tr-term); }
 /* Every key in view: two rows whose keys share the width, rather than one row that scrolls sideways. */
 .keys { display: flex; flex-direction: column; gap: 6px; }
