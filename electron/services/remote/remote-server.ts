@@ -115,6 +115,8 @@ export class RemoteServer {
   private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number }; cols: number; rows: number; forced: boolean }>();
   /** Phone sizes asked for while the person was using this computer, applied once it goes idle. */
   private wants = new Map<string, { device: string; runId: string; cols: number; rows: number }>();
+  /** When a linked computer last said its person was using this computer's channels (`/api/active`). */
+  private usedFrom = 0;
   private desktopTimer: ReturnType<typeof setInterval> | null = null;
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
@@ -297,7 +299,9 @@ export class RemoteServer {
     if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
     this.watchDesktop();
   }
-  private desktopAway() { const idle = this.host.idleSeconds?.(); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
+  /** Seconds since the person last used this computer: here, or through a linked computer showing its channels (`/api/active`). */
+  private idle() { const own = this.host.idleSeconds?.(); return own === undefined ? undefined : Math.min(own, (Date.now() - this.usedFrom) / 1000); }
+  private desktopAway() { const idle = this.idle(); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
   /** While phones want or hold a size, follows whether the person is at this computer. */
   private watchDesktop() {
     if (this.desktopTimer || !this.host.idleSeconds) return;
@@ -305,7 +309,7 @@ export class RemoteServer {
   }
   /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
   checkDesktop() {
-    const idle = this.host.idleSeconds?.(); if (idle === undefined) return;
+    const idle = this.idle(); if (idle === undefined) return;
     if (idle < 3) for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows }); this.release(sessionId, hold.device, true); }
     if (idle >= DESKTOP_IDLE_SECONDS) for (const [sessionId, want] of [...this.wants]) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
     if (!this.wants.size && ![...this.phoneSizes.values()].some((hold) => !hold.forced) && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
@@ -493,6 +497,11 @@ export class RemoteServer {
       if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/active') {
+      // A linked computer is showing this one's channels and its person is using it: that counts as using this one.
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can report that it is in use.' });
+      this.usedFrom = Date.now(); this.checkDesktop(); return this.send(response, 200, { ok: true });
     }
     if (url.pathname === '/api/size' && (request.method === 'POST' || request.method === 'DELETE')) {
       const body = await this.body(request);

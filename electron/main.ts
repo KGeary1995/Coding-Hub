@@ -421,7 +421,7 @@ else app.whenReady().then(() => {
     const devices = hub.devices; phone.identity = devices.machine;
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
-      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() });
+      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
     phone.setRelay(linked); linked.start();
     // The phone app the other computer served may call this one directly while that one is off.
     phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
