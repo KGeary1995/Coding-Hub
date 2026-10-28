@@ -54,8 +54,15 @@ footer { padding: 16px; text-align: center; }
 .channel-view { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; gap: 8px; }
 .ask-banner { margin: 0; padding: 10px 12px; border: 1px solid var(--tr-st-waiting); border-radius: var(--tr-r-control, 6px); color: var(--tr-st-waiting); font-weight: 600; }
 .terminal { flex: 1; min-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control, 6px); background: var(--tr-term); }
-.keys { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
-.keys button { flex: none; min-width: 48px; font: 600 14px var(--tr-font-mono); }
+/* Every key in view: two rows whose keys share the width, rather than one row that scrolls sideways. */
+.keys { display: flex; flex-direction: column; gap: 6px; }
+.keys > div { display: flex; gap: 5px; }
+.keys button { flex: 1 1 0; min-width: 0; min-height: 42px; padding: 0 2px; font: 600 14px var(--tr-font-mono); white-space: nowrap; }
+/* The named keys get room for their names; the single symbols below share the width evenly. */
+.keys > div:first-child button { flex-basis: auto; padding: 0 6px; }
+.tools { display: flex; gap: 6px; }
+.tools button { flex: 1 1 auto; min-height: 36px; padding: 0 8px; white-space: nowrap; font: 600 13px var(--tr-font-mono); }
+.tools #fit-phone { flex-grow: 3; }
 .compose { display: flex; gap: 8px; }
 .compose input { flex: 1; }
 .terminal, .terminal .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--tr-line-control) transparent; }
