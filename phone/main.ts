@@ -242,7 +242,7 @@ function showChannel(sessionId: string) {
   // message box instead, where the keyboard works as in any text field. Its replies to the CLI's queries are not sent
   // either: the desktop's terminal answers them.
   terminal.options.disableStdin = true; terminal.textarea?.setAttribute('inputmode', 'none'); terminal.textarea?.setAttribute('tabindex', '-1');
-  output.addEventListener('click', () => text.focus());
+  output.addEventListener('click', (event) => { if (terminal && !tapScreen(output, terminal, event)) text.focus(); });
   scrollBySwipe(output, terminal);
   renderChannel(); listen(sessionId);
 }
@@ -256,7 +256,6 @@ function showChannel(sessionId: string) {
  */
 function scrollBySwipe(element: HTMLElement, screen: Terminal) {
   let last: { x: number; y: number } | null = null; let swiped = 0; let vertical: boolean | null = null;
-  const fullScreen = () => screen.buffer.active.type === 'alternate' && screen.modes.mouseTrackingMode !== 'none';
   element.addEventListener('touchstart', (event) => { last = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null; swiped = 0; vertical = null; }, { capture: true, passive: true });
   element.addEventListener('touchmove', (event) => {
     if (last === null || event.touches.length !== 1) return;
@@ -268,10 +267,27 @@ function scrollBySwipe(element: HTMLElement, screen: Terminal) {
     const line = element.clientHeight / screen.rows; const lines = Math.trunc(swiped / line); if (!lines || terminal !== screen) return;
     swiped -= lines * line;
     // Moving the finger up shows newer lines (wheel down, 65); moving it down shows older ones (wheel up, 64).
-    if (fullScreen()) void type(`\x1b[<${lines > 0 ? 65 : 64};${Math.ceil(screen.cols / 2)};${Math.ceil(screen.rows / 2)}M`.repeat(Math.abs(lines)));
+    if (fullScreen(screen)) void type(`\x1b[<${lines > 0 ? 65 : 64};${Math.ceil(screen.cols / 2)};${Math.ceil(screen.rows / 2)}M`.repeat(Math.abs(lines)));
     else screen.scrollLines(lines);
   }, { capture: true, passive: false });
   element.addEventListener('touchend', () => { last = null; }, { capture: true, passive: true });
+}
+
+/** A full-screen CLI that takes mouse reports (Claude Code's full-screen view). */
+const fullScreen = (screen: Terminal) => screen.buffer.active.type === 'alternate' && screen.modes.mouseTrackingMode !== 'none';
+
+/**
+ * A tap on a full-screen CLI is a click there (press and release, SGR encoding), so its own buttons work, such as the
+ * one in Claude Code's full-screen view that jumps back to the newest output; the message box below is tapped to type.
+ * Returns false for a CLI drawn in the normal screen, where a tap opens the message box.
+ */
+function tapScreen(element: HTMLElement, screen: Terminal, event: MouseEvent) {
+  if (!fullScreen(screen)) return false;
+  // The drawn grid's bounds, which already include any panning of a desktop-sized channel wider than the phone.
+  const grid = (element.querySelector('.xterm-screen') ?? element).getBoundingClientRect();
+  const col = Math.min(screen.cols, Math.max(1, Math.floor((event.clientX - grid.left) / (grid.width / screen.cols)) + 1));
+  const row = Math.min(screen.rows, Math.max(1, Math.floor((event.clientY - grid.top) / (grid.height / screen.rows)) + 1));
+  void type(`\x1b[<0;${col};${row}M\x1b[<0;${col};${row}m`); return true;
 }
 
 /**
