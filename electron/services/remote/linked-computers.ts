@@ -42,6 +42,7 @@ export class LinkedComputers implements RemoteRelay {
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
   /** Computers whose tab the desktop has open: only their live output is sent to the window. */
   private watching = new Set<string>();
+  private activeTimer: ReturnType<typeof setInterval> | null = null;
   constructor(
     private root: string,
     private self: () => { id: string; name: string },
@@ -49,11 +50,13 @@ export class LinkedComputers implements RemoteRelay {
     private emit: (event: LinkedComputerEvent) => void,
     private sink: RelaySink,
     private fetcher: typeof fetch = fetch,
+    /** Seconds since the person last used this computer; without it, linked computers are not told it is in use. */
+    private idleSeconds?: () => number,
   ) {}
 
   private links(): Link[] { return load(this.root, FILE, z.array(linkSchema).max(20), []); }
   start() { for (const link of this.links()) this.connect(link); }
-  stop() { for (const connection of this.connections.values()) this.disconnect(connection); this.connections.clear(); }
+  stop() { this.stopActive(); for (const connection of this.connections.values()) this.disconnect(connection); this.connections.clear(); }
 
   status(): LinkedComputer[] {
     const self = this.self().id; const links = new Map(this.links().map((link) => [link.id, link]));
@@ -123,13 +126,27 @@ export class LinkedComputers implements RemoteRelay {
   }
   /** The desktop opened a linked computer's tab: send it every channel's screen as it is now. */
   watch(id: string) {
-    this.watching.add(id);
+    this.watching.add(id); this.watchActive();
     const connection = this.connections.get(id); if (!connection) return;
     for (const [sessionId, mirror] of connection.mirrors) mirror.snapshot((screen) => this.emit({ type: 'replay', id, sessionId, runId: mirror.runId, ...screen }));
   }
 
   /** The desktop left a linked computer's tab. */
-  unwatch(id: string) { this.watching.delete(id); }
+  unwatch(id: string) { this.watching.delete(id); if (!this.watching.size) this.stopActive(); }
+  /**
+   * While a linked computer's tab is open and the person is using this computer, tells that computer every 2 s
+   * (`/api/active`), so it gives its channels its own size back from a phone, as it does when used directly.
+   * A computer on Trace before 1.11.5 answers 404, which is ignored.
+   */
+  private watchActive() {
+    if (this.activeTimer || !this.idleSeconds) return;
+    this.activeTimer = setInterval(() => this.reportActive(), 2000); this.activeTimer.unref?.();
+  }
+  private stopActive() { if (this.activeTimer) clearInterval(this.activeTimer); this.activeTimer = null; }
+  reportActive() {
+    if (!this.idleSeconds || this.idleSeconds() >= 3) return;
+    for (const id of this.watching) { const connection = this.connections.get(id); if (connection?.connected) void this.request(connection.link, 'api/active', { method: 'POST', body: '{}', signal: AbortSignal.timeout(5000) }).catch(() => {}); }
+  }
 
   // RemoteRelay: this computer's phones see linked computers' channels.
   channels(): RemoteChannel[] { return [...this.connections.values()].filter((connection) => connection.connected).flatMap((connection) => this.tagged(connection)); }

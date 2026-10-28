@@ -208,6 +208,27 @@ describe('linked computers', () => {
     idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
   });
 
+  it('counts using its channels from a linked computer as using the computer, so a phone gives the size back', async () => {
+    const idle = { seconds: DESKTOP_IDLE_SECONDS }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
+    const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
+    // Nobody at the Mac: a phone answering a prompt there gets its size.
+    await fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: 'mac-1', runId: 'run-mac-1', cols: 44, rows: 30 }) });
+    expect(mac.sizes).toEqual(['44x30']);
+    // Only a linked computer may say it is in use.
+    expect((await fetch(`${mac.url}api/active`, { method: 'POST', headers: auth, body: '{}' })).status).toBe(403);
+    const here = { seconds: 1 };
+    const pc = new LinkedComputers(temporary(), () => ({ id: PC, name: 'Obsidian-Halo' }), () => [{ id: MAC, name: 'MacBook', url: mac.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetch, () => here.seconds);
+    cleanup.push(() => pc.stop());
+    await pc.link(MAC, mac.server.pair('computer').pairing!.code); await until(() => pc.status()[0].connected, 'the stream');
+    // The Mac's tab is not open here: nothing is reported.
+    pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); expect(mac.sizes).toEqual(['44x30']);
+    // Its tab is open but the person here is away too: still the phone's size.
+    pc.watch(MAC); here.seconds = 30; pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); expect(mac.sizes).toEqual(['44x30']);
+    // The person here is using it: the Mac puts its own size back, and the phone's size waits for an idle spell.
+    here.seconds = 1; pc.reportActive(); await until(() => mac.sizes.length === 2, 'the desktop size'); expect(mac.sizes).toEqual(['44x30', '100x30']);
+    mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+  });
+
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {
     expect(linkableAddress('https://desk.tail1234.ts.net/')).toBe('https://desk.tail1234.ts.net/');
     expect(linkableAddress('https://desk.tail1234.ts.net/some/path')).toBe('https://desk.tail1234.ts.net/');
