@@ -27,5 +27,5 @@ describe('prepared folder limit', () => {
     const next = service.execute({ action: 'prepare', report: 'Report 100' }) as { directory: string };
     expect(fs.existsSync(next.directory)).toBe(true); expect(fs.existsSync(folders[0])).toBe(true); expect(fs.existsSync(folders[1])).toBe(false); expect(fs.existsSync(folders[2])).toBe(true);
     expect(rules.read([]).directories).not.toContain(folders[1]); expect(() => rules.verifyLaunch(next.directory)).not.toThrow();
-  });
+  }, 30_000); /** 101 real folders: about 2 s locally, past the 5 s default on a slow Windows runner. */
 });
