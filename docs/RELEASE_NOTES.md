@@ -1,11 +1,11 @@
 ## What's new
 
-1.11.5 fixes two things:
+1.11.6 fixes two things on the phone:
 
-- **The Trace icon.** Windows and Mac still showed the green AI Coding Hub icon with `{ }`. They now show the Trace bars, the same icon as the phone app. If a pinned taskbar icon still shows the old one, unpin Trace and pin it again: Windows keeps old icons for a while.
-- **Linked computers' channels at their full size.** After you answered a channel from your phone, it could stay drawn at the phone's width when you looked at it from another computer. Using a computer's channels from a linked computer now counts as using that computer, so it gives the channel its own size back, as it does when you sit at it. Update both computers.
+- **Scroll to the end in Claude Code's full-screen view.** Tapping its button that jumps back to the newest output did nothing on the phone. A tap on a full-screen Claude Code channel is now a click there, so its buttons work. Tap the message box below it to type.
+- **A linked computer's channel keeps your phone's size.** With two phones, one leaving another computer's channel could put it back to the computer's size while the other phone was still using it. Only the phone that asked for its size gives it back now. Update both computers.
 
-Also in 1.11.4: a round of fixes from an audit of the whole app. Pasting images on Windows; scrolling, copying and sizing on the phone; safer Git reads; usage that includes Claude Code subagents; fixes for chat channels, linked computers, sync, updates and startup. Also in 1.11.3: approval alerts clear when Claude moves on, and Claude channels show how much context is in use. Also in 1.11.2: memory keeps working in projects where it was installed before the rename. Also in 1.11.1: chat channels keep their conversation, the phone reconnects by itself, security fixes for linked computers, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, and copying several lines from Claude Code. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
+Also in 1.11.5: the Trace icon, and linked computers' channels at their full size. Also in 1.11.4: a round of fixes from an audit of the whole app. Pasting images on Windows; scrolling, copying and sizing on the phone; safer Git reads; usage that includes Claude Code subagents; fixes for chat channels, linked computers, sync, updates and startup. Also in 1.11.3: approval alerts clear when Claude moves on, and Claude channels show how much context is in use. Also in 1.11.2: memory keeps working in projects where it was installed before the rename. Also in 1.11.1: chat channels keep their conversation, the phone reconnects by itself, security fixes for linked computers, and more accurate usage. Also in 1.11.0: Trace installs as Trace, scrolling and typing on your phone, and copying several lines from Claude Code. In 1.10.x: chat channels with images, plan limits, no lag while agents work, and copying that keeps sentences whole.
 
 ## Install
 
