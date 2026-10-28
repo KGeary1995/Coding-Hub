@@ -60,6 +60,11 @@ footer { padding: 16px; text-align: center; }
 .compose input { flex: 1; }
 .terminal, .terminal .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--tr-line-control) transparent; }
 .terminal .xterm-viewport { background: var(--tr-term) !important; }
+/* Text selected by pressing and holding the channel: floats over the channel so its size does not change. */
+.select-bar { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 60px); z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--tr-line-strong, var(--tr-line)); border-radius: var(--tr-r-control, 6px); background: var(--tr-panel); box-shadow: 0 4px 16px rgb(0 0 0 / 0.35); }
+.select-bar[hidden] { display: none; }
+.select-bar span { flex: 1; }
+.terminal .xterm-screen { -webkit-touch-callout: none; }
 
 .alerts { margin-top: 24px; padding: 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); }
 .alerts h2 { margin: 0 0 6px; font: 600 16px/22px var(--tr-font-ui); color: var(--tr-fg-strong); }

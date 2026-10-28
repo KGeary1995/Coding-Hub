@@ -232,7 +232,8 @@ function showChannel(sessionId: string) {
     h('button', { className: 'icon small', id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'While you use the computer, the channel keeps its desktop size. Fit to phone redraws it at this screen\'s size until you type in it on the computer.' }, 'Fit to phone'),
     h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { className: 'icon small', type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+')];
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
-  app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, output, problem, keys, form));
+  const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
+  app.replaceChildren(header(showList, title, ...size), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, output, selected, problem, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   fit = new FitAddon(); terminal.loadAddon(fit);
@@ -243,7 +244,7 @@ function showChannel(sessionId: string) {
   // either: the desktop's terminal answers them.
   terminal.options.disableStdin = true; terminal.textarea?.setAttribute('inputmode', 'none'); terminal.textarea?.setAttribute('tabindex', '-1');
   output.addEventListener('click', (event) => { if (terminal && !tapScreen(output, terminal, event)) text.focus(); });
-  scrollBySwipe(output, terminal);
+  selectByHold(output, terminal, selected); scrollBySwipe(output, terminal);
   renderChannel(); listen(sessionId);
 }
 
@@ -283,11 +284,64 @@ const fullScreen = (screen: Terminal) => screen.buffer.active.type === 'alternat
  */
 function tapScreen(element: HTMLElement, screen: Terminal, event: MouseEvent) {
   if (!fullScreen(screen)) return false;
-  // The drawn grid's bounds, which already include any panning of a desktop-sized channel wider than the phone.
+  const { col, row } = cellAt(element, screen, event.clientX, event.clientY);
+  void type(`\x1b[<0;${col + 1};${row + 1}M\x1b[<0;${col + 1};${row + 1}m`); return true;
+}
+/** The on-screen cell (from 0) under a point, from the drawn grid's bounds, which include any panning of a wide channel. */
+function cellAt(element: HTMLElement, screen: Terminal, x: number, y: number) {
   const grid = (element.querySelector('.xterm-screen') ?? element).getBoundingClientRect();
-  const col = Math.min(screen.cols, Math.max(1, Math.floor((event.clientX - grid.left) / (grid.width / screen.cols)) + 1));
-  const row = Math.min(screen.rows, Math.max(1, Math.floor((event.clientY - grid.top) / (grid.height / screen.rows)) + 1));
-  void type(`\x1b[<0;${col};${row}M\x1b[<0;${col};${row}m`); return true;
+  return { col: Math.min(screen.cols - 1, Math.max(0, Math.floor((x - grid.left) / (grid.width / screen.cols)))), row: Math.min(screen.rows - 1, Math.max(0, Math.floor((y - grid.top) / (grid.height / screen.rows)))) };
+}
+
+/**
+ * Press and hold the channel to select text, and drag to select more; a bar then offers to copy it. xterm selects only
+ * with a mouse, so the phone drives xterm's own selection, which works in a full-screen CLI too (where a mouse drag
+ * would go to the CLI). The text is taken when the finger lifts, so a redraw that clears the selection loses nothing.
+ * Registered before the swipe, so a drag that selects does not also scroll.
+ */
+function selectByHold(element: HTMLElement, screen: Terminal, bar: HTMLElement) {
+  let timer: ReturnType<typeof setTimeout> | undefined; let start: { x: number; y: number } | null = null;
+  let anchor: { col: number; row: number } | null = null; let swallowClick = false;
+  const cell = (x: number, y: number) => { const at = cellAt(element, screen, x, y); return { col: at.col, row: at.row + screen.buffer.active.viewportY }; };
+  const extend = (x: number, y: number) => {
+    if (!anchor) return; const end = cell(x, y);
+    const [from, to] = end.row < anchor.row || (end.row === anchor.row && end.col < anchor.col) ? [end, anchor] : [anchor, end];
+    screen.select(from.col, from.row, (to.row - from.row) * screen.cols + to.col - from.col + 1);
+  };
+  const close = () => { screen.clearSelection(); bar.hidden = true; bar.replaceChildren(); };
+  const offer = (text: string) => {
+    const status = h('span', { className: 'dim', aria: { live: 'polite' } }, `${text.length.toLocaleString()} characters`);
+    bar.replaceChildren(status, h('button', { className: 'primary', type: 'button', onclick: async () => {
+      try { await navigator.clipboard.writeText(text); status.textContent = 'Copied.'; setTimeout(close, 800); }
+      catch { close(); showCopy(); }
+    } }, 'Copy'), h('button', { type: 'button', onclick: close }, 'Cancel'));
+    bar.hidden = false;
+  };
+  element.addEventListener('touchstart', (event) => {
+    clearTimeout(timer); anchor = null; start = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null; if (!start) return;
+    const at = start; timer = setTimeout(() => { if (terminal !== screen) return; anchor = cell(at.x, at.y); extend(at.x, at.y); navigator.vibrate?.(10); }, 450);
+  }, { capture: true, passive: true });
+  element.addEventListener('touchmove', (event) => {
+    const touch = event.touches[0]; if (!touch) return;
+    if (anchor) { event.preventDefault(); event.stopImmediatePropagation(); extend(touch.clientX, touch.clientY); return; }
+    if (start && Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 8) { clearTimeout(timer); start = null; }
+  }, { capture: true, passive: false });
+  const end = (event: TouchEvent) => {
+    clearTimeout(timer); start = null; if (!anchor) return;
+    // Moves can be dropped or merged; where the finger lifts is where the selection ends.
+    const lifted = event.type === 'touchend' ? event.changedTouches[0] : undefined; if (lifted) extend(lifted.clientX, lifted.clientY);
+    anchor = null;
+    // A browser that sends no click after a hold must not swallow the next real tap.
+    swallowClick = true; setTimeout(() => { swallowClick = false; }, 400);
+    const text = screen.getSelection(); if (text.trim()) offer(text); else close();
+  };
+  element.addEventListener('touchend', end, { capture: true, passive: true }); element.addEventListener('touchcancel', end, { capture: true, passive: true });
+  // The tap that ends a hold, or one that dismisses a selection, neither opens the message box nor clicks in the CLI.
+  element.addEventListener('click', (event) => {
+    if (!swallowClick && bar.hidden) return;
+    if (!swallowClick) close(); swallowClick = false; event.stopPropagation(); event.preventDefault();
+  }, { capture: true });
+  element.addEventListener('contextmenu', (event) => event.preventDefault());
 }
 
 /**
