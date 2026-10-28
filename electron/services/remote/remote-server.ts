@@ -115,6 +115,11 @@ export class RemoteServer {
   private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number }; cols: number; rows: number; forced: boolean }>();
   /** Phone sizes asked for while the person was using this computer, applied once it goes idle. */
   private wants = new Map<string, { device: string; runId: string; cols: number; rows: number }>();
+  /**
+   * Which of this computer's phones last asked for its size on a linked computer's channel. The linked computer sees all
+   * of them as this one computer, so only that phone leaving gives the channel back; another phone leaving keeps it.
+   */
+  private relaySizes = new Map<string, string>();
   /** When a linked computer last said its person was using this computer's channels (`/api/active`). */
   private usedFrom = 0;
   private desktopTimer: ReturnType<typeof setInterval> | null = null;
@@ -322,6 +327,11 @@ export class RemoteServer {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === hold.runId);
     if (run && this.host.resize) try { this.host.resize({ sessionId, runId: hold.runId }, hold.desktop.cols, hold.desktop.rows); this.resized(sessionId); } catch { /* The run ended. */ }
   }
+  /** One of this computer's phones left a linked computer's channel: gives it back there only if that phone sized it. */
+  private async relayRelease(sessionId: string, device: string) {
+    if (!this.relay || this.relaySizes.get(sessionId) !== device) return;
+    this.relaySizes.delete(sessionId); await this.relay.size(sessionId, '', null);
+  }
 
   /**
    * This computer's channels, and for phones also those of linked computers. A linked computer is never given channels
@@ -439,7 +449,7 @@ export class RemoteServer {
       request.on('close', () => {
         this.streams.delete(stream);
         // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
-        if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone' && this.relay) void this.relay.size(sessionId, '', null).catch(() => {}); }
+        if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone') void this.relayRelease(sessionId, device.id).catch(() => {}); }
       });
       this.write(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
@@ -509,13 +519,13 @@ export class RemoteServer {
       try {
         if (request.method === 'DELETE') {
           const parsed = releaseSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
-          if (this.local(parsed.data.sessionId)) this.release(parsed.data.sessionId, device.id); else if (kind === 'phone' && this.relay) await this.relay.size(parsed.data.sessionId, '', null);
+          if (this.local(parsed.data.sessionId)) this.release(parsed.data.sessionId, device.id); else if (kind === 'phone') await this.relayRelease(parsed.data.sessionId, device.id);
         } else {
           const parsed = sizeSchema.safeParse(body); if (!parsed.success) return this.send(response, 400, { error: 'Invalid size.' });
           const { sessionId, runId, cols, rows, force } = parsed.data;
           // `held`: whether the channel is now drawn at the phone's size (false while the desktop is in use).
           if (this.local(sessionId)) return this.send(response, 200, { ok: true, held: this.phoneSize(device.id, sessionId, runId, cols, rows, force) });
-          else if (kind === 'phone' && this.relay) await this.relay.size(sessionId, runId, { cols, rows });
+          else if (kind === 'phone' && this.relay) { await this.relay.size(sessionId, runId, { cols, rows }); this.relaySizes.set(sessionId, device.id); }
           else return this.send(response, 400, { error: 'Unknown channel.' });
         }
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be resized.' }); }

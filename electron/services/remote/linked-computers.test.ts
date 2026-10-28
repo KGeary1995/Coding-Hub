@@ -184,6 +184,13 @@ describe('linked computers', () => {
     // The other computer's channel is resized there, through this one.
     expect((await size('pc-1', 40, 22)).status).toBe(200); expect((await release('pc-1')).status).toBe(200);
     expect(pc.sizes).toEqual(['40x22', '100x30']); expect(mac.sizes.slice(-1)).toEqual(['120x40']);
+    // The PC sees every phone of this computer as this computer: a second phone leaving the PC's channel (or never
+    // having sized it) keeps the size the first phone asked for, and only that phone leaving gives it back.
+    const other = { ...auth, Authorization: `Bearer ${await phoneToken(mac.server)}` };
+    await size('pc-1', 40, 22); expect((await fetch(`${mac.url}api/size`, { method: 'DELETE', headers: other, body: JSON.stringify({ sessionId: 'pc-1' }) })).status).toBe(200);
+    const left = new AbortController(); await fetch(`${mac.url}api/stream?sessionId=pc-1`, { headers: other, signal: left.signal }); left.abort();
+    await new Promise((resolve) => setTimeout(resolve, 50)); expect(pc.sizes.slice(-1)).toEqual(['40x22']);
+    await release('pc-1'); expect(pc.sizes.slice(-1)).toEqual(['100x30']);
     // Out-of-range sizes are refused.
     expect((await size('mac-1', 5, 2)).status).toBe(400);
   });
