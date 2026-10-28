@@ -231,6 +231,8 @@ kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-lef
 .hub-warning .button { margin-left: 10px; }
 .hub-form, .hub-preview, .server-card, .memory-connection { padding: 24px; border: 1px solid var(--tr-line-control); background: var(--tr-surface); border-radius: 6px; }
 .hub-form { display: flex; flex-direction: column; gap: 17px; margin-bottom: 24px; }
+/* A form after a card (Settings: Display and keyboard, then Google Drive) keeps the cards' 20 px gap. */
+.storage-card + .hub-form { margin-top: 20px; }
 .hub-form > .button { align-self: start; }
 .form-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .server-list { display: grid; gap: 14px; }
