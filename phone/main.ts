@@ -153,7 +153,7 @@ const SIZE_KEY = 'trace-remote-font';
 let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) || 13));
 let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
 /** Whether the phone wants the channel at its size, and the size it last asked for. */
-let holding = false; let asked: { cols: number; rows: number } | null = null;
+let holding = false; let asked: { cols: number; rows: number } | null = null; let askedBefore: { cols: number; rows: number } | null = null;
 /**
  * Whether the channel is drawn at the phone's size right now. While the person uses the computer it keeps the
  * desktop's size (the desktop wins), and the phone shows that layout with its text shrunk to fit the screen's width.
@@ -166,18 +166,20 @@ function requestSize() {
   if (sizeTimer) clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => {
     sizeTimer = null; const dims = fit?.proposeDimensions();
+    // The desktop may have taken the channel back, or the phone been locked, while this waited.
+    if (!holding || document.visibilityState !== 'visible') return;
     if (!current || !run || !terminal || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
     // What fits at the chosen text size, even while the text is shrunk to show the desktop's layout.
     const scale = (terminal.options.fontSize ?? textSize) / textSize;
     const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const force = forceNext; forceNext = false;
     const key = `${current}:${run}:${cols}x${rows}`;
-    if (key === sentSize && !force) return; sentSize = key; asked = { cols, rows };
+    if (key === sentSize && !force) return; sentSize = key; askedBefore = asked; asked = { cols, rows };
     const channel = current; const asking = run;
     void sizeChannel(channel, asking, cols, rows, force).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
   }, 200);
 }
 /** Gives the channel being left back to the desktop's size. */
-function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; granted = false; }
+function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
   if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
@@ -414,10 +416,12 @@ function onEvent(event: StreamEvent) {
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
     // The computer applied the phone's size (it went idle, or "Fit to phone"), or took it back (the person is there).
-    if (event.data.runId === run) granted = Boolean(asked && event.data.cols === asked.cols && event.data.rows === asked.rows);
+    // The size the phone asked for before its latest can still arrive after it: that is the phone's too, not the desktop's.
+    const mine = (size: typeof asked) => Boolean(size && event.data.cols === size.cols && event.data.rows === size.rows);
+    if (event.data.runId === run) granted = mine(asked) || mine(askedBefore);
     if (event.data.runId === run) resizeTo(event.data.cols, event.data.rows);
     // The desktop took the channel back (the person typed there): the phone leaves it at that size until it is used.
-    if (event.data.runId === run && holding && asked && sentSize && (event.data.cols !== asked.cols || event.data.rows !== asked.rows)) { holding = false; sentSize = ''; }
+    if (event.data.runId === run && holding && asked && sentSize && !mine(asked) && !mine(askedBefore)) { holding = false; sentSize = ''; }
     return;
   }
   if (event.type === 'replay') {
