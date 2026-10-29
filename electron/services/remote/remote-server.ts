@@ -21,6 +21,8 @@ export interface RemoteHost {
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
   control?(sessionId: string, control: ChannelControl): Promise<void>;
+  /** Adds a channel to this computer's workspace (a linked computer's + Channel). */
+  add?(engine: ChannelEngine): Promise<void>;
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
@@ -71,6 +73,7 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
@@ -539,6 +542,15 @@ export class RemoteServer {
           else return this.send(response, 400, { error: 'Unknown channel.' });
         }
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be resized.' }); }
+      return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/channel-add') {
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can add channels.' });
+      const parsed = addSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid channel.' });
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
+      try { await this.host.add(parsed.data.engine); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/control') {

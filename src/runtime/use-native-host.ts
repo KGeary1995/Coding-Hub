@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import type { ChannelControl } from '../../shared/remote';
+import type { ChannelEngine } from '../../shared/types';
+import { MAX_CHANNELS } from '../../shared/schemas';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
@@ -55,8 +57,9 @@ export function useNativeHost() {
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
-    const unsubscribeControl = host.onRemoteControl(({ requestId, sessionId, control }) => {
-      void remoteControl(sessionId, control).then((error) => host.finishRemoteControl({ requestId, ...(error ? { error } : {}) })).catch(() => {});
+    const unsubscribeControl = host.onRemoteControl((request) => {
+      void ('add' in request ? Promise.resolve(remoteAdd(request.add)) : remoteControl(request.sessionId, request.control))
+        .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
     });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
       void host.finishWorkspaceFlush({ requestId, ...(loaded ? { workspace: savedWorkspace() } : {}) }).catch(() => {});
@@ -129,6 +132,13 @@ export async function stopSession(id: string): Promise<boolean> {
  * Carries out a linked computer's request to start, stop or restart one of this computer's channels, the same way the
  * buttons on its tile would. Returns why it could not, for the other computer to show.
  */
+/** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
+export function remoteAdd(engine: ChannelEngine): string | undefined {
+  const before = useWorkspaceStore.getState().sessions.length;
+  if (before >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels.`;
+  useWorkspaceStore.getState().addSession(engine);
+  return useWorkspaceStore.getState().sessions.length > before ? undefined : 'The channel could not be added.';
+}
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {
   const current = () => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const session = current(); if (!session) return 'That channel is no longer on this computer.';

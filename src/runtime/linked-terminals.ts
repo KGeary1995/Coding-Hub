@@ -28,6 +28,9 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
     const runId = entry.runId; if (!runId || !typed) return;
     entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: typed })).catch(() => {});
   });
+  // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing; let the browser paste the text instead, as
+  // channels on this computer do (terminals.ts). An image cannot be sent: it is on this computer's clipboard.
+  terminal.attachCustomKeyEventHandler((event) => !(event.type === 'keydown' && event.code === 'KeyV' && !event.shiftKey && event.ctrlKey && !event.altKey && !event.metaKey && navigator.userAgent.includes('Windows')));
   terminals.set(id, entry);
   return entry;
 }

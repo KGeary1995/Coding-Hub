@@ -1,4 +1,4 @@
-import type { ChannelControl, LinkedComputerEvent } from './remote';
+import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { CoachingRequest, CoachingResponse } from './coaching';
@@ -95,8 +95,8 @@ export interface CodingHubHost {
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
-  /** A linked computer asks this window to start, stop or restart a channel; answer with finishRemoteControl. */
-  onRemoteControl(listener: (request: { requestId: string; sessionId: string; control: ChannelControl }) => void): () => void;
+  /** A linked computer asks this window to start, stop or restart a channel, or add one; answer with finishRemoteControl. */
+  onRemoteControl(listener: (request: RemoteControlRequest) => void): () => void;
   finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
   /** The local path of a file dropped on the page, or '' when it has none. */
   pathForFile(file: File): string;
