@@ -7,8 +7,8 @@ import { workbench } from './workbench';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
 
 /**
- * Terminals showing channels that run on a linked computer. Each is drawn at that CLI's own size (the other computer
- * owns it, so it is never resized from here) and what the person types goes back to that computer.
+ * Terminals showing channels that run on a linked computer. Each is drawn at that CLI's own size: the other computer
+ * owns it, and this window only asks for its tile's size (`linked-fit`). What the person types goes back to that computer.
  */
 interface Entry { terminal: Terminal; element: HTMLDivElement; runId: string | null; queue: Promise<unknown> }
 const terminals = new Map<string, Entry>();
