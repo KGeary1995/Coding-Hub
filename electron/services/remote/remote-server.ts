@@ -121,8 +121,8 @@ export class RemoteServer {
    * of them as this one computer, so only that phone leaving gives the channel back; another phone leaving keeps it.
    */
   private relaySizes = new Map<string, string>();
-  /** When a linked computer last said its person was using this computer's channels (`/api/active`). */
-  private usedFrom = 0;
+  /** When each linked computer last said its person was using this computer's channels (`/api/active`). */
+  private usedFrom = new Map<string, number>();
   private desktopTimer: ReturnType<typeof setInterval> | null = null;
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
@@ -293,7 +293,7 @@ export class RemoteServer {
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
     if (!run || !this.host.resize) throw new HubError('STALE_SESSION', 'This channel is not running.');
-    if (!force && !this.desktopAway()) { this.wants.set(sessionId, { device, runId, cols, rows }); this.watchDesktop(); return false; }
+    if (!force && !this.desktopAway(device)) { this.wants.set(sessionId, { device, runId, cols, rows }); this.watchDesktop(); return false; }
     this.wants.delete(sessionId); this.apply(device, sessionId, runId, cols, rows, force); return true;
   }
   /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
@@ -305,9 +305,16 @@ export class RemoteServer {
     if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
     this.watchDesktop();
   }
-  /** Seconds since the person last used this computer: here, or through a linked computer showing its channels (`/api/active`). */
-  private idle() { const own = this.host.idleSeconds?.(); return own === undefined ? undefined : Math.min(own, (Date.now() - this.usedFrom) / 1000); }
-  private desktopAway() { const idle = this.idle(); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
+  /**
+   * Seconds since the person last used this computer: here, or through a linked computer showing its channels
+   * (`/api/active`). A linked computer that asked for a channel at its own size does not count against that size.
+   */
+  private idle(device?: string) {
+    const own = this.host.idleSeconds?.(); if (own === undefined) return undefined;
+    let last = 0; for (const [id, time] of this.usedFrom) if (id !== device) last = Math.max(last, time);
+    return Math.min(own, (Date.now() - last) / 1000);
+  }
+  private desktopAway(device?: string) { const idle = this.idle(device); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
   /** While phones want or hold a size, follows whether the person is at this computer. */
   private watchDesktop() {
     if (this.desktopTimer || !this.host.idleSeconds) return;
@@ -315,9 +322,9 @@ export class RemoteServer {
   }
   /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
   checkDesktop() {
-    const idle = this.idle(); if (idle === undefined) return;
-    if (idle < 3) for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows }); this.release(sessionId, hold.device, true); }
-    if (idle >= DESKTOP_IDLE_SECONDS) for (const [sessionId, want] of [...this.wants]) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
+    if (this.idle() === undefined) return;
+    for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced && this.idle(hold.device)! < 3) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows }); this.release(sessionId, hold.device, true); }
+    for (const [sessionId, want] of [...this.wants]) if (this.idle(want.device)! >= DESKTOP_IDLE_SECONDS) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
     if (!this.wants.size && ![...this.phoneSizes.values()].some((hold) => !hold.forced) && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
   }
   /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
@@ -451,6 +458,8 @@ export class RemoteServer {
         this.streams.delete(stream);
         // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
         if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone') void this.relayRelease(sessionId, device.id).catch(() => {}); }
+        // A linked computer that closed (or lost the connection) gives back every channel it showed at its size.
+        if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
       this.write(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
@@ -512,7 +521,7 @@ export class RemoteServer {
     if (request.method === 'POST' && url.pathname === '/api/active') {
       // A linked computer is showing this one's channels and its person is using it: that counts as using this one.
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can report that it is in use.' });
-      this.usedFrom = Date.now(); this.checkDesktop(); return this.send(response, 200, { ok: true });
+      this.usedFrom.set(device.id, Date.now()); this.checkDesktop(); return this.send(response, 200, { ok: true });
     }
     if (url.pathname === '/api/size' && (request.method === 'POST' || request.method === 'DELETE')) {
       const body = await this.body(request);

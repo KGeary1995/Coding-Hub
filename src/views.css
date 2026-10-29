@@ -75,6 +75,6 @@
 .linked-computer-head h1 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font: var(--tr-t-heading); }
 .linked-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); grid-auto-rows: minmax(360px, 1fr); gap: 10px; overflow: auto; }
 .linked-tile { display: flex; flex-direction: column; min-height: 0; }
-/* The terminal keeps the other computer's columns and rows, so it scrolls here instead of being refitted. */
+/* The terminal has the other computer's columns and rows (the tile's own once that computer applies them); when they do not fit, it scrolls here. */
 .linked-viewport { overflow: auto; }
 .linked-viewport .terminal-surface { width: max-content; height: max-content; }

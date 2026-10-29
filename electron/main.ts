@@ -181,6 +181,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
 async function linkedRequest(payload: unknown) {
   if (!linked) throw new HubError('LINK_UNAVAILABLE', 'Linking computers needs writable local storage.');
@@ -191,6 +192,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-watch') { linked.watch(request.id); return null; }
   if (request.action === 'linked-unwatch') { linked.unwatch(request.id); return null; }
+  if (request.action === 'linked-fit') { await linked.fit(request.id, request.sessionId, request.runId, request.cols && request.rows ? { cols: request.cols, rows: request.rows } : null); return null; }
   return linked.status();
 }
 /** A linked computer asked to start, stop or restart one of this computer's channels; the desktop window does it. */

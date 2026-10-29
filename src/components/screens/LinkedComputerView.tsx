@@ -18,6 +18,22 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     container.current.appendChild(entry.element);
     return () => { entry.element.remove(); };
   }, [computer.id, channel.sessionId]);
+  // While the tile is shown, it asks for the channel at the tile's size; the other computer applies it while nobody
+  // uses it there, and keeps its own size while someone does.
+  useEffect(() => {
+    const view = container.current; const runId = channel.runId; if (!view || channel.chat || !runId) return;
+    const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel); let sent = ''; let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      const screen = entry.element.querySelector<HTMLElement>('.xterm-screen'); const { cols, rows } = entry.terminal;
+      if (!screen?.offsetWidth || !screen.offsetHeight || !view.clientWidth || !view.clientHeight) return;
+      // Less the terminal's own scrollbar, as xterm's fit add-on leaves room for it.
+      const fit = { cols: Math.max(20, Math.min(300, Math.floor((view.clientWidth - 14) * cols / screen.offsetWidth))), rows: Math.max(6, Math.min(200, Math.floor(view.clientHeight * rows / screen.offsetHeight))) };
+      if (`${fit.cols}x${fit.rows}` === sent) return; sent = `${fit.cols}x${fit.rows}`;
+      void workbench({ action: 'linked-fit', id: computer.id, sessionId: channel.sessionId, runId, ...fit }).catch(() => {});
+    };
+    const observer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(measure, 200); }); observer.observe(view);
+    return () => { observer.disconnect(); clearTimeout(timer); void workbench({ action: 'linked-fit', id: computer.id, sessionId: channel.sessionId, runId }).catch(() => {}); };
+  }, [computer.id, channel.sessionId, channel.runId]);
   // Typing needs the current run; a channel that has not drawn anything yet still takes input.
   useEffect(() => { const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel); if (channel.runId && !entry.runId) entry.runId = channel.runId; }, [channel.runId]);
   const control = async (action: ChannelControl) => {

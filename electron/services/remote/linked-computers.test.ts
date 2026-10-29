@@ -237,6 +237,28 @@ describe('linked computers', () => {
     mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
   });
 
+  it('draws a channel at the size of its tile on a linked computer while nobody uses its own computer', async () => {
+    const idle = { seconds: DESKTOP_IDLE_SECONDS }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
+    const here = { seconds: 1 };
+    const pc = new LinkedComputers(temporary(), () => ({ id: PC, name: 'Obsidian-Halo' }), () => [{ id: MAC, name: 'MacBook', url: mac.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetch, () => here.seconds);
+    cleanup.push(() => pc.stop());
+    await pc.link(MAC, mac.server.pair('computer').pairing!.code); await until(() => pc.status()[0].connected, 'the stream');
+    // The Mac's tab is open on the PC and nobody is at the Mac: the channel fills the PC's tile.
+    pc.watch(MAC); await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); expect(mac.sizes).toEqual(['150x40']);
+    // The person using the Mac's channels from the PC does not give that size back, as it would a phone's.
+    pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); mac.server.checkDesktop(); expect(mac.sizes).toEqual(['150x40']);
+    // Someone at the Mac takes it back, and the tile's size returns once the Mac is unused again.
+    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
+    // A phone of the PC's showing that channel, then leaving it, puts back the tile's size rather than the Mac's.
+    await pc.size('mac-1', 'run-mac-1', { cols: 44, rows: 30 }); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
+    await pc.size('mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
+    // Closing the tile gives the Mac its size back; so does the PC going away.
+    await pc.fit(MAC, 'mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
+    pc.stop(); await until(() => mac.sizes.at(-1) === '100x30', 'the Mac’s size after the PC left');
+  });
+
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {
     expect(linkableAddress('https://desk.tail1234.ts.net/')).toBe('https://desk.tail1234.ts.net/');
     expect(linkableAddress('https://desk.tail1234.ts.net/some/path')).toBe('https://desk.tail1234.ts.net/');
