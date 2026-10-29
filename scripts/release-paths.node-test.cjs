@@ -50,7 +50,7 @@ test('signed upgrade build and installation check use the same validated baselin
   assert.equal(baselineStep.env?.TRACE_LEGACY_PRODUCT_NAME, '1');
   assert.throws(() => installBaselineVersion({ CODING_HUB_BASELINE_VERSION: '../escape' }));
 });
-test('a Developer ID Mac build makes the update zips and marks the app as able to update itself', () => {
+test('a Developer ID Mac build makes the update zips and marks the app as able to update itself', async () => {
   const load = (identity) => {
     const saved = process.env.MAC_SIGNING_IDENTITY; const file = require.resolve('../electron-builder.cjs');
     if (identity) process.env.MAC_SIGNING_IDENTITY = identity; else delete process.env.MAC_SIGNING_IDENTITY;
@@ -60,8 +60,11 @@ test('a Developer ID Mac build makes the update zips and marks the app as able t
   assert.deepEqual(signed.mac.target.map((item) => item.target), ['dmg', 'zip']);
   assert.deepEqual(signed.extraMetadata, { traceMacUpdates: true });
   assert.equal(signed.mac.notarize, Boolean(process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID));
-  assert.match(signed.zip.artifactName, /-\$\{version\}-macOS-\$\{arch\}\.\$\{ext\}$/);
+  assert.match(signed.mac.artifactName, /-\$\{version\}-macOS-\$\{arch\}\.\$\{ext\}$/);
   // Ad-hoc builds cannot be installed over a signed one by macOS's updater: disk images only, and no update flag.
   assert.deepEqual(adhoc.mac.target.map((item) => item.target), ['dmg']);
   assert.equal(adhoc.extraMetadata, undefined); assert.equal(adhoc.mac.identity, '-');
+  // electron-builder's own schema check, which the build runs first: an unknown key fails every build, Windows too.
+  const { validateConfiguration } = require('app-builder-lib/out/util/config/config'); const { DebugLogger } = require('builder-util');
+  for (const config of [signed, adhoc]) await validateConfiguration(config, new DebugLogger(false));
 });

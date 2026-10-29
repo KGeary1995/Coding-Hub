@@ -46,6 +46,8 @@ module.exports = {
     target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, ...(macIdentity ? [{ target: 'zip', arch: ['arm64', 'x64'] }] : [])],
     icon: 'assets/icon.png',
     category: 'public.app-category.developer-tools',
+    // The update zips' names (the disk images name theirs under dmg); electron-builder has no top-level zip section.
+    artifactName: prefix + '-${version}-macOS-${arch}.${ext}',
     files: [...common, '!node_modules/node-pty/prebuilds/win32-*/**'],
     // MAC_SIGNING_IDENTITY (a Developer ID Application name, e.g. "Kyle Geary (73DB29GHV2)") signs with the hardened
     // runtime, and APPLE_KEYCHAIN_PROFILE (from `xcrun notarytool store-credentials`) or APPLE_API_KEY / APPLE_ID also
@@ -58,7 +60,6 @@ module.exports = {
   },
   // A signed disk image, so Gatekeeper accepts the download itself; notarize it after the build (see README).
   dmg: { artifactName: prefix + '-${version}-macOS-${arch}.${ext}', sign: Boolean(macIdentity) },
-  zip: { artifactName: prefix + '-${version}-macOS-${arch}.${ext}' },
   // Tells the packaged app it may update itself on a Mac (see updatesEnabled).
   ...(macIdentity ? { extraMetadata: { traceMacUpdates: true } } : {}),
   // Installers are published to a public downloads repository so installed copies can check it without credentials;
