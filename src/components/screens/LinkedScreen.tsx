@@ -2,10 +2,21 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { MousePointer2, RotateCcw, X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
 import type { LinkedComputer } from '../../../shared/remote';
+import type { ScreenKind } from '../../../shared/screen';
 import { savedCredentials, screen, ScreenChannel } from '../../runtime/screen-channel';
 
-const XK_SUPER_L = 0xffeb; const XK_V = 0x0076;
+const XK_SUPER_L = 0xffeb; const XK_CONTROL_L = 0xffe3; const XK_V = 0x0076;
 type Status = 'connecting' | 'signin' | 'connected' | 'ended';
+const mac = navigator.userAgent.includes('Mac');
+/**
+ * The modifier each side copies and pastes with differs, so one local key stands in for the other's: on Windows (whose
+ * Windows key cannot be sent) viewing a Mac, Ctrl sends ⌘; on a Mac viewing Windows, ⌘ sends Ctrl (noVNC would send Alt).
+ */
+function swapFor(kind: ScreenKind | null) {
+  if (kind === 'system' && !mac) return { codes: ['ControlLeft', 'ControlRight'], keysym: XK_SUPER_L, code: 'MetaLeft', label: 'Ctrl as ⌘', title: 'Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on the Mac', paste: (event: KeyboardEvent) => event.ctrlKey && !event.metaKey };
+  if (kind === 'trace' && mac) return { codes: ['MetaLeft', 'MetaRight'], keysym: XK_CONTROL_L, code: 'ControlLeft', label: '⌘ as Ctrl', title: '⌘ is sent as Ctrl, so ⌘C and ⌘V copy and paste on Windows', paste: (event: KeyboardEvent) => event.metaKey && !event.ctrlKey };
+  return null;
+}
 
 /**
  * The other computer's screen, through its own screen-sharing server (macOS Screen Sharing), so it works even while
@@ -15,8 +26,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   const view = useRef<HTMLDivElement>(null); const pasteTarget = useRef<HTMLTextAreaElement>(null); const rfb = useRef<RFB | null>(null);
   const [attempt, setAttempt] = useState(0); const [status, setStatus] = useState<Status>('connecting'); const [message, setMessage] = useState('');
   const [control, setControl] = useState(true);
-  // Windows keeps the Windows key for itself, so Ctrl stands in for ⌘: Ctrl+C, Ctrl+V and Ctrl+Tab do what a Mac expects.
-  const [command, setCommand] = useState(navigator.userAgent.includes('Windows'));
+  const [kind, setKind] = useState<ScreenKind | null>(null); const [command, setCommand] = useState(true); const swap = swapFor(kind);
   const [types, setTypes] = useState<string[]>([]); const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [remember, setRemember] = useState(true);
   /** Saved sign-in is skipped on the next try once the computer refused it. */
   const useSaved = useRef(true); const toSave = useRef<{ username: string; password: string } | null>(null);
@@ -34,7 +44,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       client = new Viewer(target, channel, saved && useSaved.current ? { credentials: saved, shared: true } : { shared: true }); rfb.current = client;
       client.scaleViewport = true; client.viewOnly = !control; client.background = 'transparent';
       client.addEventListener('connect', () => {
-        setStatus('connected'); useSaved.current = true;
+        setStatus('connected'); setKind(channel.kind); useSaved.current = true;
         const credentials = toSave.current; toSave.current = null;
         if (credentials) void screen({ action: 'screen-save-credentials', id: computer.id, ...credentials }).then(() => setHasSaved(true), (error: Error) => setMessage(error.message));
       });
@@ -57,23 +67,23 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
 
   useEffect(() => { if (rfb.current) rfb.current.viewOnly = !control; }, [control]);
 
-  // Ctrl as ⌘: Ctrl itself is sent as ⌘ (down and up, so it never sticks), and Ctrl+V first puts this computer's text
-  // on the other's clipboard: the browser pastes into a hidden field, which hands the text over before ⌘V is sent.
+  // The swapped key is sent as the other side's (down and up, so it never sticks), and its V first puts this computer's
+  // text on the other's clipboard: the browser pastes into a hidden field, which hands the text over before V is sent.
   useEffect(() => {
-    const target = view.current; if (!target || !command) return; let held = false;
+    const target = view.current; if (!target || !command || !swap) return; let held = false;
     const key = (event: KeyboardEvent) => {
       const client = rfb.current; if (!client || !control) return;
-      if (event.code === 'ControlLeft' || event.code === 'ControlRight') {
+      if (swap.codes.includes(event.code)) {
         event.preventDefault(); event.stopPropagation(); const down = event.type === 'keydown';
-        if (!(down && held)) { held = down; client.sendKey(XK_SUPER_L, 'MetaLeft', down); }
+        if (!(down && held)) { held = down; client.sendKey(swap.keysym, swap.code, down); }
         return;
       }
-      if (event.type === 'keydown' && event.ctrlKey && !event.altKey && !event.shiftKey && event.code === 'KeyV') { event.stopPropagation(); pasteTarget.current?.focus(); }
+      if (event.type === 'keydown' && swap.paste(event) && !event.altKey && !event.shiftKey && event.code === 'KeyV') { event.stopPropagation(); pasteTarget.current?.focus(); }
     };
-    const release = () => { if (held) { held = false; rfb.current?.sendKey(XK_SUPER_L, 'MetaLeft', false); } };
+    const release = () => { if (held) { held = false; rfb.current?.sendKey(swap.keysym, swap.code, false); } };
     target.addEventListener('keydown', key, true); target.addEventListener('keyup', key, true); window.addEventListener('blur', release);
     return () => { release(); target.removeEventListener('keydown', key, true); target.removeEventListener('keyup', key, true); window.removeEventListener('blur', release); };
-  }, [command, control]);
+  }, [command, control, kind]);
 
   const pasted = (text: string) => {
     const client = rfb.current; if (!client) return;
@@ -96,7 +106,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <span className={`storage-status ${status === 'connected' ? 'saved' : ''}`} role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : 'Disconnected'}</span>
       <span className="tr-spacer" />
       <button className="tr-detail-button" aria-pressed={control} title={control ? 'Mouse and keyboard reach the other computer' : 'Only watching: nothing is sent'} onClick={() => setControl((value) => !value)}><MousePointer2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">{control ? 'Control' : 'View only'}</span></button>
-      <label className="linked-screen-toggle" title="Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on a Mac"><input type="checkbox" checked={command} onChange={(event) => setCommand(event.target.checked)} /> Ctrl as ⌘</label>
+      {swap && <label className="linked-screen-toggle" title={swap.title}><input type="checkbox" checked={command} onChange={(event) => setCommand(event.target.checked)} /> {swap.label}</label>}
       {hasSaved && <button className="tr-detail-button" title={`Forget the password saved for ${computer.name}`} onClick={forget}><span className="tr-detail-label">Forget password</span></button>}
       <button className="tr-detail-button" onClick={retry}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Reconnect</span></button>
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>

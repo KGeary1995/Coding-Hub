@@ -3,7 +3,7 @@
   "version": "1.12.0",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
-  "main": "dist-electron/electron/main.js",
+  "main": "dist-electron/electron/entry.js",
   "scripts": {
     "dev": "npm run build:host && npm run build:phone && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "dev:web": "vite --host 127.0.0.1",
@@ -33,7 +33,8 @@
     "test:models-stability": "npm run build && node scripts/models-stability-smoke.cjs",
     "test:remote": "npm run build && node scripts/remote-smoke.cjs",
     "test:paste": "npm run build && node scripts/paste-smoke.cjs",
-    "test:screen": "npm run build && node scripts/screen-smoke.cjs"
+    "test:screen": "npm run build && node scripts/screen-smoke.cjs",
+    "test:screen-service": "npm run build && node scripts/screen-service-smoke.cjs"
   },
   "engines": {
     "node": ">=22.13.0"

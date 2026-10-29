@@ -78,7 +78,8 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
     } else console.log('safeStorage is unavailable here: saving the password is not checked');
 
     // Keys: Ctrl goes as ⌘ (Super_L), down and up, and letters as themselves.
-    await canvas.click(); vnc.keys.length = 0;
+    // On by default only on Windows, where the Windows key cannot be sent.
+    await panel.getByLabel('Ctrl as ⌘').check(); await canvas.click(); vnc.keys.length = 0;
     await page.keyboard.down('Control'); await page.keyboard.up('Control'); await page.keyboard.press('a');
     await until(() => vnc.keys.length >= 4, 'the key events');
     assert.deepEqual(vnc.keys.slice(0, 4), [{ down: true, key: 0xffeb }, { down: false, key: 0xffeb }, { down: true, key: 0x61 }, { down: false, key: 0x61 }]);

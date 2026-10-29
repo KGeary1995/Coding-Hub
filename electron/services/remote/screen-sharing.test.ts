@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,9 +22,10 @@ async function vncServer() {
   cleanup.push(() => new Promise<void>((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
   return { port: (server.address() as net.AddressInfo).port, received, sockets };
 }
-function sharing(port: number, options: { cipher?: SecretCipher; linked?: boolean } = {}) {
+function sharing(port: number, options: { cipher?: SecretCipher; linked?: boolean; trace?: string } = {}) {
   const events: { owner: number; event: ScreenEvent }[] = []; const root = temporary();
-  const screens = new ScreenSharing(root, (id) => options.linked !== false && id === MAC ? { host: '127.0.0.1', name: 'MacBook-Air-2.local' } : null, (owner, event) => events.push({ owner, event }), options.cipher ?? cipher(), port);
+  const target = { name: 'MacBook-Air-2.local', trace: options.trace ? { url: options.trace, token: 'c'.repeat(43) } : null, system: { host: '127.0.0.1', port } };
+  const screens = new ScreenSharing(root, (id) => options.linked !== false && id === MAC ? target : null, (owner, event) => events.push({ owner, event }), options.cipher ?? cipher());
   cleanup.push(() => screens.closeAll());
   return { screens, events, root };
 }
@@ -36,7 +38,7 @@ describe('screen sharing with a linked computer', () => {
 
   it('carries bytes both ways, and only for the window that opened it', async () => {
     const server = await vncServer(); const { screens, events } = sharing(server.port);
-    await screens.open(7, MAC, STREAM);
+    expect(await screens.open(7, MAC, STREAM)).toEqual({ kind: 'system' });
     await until(() => events.some(({ event }) => event.type === 'data'), 'the server greeting');
     const greeting = events.find(({ event }) => event.type === 'data')!;
     expect(greeting.owner).toBe(7); expect(Buffer.from((greeting.event as { data: Uint8Array }).data).toString()).toBe('RFB 003.889\n');
@@ -64,6 +66,23 @@ describe('screen sharing with a linked computer', () => {
     await expect(screens.open(1, MAC, STREAM)).rejects.toMatchObject({ code: 'SCREEN_CONNECT', message: expect.stringContaining('System Settings → General → Sharing → Screen Sharing') });
     // The failed stream is gone, so the same name can be tried again.
     await expect(screens.open(1, MAC, STREAM)).rejects.toMatchObject({ code: 'SCREEN_CONNECT' });
+  });
+
+  it("uses the computer's own screen sharing when it has no Trace screen service (a Mac)", async () => {
+    const server = await vncServer();
+    // Nothing listens at the Trace address, as when Tailscale finds no service there.
+    const closed = net.createServer(); await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
+    const nowhere = `http://127.0.0.1:${(closed.address() as net.AddressInfo).port}/`; await new Promise<void>((resolve) => closed.close(() => resolve()));
+    const { screens } = sharing(server.port, { trace: nowhere });
+    expect(await screens.open(1, MAC, STREAM)).toEqual({ kind: 'system' });
+  });
+
+  it("says why when the computer's Trace screen service refuses, without trying anything else", async () => {
+    const refusing = http.createServer(); refusing.on('upgrade', (_request, socket) => { const body = JSON.stringify({ error: 'Screen sharing is off on Obsidian-Halo.' }); socket.end(`HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`); });
+    await new Promise<void>((resolve) => refusing.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => refusing.close(() => resolve())));
+    const server = await vncServer(); const { screens } = sharing(server.port, { trace: `http://127.0.0.1:${(refusing.address() as net.AddressInfo).port}/` });
+    await expect(screens.open(1, MAC, STREAM)).rejects.toMatchObject({ code: 'SCREEN_CONNECT', message: 'Screen sharing is off on Obsidian-Halo.' });
+    expect(server.sockets).toHaveLength(0);
   });
 
   it('refuses computers that are not linked, and a second stream of the same name', async () => {

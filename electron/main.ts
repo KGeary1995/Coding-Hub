@@ -27,7 +27,7 @@ import { WorktreeService } from './services/repository/worktrees';
 import { autoUpdater } from 'electron-updater';
 import { UpdateService, updatesEnabled } from './services/updates/update-service';
 import { pathToFileURL } from 'node:url';
-import { homedir } from 'node:os';
+import os, { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
@@ -48,6 +48,8 @@ import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, stopServing, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
 import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
+import { ScreenShare } from './services/remote/screen-share';
+import { SCREEN_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
@@ -80,6 +82,7 @@ let hub: HubService | null = null;
 let remote: RemoteServer | null = null;
 let linked: LinkedComputers | null = null;
 let screens: ScreenSharing | null = null;
+let screenShare: ScreenShare | null = null;
 /** Start/stop requests from linked computers, waiting for the desktop window to carry them out. */
 const pendingControls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 let autoMemory: AutoMemory | null = null;
@@ -196,10 +199,16 @@ const screenSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('screen-credentials'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-save-credentials'), id: z.uuid(), username: z.string().min(1).max(256), password: z.string().min(1).max(1024) }).strict(),
   z.object({ action: z.literal('screen-forget-credentials'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-share-status') }).strict(),
+  z.object({ action: z.literal('screen-share-set'), enabled: z.boolean() }).strict(),
 ]);
 async function screenRequest(owner: number, payload: unknown) {
-  if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
   const request = screenSchema.parse(payload);
+  if (request.action === 'screen-share-status' || request.action === 'screen-share-set') {
+    if (!screenShare) throw new HubError('SCREEN_UNAVAILABLE', 'Sharing this screen needs writable local storage.');
+    return request.action === 'screen-share-set' ? screenShare.set(request.enabled) : screenShare.status();
+  }
+  if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
   if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId);
   if (request.action === 'screen-send') return screens.send(owner, request.streamId, request.data);
   if (request.action === 'screen-close') return screens.close(owner, request.streamId);
@@ -456,6 +465,9 @@ else app.whenReady().then(() => {
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
+  // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
+  screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);
+  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed'));
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
@@ -466,9 +478,12 @@ else app.whenReady().then(() => {
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
-    screens = new ScreenSharing(storageRoot, (id) => { const computer = linked?.status().find((item) => item.id === id && item.linked); const host = testScreen ? '127.0.0.1' : screenHost(computer?.url ?? null); return computer && host ? { host, name: computer.name } : null; },
-      (owner, event) => sendToRenderer(IPC_CHANNELS.screenEvent, event, owner),
-      { available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text).toString('base64'), decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')) }, testScreen ?? undefined);
+    // A Windows computer's Trace screen service is tried first, with the link key; then a Mac's own Screen Sharing.
+    screens = new ScreenSharing(storageRoot, (id) => {
+      const access = linked?.access(id); if (!access) return null; const host = testScreen ? '127.0.0.1' : screenHost(access.url);
+      return { name: access.name, trace: testScreen ? null : { url: access.url, token: access.token }, system: host ? { host, port: testScreen ?? SCREEN_PORT } : null };
+    }, (owner, event) => sendToRenderer(IPC_CHANNELS.screenEvent, event, owner),
+    { available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text).toString('base64'), decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')) });
     // The phone app the other computer served may call this one directly while that one is off.
     phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
   }

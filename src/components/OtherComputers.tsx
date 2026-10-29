@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Monitor, X } from 'lucide-react';
 import type { LinkedComputer, RemoteStatus } from '../../shared/remote';
+import type { ScreenShareStatus } from '../../shared/screen';
+import { screen } from '../runtime/screen-channel';
 import { workbench } from '../runtime/workbench';
 import { refreshLinked } from '../runtime/linked-terminals';
 import { useLinkedStore } from '../state/linked-store';
@@ -17,7 +19,9 @@ export function OtherComputersCard() {
   const computers = useLinkedStore((state) => state.computers);
   const [remote, setRemote] = useState<RemoteStatus | null>(null); const [codes, setCodes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [now, setNow] = useState(Date.now());
+  const [share, setShare] = useState<ScreenShareStatus | null>(null);
   const status = () => workbench<RemoteStatus>({ action: 'remote-status' }).then(setRemote).catch(() => {});
+  useEffect(() => { void screen<ScreenShareStatus>({ action: 'screen-share-status' }).then(setShare).catch(() => {}); }, []);
   useEffect(() => { void status(); void refreshLinked(); const poll = setInterval(() => { void refreshLinked(); }, 10000); return () => clearInterval(poll); }, []);
   const pairing = remote?.pairing?.kind === 'computer' ? remote.pairing : null;
   // While this computer's code shows, count down and watch for the other computer to use it.
@@ -59,6 +63,13 @@ export function OtherComputersCard() {
         <button className="quiet-button" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-revoke', id: device.id })))}><X size={14} />Remove</button>
       </li>)}</ul>}
     </div>
+    {share?.supported && <div className="link-this">
+      <h3>Share this screen</h3>
+      <label className="linked-screen-toggle"><input type="checkbox" checked={share.enabled} disabled={busy || (!ready && !share.enabled)} onChange={(event) => { const enabled = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled }))); }} /> Let linked computers see and control this screen</label>
+      <p className="control-note">A linked computer opens it with <strong>Screen</strong> on this computer’s tab. It works while Trace is closed: a small Trace service starts when you sign in to Windows. A Trace icon by the clock shows while someone is watching, with <strong>Disconnect</strong>. This computer must be on, awake and unlocked; Windows does not let it control apps running as administrator.</p>
+      {share.enabled && <p className="control-note">{share.running ? 'Sharing: the service is running.' : 'The service is not running. Turn this off and on again.'}</p>}
+      {!ready && !share.enabled && <p className="control-note">Set up Phone access with Tailscale HTTPS above first.</p>}
+    </div>}
     {error && <p role="alert" className="error-message">{error}</p>}
   </article>;
 }

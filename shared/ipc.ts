@@ -1,7 +1,7 @@
 import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
-import type { ScreenCredentials, ScreenEvent, ScreenRequest } from './screen';
+import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
 import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
@@ -94,7 +94,7 @@ export interface CodingHubHost {
   copyText(text: string): Promise<HostResult<null>>;
   onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
   /** A linked computer's screen: its connection, the bytes both ways, and its saved sign-in. */
-  screen(request: ScreenRequest): Promise<HostResult<ScreenCredentials | null>>;
+  screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;

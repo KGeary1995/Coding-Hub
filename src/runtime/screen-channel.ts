@@ -1,4 +1,4 @@
-import type { ScreenCredentials, ScreenEvent, ScreenRequest } from '../../shared/screen';
+import type { ScreenCredentials, ScreenEvent, ScreenKind, ScreenRequest } from '../../shared/screen';
 
 export async function screen<T = null>(request: ScreenRequest): Promise<T> {
   if (!window.codingHub) throw new Error('This feature requires the desktop app.');
@@ -26,6 +26,8 @@ export class ScreenChannel {
   onclose: ((event: CloseEvent) => void) | null = null; onerror: ((event: Event) => void) | null = null;
   /** Why the connection ended, when the window did not close it. */
   error: string | null = null;
+  /** Which screen server answered, once open: Trace's (Windows) or the system's (macOS Screen Sharing). */
+  kind: ScreenKind | null = null;
   private readonly streamId = crypto.randomUUID();
   /** The server speaks first, as soon as the host connects, which can be before the host's answer to open arrives. */
   private early: Uint8Array[] = [];
@@ -33,10 +35,10 @@ export class ScreenChannel {
   constructor(computerId: string) {
     if (window.codingHub && listening !== window.codingHub) { window.codingHub.onScreenEvent(route); listening = window.codingHub; }
     channels.set(this.streamId, this);
-    screen({ action: 'screen-open', id: computerId, streamId: this.streamId }).then(() => {
+    screen<{ kind: ScreenKind }>({ action: 'screen-open', id: computerId, streamId: this.streamId }).then((opened) => {
       if (this.readyState === 'closing') { void screen({ action: 'screen-close', streamId: this.streamId }).catch(() => {}); return; }
       if (this.readyState !== 'connecting') return;
-      this.readyState = 'open'; this.onopen?.(new Event('open'));
+      this.kind = opened?.kind ?? null; this.readyState = 'open'; this.onopen?.(new Event('open'));
       for (const data of this.early) this.deliver(data); this.early = [];
     }, (error: Error) => this.ended(error.message));
   }
