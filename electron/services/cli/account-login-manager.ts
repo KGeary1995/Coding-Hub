@@ -10,7 +10,7 @@ import type { ClaudeProfiles } from './claude-profiles';
 import { HubError } from './engine-adapter';
 import { nodePty } from './native-pty';
 const provider = z.enum(['claude', 'codex', 'github']); const cols = z.number().int().min(2).max(500); const rows = z.number().int().min(1).max(300);
-const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('status'), profileId: z.uuid().optional() }).strict(), z.object({ action: z.literal('profile-list') }).strict(), z.object({ action: z.literal('profile-create'), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('profile-rename'), profileId: z.uuid(), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('login'), provider, profileId: z.uuid().optional(), cols, rows }).strict(), z.object({ action: z.literal('stop'), runId: z.uuid().optional() }).strict(), z.object({ action: z.literal('write'), runId: z.uuid(), data: z.string().max(16384) }).strict(), z.object({ action: z.literal('resize'), runId: z.uuid(), cols, rows }).strict(), z.object({ action: z.literal('install-guide'), provider }).strict()]);
+const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('status'), profileId: z.uuid().optional() }).strict(), z.object({ action: z.literal('profile-list') }).strict(), z.object({ action: z.literal('labels') }).strict(), z.object({ action: z.literal('profile-create'), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('profile-rename'), profileId: z.uuid(), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('login'), provider, profileId: z.uuid().optional(), cols, rows }).strict(), z.object({ action: z.literal('stop'), runId: z.uuid().optional() }).strict(), z.object({ action: z.literal('write'), runId: z.uuid(), data: z.string().max(16384) }).strict(), z.object({ action: z.literal('resize'), runId: z.uuid(), cols, rows }).strict(), z.object({ action: z.literal('install-guide'), provider }).strict()]);
 interface Run { owner: number; login: AccountLogin; pty: IPty; exited: Promise<void>; resolve: () => void; finished: boolean }
 export class AccountLoginManager {
   private run: Run | null = null;
@@ -27,11 +27,12 @@ export class AccountLoginManager {
       if (id && !this.dependencies.profiles) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
       return this.dependencies.profiles?.environment(hostEnvironment(), id) ?? hostEnvironment();
     };
-    if (request.action === 'profile-list' || request.action === 'profile-create' || request.action === 'profile-rename') {
+    if (request.action === 'profile-list' || request.action === 'labels' || request.action === 'profile-create' || request.action === 'profile-rename') {
       const profiles = this.dependencies.profiles;
       if (!profiles) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
       if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
       if (request.action === 'profile-list') return profiles.list();
+      if (request.action === 'labels') return profiles.labels();
       if (request.action === 'profile-create') return profiles.create(request.name);
       return profiles.rename(request.profileId, request.name);
     }

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { ClaudeAccountProfile } from '../../../shared/accounts';
+import type { AccountLabel, AccountLabels, ClaudeAccountProfile } from '../../../shared/accounts';
 import { HubError } from './engine-adapter';
 
 const profileSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(60), createdAt: z.iso.datetime() }).strict();
@@ -19,7 +20,8 @@ const authOverrides = new Set([
 export class ClaudeProfiles {
   private readonly root: string;
   private readonly file: string;
-  constructor(storageRoot: string) {
+  /** The default sign-in's folder: CLAUDE_CONFIG_DIR when set, otherwise Claude Code's settings sit in the home folder. */
+  constructor(storageRoot: string, private readonly home = os.homedir(), private readonly defaultDirectory: string | null = process.env.CLAUDE_CONFIG_DIR ?? null) {
     if (!path.isAbsolute(storageRoot)) throw new HubError('PROFILE_STORAGE', 'Profile storage requires an absolute local directory.');
     this.root = path.join(storageRoot, 'claude-profiles');
     this.file = path.join(this.root, 'profiles.json');
@@ -69,6 +71,31 @@ export class ClaudeProfiles {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new HubError('PROFILE_STORAGE', 'The profile configuration directory must not be a link.');
     return directory;
+  }
+  /**
+   * Which account a sign-in is: the email and organization Claude Code keeps beside its settings (`.claude.json`,
+   * `oauthAccount`). Only those two fields are kept; credentials live in another file and are not opened.
+   */
+  private identity(directory: string | null) {
+    const file = directory ? path.join(directory, '.claude.json') : path.join(this.home, '.claude.json');
+    try {
+      const stat = fs.lstatSync(file); if (!stat.isFile() || stat.size > 16 * 1024 * 1024) return null;
+      const account = (JSON.parse(fs.readFileSync(file, 'utf8')) as { oauthAccount?: { emailAddress?: unknown; organizationName?: unknown } }).oauthAccount;
+      return typeof account?.emailAddress === 'string' ? { email: account.emailAddress, organization: typeof account.organizationName === 'string' ? account.organizationName : null } : null;
+    } catch { return null; }
+  }
+  /**
+   * What each Claude sign-in is called, so every channel shows whose account it runs on: a profile by its name, and
+   * the default sign-in by the profile signed in to the same account (else its email). `tone` picks its colour.
+   */
+  labels(): AccountLabels {
+    const profiles = this.read(); const result: AccountLabels = { default: null, profiles: {} };
+    const emails = profiles.map((profile) => this.identity(path.join(this.root, profile.id))?.email.toLowerCase());
+    profiles.forEach((profile, tone) => { result.profiles[profile.id] = { name: profile.name, tone }; });
+    const own = this.identity(this.defaultDirectory); if (!own) return result;
+    const same = emails.indexOf(own.email.toLowerCase());
+    const label: AccountLabel = same >= 0 ? { name: profiles[same].name, tone: same } : { name: own.email, tone: profiles.length };
+    return { ...result, default: label };
   }
   environment(base: Record<string, string>, id?: string): Record<string, string> {
     if (!id) return { ...base };

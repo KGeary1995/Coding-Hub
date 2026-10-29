@@ -31,6 +31,12 @@
   --tr-ch-codex: oklch(0.80 0.11 215);
   --tr-ch-shell: oklch(0.84 0.03 165);  /* Terminal channels: a plain shell, kept quieter than the agents */
 
+  /* accounts: whose Claude account a channel runs on (a profile, or the default sign-in), clear of the engine and state colours */
+  --tr-account-0: oklch(0.74 0.14 300);
+  --tr-account-1: oklch(0.80 0.14 140);
+  --tr-account-2: oklch(0.74 0.12 255);
+  --tr-account-3: oklch(0.78 0.12 10);
+
   /* states — "working" uses the engine colour */
   --tr-st-idle: #879692;
   --tr-st-starting: #d8e3df;
