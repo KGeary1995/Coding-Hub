@@ -1,5 +1,10 @@
 ## What's new
 
+1.12.1 makes controlling your Windows PC's screen from another computer more responsive (update the PC; update the Mac too for the pointer dot):
+
+- **Changes arrive as they happen.** The PC sends each change to the screen as soon as it happens instead of waiting to be asked for every frame, so a change takes one trip across the network instead of two. It captures 30 frames a second instead of 15, and when the connection is busy it sends the newest picture rather than queuing old ones.
+- **A dot shows where your mouse is at once.** The PC's own cursor follows a moment later.
+
 1.12.0 lets your computers see and control each other's screens:
 
 - **Screen on another computer's tab.** **Screen** shows that computer's screen and gives you its mouse and keyboard. It uses the Mac's own Screen Sharing, not Trace, so it still works when Trace on the Mac has closed (to reopen it, for example). Turn it on once on the Mac: **System Settings → General → Sharing → Screen Sharing**. It connects only over Tailscale, to computers you have linked.

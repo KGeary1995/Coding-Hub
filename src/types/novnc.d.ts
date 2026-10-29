@@ -7,6 +7,7 @@ declare module '@novnc/novnc' {
     clipViewport: boolean;
     resizeSession: boolean;
     focusOnClick: boolean;
+    showDotCursor: boolean;
     qualityLevel: number;
     compressionLevel: number;
     background: string;
