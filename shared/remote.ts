@@ -1,4 +1,5 @@
 import type { ChannelEngine } from './types';
+import type { AccountLabel } from './accounts';
 
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
@@ -8,7 +9,9 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   /** What the session is working on, from its CLI's terminal title (Claude Code's task summary). */
   topic?: string;
   /** A chat channel: its conversation is shown only on the computer it runs on, which is where it is answered too. */
-  chat?: true }
+  chat?: true;
+  /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
+  account?: AccountLabel }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
 /** `kind` is `computer` for another Trace linked to this one, which may also start and stop channels. */
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }

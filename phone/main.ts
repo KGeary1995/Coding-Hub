@@ -122,15 +122,18 @@ function computerSwitcher() {
     h('span', { className: 'count' }, String(channels.filter((channel) => (!id || channel.computer?.id === id) && channel.attention).length || '')))));
 }
 
+/** Whose Claude account a channel runs on (personal, work…), in that account's colour, as on the computer's tiles. */
+const tone = (channel: RemoteChannel): Record<string, string> => channel.account ? { account: String(channel.account.tone % 4) } : {};
+const account = (channel: RemoteChannel) => channel.account ? h('span', { className: 'account', dataset: tone(channel) }, channel.account.name) : '';
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
   computerSwitcher();
   const shown = channels.filter((channel) => !shownComputer || channel.computer?.id === shownComputer);
   const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;
   list.replaceChildren(...shown.map((channel) => h('li', {},
-    h('button', { className: `channel ${state(channel)}`, onclick: () => showChannel(channel.sessionId) },
+    h('button', { className: `channel ${state(channel)}`, dataset: tone(channel), onclick: () => showChannel(channel.sessionId) },
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
-      h('span', { className: 'name' }, channel.title, (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
+      h('span', { className: 'name' }, channel.title, account(channel), (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
       h('span', { className: 'tag' }, channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
@@ -375,7 +378,7 @@ function showCopy() {
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
   const title = document.getElementById('channel-title');
-  title?.replaceChildren(h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title} `, h('small', { className: `state-${state(channel)}` }, word[state(channel)]));
+  title?.replaceChildren(h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title} `, account(channel), h('small', { className: `state-${state(channel)}` }, word[state(channel)]));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   // A restarted channel is a new process: its screen starts afresh, as on the desktop.

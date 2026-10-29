@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
+import type { AccountLabel } from '../../../shared/accounts';
 import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
@@ -15,7 +16,7 @@ import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } 
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 export interface RemoteHost {
-  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true }[];
+  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel }[];
   running(): (RunningSession & { cols?: number; rows?: number; title?: string })[];
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
@@ -342,7 +343,7 @@ export class RemoteServer {
     const local = this.host.sessions().map((session, index): RemoteChannel => {
       const run = running.get(session.id); const waiting = this.attention.get(session.id);
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.

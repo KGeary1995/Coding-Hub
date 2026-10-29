@@ -17,6 +17,13 @@
 .tr-tile .tr-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 .tr-tile .tr-tile-model { margin: 0; padding: 0; border: 0; min-width: 0; flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .tr-profile-chip.account-profile-chip { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 5px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-muted); font: 400 11px/16px var(--tr-font-mono); }
+/* Each account has its own colour, on its name and down the tile's left edge, so personal and work channels differ at a glance. */
+.tr-tile[data-account="0"], .account-profile-chip[data-account="0"] { --account: var(--tr-account-0); }
+.tr-tile[data-account="1"], .account-profile-chip[data-account="1"] { --account: var(--tr-account-1); }
+.tr-tile[data-account="2"], .account-profile-chip[data-account="2"] { --account: var(--tr-account-2); }
+.tr-tile[data-account="3"], .account-profile-chip[data-account="3"] { --account: var(--tr-account-3); }
+.session-tile.tr-tile[data-account]::before { content: ""; position: absolute; z-index: 20; inset: -1px auto -1px -1px; width: 4px; border-radius: var(--tr-r-panel) 0 0 var(--tr-r-panel); background: var(--account); pointer-events: none; }
+.tr-profile-chip.account-profile-chip[data-account] { max-width: 160px; border-color: transparent; background: var(--account); color: var(--tr-on-light, #0b1010); font-weight: 600; }
 .tr-tile-head .tr-spacer { flex: 1 1 0; min-width: 0; }
 .tr-tile-metric { flex: none; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); white-space: nowrap; }
 .tr-tile-metric b { font-weight: 400; color: var(--tr-fg); }
@@ -82,7 +89,8 @@
 .tr-tile .session-config { border-top: 1px solid var(--tr-line); }
 
 /* Narrow tiles: drop the model, then the metrics, so the action and chip never clip. */
-@container (max-width: 520px) { .tr-tile-model, .tr-profile-chip.account-profile-chip { display: none; } }
+/* The account stays: it is what tells a personal channel from a work one. */
+@container (max-width: 520px) { .tr-tile-model, .tr-profile-chip.account-profile-chip:not([data-account]) { display: none; } }
 @container (max-width: 420px) { .tr-tile-metric { display: none; } .tr-action kbd { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
