@@ -1,5 +1,6 @@
 name: CI
-# Fast checks on every pull request push. The full Windows build and install test is in windows-release.yml.
+# Fast checks on every pull request push. The full Windows build and install test is in windows-release.yml, which runs
+# nightly when main changed, on pull requests labeled `windows`, and by hand.
 on:
   pull_request:
   push:
