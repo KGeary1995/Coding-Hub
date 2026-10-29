@@ -16,7 +16,7 @@ const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'li
 async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = []; const adds: string[] = [];
-  const size = { cols: 100, rows: 30 }; const sizes: string[] = [];
+  const size = { cols: 100, rows: 30 }; const sizes: string[] = []; const images: { reference: RunReference; image: Buffer }[] = [];
   const host: RemoteHost = {
     sessions: () => [{ id: sessionId, title: 'Claude Code', engine: 'claude', account: { name: 'Work', tone: 1 } }],
     running: () => running.map((run) => ({ ...run, ...size })),
@@ -24,11 +24,12 @@ async function computer(id: string, name: string, sessionId: string, idle?: { se
     write: (reference, data) => { writes.push({ reference, data }); },
     control: async (target, control) => { controls.push({ sessionId: target, control }); },
     add: async (engine) => { adds.push(engine); },
+    pasteImage: async (reference, image) => { images.push({ reference, image }); },
     ...(idle ? { idleSeconds: () => idle.seconds } : {}),
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
-  return { server, writes, controls, adds, sizes, url: `http://127.0.0.1:${server.address}/` };
+  return { server, writes, controls, adds, sizes, images, url: `http://127.0.0.1:${server.address}/` };
 }
 async function phoneToken(server: RemoteServer) {
   const code = server.pair('phone').pairing!.code;
@@ -262,12 +263,29 @@ describe('linked computers', () => {
     pc.stop(); await until(() => mac.sizes.at(-1) === '100x30', 'the Mac’s size after the PC left');
   });
 
+  it('pastes an image into a channel there, from linked computers only', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop()); await mac.link(PC, pc.server.pair('computer').pairing!.code);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200 * 1024, 7)]);
+    await mac.pasteImage(PC, 'pc-1', 'run-pc-1', png.toString('base64'));
+    expect(pc.images).toHaveLength(1); expect(pc.images[0].reference).toEqual({ sessionId: 'pc-1', runId: 'run-pc-1' }); expect(pc.images[0].image.equals(png)).toBe(true);
+    await expect(mac.pasteImage(PC, 'pc-1', 'run-pc-1', Buffer.from('not an image at all').toString('base64'))).rejects.toThrow(/Only PNG and JPEG/);
+    // A phone's key cannot.
+    const phone = await phoneToken(pc.server);
+    const refused = await fetch(`${pc.url}api/paste-image`, { method: 'POST', headers: { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'pc-1', runId: 'run-pc-1', image: png.toString('base64') }) });
+    expect(refused.status).toBe(403); expect(pc.images).toHaveLength(1);
+  });
+
   it('says to update the other computer when its Trace cannot add channels yet', async () => {
     const old = async (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('api/channel-add') ? new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 }) : fetch(input, init);
     const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/' }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, old as typeof fetch);
     cleanup.push(() => mac.stop());
     (mac as unknown as { linked: () => unknown }).linked = () => ({ id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/', token: 't' });
     await expect(mac.add(PC, 'claude')).rejects.toMatchObject({ code: 'LINK_OLD', message: 'Update Trace on Obsidian-Halo to add channels there from here.' });
+    const older = async (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('api/paste-image') ? new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 }) : fetch(input, init);
+    (mac as unknown as { fetcher: unknown }).fetcher = older;
+    await expect(mac.pasteImage(PC, 'pc-1', 'run', 'iVBORw0KGgo=')).rejects.toMatchObject({ code: 'LINK_OLD', message: 'Update Trace on Obsidian-Halo to paste images there from here.' });
   });
 
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {

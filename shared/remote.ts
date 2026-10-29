@@ -82,6 +82,8 @@ export type LinkedComputerRequest =
   | { action: 'linked-unwatch'; id: string }
   /** Adds a channel on that computer, in its own workspace. */
   | { action: 'linked-add'; id: string; engine: ChannelEngine }
+  /** An image pasted here (PNG or JPEG, base64) for a channel there; that computer attaches it as if pasted there. */
+  | { action: 'linked-paste-image'; id: string; sessionId: string; runId: string; image: string }
   /** A tile here shows that channel at its own size (`cols`/`rows`), or gives it back (without them). */
   | { action: 'linked-fit'; id: string; sessionId: string; runId: string; cols?: number; rows?: number };
 /** Live updates about linked computers for the desktop window. */

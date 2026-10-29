@@ -119,6 +119,12 @@ export class LinkedComputers implements RemoteRelay {
     try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine }), signal: AbortSignal.timeout(30000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
   }
+  /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */
+  async pasteImage(id: string, sessionId: string, runId: string, image: string) {
+    const link = this.linked(id);
+    try { await this.request(link, 'api/paste-image', { method: 'POST', body: JSON.stringify({ sessionId, runId, image }), signal: AbortSignal.timeout(60000) }); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to paste images there from here.`); throw error; }
+  }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
   /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */
   async phoneKey(id: string, name: string, relayKey: string) {

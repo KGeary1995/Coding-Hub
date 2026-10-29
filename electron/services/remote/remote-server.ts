@@ -23,6 +23,8 @@ export interface RemoteHost {
   control?(sessionId: string, control: ChannelControl): Promise<void>;
   /** Adds a channel to this computer's workspace (a linked computer's + Channel). */
   add?(engine: ChannelEngine): Promise<void>;
+  /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
+  pasteImage?(reference: RunReference, image: Buffer): Promise<void>;
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
@@ -75,6 +77,9 @@ const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.st
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
+/** A pasted image (PNG or JPEG, base64), at most 15 MB. */
+const IMAGE_LIMIT = 15 * 1024 * 1024;
+const pasteSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(Math.ceil(IMAGE_LIMIT / 3) * 4).regex(/^[A-Za-z0-9+/]+=*$/) }).strict();
 const inputSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict();
 /** Unambiguous characters, so a code read off the screen can be typed on a phone. */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -391,9 +396,9 @@ export class RemoteServer {
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     response.end(JSON.stringify(body));
   }
-  private async body(request: http.IncomingMessage) {
+  private async body(request: http.IncomingMessage, limit = 16384) {
     let size = 0; const chunks: Buffer[] = [];
-    for await (const chunk of request) { size += (chunk as Buffer).length; if (size > 16384) throw new HubError('REMOTE_BODY', 'Request too large.'); chunks.push(chunk as Buffer); }
+    for await (const chunk of request) { size += (chunk as Buffer).length; if (size > limit) throw new HubError('REMOTE_BODY', 'Request too large.'); chunks.push(chunk as Buffer); }
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown;
   }
   private device(request: http.IncomingMessage): Device | null {
@@ -551,6 +556,18 @@ export class RemoteServer {
       if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
       try { await this.host.add(parsed.data.engine); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
+      return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/paste-image') {
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can paste images.' });
+      const parsed = pasteSchema.safeParse(await this.body(request, Math.ceil(IMAGE_LIMIT / 3) * 4 + 1024)); if (!parsed.success) return this.send(response, 400, { error: 'That image is too large or not an image (PNG or JPEG, up to 15 MB).' });
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      const image = Buffer.from(parsed.data.image, 'base64');
+      const png = image.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])); const jpeg = image[0] === 0xff && image[1] === 0xd8;
+      if (!png && !jpeg) return this.send(response, 400, { error: 'Only PNG and JPEG images can be pasted.' });
+      if (!this.host.pasteImage) return this.send(response, 409, { error: 'This computer cannot take pasted images right now.' });
+      try { await this.host.pasteImage({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, image); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The image could not be pasted.' }); }
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/control') {

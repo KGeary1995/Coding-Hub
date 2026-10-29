@@ -1,6 +1,8 @@
 ## What's new
 
-1.12.1 makes controlling your Windows PC's screen from another computer more responsive (update the PC; update the Mac too for the pointer dot):
+1.12.1 pastes screenshots into your other computer's channels, and makes controlling your PC's screen more responsive (update both computers):
+
+- **Paste images into another computer's channels.** A screenshot pasted into a Claude Code or Codex channel on your other computer now reaches it, from the PC to the Mac and the other way round: Ctrl+V on Windows, ⌘V or Ctrl+V on a Mac. Claude Code there attaches it as if you had pasted it on that computer. It replaces what was on that computer's clipboard.
 
 - **Changes arrive as they happen.** The PC sends each change to the screen as soon as it happens instead of waiting to be asked for every frame, so a change takes one trip across the network instead of two. It captures 30 frames a second instead of 15, and when the connection is busy it sends the newest picture rather than queuing old ones.
 - **A dot shows where your mouse is at once.** The PC's own cursor follows a moment later.
