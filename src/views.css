@@ -78,3 +78,14 @@
 /* The terminal has the other computer's columns and rows (the tile's own once that computer applies them); when they do not fit, it scrolls here. */
 .linked-viewport { overflow: auto; }
 .linked-viewport .terminal-surface { width: max-content; height: max-content; }
+/* A linked computer's screen (noVNC draws it scaled to fit; its canvas is the focus target for keys). */
+.linked-screen { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.linked-screen-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.linked-screen-bar .tr-detail-button[aria-pressed="true"] { background: var(--tr-control-on); color: var(--tr-fg-strong); }
+.linked-screen-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
+.linked-screen-view { position: relative; flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--tr-tile-border); background: var(--tr-term); }
+.linked-screen-view[hidden] { display: none; }
+.linked-screen-paste { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.linked-screen-signin { display: grid; gap: 10px; justify-items: start; max-width: 420px; padding: 16px; border: 1px solid var(--tr-line); background: var(--tr-surface); }
+.linked-screen-signin p { margin: 0; color: var(--tr-fg-muted); }
+.linked-screen-signin label:not(.linked-screen-toggle) { display: grid; gap: 4px; width: 100%; }

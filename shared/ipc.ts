@@ -1,6 +1,7 @@
 import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
+import type { ScreenCredentials, ScreenEvent, ScreenRequest } from './screen';
 import type { CoachingRequest, CoachingResponse } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
@@ -92,6 +93,9 @@ export interface CodingHubHost {
   /** Puts text on the clipboard: what a full-screen CLI copied when the person selected text in it. */
   copyText(text: string): Promise<HostResult<null>>;
   onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
+  /** A linked computer's screen: its connection, the bytes both ways, and its saved sign-in. */
+  screen(request: ScreenRequest): Promise<HostResult<ScreenCredentials | null>>;
+  onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
@@ -142,6 +146,8 @@ export const IPC_CHANNELS = {
   clipboardImage: 'coding-hub:clipboard-image',
   copyText: 'coding-hub:copy-text',
   linkedEvent: 'coding-hub:linked-event',
+  screen: 'coding-hub:screen',
+  screenEvent: 'coding-hub:screen-event',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',

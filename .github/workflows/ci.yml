@@ -31,7 +31,7 @@ jobs:
       - run: npm run build
       - name: Desktop smoke tests (fixture CLIs, virtual display)
         run: |
-          for test in desktop design profiles workbench enterprise productivity models-stability remote; do
+          for test in desktop design profiles workbench enterprise productivity models-stability remote screen; do
             echo "::group::$test"
             xvfb-run -a node "scripts/$test-smoke.cjs"
             echo "::endgroup::"

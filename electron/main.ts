@@ -20,7 +20,7 @@ import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -47,6 +47,7 @@ import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, stopServing, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
+import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
@@ -78,6 +79,7 @@ let storage: WorkspaceStorage | null = null;
 let hub: HubService | null = null;
 let remote: RemoteServer | null = null;
 let linked: LinkedComputers | null = null;
+let screens: ScreenSharing | null = null;
 /** Start/stop requests from linked computers, waiting for the desktop window to carry them out. */
 const pendingControls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 let autoMemory: AutoMemory | null = null;
@@ -187,6 +189,24 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
+const screenSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('screen-open'), id: z.uuid(), streamId: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-send'), streamId: z.uuid(), data: z.instanceof(Uint8Array).refine((data) => data.byteLength > 0 && data.byteLength <= 1024 * 1024) }).strict(),
+  z.object({ action: z.literal('screen-close'), streamId: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-credentials'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-save-credentials'), id: z.uuid(), username: z.string().min(1).max(256), password: z.string().min(1).max(1024) }).strict(),
+  z.object({ action: z.literal('screen-forget-credentials'), id: z.uuid() }).strict(),
+]);
+async function screenRequest(owner: number, payload: unknown) {
+  if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
+  const request = screenSchema.parse(payload);
+  if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId);
+  if (request.action === 'screen-send') return screens.send(owner, request.streamId, request.data);
+  if (request.action === 'screen-close') return screens.close(owner, request.streamId);
+  if (request.action === 'screen-save-credentials') return screens.saveCredentials(request.id, { username: request.username, password: request.password });
+  if (request.action === 'screen-forget-credentials') return screens.forgetCredentials(request.id);
+  return screens.credentials(request.id);
+}
 async function linkedRequest(payload: unknown) {
   if (!linked) throw new HubError('LINK_UNAVAILABLE', 'Linking computers needs writable local storage.');
   const request = linkedSchema.parse(payload);
@@ -312,12 +332,12 @@ function createWindow() {
       if (!quitting && !current.isDestroyed()) dialog.showErrorBox('Workspace recovery could not finish', `A coding or login process could not be confirmed stopped. Check your system process manager before restarting Trace.${manager.ownedProcessIds(owner).length ? '\nOwned coding process IDs: ' + manager.ownedProcessIds(owner).join(', ') : ''}\nLocal lifecycle diagnostics were preserved.`);
     });
   });
-  current.webContents.on('render-process-gone', () => repositoryFiles.closeOwner(owner));
+  current.webContents.on('render-process-gone', () => { repositoryFiles.closeOwner(owner); screens?.closeAll(owner); });
   // did-start-navigation fires before will-navigate can cancel, so clean up only once the old page is really replaced.
   let firstDocument = true;
   current.webContents.on('did-navigate', () => {
     if (firstDocument) { firstDocument = false; return; }
-    void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner);
+    void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner); screens?.closeAll(owner);
   });
   let closing = false;
   current.on('close', (event) => {
@@ -443,6 +463,12 @@ else app.whenReady().then(() => {
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
     phone.setRelay(linked); linked.start();
+    // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
+    // The screen smoke test serves a stand-in screen on loopback (source runs only).
+    const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
+    screens = new ScreenSharing(storageRoot, (id) => { const computer = linked?.status().find((item) => item.id === id && item.linked); const host = testScreen ? '127.0.0.1' : screenHost(computer?.url ?? null); return computer && host ? { host, name: computer.name } : null; },
+      (owner, event) => sendToRenderer(IPC_CHANNELS.screenEvent, event, owner),
+      { available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text).toString('base64'), decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')) }, testScreen ?? undefined);
     // The phone app the other computer served may call this one directly while that one is off.
     phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
   }
@@ -621,6 +647,7 @@ else app.whenReady().then(() => {
     return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
   });
   // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
+  handle(IPC_CHANNELS.screen, screenRequest);
   handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
@@ -676,6 +703,6 @@ app.on('before-quit', (event) => {
     if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
-    try { linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

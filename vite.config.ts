@@ -21,7 +21,10 @@ export default defineConfig({
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
   // Built apps under release/ hold copies of the compiled tests; only the sources are tested.
   test: { setupFiles: ['./vitest.setup.ts'], exclude: [...configDefaults.exclude, 'release/**'] },
+  // noVNC (the linked-screen viewer) awaits at the top of a module; Electron's Chromium runs that, Vite's default target refuses it.
+  optimizeDeps: { esbuildOptions: { target: 'es2022' } },
   build: {
+    target: 'es2022',
     outDir: 'dist',
     rollupOptions: {
       output: { manualChunks: { terminal: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-webgl'] } },
