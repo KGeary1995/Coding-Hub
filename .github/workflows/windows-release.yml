@@ -1,10 +1,15 @@
 name: Windows release candidate
+# About 16 billed minutes a run (Windows minutes count double on a private repository), and in October 2026 it ran on
+# every pull request push and every merge, about 200 times. So it runs:
+# - nightly, on main, only when main has a commit this workflow hasn't passed on yet (the `changed` job);
+# - on pull requests labeled `windows`, for a change worth checking on Windows before it merges;
+# - by hand (Run workflow), which is the step before tagging a release (docs/windows-releases.md).
+# ci.yml still runs the tests on Linux for every pull request push.
 on:
-  push:
-    branches: [main]
-  # Ready pull requests only: Windows minutes cost double on private repositories. Drafts get ci.yml alone.
+  schedule:
+    - cron: '0 9 * * *' # 09:00 UTC, overnight in the US
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [labeled, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -12,8 +17,33 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  # Scheduled runs only: has this workflow already passed on main's head (nightly or by hand)?
+  changed:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          passed=$(gh run list --workflow windows-release.yml --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
+          echo "main is at $GITHUB_SHA; last passed at ${passed:-nothing}"
+          if [ "$passed" = "$GITHUB_SHA" ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   windows:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: changed
+    # always(): `changed` is skipped on everything but the nightly run, and a skipped need would skip this job too.
+    if: >-
+      always() && (
+        (github.event_name == 'schedule' && needs.changed.outputs.run == 'true') ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+          contains(github.event.pull_request.labels.*.name, 'windows'))
+      )
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

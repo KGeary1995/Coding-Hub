@@ -65,7 +65,7 @@ Never start the GUI with `ELECTRON_RUN_AS_NODE` set: it makes Electron behave as
 | Workflow | When | What |
 |---|---|---|
 | `ci.yml` (**CI**, ubuntu) | every PR, pushes to main | `npm ci`, `test`, `test:release`, `build`, then the desktop, design, profiles, workbench, enterprise, productivity, models-stability and remote smokes under xvfb |
-| `windows-release.yml` (**Windows release candidate**) | pushes to main, ready PRs, manual | `test`, `test:release`, seven smokes (not remote), `dist:win`, a legacy-named 1.2.0 baseline, `test:install`. Uploads installers except on PRs |
+| `windows-release.yml` (**Windows release candidate**) | nightly on main when it changed, ready PRs labeled `windows`, manual | `test`, `test:release`, seven smokes (not remote), `dist:win`, a legacy-named 1.2.0 baseline, `test:install`. Uploads installers except on PRs |
 | `release.yml` (**Release**) | `v*` tags, or manual on main with **Publish** | Windows: `test` + `dist:win`. Mac: `test`, `test:pty`, `dist:mac`, packaged smoke (arm64). Then publishes to `KGeary1995/trace-releases` with `RELEASES_TOKEN` |
 | `signed-release.yml` | manual | Signed Windows build and install test with certificate secrets. Never publishes |
 

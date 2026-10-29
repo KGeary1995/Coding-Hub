@@ -1,6 +1,6 @@
 name: Release
 # Pushing a tag v<version> (matching package.json) builds the Windows installer and the Mac disk images, checks that
-# the Mac app starts a CLI (windows-release.yml on main already tests the Windows installer), and publishes them on
+# the Mac app starts a CLI (windows-release.yml, run by hand on main before tagging, tests the Windows installer), and publishes them on
 # the public downloads repository KGeary1995/trace-releases, which installed copies check for updates. A manual run
 # builds and tests; on main with "publish" ticked it also publishes, as v<package.json version>.
 on:
