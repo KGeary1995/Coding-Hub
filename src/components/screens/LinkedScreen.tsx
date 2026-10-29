@@ -31,10 +31,12 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   /** Saved sign-in is skipped on the next try once the computer refused it. */
   const useSaved = useRef(true); const toSave = useRef<{ username: string; password: string } | null>(null);
   const [hasSaved, setHasSaved] = useState(false);
+  /** Why the computer refused the sign-in, kept for the disconnect that follows; other notes give way to it. */
+  const refusal = useRef('');
 
   useEffect(() => {
     const target = view.current; if (!target) return; let cancelled = false; let client: RFB | null = null;
-    setStatus('connecting'); setMessage('');
+    setStatus('connecting'); setMessage(''); refusal.current = '';
     void (async () => {
       // Loaded only when a screen is opened: the viewer is large and most sessions never use it.
       const { default: Viewer } = await import('@novnc/novnc');
@@ -53,11 +55,11 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       client.addEventListener('securityfailure', (event) => {
         useSaved.current = false; toSave.current = null;
         const reason = (event as CustomEvent<{ reason?: string }>).detail.reason;
-        setMessage(`${computer.name} did not accept that user name and password.${reason ? ` (${reason})` : ''}`);
+        refusal.current = `${computer.name} did not accept that user name and password.${reason ? ` (${reason})` : ''}`; setMessage(refusal.current);
       });
       client.addEventListener('disconnect', (event) => {
         if (rfb.current === client) rfb.current = null;
-        setStatus('ended'); setMessage((current) => current || channel.error || ((event as CustomEvent<{ clean: boolean }>).detail.clean ? 'Screen sharing ended.' : `The connection to ${computer.name}'s screen closed.`));
+        setStatus('ended'); setMessage(refusal.current || channel.error || ((event as CustomEvent<{ clean: boolean }>).detail.clean ? 'Screen sharing ended.' : `The connection to ${computer.name}'s screen closed.`));
       });
       // What is copied there lands on this computer's clipboard too.
       client.addEventListener('clipboard', (event) => { const text = (event as CustomEvent<{ text: string }>).detail.text; if (text) void window.codingHub?.copyText(text.slice(0, 1024 * 1024)); });
