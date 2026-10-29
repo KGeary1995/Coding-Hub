@@ -43,11 +43,14 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
   };
   const interrupt = () => { if (channel.runId) void workbench({ action: 'linked-input', id: computer.id, sessionId: channel.sessionId, runId: channel.runId, data: '\x03' }).catch((e: Error) => setError(e.message)); };
   const state = !channel.running ? 'idle' : channel.attention ? 'waiting' : 'working';
-  return <article className={`session-tile tr-tile linked-tile ${channel.engine} state-${state}`} aria-label={`${computer.name} channel ${channel.channel}: ${channel.title}`}>
+  // Whose account it runs on there, coloured as on desktop tiles here (that computer numbers its own accounts).
+  const tone = channel.account ? String(channel.account.tone % 4) : undefined;
+  return <article className={`session-tile tr-tile linked-tile ${channel.engine} state-${state}`} data-account={tone} aria-label={`${computer.name} channel ${channel.channel}: ${channel.title}${channel.account ? `, ${channel.account.name} account` : ''}`}>
     <header className="tile-header tr-tile-head">
       <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${channel.engine})` }} title={ENGINE_NAME[channel.engine]}>CH{channel.channel}</span>
       <strong className="tr-tile-name" title={channel.title}>{channel.title}</strong>
       <span className="tr-tile-model model-name">{computer.name}</span>
+      {channel.account && <span className="tr-profile-chip account-profile-chip" data-account={tone} title={`Claude account on ${computer.name}: ${channel.account.name}`}>{channel.account.name}</span>}
       <span className="tr-spacer" />
       {channel.running
         ? <>{!channel.chat && <button className="tr-detail-button icon" title="Interrupt (Ctrl+C)" aria-label={`Interrupt channel ${channel.channel} on ${computer.name}`} disabled={Boolean(busy)} onClick={interrupt}><OctagonPause size={13} /></button>}

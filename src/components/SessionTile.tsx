@@ -3,7 +3,7 @@ import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, X, SquareChevronRight } from 'lucide-react';
-import { useAccountStore, refreshClaudeProfiles } from '../state/account-store';
+import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -32,7 +32,10 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const profiles = useAccountStore((s) => s.profiles);
   useEffect(() => { if (session.config.engine === 'claude') void refreshClaudeProfiles(); }, [session.config.engine]);
   const profileId = session.config.engine === 'claude' ? session.config.accountProfileId : undefined;
-  const profileName = profileId ? profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile' : null;
+  // Whose account the channel runs on, named and coloured: its profile, or the account the default sign-in is.
+  const labels = useAccountStore((s) => s.labels);
+  const account = session.config.engine !== 'claude' ? null : accountLabel(labels, profileId) ?? (profileId ? { name: profiles.find((p) => p.id === profileId)?.name ?? 'Saved profile', tone: -1 } : null);
+  const tone = account && account.tone >= 0 ? String(account.tone % 4) : undefined;
   const { name, topic } = useChannelName(session);
   const [coachingSent, setCoachingSent] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
@@ -96,7 +99,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   ].filter(Boolean).join(' · ');
   return (
     <article className={`session-tile tr-tile ${engine} state-${state} ${dense ? 'dense' : ''} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''}`}
-      data-status={session.status} data-state={state} aria-label={`${name} session ${channel}`} tabIndex={0} onKeyDown={onTileKey}>
+      data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} session ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
@@ -104,7 +107,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
-          {profileName && <span className="tr-profile-chip account-profile-chip" title={`Claude account: ${profileName}`}>{profileName}</span>}
+          {account && <span className="tr-profile-chip account-profile-chip" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           <span className="tr-spacer" />
           {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
           <span className="tr-tile-metric tnum" title={usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}

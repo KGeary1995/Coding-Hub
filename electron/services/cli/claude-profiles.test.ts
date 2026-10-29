@@ -48,3 +48,26 @@ describe('isolated local Claude profiles', () => {
     expect(engineConfigSchema.safeParse({ engine: 'codex', model: '', reasoningEffort: null, accountProfileId: id }).success).toBe(false);
   });
 });
+
+describe('which account each Claude sign-in is', () => {
+  it('names the default sign-in after the profile signed in to the same account, and reads nothing but who it is', () => {
+    const { root } = fixture(); const home = path.join(root, 'home'); fs.mkdirSync(home);
+    const store = new ClaudeProfiles(root, home, null); const personal = store.create('Personal'); const work = store.create('Work');
+    const account = (file: string, email: string, organization: string) => fs.writeFileSync(file, JSON.stringify({ oauthAccount: { emailAddress: email, organizationName: organization, accountUuid: 'private-id' }, projects: {} }));
+    // Not signed in anywhere yet: profiles keep their names, the default sign-in has none.
+    expect(store.labels()).toEqual({ default: null, profiles: { [personal.id]: { name: 'Personal', tone: 0 }, [work.id]: { name: 'Work', tone: 1 } } });
+    account(path.join(store.directory(personal.id), '.claude.json'), 'me@example.com', 'Mine');
+    account(path.join(store.directory(work.id), '.claude.json'), 'me@company.example', 'Company');
+    account(path.join(home, '.claude.json'), 'ME@example.com', 'Mine');
+    expect(store.labels().default).toEqual({ name: 'Personal', tone: 0 });
+    // Another account than any profile's: shown by its email, in a colour of its own.
+    account(path.join(home, '.claude.json'), 'other@example.com', 'Other');
+    expect(store.labels().default).toEqual({ name: 'other@example.com', tone: 2 });
+    // CLAUDE_CONFIG_DIR moves the default sign-in's settings into that folder.
+    const moved = path.join(root, 'moved'); fs.mkdirSync(moved); account(path.join(moved, '.claude.json'), 'me@company.example', 'Company');
+    expect(new ClaudeProfiles(root, home, moved).labels().default).toEqual({ name: 'Work', tone: 1 });
+    // Unreadable settings give no name rather than an error.
+    fs.writeFileSync(path.join(home, '.claude.json'), '{not json'); expect(store.labels().default).toBeNull();
+    expect(JSON.stringify(store.labels())).not.toContain('private-id');
+  });
+});

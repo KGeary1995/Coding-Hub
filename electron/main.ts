@@ -16,6 +16,7 @@ import { CoachingService } from './services/coaching/service';
 import { DesignArchive } from './services/design/archive';
 import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
+import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, type IpcMainInvokeEvent } from 'electron';
@@ -84,6 +85,13 @@ let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
 const rendererFile = path.join(__dirname, '../../dist/index.html');
 const claudeProfiles = new ClaudeProfiles(storageRoot);
+/** Whose account each Claude channel runs on, for phones and linked computers. Read again at most every 30 s. */
+let labelCache: { at: number; value: AccountLabels } | null = null;
+const channelAccount = (config: { engine: string; accountProfileId?: string }): AccountLabel | undefined => {
+  if (config.engine !== 'claude') return undefined;
+  if (!labelCache || Date.now() - labelCache.at > 30000) { let value: AccountLabels = { default: null, profiles: {} }; try { value = claudeProfiles.labels(); } catch { /* No profile registry: no names. */ } labelCache = { at: Date.now(), value }; }
+  return (config.accountProfileId ? labelCache.value.profiles[config.accountProfileId] : labelCache.value.default) ?? undefined;
+};
 /** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
 const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id));
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
@@ -408,7 +416,8 @@ else app.whenReady().then(() => {
   remote = new RemoteServer(storageRoot, {
     // Channels still called by their engine's name are named after their folder, as on the desktop.
     sessions: () => { const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
+      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
+        ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),

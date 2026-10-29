@@ -18,7 +18,7 @@ async function computer(id: string, name: string, sessionId: string, idle?: { se
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = [];
   const size = { cols: 100, rows: 30 }; const sizes: string[] = [];
   const host: RemoteHost = {
-    sessions: () => [{ id: sessionId, title: 'Claude Code', engine: 'claude' }],
+    sessions: () => [{ id: sessionId, title: 'Claude Code', engine: 'claude', account: { name: 'Work', tone: 1 } }],
     running: () => running.map((run) => ({ ...run, ...size })),
     resize: (_reference, cols, rows) => { Object.assign(size, { cols, rows }); sizes.push(`${cols}x${rows}`); },
     write: (reference, data) => { writes.push({ reference, data }); },
@@ -53,7 +53,8 @@ describe('linked computers', () => {
     expect(status[0]).toMatchObject({ id: PC, linked: true });
     expect(pc.server.status().devices).toEqual([expect.objectContaining({ name: 'MacBook', kind: 'computer' })]);
     await until(() => mac.status()[0].connected && mac.status()[0].channels.length === 1, 'the stream');
-    expect(mac.status()[0].channels[0]).toMatchObject({ sessionId: 'pc-1', running: true, computer: { id: PC, name: 'Obsidian-Halo' } });
+    // With whose account it runs on there, so its tile here can say personal or work.
+    expect(mac.status()[0].channels[0]).toMatchObject({ sessionId: 'pc-1', running: true, computer: { id: PC, name: 'Obsidian-Halo' }, account: { name: 'Work', tone: 1 } });
 
     // With the computer's tab closed, its output still reaches phones but not the desktop window.
     pc.server.onSessionEvent({ type: 'data', sessionId: 'pc-1', runId: 'run-pc-1', data: 'before the tab opened' });
