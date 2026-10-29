@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Monitor, OctagonPause, Play, RotateCcw, Square } from 'lucide-react';
+import { Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square } from 'lucide-react';
 import type { ChannelControl, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import { linkedTerminal } from '../../runtime/linked-terminals';
 import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
+import { LinkedScreen } from './LinkedScreen';
 
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 
@@ -72,6 +73,7 @@ export function LinkedComputerView() {
   const computerId = useWorkspaceStore((state) => state.computerId);
   const computer = useLinkedStore((state) => state.computers.find((item) => item.id === computerId));
   const addError = useLinkedStore((state) => state.addError);
+  const [screenOf, setScreenOf] = useState<string | null>(null); const showScreen = Boolean(computer && screenOf === computer.id);
   // Every channel's current screen, whenever the tab opens, reconnects, or a channel starts a new run.
   const runs = computer?.channels.map((channel) => `${channel.sessionId}:${channel.runId}`).join() ?? '';
   useEffect(() => { if (computer?.connected) void workbench({ action: 'linked-watch', id: computer.id }).catch(() => {}); }, [computer?.id, computer?.connected, runs]);
@@ -80,10 +82,14 @@ export function LinkedComputerView() {
   if (!computer) return <section className="feature-panel"><p className="history-empty">That computer is no longer linked. Open Settings → Other computers.</p></section>;
   return <section className="linked-computer" aria-labelledby="linked-computer-title">
     <header className="linked-computer-head"><h1 id="linked-computer-title"><Monitor size={16} aria-hidden="true" />{computer.name}</h1>
-      <span className={`storage-status ${computer.connected ? 'saved' : ''}`}>{computer.connected ? `${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…'}</span></header>
+      <span className={`storage-status ${computer.connected ? 'saved' : ''}`}>{computer.connected ? `${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…'}</span>
+      <span className="tr-spacer" />
+      {/* Its own screen-sharing server answers even while Trace there is closed. */}
+      <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => setScreenOf(showScreen ? null : computer.id)}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
     {addError && <p className="session-error" role="alert">{addError}</p>}
-    {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}. Add one with + Channel.</p>}
-    {!computer.connected && <p className="history-empty">{computer.name} is not reachable right now. Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected.</p>}
-    <div className="linked-grid">{computer.channels.map((channel) => <LinkedTile key={channel.sessionId} computer={computer} channel={channel} />)}</div>
+    {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
+      {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}. Add one with + Channel.</p>}
+      {!computer.connected && <p className="history-empty">{computer.name} is not reachable right now. Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected. If Trace has closed there, Screen still reaches it.</p>}
+      <div className="linked-grid">{computer.channels.map((channel) => <LinkedTile key={channel.sessionId} computer={computer} channel={channel} />)}</div></>}
   </section>;
 }

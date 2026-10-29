@@ -48,7 +48,11 @@ for (const name of ['winpty-agent.exe', 'winpty.dll', 'conpty/OpenConsole.exe', 
   verifyPE(`${pty}/prebuilds/win32-x64/${name}`, 0x8664);
 }
 for (const relative of [
+  'dist-electron/electron/entry.js',
   'dist-electron/electron/main.js',
+  'dist-electron/electron/screen-service.js',
+  'dist-electron/electron/screen-capture-preload.js',
+  'dist/capture.html',
   'dist-electron/electron/preload.js',
   'dist-electron/electron/services/cli/pty-manager.js',
   'dist-electron/shared/schemas.js',

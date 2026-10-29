@@ -95,6 +95,13 @@ export class LinkedComputers implements RemoteRelay {
     return this.status();
   }
 
+  /** The address and key this computer reaches a linked one with (for its screen service, which checks the same key). */
+  access(id: string): { name: string; url: string; token: string } | null {
+    const link = this.links().find((item) => item.id === id); if (!link) return null;
+    const url = linkableAddress(this.status().find((item) => item.id === id)?.url ?? link.url) ?? link.url;
+    return { name: link.name, url, token: link.token };
+  }
+
   async unlink(id: string): Promise<LinkedComputer[]> {
     const link = this.links().find((item) => item.id === id); if (!link) return this.status();
     const connection = this.connections.get(id); if (connection) { this.disconnect(connection); this.connections.delete(id); }
