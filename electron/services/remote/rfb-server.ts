@@ -14,7 +14,11 @@ export interface ScreenInput {
   /** The viewer's copied text, for this computer's clipboard. */
   clipboard(text: string): void;
 }
-const TIGHT = 7; const IDLE_POLL = 100; const CLIPBOARD_LIMIT = 1024 * 1024;
+const TIGHT = 7; const CONTINUOUS = -313; const CLIPBOARD_LIMIT = 1024 * 1024;
+/** How often an unchanged screen is looked at again; cheap, as the capture skips frames it has already compared. */
+const IDLE_POLL = 15;
+/** Updates wait while this much is still unsent, so the viewer sees the newest screen rather than a queue of old ones. */
+const SEND_LIMIT = 64 * 1024;
 
 /** Tight's "compact" length: 7 bits per byte, at most three bytes. */
 export function compactLength(length: number): Buffer {
@@ -27,12 +31,14 @@ const latin1 = (text: string) => Buffer.from(text.replace(/[^\x00-\xff]/g, '?'),
 
 /**
  * One viewer of this computer's screen, speaking VNC (RFB 3.8). The connection reaching here is already authenticated
- * (a linked computer's key, checked by the remote), so VNC's own security is "None". The viewer asks for each update,
- * so the frame rate follows what the connection carries.
+ * (a linked computer's key, checked by the remote), so VNC's own security is "None". Updates are pushed as the
+ * screen changes (VNC's continuous updates, which noVNC takes up) rather than one per request, so a change costs one
+ * trip across the network, not two; sending waits while the connection is backed up.
  */
 export class RfbSession {
   private buffer: Buffer = Buffer.alloc(0); private stage: 'version' | 'security' | 'init' | 'messages' = 'version';
   private encodings = new Set<number>(); private request: { incremental: boolean } | null = null; private pumping = false;
+  private continuous = false; private offered = false;
   private closed = false; private clipboardTimer: ReturnType<typeof setInterval> | null = null; private lastClipboard: string | null = null;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
@@ -81,7 +87,18 @@ export class RfbSession {
         const message = this.take(4 + 4 * count); this.encodings = new Set(Array.from({ length: count }, (_, index) => message.readInt32BE(4 + 4 * index)));
         continue;
       }
-      if (type === 3) { if (this.buffer.length < 10) return; const message = this.take(10); this.request = { incremental: message[1] === 1 && (this.request?.incremental ?? true) }; void this.pump(); continue; }
+      if (type === 3) {
+        if (this.buffer.length < 10) return; const message = this.take(10); this.request = { incremental: message[1] === 1 && (this.request?.incremental ?? true) };
+        // Offered once (EndOfContinuousUpdates); the viewer answers with EnableContinuousUpdates and stops asking.
+        if (!this.offered && this.encodings.has(CONTINUOUS)) { this.offered = true; this.socket.write(Buffer.from([150])); }
+        void this.pump(); continue;
+      }
+      if (type === 150) {
+        if (this.buffer.length < 10) return; this.continuous = this.take(10)[1] === 1;
+        // Turned off, the viewer asks again for each update; the protocol wants this message to confirm it.
+        if (!this.continuous) this.socket.write(Buffer.from([150]));
+        void this.pump(); continue;
+      }
       if (type === 4) { if (this.buffer.length < 8) return; const message = this.take(8); this.input.key(message.readUInt32BE(4), message[1] === 1); continue; }
       if (type === 5) {
         if (this.buffer.length < 6) return; const message = this.take(6);
@@ -100,14 +117,15 @@ export class RfbSession {
 
   private take(length: number) { const part = this.buffer.subarray(0, length); this.buffer = this.buffer.subarray(length); return part; }
 
-  /** Answers the viewer's request with what changed, waiting while nothing has. */
+  /** Sends what changed, while the viewer has asked for an update or takes them continuously; waits while nothing has. */
   private async pump() {
     if (this.pumping) return; this.pumping = true;
     try {
-      while (this.request && !this.closed) {
+      while ((this.request || this.continuous) && !this.closed) {
         // Only Tight carries JPEG; every viewer Trace ships (noVNC) asks for it.
         if (!this.encodings.has(TIGHT)) { this.close(); return; }
-        const full = !this.request.incremental; const rects = await this.source.frame(full);
+        if (this.socket.writableLength > SEND_LIMIT) { await new Promise((resolve) => { this.socket.once('drain', resolve); this.socket.once('close', resolve); }); continue; }
+        const full = this.request ? !this.request.incremental : false; const rects = await this.source.frame(full);
         if (this.closed) return;
         if (!rects.length) { await new Promise((resolve) => setTimeout(resolve, IDLE_POLL)); continue; }
         this.request = null;
@@ -116,7 +134,7 @@ export class RfbSession {
           const header = Buffer.alloc(12); header.writeUInt16BE(rect.x, 0); header.writeUInt16BE(rect.y, 2); header.writeUInt16BE(rect.width, 4); header.writeUInt16BE(rect.height, 6); header.writeInt32BE(TIGHT, 8);
           parts.push(header, Buffer.from([0x90]), compactLength(rect.jpeg.byteLength), Buffer.from(rect.jpeg.buffer, rect.jpeg.byteOffset, rect.jpeg.byteLength));
         }
-        if (!this.socket.write(Buffer.concat(parts))) await new Promise((resolve) => { this.socket.once('drain', resolve); this.socket.once('close', resolve); });
+        this.socket.write(Buffer.concat(parts));
       }
     } finally { this.pumping = false; }
   }

@@ -8,6 +8,8 @@ import { ipcRenderer } from 'electron';
 declare class MediaStreamTrackProcessor { constructor(init: { track: MediaStreamTrack }); readable: ReadableStream<VideoFrame> }
 const TILE = 64; const QUALITY = 0.7;
 let track: MediaStreamTrack | null = null; let latest: VideoFrame | null = null; let previous: Uint32Array | null = null;
+/** A frame has arrived since the last comparison; without one nothing can have changed, so nothing is read back. */
+let fresh = false;
 let canvas: OffscreenCanvas | null = null; let context: OffscreenCanvasRenderingContext2D | null = null;
 
 function stop() { track?.stop(); track = null; latest?.close(); latest = null; previous = null; canvas = null; context = null; }
@@ -15,14 +17,14 @@ function stop() { track?.stop(); track = null; latest?.close(); latest = null; p
 ipcRenderer.on('trace-capture-start', async (_event, request: { sourceId: string; maxWidth: number; maxHeight: number }) => {
   stop();
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: request.sourceId, maxWidth: request.maxWidth, maxHeight: request.maxHeight, maxFrameRate: 15 } } } as unknown as MediaStreamConstraints);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: request.sourceId, maxWidth: request.maxWidth, maxHeight: request.maxHeight, maxFrameRate: 30 } } } as unknown as MediaStreamConstraints);
     const current = stream.getVideoTracks()[0]; track = current;
     const reader = new MediaStreamTrackProcessor({ track: current }).readable.getReader();
     const first = await reader.read(); if (first.done) throw new Error('The capture ended at once.');
-    latest = first.value; const width = latest.displayWidth & ~1; const height = latest.displayHeight & ~1;
+    latest = first.value; fresh = true; const width = latest.displayWidth & ~1; const height = latest.displayHeight & ~1;
     canvas = new OffscreenCanvas(width, height); context = canvas.getContext('2d', { willReadFrequently: true });
     // Keeps only the newest frame; each older one is closed so the capture does not stall.
-    void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || track !== current) { next.value?.close(); return; } latest?.close(); latest = next.value; } })();
+    void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || track !== current) { next.value?.close(); return; } latest?.close(); latest = next.value; fresh = true; } })();
     ipcRenderer.send('trace-capture-started', { width, height });
   } catch (error) { stop(); ipcRenderer.send('trace-capture-started', { error: (error as Error).message || 'The screen could not be captured.' }); }
 });
@@ -30,7 +32,8 @@ ipcRenderer.on('trace-capture-start', async (_event, request: { sourceId: string
 ipcRenderer.on('trace-capture-frame', async (_event, request: { id: number; full: boolean }) => {
   try {
     if (!canvas || !context || !latest) throw new Error('Not capturing.');
-    const { width, height } = canvas; context.drawImage(latest, 0, 0, width, height);
+    if (!request.full && !fresh) { ipcRenderer.send('trace-capture-frame', { id: request.id, rects: [] }); return; }
+    fresh = false; const { width, height } = canvas; context.drawImage(latest, 0, 0, width, height);
     const pixels = new Uint32Array(context.getImageData(0, 0, width, height).data.buffer); const before = request.full ? null : previous; previous = pixels;
     const rects: { x: number; y: number; width: number; height: number; jpeg: Uint8Array }[] = [];
     for (let ty = 0; ty < height; ty += TILE) {
@@ -41,10 +44,11 @@ ipcRenderer.on('trace-capture-frame', async (_event, request: { id: number; full
         if (!changed && start >= 0) { rects.push({ x: start, y: ty, width: tx - start, height: rows, jpeg: new Uint8Array() }); start = -1; }
       }
     }
-    for (const rect of rects) {
-      const part = new OffscreenCanvas(rect.width, rect.height); part.getContext('2d')!.drawImage(canvas, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    // Encoded side by side: the browser compresses each part off this thread.
+    await Promise.all(rects.map(async (rect) => {
+      const part = new OffscreenCanvas(rect.width, rect.height); part.getContext('2d')!.drawImage(canvas!, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
       rect.jpeg = new Uint8Array(await (await part.convertToBlob({ type: 'image/jpeg', quality: QUALITY })).arrayBuffer());
-    }
+    }));
     ipcRenderer.send('trace-capture-frame', { id: request.id, rects });
   } catch (error) { ipcRenderer.send('trace-capture-frame', { id: request.id, error: (error as Error).message }); }
 });

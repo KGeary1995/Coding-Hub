@@ -44,7 +44,9 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       if (cancelled) return;
       const channel = new ScreenChannel(computer.id);
       client = new Viewer(target, channel, saved && useSaved.current ? { credentials: saved, shared: true } : { shared: true }); rfb.current = client;
-      client.scaleViewport = true; client.viewOnly = !control; client.background = 'transparent';
+      // A dot marks the pointer here at once when the other computer draws its own cursor into the picture (Trace's
+      // Windows service), which arrives a moment later.
+      client.scaleViewport = true; client.viewOnly = !control; client.background = 'transparent'; client.showDotCursor = true;
       client.addEventListener('connect', () => {
         setStatus('connected'); setKind(channel.kind); useSaved.current = true;
         const credentials = toSave.current; toSave.current = null;

@@ -49,6 +49,19 @@ describe('the Windows screen as a VNC server', () => {
     await until(() => vnc.events.length >= 3, 'input'); expect(vnc.events).toEqual(['key 61 true', 'pointer 10 20 1', 'clipboard hi']);
   });
 
+  it('pushes changes without being asked once the viewer takes continuous updates', async () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]); const rect = (x: number) => [{ x, y: 0, width: 64, height: 64, jpeg }];
+    const vnc = await session([rect(0), rect(64), rect(128)]);
+    vnc.viewer.write('RFB 003.008\n'); vnc.viewer.write(Buffer.from([1, 1])); await until(() => vnc.bytes().length >= 18 + 37, 'the server init');
+    vnc.viewer.write(Buffer.concat([encodings(7, -313), request(false)]));
+    // EndOfContinuousUpdates offers them, then the requested update.
+    await until(() => vnc.bytes().length >= 18 + 37 + 1 + 22, 'the offer and the first update'); expect(vnc.bytes()[18 + 37]).toBe(150);
+    vnc.viewer.write(Buffer.from([150, 1, 0, 0, 0, 0, 2, 128, 1, 224]));
+    // Two more updates arrive with no further request.
+    await until(() => vnc.bytes().length >= 18 + 37 + 1 + 3 * 22, 'pushed updates');
+    const second = vnc.bytes().subarray(18 + 37 + 1 + 22); expect(second[0]).toBe(0); expect(second.readUInt16BE(4)).toBe(64);
+  });
+
   it('sends what is copied here after the viewer connects, not what was there before', async () => {
     const vnc = await session([]);
     vnc.viewer.write('RFB 003.008\n'); vnc.viewer.write(Buffer.from([1, 1]));

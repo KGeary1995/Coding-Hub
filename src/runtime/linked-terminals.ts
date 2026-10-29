@@ -13,6 +13,25 @@ import { attachCopy } from './terminals';
  */
 interface Entry { terminal: Terminal; element: HTMLDivElement; runId: string | null; queue: Promise<unknown> }
 const terminals = new Map<string, Entry>();
+const MAC = navigator.userAgent.includes('Mac'); const WINDOWS = navigator.userAgent.includes('Windows');
+
+function base64(bytes: Uint8Array) { let text = ''; for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(text); }
+
+/** Sends an image to a channel on a linked computer; what went wrong shows above that computer's channels. */
+function sendImage(entry: Entry, computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell', image: string) {
+  const runId = entry.runId; if (!runId) return;
+  if (engine === 'shell') { useLinkedStore.setState({ addError: 'Images paste into Claude Code and Codex channels, not terminals.' }); return; }
+  useLinkedStore.setState({ addError: '' });
+  entry.queue = entry.queue.then(() => workbench({ action: 'linked-paste-image', id: computerId, sessionId, runId, image })).catch((error: Error) => useLinkedStore.setState({ addError: error.message }));
+}
+
+/** Ctrl+V on a Mac: this computer's clipboard image if there is one, else the key itself. */
+async function pasteClipboardImage(entry: Entry, computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell') {
+  const result = await window.codingHub?.clipboardImage().catch(() => null);
+  const full = result?.ok ? result.value?.full : undefined;
+  if (full) { sendImage(entry, computerId, sessionId, engine, full.slice(full.indexOf(',') + 1)); return; }
+  const runId = entry.runId; if (runId) entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: '\x16' })).catch(() => {});
+}
 const key = (computerId: string, sessionId: string) => `${computerId}:${sessionId}`;
 
 export function linkedTerminal(computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell', size: { cols: number | null; rows: number | null }): Entry {
@@ -30,12 +49,23 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
     entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: typed })).catch(() => {});
   });
   // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing, and Ctrl+C into ^C, which would interrupt the CLI
-  // there instead of copying what is selected here. Let the browser paste or copy instead. An image cannot be pasted:
-  // it is on this computer's clipboard.
+  // there instead of copying what is selected here. Let the browser paste or copy instead.
   terminal.attachCustomKeyEventHandler((event) => {
-    if (event.type !== 'keydown' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || !navigator.userAgent.includes('Windows')) return true;
+    if (event.type !== 'keydown' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return true;
+    // On a Mac, Ctrl+V is Claude Code's image key, which would read the other computer's clipboard: an image here goes
+    // across instead, and without one the key goes as it is.
+    if (MAC && event.code === 'KeyV') { void pasteClipboardImage(entry, computerId, sessionId, engine); return false; }
+    if (!WINDOWS) return true;
     return !(event.code === 'KeyV' || (event.code === 'KeyC' && terminal.hasSelection()));
   });
+  // An image pasted here is on this computer's clipboard, which the CLI there cannot read: it is sent to that computer,
+  // which puts it on its own clipboard and presses the CLI's image key, as a paste there would.
+  element.addEventListener('paste', (event) => {
+    const data = event.clipboardData; const file = [...(data?.items ?? [])].find((item) => item.type === 'image/png' || item.type === 'image/jpeg')?.getAsFile();
+    if (!data || data.getData('text/plain') || !file) return;
+    event.preventDefault(); event.stopPropagation();
+    void file.arrayBuffer().then((bytes) => sendImage(entry, computerId, sessionId, engine, base64(new Uint8Array(bytes))));
+  }, true);
   attachCopy(terminal, element);
   terminals.set(id, entry);
   return entry;

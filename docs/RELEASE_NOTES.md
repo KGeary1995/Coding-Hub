@@ -1,5 +1,12 @@
 ## What's new
 
+1.12.1 pastes screenshots into your other computer's channels, and makes controlling your PC's screen more responsive (update both computers):
+
+- **Paste images into another computer's channels.** A screenshot pasted into a Claude Code or Codex channel on your other computer now reaches it, from the PC to the Mac and the other way round: Ctrl+V on Windows, ⌘V or Ctrl+V on a Mac. Claude Code there attaches it as if you had pasted it on that computer. It replaces what was on that computer's clipboard.
+
+- **Changes arrive as they happen.** The PC sends each change to the screen as soon as it happens instead of waiting to be asked for every frame, so a change takes one trip across the network instead of two. It captures 30 frames a second instead of 15, and when the connection is busy it sends the newest picture rather than queuing old ones.
+- **A dot shows where your mouse is at once.** The PC's own cursor follows a moment later.
+
 1.12.0 lets your computers see and control each other's screens:
 
 - **Screen on another computer's tab.** **Screen** shows that computer's screen and gives you its mouse and keyboard. It uses the Mac's own Screen Sharing, not Trace, so it still works when Trace on the Mac has closed (to reopen it, for example). Turn it on once on the Mac: **System Settings → General → Sharing → Screen Sharing**. It connects only over Tailscale, to computers you have linked.
