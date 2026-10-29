@@ -30,6 +30,8 @@ export function linkableAddress(value: string | null): string | null {
 interface Connection {
   link: Link; controller: AbortController | null; stopped: boolean; connected: boolean; error: string | null;
   channels: RemoteChannel[]; mirrors: Map<string, ScreenMirror>; wake?: () => void;
+  /** The size each of its channels' tiles has in this computer's window, asked for while the tile is shown. */
+  fits: Map<string, { runId: string; cols: number; rows: number }>;
 }
 
 /**
@@ -122,7 +124,20 @@ export class LinkedComputers implements RemoteRelay {
   async size(sessionId: string, runId: string, size: { cols: number; rows: number } | null) {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
     if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
-    await this.request(connection.link, 'api/size', size ? { method: 'POST', body: JSON.stringify({ sessionId, runId, ...size }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+    // The other computer sees the phone and this window as one device: a phone leaving puts back the tile's size, if shown.
+    const fit = size ? null : connection.fits.get(sessionId);
+    await this.request(connection.link, 'api/size', size || fit ? { method: 'POST', body: JSON.stringify({ sessionId, ...(fit ?? { runId, ...size }) }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+  }
+  /**
+   * A tile in this computer's window showing a linked computer's channel asks for that CLI at the tile's size, or
+   * (null) gives it back. The other computer applies it while nobody uses it there, as it does a phone's.
+   */
+  async fit(id: string, sessionId: string, runId: string, size: { cols: number; rows: number } | null) {
+    const connection = this.connections.get(id); if (!connection) return;
+    if (size) connection.fits.set(sessionId, { runId, ...size }); else if (!connection.fits.delete(sessionId)) return;
+    if (!connection.connected) return;
+    // A Trace before 1.11.8 there takes it as a phone's size; any refusal leaves the tile at that computer's size.
+    await this.request(connection.link, 'api/size', size ? { method: 'POST', body: JSON.stringify({ sessionId, runId, ...size }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) }).catch(() => {});
   }
   /** The desktop opened a linked computer's tab: send it every channel's screen as it is now. */
   watch(id: string) {
@@ -179,7 +194,7 @@ export class LinkedComputers implements RemoteRelay {
   }
 
   private connect(link: Link) {
-    const connection: Connection = { link, controller: null, stopped: false, connected: false, error: null, channels: [], mirrors: new Map() };
+    const connection: Connection = { link, controller: null, stopped: false, connected: false, error: null, channels: [], mirrors: new Map(), fits: new Map() };
     this.connections.set(link.id, connection);
     void (async () => {
       let delay = 2000;
@@ -188,6 +203,8 @@ export class LinkedComputers implements RemoteRelay {
         try {
           const response = await this.request(link, 'api/stream?all=1', { signal: connection.controller.signal });
           connection.connected = true; connection.error = null; delay = 2000; this.notify();
+          // The other computer gave the tiles' sizes back when the last stream closed: ask for them again.
+          for (const [sessionId, fit] of connection.fits) void this.request(link, 'api/size', { method: 'POST', body: JSON.stringify({ sessionId, ...fit }) }).catch(() => {});
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
           // The other computer sends at least a ping every 25 seconds. A minute of silence means it slept or the network
           // dropped without a reset: reconnect, rather than show its channels as live while typing into them fails.
