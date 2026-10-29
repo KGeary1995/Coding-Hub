@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ChannelControl, LinkedComputer, LinkedComputerEvent, RemoteChannel } from '../../../shared/remote';
+import type { ChannelEngine } from '../../../shared/types';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import type { RemoteRelay } from './remote-server';
@@ -105,6 +106,12 @@ export class LinkedComputers implements RemoteRelay {
   }
 
   async input(id: string, sessionId: string, runId: string, data: string) { await this.request(this.linked(id), 'api/input', { method: 'POST', body: JSON.stringify({ sessionId, runId, data }) }); }
+  /** Adds a channel on that computer, in its own workspace. A Trace before 1.11.9 there answers 404. */
+  async add(id: string, engine: ChannelEngine) {
+    const link = this.linked(id);
+    try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine }), signal: AbortSignal.timeout(30000) }); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
+  }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
   /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */
   async phoneKey(id: string, name: string, relayKey: string) {

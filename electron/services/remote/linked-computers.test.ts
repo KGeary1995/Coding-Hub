@@ -15,7 +15,7 @@ const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'li
 /** A computer's remote with one running Claude channel, standing in for Trace on the other computer. */
 async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
-  const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = [];
+  const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = []; const adds: string[] = [];
   const size = { cols: 100, rows: 30 }; const sizes: string[] = [];
   const host: RemoteHost = {
     sessions: () => [{ id: sessionId, title: 'Claude Code', engine: 'claude', account: { name: 'Work', tone: 1 } }],
@@ -23,11 +23,12 @@ async function computer(id: string, name: string, sessionId: string, idle?: { se
     resize: (_reference, cols, rows) => { Object.assign(size, { cols, rows }); sizes.push(`${cols}x${rows}`); },
     write: (reference, data) => { writes.push({ reference, data }); },
     control: async (target, control) => { controls.push({ sessionId: target, control }); },
+    add: async (engine) => { adds.push(engine); },
     ...(idle ? { idleSeconds: () => idle.seconds } : {}),
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
-  return { server, writes, controls, sizes, url: `http://127.0.0.1:${server.address}/` };
+  return { server, writes, controls, adds, sizes, url: `http://127.0.0.1:${server.address}/` };
 }
 async function phoneToken(server: RemoteServer) {
   const code = server.pair('phone').pairing!.code;
@@ -69,6 +70,8 @@ describe('linked computers', () => {
     expect(pc.writes).toEqual([{ reference: { sessionId: 'pc-1', runId: 'run-pc-1' }, data: 'y\r' }]);
     await mac.control(PC, 'pc-1', 'restart');
     expect(pc.controls).toEqual([{ sessionId: 'pc-1', control: 'restart' }]);
+    // + Channel on the PC's tab adds the channel on the PC, in its own workspace.
+    await mac.add(PC, 'codex'); expect(pc.adds).toEqual(['codex']);
     await expect(mac.control(PC, 'not-a-channel', 'stop')).rejects.toMatchObject({ code: 'LINK_FAILED' });
 
     // The desktop opening the tab gets the screen as it is now.
@@ -257,6 +260,14 @@ describe('linked computers', () => {
     await pc.fit(MAC, 'mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
     await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
     pc.stop(); await until(() => mac.sizes.at(-1) === '100x30', 'the Mac’s size after the PC left');
+  });
+
+  it('says to update the other computer when its Trace cannot add channels yet', async () => {
+    const old = async (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('api/channel-add') ? new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 }) : fetch(input, init);
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/' }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, old as typeof fetch);
+    cleanup.push(() => mac.stop());
+    (mac as unknown as { linked: () => unknown }).linked = () => ({ id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/', token: 't' });
+    await expect(mac.add(PC, 'claude')).rejects.toMatchObject({ code: 'LINK_OLD', message: 'Update Trace on Obsidian-Halo to add channels there from here.' });
   });
 
   it('only sends codes and keys to tailnet HTTPS addresses (or loopback in tests)', () => {

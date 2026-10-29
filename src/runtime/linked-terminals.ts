@@ -5,6 +5,7 @@ import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { workbench } from './workbench';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
+import { attachCopy } from './terminals';
 
 /**
  * Terminals showing channels that run on a linked computer. Each is drawn at that CLI's own size: the other computer
@@ -28,6 +29,14 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
     const runId = entry.runId; if (!runId || !typed) return;
     entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: typed })).catch(() => {});
   });
+  // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing, and Ctrl+C into ^C, which would interrupt the CLI
+  // there instead of copying what is selected here. Let the browser paste or copy instead. An image cannot be pasted:
+  // it is on this computer's clipboard.
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || !navigator.userAgent.includes('Windows')) return true;
+    return !(event.code === 'KeyV' || (event.code === 'KeyC' && terminal.hasSelection()));
+  });
+  attachCopy(terminal, element);
   terminals.set(id, entry);
   return entry;
 }

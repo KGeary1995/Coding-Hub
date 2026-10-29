@@ -17,6 +17,7 @@ import { DesignArchive } from './services/design/archive';
 import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
+import type { ChannelEngine } from '../shared/types';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, type IpcMainInvokeEvent } from 'electron';
@@ -181,6 +182,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
@@ -192,19 +194,23 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
+  if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
   if (request.action === 'linked-watch') { linked.watch(request.id); return null; }
   if (request.action === 'linked-unwatch') { linked.unwatch(request.id); return null; }
   if (request.action === 'linked-fit') { await linked.fit(request.id, request.sessionId, request.runId, request.cols && request.rows ? { cols: request.cols, rows: request.rows } : null); return null; }
   return linked.status();
 }
 /** A linked computer asked to start, stop or restart one of this computer's channels; the desktop window does it. */
-function controlChannel(sessionId: string, control: 'start' | 'stop' | 'restart'): Promise<void> {
+function controlChannel(sessionId: string, control: 'start' | 'stop' | 'restart'): Promise<void> { return askWindow({ sessionId, control }); }
+/** A linked computer adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
+function addChannel(engine: ChannelEngine): Promise<void> { return askWindow({ add: engine }); }
+function askWindow(request: { sessionId: string; control: 'start' | 'stop' | 'restart' } | { add: ChannelEngine }): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pendingControls.delete(requestId); reject(new HubError('REMOTE_CONTROL_TIMEOUT', 'This computer did not finish in time. Check the channel there.')); }, 45000);
     pendingControls.set(requestId, { resolve, reject, timer });
-    if (!sendToRenderer(IPC_CHANNELS.remoteControl, { requestId, sessionId, control })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
+    if (!sendToRenderer(IPC_CHANNELS.remoteControl, { requestId, ...request })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
   });
 }
 /**
@@ -423,6 +429,7 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
+    add: (engine) => addChannel(engine),
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.

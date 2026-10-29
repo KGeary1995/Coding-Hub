@@ -1,4 +1,4 @@
-import { useLinkedStore, waitingOn } from '../../state/linked-store';
+import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { CircleHelp, Columns2, Grid2X2, Monitor, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
@@ -46,6 +46,11 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   const busyNote = sessions.length >= 4 ? `Channel ${sessions.length + 1} of ${MAX_CHANNELS}. Each runs its own CLI and uses more memory.` : undefined;
+  // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
+  const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
+  const channelMenu: MenuItem[] = other
+    ? (['claude', 'codex', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', shell: 'Terminal' }[engine], detail: `On ${other.name}`, onSelect: () => void addLinkedChannel(other.id, engine) }))
+    : [{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Claude chat', detail: busyNote ?? 'Claude as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('claude') }, { label: 'Codex chat', detail: busyNote ?? 'Codex as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('codex') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }, { label: 'Terminal', detail: busyNote ?? 'Your shell (zsh, bash or PowerShell) in the project folder', onSelect: () => addSession('shell') }];
   return <header className="tr-topbar">
     <Wordmark />
     {project
@@ -68,6 +73,6 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <CommandMenu />
     <button className="tr-icon" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal className="tr-narrow-icon" size={14} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
-    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={[{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Claude chat', detail: busyNote ?? 'Claude as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('claude') }, { label: 'Codex chat', detail: busyNote ?? 'Codex as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('codex') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }, { label: 'Terminal', detail: busyNote ?? 'Your shell (zsh, bash or PowerShell) in the project folder', onSelect: () => addSession('shell') }]} />
+    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={other ? !other.connected || other.channels.length >= MAX_CHANNELS : sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={channelMenu} />
   </header>;
 }

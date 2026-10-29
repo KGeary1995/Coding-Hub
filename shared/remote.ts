@@ -18,6 +18,8 @@ export interface RemoteDevice { id: string; name: string; createdAt: string; las
 export type RemoteDeviceKind = 'phone' | 'computer';
 /** What a linked computer may ask this one to do with a channel, beyond typing into it. */
 export type ChannelControl = 'start' | 'stop' | 'restart';
+/** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
+export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine };
 export interface TailscaleState {
   /** The tailscale CLI was found. */
   installed: boolean;
@@ -78,6 +80,8 @@ export type LinkedComputerRequest =
   | { action: 'linked-control'; id: string; sessionId: string; control: ChannelControl }
   | { action: 'linked-watch'; id: string }
   | { action: 'linked-unwatch'; id: string }
+  /** Adds a channel on that computer, in its own workspace. */
+  | { action: 'linked-add'; id: string; engine: ChannelEngine }
   /** A tile here shows that channel at its own size (`cols`/`rows`), or gives it back (without them). */
   | { action: 'linked-fit'; id: string; sessionId: string; runId: string; cols?: number; rows?: number };
 /** Live updates about linked computers for the desktop window. */

@@ -71,16 +71,18 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
 export function LinkedComputerView() {
   const computerId = useWorkspaceStore((state) => state.computerId);
   const computer = useLinkedStore((state) => state.computers.find((item) => item.id === computerId));
+  const addError = useLinkedStore((state) => state.addError);
   // Every channel's current screen, whenever the tab opens, reconnects, or a channel starts a new run.
   const runs = computer?.channels.map((channel) => `${channel.sessionId}:${channel.runId}`).join() ?? '';
   useEffect(() => { if (computer?.connected) void workbench({ action: 'linked-watch', id: computer.id }).catch(() => {}); }, [computer?.id, computer?.connected, runs]);
   // Leaving the tab stops the other computer's live output reaching this window (phones still get it).
-  useEffect(() => { const id = computer?.id; return () => { if (id) void workbench({ action: 'linked-unwatch', id }).catch(() => {}); }; }, [computer?.id]);
+  useEffect(() => { const id = computer?.id; return () => { useLinkedStore.setState({ addError: '' }); if (id) void workbench({ action: 'linked-unwatch', id }).catch(() => {}); }; }, [computer?.id]);
   if (!computer) return <section className="feature-panel"><p className="history-empty">That computer is no longer linked. Open Settings → Other computers.</p></section>;
   return <section className="linked-computer" aria-labelledby="linked-computer-title">
     <header className="linked-computer-head"><h1 id="linked-computer-title"><Monitor size={16} aria-hidden="true" />{computer.name}</h1>
       <span className={`storage-status ${computer.connected ? 'saved' : ''}`}>{computer.connected ? `${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…'}</span></header>
-    {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}.</p>}
+    {addError && <p className="session-error" role="alert">{addError}</p>}
+    {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}. Add one with + Channel.</p>}
     {!computer.connected && <p className="history-empty">{computer.name} is not reachable right now. Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected.</p>}
     <div className="linked-grid">{computer.channels.map((channel) => <LinkedTile key={channel.sessionId} computer={computer} channel={channel} />)}</div>
   </section>;

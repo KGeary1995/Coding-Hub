@@ -32,6 +32,28 @@ function readImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
 }
 
+/**
+ * Copying from a channel's terminal, here or on a linked computer. Claude Code and Codex break long text into separate
+ * lines to fit the window; copying joins those lines again. Claude Code's full-screen view selects text itself (a drag
+ * there goes to the CLI, not the terminal) and copies it with an OSC 52 request, which on a linked computer's channel
+ * arrives here with its output. It is honoured only just after the person used the mouse or keyboard in this channel,
+ * so a CLI cannot change the clipboard on its own.
+ */
+export function attachCopy(terminal: Terminal, element: HTMLElement) {
+  element.addEventListener('copy', (event) => {
+    if (!terminal.hasSelection() || !event.clipboardData) return;
+    const rows = selectedRows(terminal); if (!rows?.length) return;
+    event.preventDefault(); event.stopPropagation();
+    event.clipboardData.setData('text/plain', unwrapCopied(rows, terminal.cols));
+  }, true);
+  let touched = 0; const touch = () => { touched = Date.now(); };
+  element.addEventListener('mouseup', touch, true); element.addEventListener('keydown', touch, true);
+  terminal.parser.registerOscHandler(52, (data) => {
+    const text = osc52Text(data); if (text !== null && Date.now() - touched < 3000) void window.codingHub?.copyText(text);
+    return true;
+  });
+}
+
 /** The selected text, row by row as it is on screen (rows the terminal itself wrapped are kept together). */
 function selectedRows(terminal: Terminal): CopiedRow[] | null {
   const range = terminal.getSelectionPosition(); if (!range) return null;
@@ -121,22 +143,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     if (WINDOWS) void showClipboardImage(session.id);
   }, true);
   attachDrop(session.id, element);
-  // Claude Code and Codex break long text into separate lines to fit the window; copying joins those lines again.
-  element.addEventListener('copy', (event) => {
-    if (!terminal.hasSelection() || !event.clipboardData) return;
-    const rows = selectedRows(terminal); if (!rows?.length) return;
-    event.preventDefault(); event.stopPropagation();
-    event.clipboardData.setData('text/plain', unwrapCopied(rows, terminal.cols));
-  }, true);
-  // Claude Code's full-screen view selects text itself (a drag there goes to the CLI, not the terminal) and copies it
-  // with an OSC 52 request. It is honoured only just after the person used the mouse or keyboard in this channel, so a
-  // CLI cannot change the clipboard on its own.
-  let touched = 0; const touch = () => { touched = Date.now(); };
-  element.addEventListener('mouseup', touch, true); element.addEventListener('keydown', touch, true);
-  terminal.parser.registerOscHandler(52, (data) => {
-    const text = osc52Text(data); if (text !== null && Date.now() - touched < 3000) void window.codingHub?.copyText(text);
-    return true;
-  });
+  attachCopy(terminal, element);
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
