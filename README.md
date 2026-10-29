@@ -26,7 +26,7 @@ Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M�
 
 **Updates:**
 - **Windows:** the installed app checks for new versions. Download and install them in **Settings → Application updates**.
-- **Mac:** download each new version from the downloads page. **Settings → Application updates → Open downloads page** takes you there.
+- **Mac:** a version signed with Trace's Developer ID updates itself, as on Windows. A Mac on 1.11.8 or earlier installs the first signed version from the downloads page once (**Settings → Application updates → Open downloads page**); after that it updates itself.
 
 Your settings, history, rules and memory live in `~/.coding-hub` and carry over between versions.
 

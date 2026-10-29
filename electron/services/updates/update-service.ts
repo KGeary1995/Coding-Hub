@@ -72,7 +72,7 @@ export class UpdateService {
   }
   status(): UpdateStatus { return { ...this.state }; }
   private set(patch: Partial<UpdateStatus>) { this.state = { ...this.state, ...patch }; this.dependencies.publish(this.status()); }
-  private fail() { if (this.state.phase === 'installing') this.dependencies.installationFailed?.(); this.set({ phase: 'error', message: 'Update failed. Check your connection and that a stable GitHub release includes its installer and latest.yml, then retry.' }); }
+  private fail() { if (this.state.phase === 'installing') this.dependencies.installationFailed?.(); this.set({ phase: 'error', message: 'Update failed. Check your connection and that a stable GitHub release includes its installer and update feed (latest.yml, or latest-mac.yml on a Mac), then retry.' }); }
   start() {
     if (!this.dependencies.enabled || !this.state.automaticChecks || this.timer || this.interval) return;
     const check = () => { if (!this.busy && ['idle', 'current', 'error'].includes(this.state.phase)) void this.execute({ action: 'check' }).catch(() => {}); };
@@ -124,6 +124,10 @@ export class UpdateService {
   }
 }
 
-export function updatesEnabled(packaged: boolean, platform: string, resourcesPath: string, portable: boolean): boolean {
-  return packaged && platform === 'win32' && !portable && existsSync(path.join(resourcesPath, 'app-update.yml'));
+/**
+ * The installed Windows edition updates itself, and so does a Mac app built with a Developer ID (`macUpdates`, from
+ * `traceMacUpdates` in its package.json): macOS installs an update only if it is signed by the same developer.
+ */
+export function updatesEnabled(packaged: boolean, platform: string, resourcesPath: string, portable: boolean, macUpdates = false): boolean {
+  return packaged && (platform === 'win32' ? !portable : platform === 'darwin' && macUpdates) && existsSync(path.join(resourcesPath, 'app-update.yml'));
 }

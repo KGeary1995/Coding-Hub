@@ -85,6 +85,8 @@ let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
 const rendererFile = path.join(__dirname, '../../dist/index.html');
 const claudeProfiles = new ClaudeProfiles(storageRoot);
+/** Whether this Mac build was signed with a Developer ID, so it may update itself (`traceMacUpdates`, electron-builder.cjs). */
+const macUpdates = () => { try { return (JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as { traceMacUpdates?: unknown }).traceMacUpdates === true; } catch { return false; } };
 /** Whose account each Claude channel runs on, for phones and linked computers. Read again at most every 30 s. */
 let labelCache: { at: number; value: AccountLabels } | null = null;
 const channelAccount = (config: { engine: string; accountProfileId?: string }): AccountLabel | undefined => {
@@ -539,8 +541,8 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees!.execute(payload); });
   updates = new UpdateService({
     version: app.getVersion(),
-    enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR)),
-    disabledReason: process.platform === 'darwin' && app.isPackaged ? 'The Mac edition does not update itself yet. Download each new version from the downloads page.' : 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
+    enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR), macUpdates()),
+    disabledReason: process.platform === 'darwin' && app.isPackaged ? 'This Mac copy is not signed with Trace\'s Developer ID, so it cannot update itself. Install the latest version from the downloads page once; later versions then update themselves.' : 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
     openDownloads: () => shell.openExternal(DOWNLOADS_URL),
     storageDirectory: storageRoot,
     updater: autoUpdater,
