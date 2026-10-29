@@ -41,7 +41,9 @@ module.exports = {
   },
   mac: {
     // One disk image per processor: Apple silicon (arm64) and Intel (x64). Each keeps its own node-pty binding.
-    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }],
+    // A Developer ID build also makes the zips and latest-mac.yml that installed Macs update themselves from; macOS
+    // installs an update only when it is signed by the same developer, so ad-hoc builds have no use for them.
+    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, ...(macIdentity ? [{ target: 'zip', arch: ['arm64', 'x64'] }] : [])],
     icon: 'assets/icon.png',
     category: 'public.app-category.developer-tools',
     files: [...common, '!node_modules/node-pty/prebuilds/win32-*/**'],
@@ -56,6 +58,9 @@ module.exports = {
   },
   // A signed disk image, so Gatekeeper accepts the download itself; notarize it after the build (see README).
   dmg: { artifactName: prefix + '-${version}-macOS-${arch}.${ext}', sign: Boolean(macIdentity) },
+  zip: { artifactName: prefix + '-${version}-macOS-${arch}.${ext}' },
+  // Tells the packaged app it may update itself on a Mac (see updatesEnabled).
+  ...(macIdentity ? { extraMetadata: { traceMacUpdates: true } } : {}),
   // Installers are published to a public downloads repository so installed copies can check it without credentials;
   // the source repository stays private. See docs/windows-releases.md.
   publish: [{ provider: 'github', owner: 'KGeary1995', repo: 'trace-releases', releaseType: 'release' }],

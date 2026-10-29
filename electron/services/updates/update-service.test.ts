@@ -102,6 +102,11 @@ describe('Windows update lifecycle', () => {
     expect(updatesEnabled(true, 'linux', directory, false)).toBe(false);
     expect(updatesEnabled(true, 'win32', directory, true)).toBe(false);
     expect(updatesEnabled(true, 'win32', path.join(directory, 'missing'), false)).toBe(false);
+    // A Mac app updates itself only when it was built with a Developer ID.
+    expect(updatesEnabled(true, 'darwin', directory, false)).toBe(false);
+    expect(updatesEnabled(true, 'darwin', directory, false, true)).toBe(true);
+    expect(updatesEnabled(false, 'darwin', directory, false, true)).toBe(false);
+    expect(updatesEnabled(true, 'darwin', path.join(directory, 'missing'), false, true)).toBe(false);
   });
   it('opens the downloads page from any edition, updating or not', async () => {
     for (const enabled of [false, true]) {

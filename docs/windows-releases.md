@@ -45,7 +45,19 @@ Running **Release** by hand without **Publish** builds and tests only. Asset nam
 
 `npm run dist:mac` (on a Mac) builds `Trace-<version>-macOS-arm64.dmg` (Apple silicon) and `…-macOS-x64.dmg` (Intel) into `release/mac` and checks each app: renderer, phone app, the node-pty binding for its processor, and an executable `spawn-helper` (without it no terminal starts). `npm run test:packaged -- "release/mac/mac-arm64/Trace.app/Contents/MacOS/Trace"` then starts a fixture CLI in the packaged app (the Intel app is at `release/mac/mac/Trace.app`; the Release workflow smoke-tests only the arm64 app). The output folder is deleted and rebuilt on every run; `TRACE_MAC_OUTPUT` overrides it.
 
-Published apps are ad-hoc signed, because the Release workflow supplies no Apple credentials. macOS therefore blocks the first launch; **System Settings → Privacy & Security → Open Anyway** allows it once. A Developer ID ($99/year Apple Developer Program) plus notarization would remove that step and is also what in-app updates on macOS require; until then the Mac edition is updated from the downloads page (Settings → Application updates → Open downloads page). Local builds can be Developer ID signed and notarized: set `MAC_SIGNING_IDENTITY` (hardened runtime with `assets/entitlements.mac.plist`), plus `APPLE_KEYCHAIN_PROFILE`, `APPLE_API_KEY` or `APPLE_ID` to notarize; the build then checks the result with `stapler` and `spctl` (see the README). Opened from Finder, the app reads the login shell's PATH so it finds CLIs installed through Homebrew, nvm, Volta or a shell profile.
+**Signing and self-updates.** With these repository secrets, the Release workflow signs both apps with the Developer ID *Kyle Geary (73DB29GHV2)*, notarizes them, and also builds `Trace-<version>-macOS-<arch>.zip` and `latest-mac.yml`. Installed Macs update themselves from those, as Windows does from `latest.yml`:
+
+| Secret | What it holds |
+|---|---|
+| `MAC_CERTIFICATE` | The *Developer ID Application* certificate with its private key, exported from Keychain Access as a `.p12` and base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `MAC_CERTIFICATE_PASSWORD` | The password chosen when exporting the `.p12` |
+| `APPLE_API_KEY` | The contents of an App Store Connect API key file (`AuthKey_<id>.p8`; App Store Connect → Users and Access → Integrations → Team Keys, access *Developer*) |
+| `APPLE_API_KEY_ID` | That key's ID |
+| `APPLE_API_ISSUER` | The issuer ID shown above the keys list |
+
+`build-mac.cjs` then checks the Developer ID signature, hardened runtime, stapled ticket and Gatekeeper's verdict, and that the zips and `latest-mac.yml` exist for this version. The app's `package.json` gets `traceMacUpdates: true`, which is what turns on its updater. macOS's updater installs only an update signed by the same developer, so a Mac on an ad-hoc build (1.11.8 or earlier) installs the first signed version from the downloads page once; after that it updates itself.
+
+Without `MAC_CERTIFICATE`, the apps are ad-hoc signed and no zips are made. macOS then blocks the first launch (**System Settings → Privacy & Security → Open Anyway** allows it once), and such a Mac is updated from the downloads page (Settings → Application updates → Open downloads page). Local builds can be Developer ID signed and notarized: set `MAC_SIGNING_IDENTITY` (hardened runtime with `assets/entitlements.mac.plist`), plus `APPLE_KEYCHAIN_PROFILE`, `APPLE_API_KEY` or `APPLE_ID` to notarize; the build then checks the result with `stapler` and `spctl` (see the README). Opened from Finder, the app reads the login shell's PATH so it finds CLIs installed through Homebrew, nvm, Volta or a shell profile.
 
 ## Update behavior and validation
 

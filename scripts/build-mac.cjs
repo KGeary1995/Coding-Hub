@@ -50,6 +50,15 @@ if (require.main === module) {
       verifyApp(path.join(output, folder, `${product().name}.app`), arch);
       const image = path.join(output, `${product().prefix}-${version}-macOS-${arch}.dmg`);
       assert.ok(fs.statSync(image).size > 50_000_000, `${arch}: disk image is missing or unexpectedly small`);
+      // Signed builds also make the zip installed Macs update from.
+      if (process.env.MAC_SIGNING_IDENTITY) assert.ok(fs.statSync(path.join(output, `${product().prefix}-${version}-macOS-${arch}.zip`)).size > 50_000_000, `${arch}: update zip is missing or unexpectedly small`);
+    }
+    if (process.env.MAC_SIGNING_IDENTITY) {
+      // The feed installed Macs read: this version, and a zip for each processor.
+      const feed = fs.readFileSync(path.join(output, 'latest-mac.yml'), 'utf8');
+      assert.match(feed, new RegExp(`^version: ${version.replace(/\./g, '\\.')}$`, 'm'), 'latest-mac.yml names another version');
+      for (const arch of ['arm64', 'x64']) assert.ok(feed.includes(`-macOS-${arch}.zip`), `latest-mac.yml has no ${arch} zip`);
+      assert.ok(JSON.parse(fs.readFileSync(path.join(output, 'mac-arm64', `${product().name}.app`, 'Contents/Resources/app/package.json'), 'utf8')).traceMacUpdates, 'the signed app does not know it may update itself');
     }
     console.log(`Verified Mac disk images: ${output}`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
