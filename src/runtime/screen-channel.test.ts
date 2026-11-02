@@ -52,3 +52,18 @@ describe('a linked screen as noVNC sees it', async () => {
     expect(channel.readyState).toBe('closed'); expect(closed!.wasClean).toBe(true); expect(channel.error).toBeNull();
   });
 });
+
+describe('typing a password at a locked Mac', async () => {
+  const { unlockKeys, WAKE_KEYS } = await import('./screen-channel');
+  const typed = (password: string) => unlockKeys(password).map((key) => `${key.down ? '+' : '-'}${key.keysym.toString(16)}`).join(' ');
+
+  it('holds Shift around capitals and shifted symbols, and ends with Return', () => {
+    expect(typed('aB!')).toBe('+61 -61 +ffe1 +42 -42 -ffe1 +ffe1 +21 -21 -ffe1 +ff0d -ff0d');
+  });
+  it('sends Latin-1 as itself and other characters as Unicode keysyms', () => {
+    expect(typed('é€')).toBe('+e9 -e9 +10020ac -10020ac +ff0d -ff0d');
+  });
+  it('wakes with a Shift tap that types nothing', () => {
+    expect(WAKE_KEYS.map((key) => key.keysym)).toEqual([0xffe1, 0xffe1]);
+  });
+});

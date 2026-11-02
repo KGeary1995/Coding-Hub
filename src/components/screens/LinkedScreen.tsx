@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { MousePointer2, RotateCcw, X } from 'lucide-react';
+import { LockKeyhole, MousePointer2, RotateCcw, X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
-import type { LinkedComputer } from '../../../shared/remote';
+import type { LinkedComputer, LinkedScreenState } from '../../../shared/remote';
 import type { ScreenKind } from '../../../shared/screen';
-import { savedCredentials, screen, ScreenChannel } from '../../runtime/screen-channel';
+import { savedCredentials, screen, ScreenChannel, unlockKeys, WAKE_KEYS, type KeyStroke } from '../../runtime/screen-channel';
+import { workbench } from '../../runtime/workbench';
 
 const XK_SUPER_L = 0xffeb; const XK_CONTROL_L = 0xffe3; const XK_V = 0x0076;
 type Status = 'connecting' | 'signin' | 'connected' | 'ended';
+/** How often an open Mac screen asks whether that Mac is locked, so the note comes and goes with it. */
+const LOCK_CHECK_MS = 5000;
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const mac = navigator.userAgent.includes('Mac');
 /**
  * The modifier each side copies and pastes with differs, so one local key stands in for the other's: on Windows (whose
@@ -31,6 +35,9 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   /** Saved sign-in is skipped on the next try once the computer refused it. */
   const useSaved = useRef(true); const toSave = useRef<{ username: string; password: string } | null>(null);
   const [hasSaved, setHasSaved] = useState(false);
+  /** The saved sign-in when it is that Mac's user (not a bare VNC password): the same password unlocks its screen. */
+  const savedLogin = useRef<string | null>(null);
+  const [locked, setLocked] = useState<boolean | null>(null); const [unlockPassword, setUnlockPassword] = useState(''); const [unlocking, setUnlocking] = useState(false);
   /** Why the computer refused the sign-in, kept for the disconnect that follows; other notes give way to it. */
   const refusal = useRef('');
 
@@ -40,7 +47,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
     void (async () => {
       // Loaded only when a screen is opened: the viewer is large and most sessions never use it.
       const { default: Viewer } = await import('@novnc/novnc');
-      const saved = await savedCredentials(computer.id).catch(() => null); setHasSaved(Boolean(saved));
+      const saved = await savedCredentials(computer.id).catch(() => null); setHasSaved(Boolean(saved)); savedLogin.current = saved && saved.username !== '-' ? saved.password : null;
       if (cancelled) return;
       const channel = new ScreenChannel(computer.id);
       client = new Viewer(target, channel, saved && useSaved.current ? { credentials: saved, shared: true } : { shared: true }); rfb.current = client;
@@ -71,6 +78,14 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
 
   useEffect(() => { if (rfb.current) rfb.current.viewOnly = !control; }, [control]);
 
+  // A locked Mac sends its screen black to every viewer but Apple's: ask Trace there, and say so here instead.
+  const checkLock = () => workbench<LinkedScreenState>({ action: 'linked-screen-state', id: computer.id }).then((state) => { setLocked(state.locked); return state.locked; }, () => null);
+  useEffect(() => {
+    if (status !== 'connected' || kind !== 'system') { setLocked(null); return; }
+    void checkLock(); const timer = setInterval(() => void checkLock(), LOCK_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [status, kind, computer.id]);
+
   // The swapped key is sent as the other side's (down and up, so it never sticks), and its V first puts this computer's
   // text on the other's clipboard: the browser pastes into a hidden field, which hands the text over before V is sent.
   useEffect(() => {
@@ -100,7 +115,21 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
     toSave.current = remember ? { username: named ? username : '-', password } : null;
     setMessage(''); setStatus('connecting'); client.sendCredentials(named ? { username, password } : { password }); setPassword('');
   };
-  const forget = () => void screen({ action: 'screen-forget-credentials', id: computer.id }).then(() => setHasSaved(false), (error: Error) => setMessage(error.message));
+  const forget = () => void screen({ action: 'screen-forget-credentials', id: computer.id }).then(() => { setHasSaved(false); savedLogin.current = null; }, (error: Error) => setMessage(error.message));
+  /** Wakes the Mac, waits for its password field, types the password there and presses Return; then looks again. */
+  const unlock = async (password: string) => {
+    const client = rfb.current; if (!client || !password || unlocking) return;
+    // Keys reach the other computer only while controlling it.
+    setControl(true); client.viewOnly = false; setUnlocking(true); setMessage('');
+    const send = (keys: KeyStroke[]) => { for (const key of keys) client.sendKey(key.keysym, key.code, key.down); };
+    try {
+      send(WAKE_KEYS); await wait(1000); if (rfb.current !== client) return;
+      send(unlockKeys(password)); setUnlockPassword('');
+      // The Mac takes a moment to unlock and to say so.
+      for (let tries = 0; tries < 4; tries++) { await wait(1500); if (await checkLock() === false) return; }
+      setMessage(`${computer.name} is still locked. Check the password and try again; if it is right, unlock it there once and reconnect.`);
+    } finally { setUnlocking(false); client.focus(); }
+  };
   const retry = () => { setMessage(''); setAttempt((value) => value + 1); };
   const named = types.includes('username');
 
@@ -116,6 +145,14 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>
     </header>
     {message && <p className="session-error" role="alert">{message}</p>}
+    {status === 'connected' && locked && <form className="linked-screen-signin linked-screen-unlock" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
+      <p><LockKeyhole size={13} aria-hidden="true" /> <strong>{computer.name} is locked</strong>, so its screen shows black here. Trace can wake it and type your password at its lock screen.</p>
+      <label>Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} onChange={(event) => setUnlockPassword(event.target.value)} /></label>
+      <span className="linked-screen-actions">
+        <button className="tr-action start" type="submit" disabled={!unlockPassword || unlocking}>{unlocking ? 'Unlocking…' : 'Wake and unlock'}</button>
+        {savedLogin.current && <button className="tr-detail-button" type="button" disabled={unlocking} onClick={() => void unlock(savedLogin.current ?? '')}><span className="tr-detail-label">Use saved password</span></button>}
+      </span>
+    </form>}
     {status === 'signin' && <form className="linked-screen-signin" onSubmit={signIn}>
       <p>{named ? `Sign in as a user on ${computer.name}: the name and password you use to log in there.` : `Enter the screen-sharing password set on ${computer.name}.`}</p>
       {named && <label>User name <input autoFocus value={username} autoComplete="off" spellCheck={false} onChange={(event) => setUsername(event.target.value)} /></label>}

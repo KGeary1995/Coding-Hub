@@ -89,3 +89,5 @@
 .linked-screen-signin { display: grid; gap: 10px; justify-items: start; max-width: 420px; padding: 16px; border: 1px solid var(--tr-line); background: var(--tr-surface); }
 .linked-screen-signin p { margin: 0; color: var(--tr-fg-muted); }
 .linked-screen-signin label:not(.linked-screen-toggle) { display: grid; gap: 4px; width: 100%; }
+.linked-screen-unlock p svg { vertical-align: -2px; }
+.linked-screen-actions { display: flex; align-items: center; gap: 8px; }

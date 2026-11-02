@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ChannelControl, LinkedComputer, LinkedComputerEvent, RemoteChannel } from '../../../shared/remote';
+import type { ChannelControl, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
 import type { ChannelEngine } from '../../../shared/types';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -169,6 +169,12 @@ export class LinkedComputers implements RemoteRelay {
     const link = this.linked(id);
     try { await this.request(link, 'api/paste-image', { method: 'POST', body: JSON.stringify({ sessionId, runId, image }), signal: AbortSignal.timeout(60000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to paste images there from here.`); throw error; }
+  }
+  /** Whether that computer's screen is locked; null when it cannot say (Trace there is closed, or older than this check). */
+  async screenState(id: string): Promise<LinkedScreenState> {
+    const link = this.linked(id);
+    try { const body = await (await this.request(link, 'api/screen-state', { signal: AbortSignal.timeout(5000) })).json() as { locked?: unknown }; return { locked: typeof body.locked === 'boolean' ? body.locked : null }; }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_REVOKED') throw error; return { locked: null }; }
   }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
   /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */

@@ -29,6 +29,8 @@ export interface RemoteHost {
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
   idleSeconds?(): number;
+  /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
+  screenLocked?(): boolean | null;
 }
 /** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
 export const DESKTOP_IDLE_SECONDS = 120;
@@ -556,6 +558,11 @@ export class RemoteServer {
       if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/screen-state') {
+      // A locked Mac sends its screen to viewers other than Apple's as black: the linked computer says so instead.
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can ask about this screen.' });
+      return this.send(response, 200, { locked: this.host.screenLocked?.() ?? null });
     }
     if (request.method === 'POST' && url.pathname === '/api/active') {
       // A linked computer is showing this one's channels and its person is using it: that counts as using this one.

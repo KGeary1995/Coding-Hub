@@ -191,6 +191,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-screen-state'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
 const screenSchema = z.discriminatedUnion('action', [
@@ -226,6 +227,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
+  if (request.action === 'linked-screen-state') return linked.screenState(request.id);
   if (request.action === 'linked-watch') { linked.watch(request.id); return null; }
   if (request.action === 'linked-unwatch') { linked.unwatch(request.id); return null; }
   if (request.action === 'linked-fit') { await linked.fit(request.id, request.sessionId, request.runId, request.cols && request.rows ? { cols: request.cols, rows: request.rows } : null); return null; }
@@ -475,6 +477,7 @@ else app.whenReady().then(() => {
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
+    screenLocked: () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.

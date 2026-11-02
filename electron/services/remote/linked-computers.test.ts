@@ -13,7 +13,7 @@ const until = async (check: () => boolean, what: string) => { for (let i = 0; i 
 const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true })); return root; };
 
 /** A computer's remote with one running Claude channel, standing in for Trace on the other computer. */
-async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }) {
+async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }, screen?: { locked: boolean | null }) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = []; const adds: string[] = [];
   const size = { cols: 100, rows: 30 }; const sizes: string[] = []; const images: { reference: RunReference; image: Buffer }[] = [];
@@ -26,6 +26,7 @@ async function computer(id: string, name: string, sessionId: string, idle?: { se
     add: async (engine) => { adds.push(engine); },
     pasteImage: async (reference, image) => { images.push({ reference, image }); },
     ...(idle ? { idleSeconds: () => idle.seconds } : {}),
+    ...(screen ? { screenLocked: () => screen.locked } : {}),
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
@@ -275,6 +276,24 @@ describe('linked computers', () => {
     const phone = await phoneToken(pc.server);
     const refused = await fetch(`${pc.url}api/paste-image`, { method: 'POST', headers: { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'pc-1', runId: 'run-pc-1', image: png.toString('base64') }) });
     expect(refused.status).toBe(403); expect(pc.images).toHaveLength(1);
+  });
+
+  it('asks whether the other computer is locked, from linked computers only', async () => {
+    const screen = { locked: true as boolean | null };
+    const pc = await computer(PC, 'MacBook-Air', 'pc-1', undefined, screen);
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'Obsidian-Halo' }), () => [{ id: PC, name: 'MacBook-Air', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop()); await mac.link(PC, pc.server.pair('computer').pairing!.code);
+    expect(await mac.screenState(PC)).toEqual({ locked: true });
+    screen.locked = false; expect(await mac.screenState(PC)).toEqual({ locked: false });
+    screen.locked = null; expect(await mac.screenState(PC)).toEqual({ locked: null });
+    // A phone's key cannot ask.
+    const phone = await phoneToken(pc.server);
+    expect((await fetch(`${pc.url}api/screen-state`, { headers: { Authorization: `Bearer ${phone}` } })).status).toBe(403);
+    // A Trace there that cannot say (older, or closed) is not an error: the screen just shows as it is.
+    (mac as unknown as { fetcher: unknown }).fetcher = async () => new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 });
+    expect(await mac.screenState(PC)).toEqual({ locked: null });
+    (mac as unknown as { fetcher: unknown }).fetcher = async () => { throw new TypeError('fetch failed'); };
+    expect(await mac.screenState(PC)).toEqual({ locked: null });
   });
 
   it('says to update the other computer when its Trace cannot add channels yet', async () => {
