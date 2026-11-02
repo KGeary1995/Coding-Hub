@@ -46,7 +46,7 @@ function toolSummary(name: string, input: Record<string, unknown>) {
   return Object.values(input).find((item): item is string => typeof item === 'string')?.slice(0, 120) ?? '';
 }
 
-function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' }>; result?: ToolResult }) {
+export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' }>; result?: ToolResult }) {
   const summary = toolSummary(block.name, block.input);
   const edit = block.name === 'Edit' && typeof block.input.old_string === 'string' ? block.input : null;
   return <details className={`chat-tool ${result?.isError ? 'error' : ''} ${result ? 'done' : 'running'}`}>

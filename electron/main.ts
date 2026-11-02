@@ -18,7 +18,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import type { ChannelControl } from '../shared/remote';
+import type { ChannelControl, ChannelTranscript } from '../shared/remote';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, type IpcMainInvokeEvent } from 'electron';
@@ -194,6 +194,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-screen-state'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-transcript'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
 const screenSchema = z.discriminatedUnion('action', [
@@ -230,10 +231,21 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
   if (request.action === 'linked-screen-state') return linked.screenState(request.id);
+  if (request.action === 'linked-transcript') return linked.transcript(request.id, request.sessionId);
   if (request.action === 'linked-watch') { linked.watch(request.id); return null; }
   if (request.action === 'linked-unwatch') { linked.unwatch(request.id); return null; }
   if (request.action === 'linked-fit') { await linked.fit(request.id, request.sessionId, request.runId, request.cols && request.rows ? { cols: request.cols, rows: request.rows } : null); return null; }
   return linked.status();
+}
+/**
+ * A channel's whole conversation, read from its CLI's own transcript: every restart resumes the same conversation, so
+ * this covers them all, while the terminal shows only the current run. Null for terminals and channels never run.
+ */
+function channelTranscript(sessionId: string): ChannelTranscript {
+  const config = storage?.load()?.sessions.find((session) => session.id === sessionId)?.config;
+  if (!config || config.engine === 'shell' || !config.resumeId) return null;
+  const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined);
+  return file ? chatHistory(config.engine, file) : null;
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
@@ -480,6 +492,7 @@ else app.whenReady().then(() => {
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
+    transcript: channelTranscript,
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
@@ -560,6 +573,7 @@ else app.whenReady().then(() => {
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if (action.startsWith('remote-')) return remoteControl(payload);
     if (action.startsWith('linked-')) return linkedRequest(payload);
+    if (action === 'channel-transcript') return channelTranscript(z.object({ action: z.literal('channel-transcript'), sessionId: z.string().min(1).max(100) }).strict().parse(payload).sessionId);
     if (action === 'plan-limits') { const request = z.object({ action: z.literal('plan-limits'), force: z.boolean().optional() }).strict().parse(payload); return planLimits.refresh(request.force); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {

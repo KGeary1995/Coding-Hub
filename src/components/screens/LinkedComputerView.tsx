@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
-import { GripVertical, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
-import type { ChannelControl, LinkedComputer, RemoteChannel } from '../../../shared/remote';
+import { GripVertical, MessagesSquare, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
+import type { ChannelControl, ChannelTranscript, LinkedComputer, RemoteChannel } from '../../../shared/remote';
+import { TranscriptView } from '../chat/TranscriptView';
 import { linkedTerminal } from '../../runtime/linked-terminals';
 import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
@@ -13,7 +14,7 @@ const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' }
 /** One channel on a linked computer: its live terminal at that CLI's size, and start, stop, restart and interrupt. */
 function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: RemoteChannel }) {
   const container = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState<ChannelControl | null>(null); const [error, setError] = useState(''); const [confirmClose, setConfirmClose] = useState(false);
+  const [busy, setBusy] = useState<ChannelControl | null>(null); const [error, setError] = useState(''); const [confirmClose, setConfirmClose] = useState(false); const [conversation, setConversation] = useState(false);
   useEffect(() => {
     if (!container.current || channel.chat) return;
     const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel);
@@ -60,6 +61,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
           <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => void control('restart')}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'restart' ? 'Restarting' : 'Restart'}</span></button>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => void control('stop')}><Square size={12} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'stop' ? 'Stopping' : 'Stop'}</span></button></>
         : <button className="tr-action start" disabled={Boolean(busy)} onClick={() => void control('start')}><Play size={12} aria-hidden="true" /> {busy === 'start' ? 'Starting' : 'Start'}</button>}
+      {channel.engine !== 'shell' && !channel.chat && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-pressed={conversation} aria-label={`Conversation of channel ${channel.channel} on ${computer.name}`} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
       {confirmClose
         ? <span className="linked-close-confirm" role="group" aria-label={`Close channel ${channel.channel} on ${computer.name}?`}><span className="tr-detail-label">{channel.running ? 'Stop and close?' : 'Close?'}</span>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => { setConfirmClose(false); void control('close'); }}><span className="tr-detail-label">{busy === 'close' ? 'Closing' : 'Close'}</span></button>
@@ -71,7 +73,8 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
     {channel.chat
       ? <p className="history-empty">This is a chat channel. Its conversation is shown on {computer.name}, and answered there.</p>
-      : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} /></div>}
+      : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
+        {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}
   </article>;
 }
 

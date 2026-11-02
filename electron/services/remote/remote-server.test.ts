@@ -242,6 +242,19 @@ describe('channel controls', () => {
   });
 });
 
+describe('channel transcripts', () => {
+  it('gives phones and linked computers a channel\'s conversation, and refuses unknown channels', async () => {
+    const { server } = await remote();
+    const history = { type: 'history' as const, messages: [{ role: 'user' as const, text: 'hello', images: 0 }], results: {} };
+    (server as unknown as { host: RemoteHost }).host.transcript = (sessionId) => sessionId === 's1' ? history : null;
+    await server.setEnabled(true);
+    const read = async (token: string, sessionId: string) => { const response = await fetch(base(server) + `/api/transcript?sessionId=${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }); return { status: response.status, body: await response.json() as { transcript?: unknown } }; };
+    expect(await read(await paired(server), 's1')).toEqual({ status: 200, body: { transcript: history } });
+    expect(await read(await computer(server), 's2')).toEqual({ status: 200, body: { transcript: null } });
+    expect((await read(await paired(server), 'nope')).status).toBe(400);
+  });
+});
+
 describe('stream events', () => {
   it('escapes Unicode line and paragraph separators, which older phones read as line ends', () => {
     const LS = String.fromCharCode(0x2028); const PS = String.fromCharCode(0x2029); const raw = 'a' + LS + 'b' + PS + 'c';

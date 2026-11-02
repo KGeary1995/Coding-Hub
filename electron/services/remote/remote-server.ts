@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
 import type { AccountLabel } from '../../../shared/accounts';
-import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
 import { HubError } from '../cli/engine-adapter';
@@ -31,6 +31,8 @@ export interface RemoteHost {
   idleSeconds?(): number;
   /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
   screenLocked?(): boolean | null | Promise<boolean | null>;
+  /** A channel's conversation from its CLI's transcript, across restarts. */
+  transcript?(sessionId: string): ChannelTranscript;
 }
 /** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
 export const DESKTOP_IDLE_SECONDS = 120;
@@ -47,6 +49,8 @@ export interface RemoteRelay {
   revokePhone?(relayKey: string): Promise<void>;
   /** Draws a linked computer's channel at a phone's size, or (null) gives it back. */
   size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
+  /** A linked computer's channel's conversation, for a phone of this computer. */
+  relayTranscript?(sessionId: string): Promise<ChannelTranscript>;
 }
 /**
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
@@ -558,6 +562,15 @@ export class RemoteServer {
       if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/transcript') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (this.local(sessionId)) return this.send(response, 200, { transcript: this.host.transcript?.(sessionId) ?? null });
+      if (kind === 'phone' && this.relay?.relayTranscript) {
+        try { return this.send(response, 200, { transcript: await this.relay.relayTranscript(sessionId) }); }
+        catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That conversation could not be read.' }); }
+      }
+      return this.send(response, 400, { error: 'Unknown channel.' });
     }
     if (request.method === 'GET' && url.pathname === '/api/screen-state') {
       // A locked Mac sends its screen to viewers other than Apple's as black: the linked computer says so instead.

@@ -7,8 +7,8 @@ import './phone.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
-import { PAIRING_PREFIX, type RemoteChannel } from '../shared/remote';
-import { alertsOn, alertsSupported, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { PAIRING_PREFIX, type ChannelTranscript, type RemoteChannel } from '../shared/remote';
+import { alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
@@ -237,6 +237,7 @@ function showChannel(sessionId: string) {
   const keys = h('div', { className: 'keys', aria: { role: 'group', label: 'Keys' } }, ...KEYS.map((row) => h('div', {}, ...row.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)))));
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
   const tools = h('div', { className: 'tools', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
+    channel && channel.engine !== 'shell' ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
     h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'While you use the computer, the channel keeps its desktop size. Fit to phone redraws it at this screen\'s size until you type in it on the computer.' }, 'Fit to phone'),
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
@@ -373,6 +374,31 @@ function showCopy() {
     h('div', { className: 'copy-bar' }, h('strong', {}, 'Copy text'), status, copyAll, h('button', { className: 'icon small', type: 'button', onclick: close }, 'Done')),
     h('p', { className: 'dim' }, 'Press and hold to select part of it, or copy it all.'), body);
   document.body.append(sheet); body.scrollTop = body.scrollHeight;
+}
+
+/**
+ * A Claude Code or Codex channel's whole conversation, from its CLI's transcript on the computer: the screen shows only
+ * the current run, so this is where what was said before a restart can be read again.
+ */
+async function showConversation(sessionId: string) {
+  const status = h('span', { className: 'dim', aria: { live: 'polite' } }, 'Reading…');
+  const body = h('div', { className: 'copy-text conversation', tabIndex: 0 });
+  const sheet = h('div', { className: 'copy-sheet', aria: { role: 'dialog', modal: 'true', label: 'Conversation' } },
+    h('div', { className: 'copy-bar' }, h('strong', {}, 'Conversation'), status, h('button', { className: 'icon small', type: 'button', onclick: () => sheet.remove() }, 'Done')), body);
+  document.body.append(sheet);
+  try {
+    const { transcript } = await (await api(`/api/transcript?sessionId=${encodeURIComponent(sessionId)}`)).json() as { transcript: ChannelTranscript };
+    if (!transcript?.messages.length) { status.textContent = ''; body.append(h('p', { className: 'dim' }, 'No saved conversation yet. It appears once the agent has answered in this channel.')); return; }
+    status.textContent = transcript.messages.length === 200 ? 'Latest 200 messages' : '';
+    for (const message of transcript.messages) {
+      if (message.role === 'user') { body.append(h('p', { className: 'said you' }, h('b', {}, 'You  '), message.text || (message.images ? `(${message.images === 1 ? 'an image' : `${message.images} images`})` : ''))); continue; }
+      for (const block of message.blocks) {
+        if (block.type === 'text') body.append(h('p', { className: 'said agent' }, block.text));
+        else if (block.type === 'tool') body.append(h('p', { className: 'said tool dim' }, `▸ ${block.name}`));
+      }
+    }
+    body.scrollTop = body.scrollHeight;
+  } catch (error) { status.textContent = ''; body.append(h('p', { className: 'error', aria: { role: 'alert' } }, (error as Error).message)); }
 }
 
 function renderChannel() {
