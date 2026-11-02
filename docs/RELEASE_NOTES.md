@@ -1,8 +1,9 @@
 ## What's new
 
-1.13.3 shows Unlock for a Mac that was locked when Trace started (update the Mac):
+1.13.3 keeps Claude Code channels' conversations across restarts, and says when a Mac is locked (update both computers):
 
-- **Locked Mac, always noticed.** Trace on a Mac now asks macOS whether the screen is locked. Before, a Trace that started or updated while the Mac was already locked said the Mac was unlocked, so the PC showed a black screen with no **Wake and unlock**.
+- **Claude Code channels keep their conversation again.** When Trace was opened or updated by a Claude session (for example, asking the Claude app to update Trace), every Claude Code channel acted as part of that session and stopped saving its conversation; a restart then resumed from before it. Trace now starts Claude Code without that session's settings. Quit and reopen Trace once after updating.
+- **Locked Mac, always noticed.** Trace on a Mac now asks macOS whether the screen is locked. Before, a Trace that started or updated while the Mac was already locked said the Mac was unlocked, so the PC showed a black screen without saying why. With only Screen Sharing turned on, macOS 26 takes no keys from Trace at its lock screen, so unlock the Mac there.
 
 1.13.2 lets you unlock a Mac whose Trace cannot say it is locked (update the PC):
 
