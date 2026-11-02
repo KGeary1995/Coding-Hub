@@ -7,8 +7,10 @@ import './phone.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
+import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
+import type RFB from '@novnc/novnc';
 import { PAIRING_PREFIX, type ChannelTranscript, type RemoteChannel } from '../shared/remote';
-import { alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
@@ -88,8 +90,48 @@ function showList() {
   leaveChannel(); disposeTerminal(); current = null; run = null;
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
   renderList(); listen(null);
+}
+
+/** Keys a phone keyboard lacks, as X keysyms. */
+const SCREEN_KEYS: [string, number, string][] = [['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']];
+let viewer: RFB | null = null;
+/**
+ * The computer's own screen, through its screen-sharing server (macOS Screen Sharing), carried over this remote: tap to
+ * click, drag to move, and type with the phone's keyboard. The Mac asks for its user name and password, which go to
+ * it, not to Trace. A locked Mac shows black here and takes no keys: macOS shows its lock screen only to Apple's viewer.
+ */
+async function showScreen() {
+  leaveChannel(); disposeTerminal(); current = null; run = null; viewer?.disconnect(); viewer = null;
+  const status = h('p', { className: 'dim', aria: { live: 'polite' } }, 'Connecting…');
+  const user = h('input', { autocomplete: 'username', autocapitalize: 'none', placeholder: 'Mac user name', aria: { label: 'User name' } });
+  const password = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Password', aria: { label: 'Password' } });
+  const signin = h('form', { className: 'compose screen-signin', hidden: true }, user, password, h('button', { className: 'primary', type: 'submit' }, 'Sign in'));
+  const view = h('div', { className: 'screen-view', aria: { label: 'Computer screen' } });
+  const typing = h('input', { className: 'screen-typing', autocomplete: 'off', autocapitalize: 'none', placeholder: 'Type here to send keys', aria: { label: 'Keys to send' } });
+  const send = (keys: KeyStroke[]) => { for (const key of keys) viewer?.sendKey(key.keysym, key.code, key.down); };
+  // What the phone's keyboard inserts goes over as key presses; the field itself stays empty.
+  typing.addEventListener('input', () => { if (typing.value) { send(unlockKeys(typing.value).filter((key) => key.keysym !== 0xff0d)); typing.value = ''; } });
+  typing.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === 'Backspace') { event.preventDefault(); send([{ keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: true }, { keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: false }]); } });
+  const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, h('div', {}, ...SCREEN_KEYS.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label))));
+  const back = () => { viewer?.disconnect(); viewer = null; showList(); };
+  app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
+  try {
+    const { ticket } = await (await api('/api/screen-ticket', { method: 'POST' })).json() as { ticket: string };
+    const { default: Viewer } = await import('@novnc/novnc');
+    const origin = activeTarget().base || location.origin;
+    const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/screen?ticket=${encodeURIComponent(ticket)}`, { shared: true }); viewer = client;
+    client.scaleViewport = true; client.showDotCursor = true; client.background = 'transparent';
+    client.addEventListener('connect', () => { status.textContent = ''; signin.hidden = true; });
+    client.addEventListener('credentialsrequired', () => { status.textContent = 'Sign in with this computer\'s user name and password.'; signin.hidden = false; user.focus(); });
+    signin.onsubmit = (event) => { event.preventDefault(); client.sendCredentials({ username: user.value, password: password.value }); password.value = ''; status.textContent = 'Signing in…'; };
+    client.addEventListener('securityfailure', () => { status.textContent = 'That user name and password were not accepted.'; });
+    client.addEventListener('disconnect', () => {
+      if (viewer !== client) return; viewer = null; signin.hidden = true;
+      status.replaceChildren('The screen connection closed. ', h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen() }, 'Reconnect'));
+    });
+  } catch (error) { status.textContent = (error as Error).message; }
 }
 
 /** Alerts: a switch that subscribes this phone to the computer's Web Push alerts, or why it cannot. */

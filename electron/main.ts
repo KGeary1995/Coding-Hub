@@ -493,6 +493,8 @@ else app.whenReady().then(() => {
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
     transcript: channelTranscript,
+    // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
+    ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
