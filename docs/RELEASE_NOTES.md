@@ -1,5 +1,13 @@
 ## What's new
 
+1.14.0 lets you read whole conversations, see your Mac's screen from your phone, and close and arrange another computer's channels (update both computers and reload the phone app):
+
+- **Conversation.** Claude Code and Codex channels have **Conversation**, which shows the channel's whole conversation, including what was said before restarts. It works on the computer itself, on another computer's tab and on the phone.
+- **Screen on your phone.** **Screen** above the channel list shows your Mac's screen and lets you control it: tap to click, drag to move, type in the field under it. It uses the Mac's own Screen Sharing and asks for your Mac's user name and password. A locked Mac still shows black.
+- **Close another computer's channels.** **Close** on a channel in another computer's tab stops it and removes it there, after you confirm.
+- **Arrange another computer's channels.** Drag another computer's channels by their grip and resize them by their corner. The arrangement is kept on this computer only; that computer's own layout doesn't change.
+- **Locked Mac, said plainly.** The Screen note now says that with only Screen Sharing on, a locked Mac takes no keys from Trace, so unlock it at the Mac.
+
 1.13.3 keeps Claude Code channels' conversations across restarts, and says when a Mac is locked (update both computers):
 
 - **Claude Code channels keep their conversation again.** When Trace was opened or updated by a Claude session (for example, asking the Claude app to update Trace), every Claude Code channel acted as part of that session and stopped saving its conversation; a restart then resumed from before it. Trace now starts Claude Code without that session's settings. Quit and reopen Trace once after updating.
