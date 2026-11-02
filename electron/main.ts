@@ -30,6 +30,7 @@ import { pathToFileURL } from 'node:url';
 import os, { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
+import { macScreenLock } from './services/remote/screen-lock';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { adoptLoginShellPath, discoverEngine } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
@@ -477,7 +478,8 @@ else app.whenReady().then(() => {
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
-    screenLocked: () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
+    // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
+    screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
   }, undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.

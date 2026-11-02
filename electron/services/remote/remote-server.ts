@@ -30,7 +30,7 @@ export interface RemoteHost {
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
   idleSeconds?(): number;
   /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
-  screenLocked?(): boolean | null;
+  screenLocked?(): boolean | null | Promise<boolean | null>;
 }
 /** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
 export const DESKTOP_IDLE_SECONDS = 120;
@@ -562,7 +562,7 @@ export class RemoteServer {
     if (request.method === 'GET' && url.pathname === '/api/screen-state') {
       // A locked Mac sends its screen to viewers other than Apple's as black: the linked computer says so instead.
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can ask about this screen.' });
-      return this.send(response, 200, { locked: this.host.screenLocked?.() ?? null });
+      return this.send(response, 200, { locked: (await this.host.screenLocked?.()) ?? null });
     }
     if (request.method === 'POST' && url.pathname === '/api/active') {
       // A linked computer is showing this one's channels and its person is using it: that counts as using this one.
