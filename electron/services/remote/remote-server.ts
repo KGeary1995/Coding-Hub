@@ -79,7 +79,7 @@ export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u20
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']) }).strict();
-const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
+const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict();
 /** A pasted image (PNG or JPEG, base64), at most 15 MB. */
 const IMAGE_LIMIT = 15 * 1024 * 1024;
 const pasteSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(Math.ceil(IMAGE_LIMIT / 3) * 4).regex(/^[A-Za-z0-9+/]+=*$/) }).strict();

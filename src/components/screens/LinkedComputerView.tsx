@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import GridLayout, { type Layout } from 'react-grid-layout';
+import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
+import { GripVertical, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
 import type { ChannelControl, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import { linkedTerminal } from '../../runtime/linked-terminals';
 import { workbench } from '../../runtime/workbench';
@@ -8,11 +10,10 @@ import { useWorkspaceStore } from '../../state/workspace-store';
 import { LinkedScreen } from './LinkedScreen';
 
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
-
 /** One channel on a linked computer: its live terminal at that CLI's size, and start, stop, restart and interrupt. */
 function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: RemoteChannel }) {
   const container = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState<ChannelControl | null>(null); const [error, setError] = useState('');
+  const [busy, setBusy] = useState<ChannelControl | null>(null); const [error, setError] = useState(''); const [confirmClose, setConfirmClose] = useState(false);
   useEffect(() => {
     if (!container.current || channel.chat) return;
     const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel);
@@ -48,6 +49,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
   const tone = channel.account ? String(channel.account.tone % 4) : undefined;
   return <article className={`session-tile tr-tile linked-tile ${channel.engine} state-${state}`} data-account={tone} aria-label={`${computer.name} channel ${channel.channel}: ${channel.title}${channel.account ? `, ${channel.account.name} account` : ''}`}>
     <header className="tile-header tr-tile-head">
+      <span className="tile-drag-handle" title="Drag to move (only here)"><GripVertical size={14} /></span>
       <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${channel.engine})` }} title={ENGINE_NAME[channel.engine]}>CH{channel.channel}</span>
       <strong className="tr-tile-name" title={channel.title}>{channel.title}</strong>
       <span className="tr-tile-model model-name">{computer.name}</span>
@@ -58,6 +60,11 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
           <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => void control('restart')}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'restart' ? 'Restarting' : 'Restart'}</span></button>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => void control('stop')}><Square size={12} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'stop' ? 'Stopping' : 'Stop'}</span></button></>
         : <button className="tr-action start" disabled={Boolean(busy)} onClick={() => void control('start')}><Play size={12} aria-hidden="true" /> {busy === 'start' ? 'Starting' : 'Start'}</button>}
+      {confirmClose
+        ? <span className="linked-close-confirm" role="group" aria-label={`Close channel ${channel.channel} on ${computer.name}?`}><span className="tr-detail-label">{channel.running ? 'Stop and close?' : 'Close?'}</span>
+          <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => { setConfirmClose(false); void control('close'); }}><span className="tr-detail-label">{busy === 'close' ? 'Closing' : 'Close'}</span></button>
+          <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => setConfirmClose(false)}><span className="tr-detail-label">Keep</span></button></span>
+        : <button className="tr-detail-button icon" title={`Close this channel on ${computer.name}`} aria-label={`Close channel ${channel.channel} on ${computer.name}`} disabled={Boolean(busy)} onClick={() => setConfirmClose(true)}><X size={13} /></button>}
       <span className="tr-state-chip" role="status">{state === 'idle' ? '○ IDLE' : state === 'waiting' ? '◆ HOLD' : '● RUN'}</span>
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
@@ -90,6 +97,31 @@ export function LinkedComputerView() {
     {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
       {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}. Add one with + Channel.</p>}
       {!computer.connected && <p className="history-empty">{computer.name} is not reachable right now. Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected. If Trace has closed there, Screen still reaches it.</p>}
-      <div className="linked-grid">{computer.channels.map((channel) => <LinkedTile key={channel.sessionId} computer={computer} channel={channel} />)}</div></>}
+      <LinkedGrid computer={computer} /></>}
   </section>;
+}
+
+/** The other computer's channels as tiles that move and resize like this computer's own, by their header grip and corner. */
+function LinkedGrid({ computer }: { computer: LinkedComputer }) {
+  const container = useRef<HTMLDivElement>(null); const [width, setWidth] = useState(0);
+  const [saved, setSaved] = useState(() => loadPlaces(computer.id));
+  useEffect(() => setSaved(loadPlaces(computer.id)), [computer.id]);
+  useLayoutEffect(() => {
+    const element = container.current; if (!element) return;
+    const measure = () => setWidth(element.clientWidth); measure();
+    const observer = new ResizeObserver(measure); observer.observe(element); return () => observer.disconnect();
+  }, []);
+  const ids = computer.channels.map((channel) => channel.sessionId);
+  const layout = arrangeLinked(ids, saved);
+  const change = (next: Layout[]) => {
+    const places = Object.fromEntries(next.filter((tile) => ids.includes(tile.i)).map(({ i, x, y, w, h }) => [i, { x, y, w, h }]));
+    if (JSON.stringify(places) === JSON.stringify(Object.fromEntries(layout.map(({ i, x, y, w, h }) => [i, { x, y, w, h }])))) return;
+    setSaved(places); savePlaces(computer.id, places);
+  };
+  return <div ref={container} className="linked-grid">
+    {width > 0 && <GridLayout className="session-grid" width={width} cols={12} rowHeight={ROW_HEIGHT} margin={[10, 10]} containerPadding={[0, 0]} layout={layout}
+      draggableHandle=".tile-drag-handle" draggableCancel="button,input,select,.terminal-viewport" compactType="vertical" resizeHandles={['se']} onLayoutChange={change}>
+      {computer.channels.map((channel) => <div key={channel.sessionId}><LinkedTile computer={computer} channel={channel} /></div>)}
+    </GridLayout>}
+  </div>;
 }

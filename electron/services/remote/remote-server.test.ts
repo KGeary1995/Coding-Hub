@@ -229,6 +229,19 @@ describe('phone remote', () => {
   });
 });
 
+describe('channel controls', () => {
+  it('lets a linked computer close a channel here, and never a phone', async () => {
+    const { server } = await remote(); const asked: { sessionId: string; control: string }[] = [];
+    (server as unknown as { host: RemoteHost }).host.control = async (sessionId, control) => { asked.push({ sessionId, control }); };
+    await server.setEnabled(true);
+    const post = (token: string, body: unknown) => fetch(base(server) + '/api/control', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post(await computer(server), { sessionId: 's1', control: 'close' })).status).toBe(200);
+    expect(asked).toEqual([{ sessionId: 's1', control: 'close' }]);
+    expect((await post(await paired(server), { sessionId: 's1', control: 'close' })).status).toBe(403);
+    expect(asked).toHaveLength(1);
+  });
+});
+
 describe('stream events', () => {
   it('escapes Unicode line and paragraph separators, which older phones read as line ends', () => {
     const LS = String.fromCharCode(0x2028); const PS = String.fromCharCode(0x2029); const raw = 'a' + LS + 'b' + PS + 'c';

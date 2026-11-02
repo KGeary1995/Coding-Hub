@@ -18,6 +18,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
+import type { ChannelControl } from '../shared/remote';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, type IpcMainInvokeEvent } from 'electron';
@@ -187,7 +188,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-link'), id: z.uuid(), code: z.string().min(1).max(40) }).strict(),
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
-  z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict(),
+  z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
   z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
@@ -234,11 +235,11 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-fit') { await linked.fit(request.id, request.sessionId, request.runId, request.cols && request.rows ? { cols: request.cols, rows: request.rows } : null); return null; }
   return linked.status();
 }
-/** A linked computer asked to start, stop or restart one of this computer's channels; the desktop window does it. */
-function controlChannel(sessionId: string, control: 'start' | 'stop' | 'restart'): Promise<void> { return askWindow({ sessionId, control }); }
+/** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
+function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
 /** A linked computer adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
 function addChannel(engine: ChannelEngine): Promise<void> { return askWindow({ add: engine }); }
-function askWindow(request: { sessionId: string; control: 'start' | 'stop' | 'restart' } | { add: ChannelEngine }): Promise<void> {
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine }): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {

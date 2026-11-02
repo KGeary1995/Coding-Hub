@@ -17,7 +17,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }
 export type RemoteDeviceKind = 'phone' | 'computer';
 /** What a linked computer may ask this one to do with a channel, beyond typing into it. */
-export type ChannelControl = 'start' | 'stop' | 'restart';
+/** `close` stops the channel if it is running and removes it, as the X on its tile does. */
+export type ChannelControl = 'start' | 'stop' | 'restart' | 'close';
 /** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
 export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine };
 export interface TailscaleState {
