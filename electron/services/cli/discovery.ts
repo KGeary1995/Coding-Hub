@@ -32,8 +32,22 @@ export function adoptLoginShellPath(env: NodeJS.ProcessEnv = process.env, read: 
   env.PATH = [...new Set([...(env.PATH ?? '').split(':'), ...shellPath.split(':')].filter(Boolean))].join(':');
 }
 
+/** Variables Claude Code sets for the processes it starts, naming its own session, account and host app. */
+const AGENT_SESSION = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_.*|CLAUDE_CODE_(ENTRYPOINT|SESSION_ID|HOST_SESSION_ID|SESSION_ATTENDED|DESKTOP_APP_VERSION|TERMINAL_MCP_TOOLS|SDK_.*|OAUTH_.*|ACCOUNT_UUID|USER_EMAIL|EAGER_FLUSH|EMIT_STARTUP_TIMING|ENABLE_ASK_USER_QUESTION_TOOL|SIMPLE|DISABLE_CRON))$/;
+/**
+ * Trace started from inside a Claude session (the desktop app or a terminal agent asked to open or update it) inherits
+ * that session's variables. Passed on, they make every Claude Code channel act as part of that other session: it did
+ * not save its conversation, so a restart resumed from before them. Only those variables go, and only when Claude Code
+ * set them (CLAUDECODE or CLAUDE_CODE_ENTRYPOINT is present); settings the person exported, such as a model or
+ * provider, stay.
+ */
+export function withoutAgentSession(env: Record<string, string>): Record<string, string> {
+  if (!env.CLAUDECODE && !env.CLAUDE_CODE_ENTRYPOINT) return env;
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !AGENT_SESSION.test(key)));
+}
+
 export function hostEnvironment(): Record<string, string> {
-  const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const env = withoutAgentSession(Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)));
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   const extra = process.platform === 'win32'
     ? [path.join(os.homedir(), '.local', 'bin'), ...(env.APPDATA ? [path.join(env.APPDATA, 'npm')] : [])]

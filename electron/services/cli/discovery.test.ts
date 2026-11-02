@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, loginShellPath, npmEntryForShim } from './discovery';
+import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, loginShellPath, npmEntryForShim, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -64,5 +64,16 @@ describe('Mac login shell PATH', () => {
     expect(env.PATH).toBe('/usr/bin:/bin:/opt/homebrew/bin:/Users/me/.volta/bin');
     adoptLoginShellPath(env, () => null);
     expect(env.PATH).toBe('/usr/bin:/bin:/opt/homebrew/bin:/Users/me/.volta/bin');
+  });
+});
+
+describe('withoutAgentSession', () => {
+  it('drops the session a Claude agent passed to Trace, keeping the person\'s own settings', () => {
+    const inherited = { PATH: '/bin', CLAUDECODE: '1', CLAUDE_PID: '22011', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_SESSION_ID: '3811d0e6-2794-42b9-bba3-c36e5c7813ae', CLAUDE_CODE_OAUTH_TOKEN: 'secret', CLAUDE_AGENT_SDK_VERSION: '0.3.309', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'opus' };
+    expect(withoutAgentSession(inherited)).toEqual({ PATH: '/bin', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_MODEL: 'opus' });
+  });
+  it('leaves an environment alone when no agent started Trace', () => {
+    const own = { PATH: '/bin', CLAUDE_CODE_SESSION_ID: 'set-by-hand' };
+    expect(withoutAgentSession(own)).toBe(own);
   });
 });
