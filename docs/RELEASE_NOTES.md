@@ -1,5 +1,9 @@
 ## What's new
 
+1.13.2 lets you unlock a Mac whose Trace cannot say it is locked (update the PC):
+
+- **Unlock, always there.** A Mac's lock screen shows black to Trace: macOS shows it only to Apple's own viewer. When Trace on the Mac is closed or older than 1.13.1, so it cannot say it is locked, **Unlock** in the Screen bar opens the password field. **Wake and unlock** wakes the Mac, types your password at its lock screen and presses Return.
+
 1.13.1 says when your Mac is locked, and unlocks it from your PC (update both computers):
 
 - **Locked Mac, said plainly.** A Mac's screen goes black to Trace while the Mac is locked. Trace now says the Mac is locked instead, and asks for its password.

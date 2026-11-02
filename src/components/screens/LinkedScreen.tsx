@@ -38,6 +38,8 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   /** The saved sign-in when it is that Mac's user (not a bare VNC password): the same password unlocks its screen. */
   const savedLogin = useRef<string | null>(null);
   const [locked, setLocked] = useState<boolean | null>(null); const [unlockPassword, setUnlockPassword] = useState(''); const [unlocking, setUnlocking] = useState(false);
+  /** The unlock form, opened from the bar when Trace on that Mac cannot say whether it is locked (closed, or older). */
+  const [unlockOpen, setUnlockOpen] = useState(false);
   /** Why the computer refused the sign-in, kept for the disconnect that follows; other notes give way to it. */
   const refusal = useRef('');
 
@@ -126,12 +128,14 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       send(WAKE_KEYS); await wait(1000); if (rfb.current !== client) return;
       send(unlockKeys(password)); setUnlockPassword('');
       // The Mac takes a moment to unlock and to say so.
-      for (let tries = 0; tries < 4; tries++) { await wait(1500); if (await checkLock() === false) return; }
+      for (let tries = 0; tries < 4; tries++) { await wait(1500); const now = await checkLock(); if (now === false) return; if (now === null) { setUnlockOpen(false); return; } }
       setMessage(`${computer.name} is still locked. Check the password and try again; if it is right, unlock it there once and reconnect.`);
     } finally { setUnlocking(false); client.focus(); }
   };
   const retry = () => { setMessage(''); setAttempt((value) => value + 1); };
   const named = types.includes('username');
+  const lockUnknown = status === 'connected' && kind === 'system' && locked === null;
+  const showUnlock = status === 'connected' && (locked === true || (lockUnknown && unlockOpen));
 
   return <section className="linked-screen" aria-label={`${computer.name} screen`}>
     <header className="linked-screen-bar">
@@ -139,14 +143,15 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <span className={`storage-status ${status === 'connected' ? 'saved' : ''}`} role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : 'Disconnected'}</span>
       <span className="tr-spacer" />
       <button className="tr-detail-button" aria-pressed={control} title={control ? 'Mouse and keyboard reach the other computer' : 'Only watching: nothing is sent'} onClick={() => setControl((value) => !value)}><MousePointer2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">{control ? 'Control' : 'View only'}</span></button>
+      {lockUnknown && <button className="tr-detail-button" aria-pressed={unlockOpen} title={`Wake ${computer.name} and type your password at its lock screen`} onClick={() => setUnlockOpen((value) => !value)}><LockKeyhole size={13} className="tr-detail-icon" /><span className="tr-detail-label">Unlock</span></button>}
       {swap && <label className="linked-screen-toggle" title={swap.title}><input type="checkbox" checked={command} onChange={(event) => setCommand(event.target.checked)} /> {swap.label}</label>}
       {hasSaved && <button className="tr-detail-button" title={`Forget the password saved for ${computer.name}`} onClick={forget}><span className="tr-detail-label">Forget password</span></button>}
       <button className="tr-detail-button" onClick={retry}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Reconnect</span></button>
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>
     </header>
     {message && <p className="session-error" role="alert">{message}</p>}
-    {status === 'connected' && locked && <form className="linked-screen-signin linked-screen-unlock" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
-      <p><LockKeyhole size={13} aria-hidden="true" /> <strong>{computer.name} is locked</strong>, so its screen shows black here. Trace can wake it and type your password at its lock screen.</p>
+    {showUnlock && <form className="linked-screen-signin linked-screen-unlock" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
+      <p><LockKeyhole size={13} aria-hidden="true" /> {locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} Trace can wake it and type your password at its lock screen.</p>
       <label>Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} onChange={(event) => setUnlockPassword(event.target.value)} /></label>
       <span className="linked-screen-actions">
         <button className="tr-action start" type="submit" disabled={!unlockPassword || unlocking}>{unlocking ? 'Unlocking…' : 'Wake and unlock'}</button>
