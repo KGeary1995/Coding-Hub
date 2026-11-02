@@ -1,5 +1,9 @@
 ## What's new
 
+1.13.3 shows Unlock for a Mac that was locked when Trace started (update the Mac):
+
+- **Locked Mac, always noticed.** Trace on a Mac now asks macOS whether the screen is locked. Before, a Trace that started or updated while the Mac was already locked said the Mac was unlocked, so the PC showed a black screen with no **Wake and unlock**.
+
 1.13.2 lets you unlock a Mac whose Trace cannot say it is locked (update the PC):
 
 - **Unlock, always there.** A Mac's lock screen shows black to Trace: macOS shows it only to Apple's own viewer. When Trace on the Mac is closed or older than 1.13.1, so it cannot say it is locked, **Unlock** in the Screen bar opens the password field. **Wake and unlock** wakes the Mac, types your password at its lock screen and presses Return.
