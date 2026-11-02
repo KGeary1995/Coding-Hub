@@ -65,8 +65,9 @@ const subscribeSchema = z.object({ endpoint: z.string().max(2048), expirationTim
 /** At most one alert per channel and kind in this window, so a CLI that keeps asking does not flood the phone. */
 const ALERT_INTERVAL = 20000;
 type Device = z.infer<typeof deviceSchema>;
-const settingsSchema = z.object({ enabled: z.boolean() }).strict();
+const settingsSchema = z.object({ enabled: z.boolean(), autoLink: z.boolean().optional() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
+const autoLinkSchema = z.object({ name: z.string().max(200), machineId: z.uuid() }).strict();
 const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
 const phoneKeyRevokeSchema = z.object({ relayKey: z.string().min(1).max(100) }).strict();
 const computerKeySchema = z.object({ id: z.uuid() }).strict();
@@ -171,8 +172,11 @@ export class RemoteServer {
   private saveDevices(devices: Device[]) { save(this.root, 'remote-devices.json', devicesSchema.parse(devices)); }
   private settings() { return load(this.root, 'remote.json', settingsSchema, { enabled: false }); }
   get enabled() { return this.settings().enabled; }
+  /** On unless turned off: the person's own computers link without a code (see `owner`). */
+  get autoLink() { return this.settings().autoLink ?? true; }
+  setAutoLink(autoLink: boolean) { save(this.root, 'remote.json', { ...this.settings(), autoLink }); return this.status(); }
 
-  async setEnabled(enabled: boolean) { save(this.root, 'remote.json', { enabled }); if (enabled) await this.start(); else await this.stop(); }
+  async setEnabled(enabled: boolean) { save(this.root, 'remote.json', { ...this.settings(), enabled }); if (enabled) await this.start(); else await this.stop(); }
   async start() {
     if (this.server || !this.enabled) return;
     const server = http.createServer((request, response) => { void this.handle(request, response).catch(() => { if (!response.headersSent) this.send(response, 500, { error: 'The remote request failed.' }); else response.destroy(); }); });
@@ -220,7 +224,7 @@ export class RemoteServer {
   status(): RemoteStatus {
     const base = this.tailscale.serving && this.tailscale.host ? `https://${this.tailscale.host}/` : null;
     const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString(), kind: this.pairing.kind } : null;
-    return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing, serveProblem: this.tailscale.serving ? null : this.serveProblem,
+    return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing, serveProblem: this.tailscale.serving ? null : this.serveProblem, autoLink: this.autoLink,
       devices: this.devices().map(({ id, name, createdAt, lastSeen, push, kind }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push), kind: kind ?? 'phone' })) };
   }
 
@@ -401,6 +405,26 @@ export class RemoteServer {
     for await (const chunk of request) { size += (chunk as Buffer).length; if (size > limit) throw new HubError('REMOTE_BODY', 'Request too large.'); chunks.push(chunk as Buffer); }
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown;
   }
+  /** Makes a key for a phone or computer that proved itself, and keeps only its hash. */
+  private issue(kind: RemoteDeviceKind, rawName: string, machineId: string | undefined) {
+    const token = randomBytes(32).toString('base64url'); const name = rawName.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || (kind === 'computer' ? 'Computer' : 'Phone');
+    const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, ...(kind === 'computer' ? { kind, ...(machineId ? { machineId } : {}) } : {}) };
+    // Linking the same computer again replaces its old key rather than leaving it working too.
+    const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
+    for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    this.saveDevices([...kept, device]);
+    return { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) };
+  }
+  /**
+   * The request came through `tailscale serve` from a computer signed in to the same Tailscale login as this one.
+   * Serve removes any Tailscale-User-* headers the sender wrote and sets its own from the tailnet's record of who is
+   * connecting; it sets none for tagged devices or Funnel (refused in `handle`). A program on this computer could call
+   * the loopback port with the header written in, but it already runs as the person and can read Trace's keys.
+   */
+  private owner(request: http.IncomingMessage) {
+    const login = request.headers['tailscale-user-login'];
+    return this.autoLink && this.tailscale.serving && Boolean(this.tailscale.login) && typeof login === 'string' && login.trim().toLowerCase() === this.tailscale.login;
+  }
   private device(request: http.IncomingMessage): Device | null {
     const header = request.headers.authorization; if (!header?.startsWith('Bearer ')) return null;
     const token = header.slice(7).trim(); if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
@@ -444,14 +468,21 @@ export class RemoteServer {
       if (!parsed.success || !pairing || pairing.expires < Date.now()) return this.send(response, 401, { error: 'This pairing code has expired. Start pairing again on the computer.' });
       if (++pairing.attempts > PAIRING_ATTEMPTS) { this.pairing = null; return this.send(response, 401, { error: 'Too many tries. Start pairing again on the computer.' }); }
       if (!same(hash(parsed.data.code.toUpperCase()), hash(pairing.code))) return this.send(response, 401, { error: 'That pairing code is not right.' });
-      this.pairing = null; const kind = pairing.kind; const machineId = kind === 'computer' ? parsed.data.machineId : undefined;
-      const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || (kind === 'computer' ? 'Computer' : 'Phone');
-      const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, ...(kind === 'computer' ? { kind, ...(machineId ? { machineId } : {}) } : {}) };
-      // Linking the same computer again replaces its old key rather than leaving it working too.
-      const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
-      for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
-      this.saveDevices([...kept, device]);
-      return this.send(response, 200, { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) });
+      this.pairing = null;
+      return this.send(response, 200, this.issue(pairing.kind, parsed.data.name, pairing.kind === 'computer' ? parsed.data.machineId : undefined));
+    }
+    // The person's other computers find this one on the tailnet and link to it without a code (see `owner`).
+    if (request.method === 'GET' && url.pathname === '/api/hello') {
+      if (!this.owner(request) || !this.identity) return this.send(response, 403, { error: 'Link with a code from Settings → Other computers.' });
+      return this.send(response, 200, { computer: this.identity });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/auto-link') {
+      if (!this.owner(request)) return this.send(response, 403, { error: 'Link with a code from Settings → Other computers.' });
+      const parsed = autoLinkSchema.safeParse(await this.body(request));
+      if (!parsed.success || parsed.data.machineId === this.identity?.id) return this.send(response, 400, { error: 'Not a computer to link.' });
+      const others = this.devices().filter((item) => !(item.kind === 'computer' && item.machineId === parsed.data.machineId));
+      if (others.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
+      return this.send(response, 200, this.issue('computer', parsed.data.name, parsed.data.machineId));
     }
     if (!url.pathname.startsWith('/api/')) return this.send(response, 404, { error: 'Not found.' });
     const device = this.device(request); if (!device) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });

@@ -45,7 +45,7 @@ import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
-import { serveFailure, serveRemote, stopServing, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
+import { serveFailure, serveRemote, stopServing, tailscalePeers, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
 import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
 import { ScreenShare } from './services/remote/screen-share';
@@ -486,7 +486,7 @@ else app.whenReady().then(() => {
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
-    phone.setRelay(linked); linked.start();
+    phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
@@ -506,6 +506,8 @@ else app.whenReady().then(() => {
     if (!phone.enabled) return; checkedTailscale = Date.now(); const next = await tailscaleState(runTailscale, phone.port);
     phone.tailscale = !next.host && next.error && phone.tailscale.host ? { ...next, host: phone.tailscale.host } : next;
     if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; }
+    // The person's other computers on the tailnet are found and linked with each check (a minute apart).
+    if (phone.autoLink && phone.tailscale.running) void linked?.autoLink().catch(() => {});
   };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   // Every minute, and every ten seconds while the tailnet name is not known yet.
@@ -517,7 +519,9 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-revoke'), id: z.uuid() }).strict(), z.object({ action: z.literal('remote-serve'), automatic: z.boolean().optional() }).strict(),
       z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
+      z.object({ action: z.literal('remote-auto-link'), enabled: z.boolean() }).strict(),
     ]).parse(payload);
+    if (request.action === 'remote-auto-link') phone.setAutoLink(request.enabled);
     if (request.action === 'remote-enable') { await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);

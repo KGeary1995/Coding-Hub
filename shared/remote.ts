@@ -31,6 +31,8 @@ export interface TailscaleState {
   serving: boolean;
   /** Tailscale Funnel would expose the phone remote to the whole internet; the remote refuses to run behind it. */
   funnel: boolean;
+  /** The Tailscale login this computer is signed in with (`person@example.com`); computers on it may link without a code. */
+  login?: string | null;
   error: string | null;
 }
 export interface RemoteStatus {
@@ -45,6 +47,8 @@ export interface RemoteStatus {
   pairing: { code: string; url: string; expiresAt: string; kind: RemoteDeviceKind } | null;
   /** Why the last `tailscale serve` failed, until HTTPS on the tailnet works. */
   serveProblem: ServeProblem | null;
+  /** The person's other computers on the same Tailscale login link with this one without a code. */
+  autoLink: boolean;
 }
 /**
  * What stopped Tailscale HTTPS: `certificates` (HTTPS certificates or MagicDNS are off for the tailnet), `approve`
@@ -61,7 +65,8 @@ export type RemoteRequest =
   | { action: 'remote-test-alert'; id: string }
   /** `automatic` retries after the person returns from Tailscale's settings: no confirmation and no page opened. */
   | { action: 'remote-serve'; automatic?: boolean }
-  | { action: 'remote-open-tailscale' };
+  | { action: 'remote-open-tailscale' }
+  | { action: 'remote-auto-link'; enabled: boolean };
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;

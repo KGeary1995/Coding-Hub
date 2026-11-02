@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
-import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscaleState } from './tailscale';
+import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscalePeers, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 const titles = ['Claude Code', 'Codex'];
@@ -91,6 +91,31 @@ describe('phone remote', () => {
     expect(device.name).toBe('Phone'); expect((await attempt(code)).status).toBe(401);
     const stored = fs.readFileSync(path.join(root, 'remote-devices.json'), 'utf8'); expect(stored).not.toContain(token);
     expect(server.status().devices).toHaveLength(1); expect(server.status().pairing).toBeNull();
+  });
+
+  it('links the person\'s own computers without a code only when Tailscale Serve vouches for the same login', async () => {
+    const { server, root } = await remote(); await server.setEnabled(true); server.identity = { id: '11111111-1111-4111-8111-111111111111', name: 'Desk' };
+    const MACHINE = '6f1c2b9e-1d2a-4c3b-8e4f-5a6b7c8d9e0f'; const me = { 'Tailscale-User-Login': 'Person@Example.com' };
+    const hello = (headers: Record<string, string>) => fetch(base(server) + '/api/hello', { headers });
+    const autoLink = (headers: Record<string, string>, machineId = MACHINE) => fetch(base(server) + '/api/auto-link', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ name: 'Laptop', machineId }) });
+    // Not serving on the tailnet, or no login known: nobody is vouched for.
+    expect((await hello(me)).status).toBe(403); expect((await autoLink(me)).status).toBe(403);
+    server.tailscale = { ...server.tailscale, host: 'desk.example.ts.net', serving: true, login: 'person@example.com' };
+    // Someone else's login, a tagged device or a request without Serve's header, and Funnel traffic, are refused.
+    for (const headers of [{}, { 'Tailscale-User-Login': 'someone@else.com' }, { ...me, 'Tailscale-Funnel-Request': '?1' }]) { expect((await hello(headers)).status).toBe(403); expect((await autoLink(headers)).status).toBe(403); }
+    expect(await (await hello(me)).json()).toEqual({ computer: { id: '11111111-1111-4111-8111-111111111111', name: 'Desk' } });
+    // Its own identity is not a computer to link, and a phone cannot get a key this way.
+    expect((await autoLink(me, '11111111-1111-4111-8111-111111111111')).status).toBe(400);
+    const response = await autoLink(me); expect(response.status).toBe(200);
+    const body = await response.json() as { token: string; device: { kind: string }; computer: { id: string } };
+    expect(body.device.kind).toBe('computer'); expect(body.computer.id).toBe('11111111-1111-4111-8111-111111111111');
+    expect((await fetch(base(server) + '/api/channels', { headers: { Authorization: `Bearer ${body.token}` } })).status).toBe(200);
+    expect(fs.readFileSync(path.join(root, 'remote-devices.json'), 'utf8')).not.toContain(body.token);
+    // Linking again replaces the key rather than adding a second one.
+    await autoLink(me); expect(server.status().devices.filter((device) => device.kind === 'computer')).toHaveLength(1);
+    // Turned off, a code is needed again; turning phone access off and on keeps the choice.
+    expect(server.setAutoLink(false).autoLink).toBe(false); expect((await autoLink(me)).status).toBe(403);
+    await server.setEnabled(false); await server.setEnabled(true); expect(server.autoLink).toBe(false);
   });
 
   it('drops a pairing code after ten wrong tries', async () => {
@@ -287,5 +312,20 @@ describe('tailscale state', () => {
     expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }), 'serve status --json': '' }), 47821)).toMatchObject({ serving: false });
     // HTTPS on another port is not the address the pairing link uses.
     expect(await tailscaleState(runner({ 'status --json': JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }), 'serve status --json': JSON.stringify({ Web: { 'desk.example.ts.net:8443': serving.Web['desk.example.ts.net:443'] } }) }), 47821)).toMatchObject({ serving: false });
+  });
+  it('reads the login this computer is signed in with, and lists only that login\'s online computers', async () => {
+    const status = { BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'Person@Example.com' }, '9': { LoginName: 'friend@example.com' } },
+      Peer: {
+        a: { DNSName: 'laptop.example.ts.net.', UserID: 7, Online: true, OS: 'macOS' },
+        b: { DNSName: 'old.example.ts.net.', UserID: 7, Online: false, OS: 'windows' },
+        c: { DNSName: 'phone.example.ts.net.', UserID: 7, Online: true, OS: 'android' },
+        d: { DNSName: 'shared.example.ts.net.', UserID: 9, Online: true, OS: 'linux' },
+        e: { DNSName: 'server.example.ts.net.', UserID: 7, Online: true, OS: 'linux', Tags: ['tag:server'] },
+      } };
+    expect(await tailscaleState(runner({ 'status --json': JSON.stringify(status), 'serve status --json': '' }), 47821)).toMatchObject({ login: 'person@example.com' });
+    expect(await tailscalePeers(runner({ 'status --json': JSON.stringify(status) }))).toEqual(['https://laptop.example.ts.net/']);
+    // A tagged computer belongs to no person, so nothing is linked from it either.
+    expect(await tailscalePeers(runner({ 'status --json': JSON.stringify({ ...status, Self: { ...status.Self, Tags: ['tag:ci'] } }) }))).toEqual([]);
+    expect(await tailscalePeers(runner({ 'status --json': JSON.stringify({ ...status, BackendState: 'Stopped' }) }))).toEqual([]);
   });
 });

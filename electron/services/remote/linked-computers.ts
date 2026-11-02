@@ -12,6 +12,8 @@ export interface AdvertisedComputer { id: string; name: string; url: string | nu
 export interface RelaySink { output(sessionId: string, runId: string, data: string): void; resize(sessionId: string, runId: string, cols: number, rows: number): void; changed(): void }
 
 const FILE = 'linked-computers.json';
+/** Computers the person unlinked: never linked again without a code. */
+const DECLINED = 'linked-computers-declined.json';
 const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), url: z.string().max(500), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), linkedAt: z.iso.datetime() }).strict();
 type Link = z.infer<typeof linkSchema>;
 const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), chat: z.literal(true).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
@@ -46,6 +48,11 @@ export class LinkedComputers implements RemoteRelay {
   /** Computers whose tab the desktop has open: only their live output is sent to the window. */
   private watching = new Set<string>();
   private activeTimer: ReturnType<typeof setInterval> | null = null;
+  /** Computers that answered on the tailnet, by sync identity: listed even when the Drive folders differ. */
+  private found = new Map<string, AdvertisedComputer>();
+  private discovering: Promise<void> | null = null;
+  /** The HTTPS addresses of the person's online computers on the tailnet (`tailscalePeers`); none until set. */
+  peers: () => Promise<string[]> = async () => [];
   constructor(
     private root: string,
     private self: () => { id: string; name: string },
@@ -63,7 +70,7 @@ export class LinkedComputers implements RemoteRelay {
 
   status(): LinkedComputer[] {
     const self = this.self().id; const links = new Map(this.links().map((link) => [link.id, link]));
-    const found = new Map(this.advertised().filter((item) => item.id !== self).map((item) => [item.id, item]));
+    const found = new Map([...this.found.values(), ...this.advertised()].filter((item) => item.id !== self).map((item) => [item.id, item]));
     return [...new Set([...found.keys(), ...links.keys()])].map((id): LinkedComputer => {
       const link = links.get(id); const advertised = found.get(id); const connection = this.connections.get(id);
       return { id, name: advertised?.name ?? link!.name, url: linkableAddress(advertised?.url ?? null) ?? link?.url ?? null, linked: Boolean(link), connected: Boolean(connection?.connected), error: connection?.error ?? null, channels: connection?.connected ? this.tagged(connection) : [] };
@@ -88,11 +95,49 @@ export class LinkedComputers implements RemoteRelay {
       throw new HubError('LINK_PHONE_CODE', 'That is a phone pairing code. On the other computer, use Settings → Other computers → Show link code.');
     }
     if (body.computer?.id && body.computer.id !== id) throw new HubError('LINK_MISMATCH', 'That address answered as a different computer. Sync now on both computers and try again.');
-    const link: Link = { id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() };
-    save(this.root, FILE, [...this.links().filter((item) => item.id !== id), link]);
-    const existing = this.connections.get(id); if (existing) { this.disconnect(existing); this.connections.delete(id); }
-    this.connect(link); this.notify();
+    this.declined(id, false); this.keep({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
     return this.status();
+  }
+  private keep(link: Link) {
+    save(this.root, FILE, [...this.links().filter((item) => item.id !== link.id), link]);
+    const existing = this.connections.get(link.id); if (existing) { this.disconnect(existing); this.connections.delete(link.id); }
+    this.connect(link); this.notify();
+  }
+  private declined(id?: string, add?: boolean): Set<string> {
+    const ids = new Set(load(this.root, DECLINED, z.array(z.uuid()).max(100), []));
+    if (id && add !== undefined && ids.has(id) !== add) { if (add) ids.add(id); else ids.delete(id); save(this.root, DECLINED, [...ids].slice(-100)); }
+    return ids;
+  }
+
+  /**
+   * Finds the person's other computers on the tailnet and in Drive, and links each one that agrees without a code: the
+   * same Tailscale login on both, auto-link on there, and a Trace new enough to answer. Others stay listed, to link with
+   * a code. Each address is asked who it is first, so a computer is never keyed under another one's identity.
+   */
+  autoLink(): Promise<void> {
+    this.discovering ??= this.discover().finally(() => { this.discovering = null; });
+    return this.discovering;
+  }
+  private async discover() {
+    const self = this.self(); const links = this.links(); const declined = this.declined();
+    const peers = await this.peers().catch(() => [] as string[]);
+    const addresses = new Set([...peers, ...this.advertised().map((item) => item.url)].map(linkableAddress).filter((url): url is string => Boolean(url)));
+    let changed = false;
+    await Promise.all([...addresses].map(async (url) => {
+      try {
+        const hello = await this.fetcher(new URL('api/hello', url), { signal: AbortSignal.timeout(5000) }); if (!hello.ok) return;
+        const computer = (await hello.json() as { computer?: { id?: unknown; name?: unknown } }).computer;
+        const id = z.uuid().safeParse(computer?.id); const name = z.string().min(1).max(100).safeParse(computer?.name);
+        if (!id.success || !name.success || id.data === self.id) return;
+        const known = this.found.get(id.data); if (known?.url !== url || known.name !== name.data) { this.found.set(id.data, { id: id.data, name: name.data, url }); changed = true; }
+        if (declined.has(id.data) || links.some((item) => item.id === id.data && item.url === url)) return;
+        const response = await this.fetcher(new URL('api/auto-link', url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: self.name.slice(0, 60), machineId: self.id }), signal: AbortSignal.timeout(15000) });
+        const body = await response.json().catch(() => ({})) as { token?: string; device?: { kind?: string }; computer?: { id?: string } };
+        if (!response.ok || !body.token || body.device?.kind !== 'computer' || body.computer?.id !== id.data) return;
+        this.keep({ id: id.data, name: name.data, url, token: body.token, linkedAt: new Date().toISOString() });
+      } catch { /* Off, asleep, or a Trace without auto-link: it can still be linked with a code. */ }
+    }));
+    if (changed) this.notify();
   }
 
   /** The address and key this computer reaches a linked one with (for its screen service, which checks the same key). */
@@ -105,7 +150,7 @@ export class LinkedComputers implements RemoteRelay {
   async unlink(id: string): Promise<LinkedComputer[]> {
     const link = this.links().find((item) => item.id === id); if (!link) return this.status();
     const connection = this.connections.get(id); if (connection) { this.disconnect(connection); this.connections.delete(id); }
-    save(this.root, FILE, this.links().filter((item) => item.id !== id));
+    save(this.root, FILE, this.links().filter((item) => item.id !== id)); this.declined(id, true);
     // Best effort: the other computer forgets this one's key too. If it is off, remove it there later.
     try { await this.request(link, 'api/unpair', { method: 'POST', body: '{}', signal: AbortSignal.timeout(5000) }); } catch { /* Unreachable. */ }
     this.notify(); this.sink.changed();
