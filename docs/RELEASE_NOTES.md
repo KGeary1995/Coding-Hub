@@ -1,5 +1,11 @@
 ## What's new
 
+1.13.0 finds your other computers on Tailscale and links them without a code (update both computers):
+
+- **Your computers find each other on Tailscale.** Every computer signed in to your Tailscale account with Trace open appears under **Settings → Other computers** within a minute. This works even when their Drive sync folders differ.
+- **No link code between your own computers.** Two computers on the same Tailscale account link by themselves, and each gets its own tab. Tailscale confirms who is connecting, so phones, devices shared from someone else's account, tagged devices and the internet still need a code.
+- **You decide.** **Link my computers automatically** (on by default) turns it off. A computer you unlink stays unlinked until you link it again with a code.
+
 1.12.1 pastes screenshots into your other computer's channels, and makes controlling your PC's screen more responsive (update both computers):
 
 - **Paste images into another computer's channels.** A screenshot pasted into a Claude Code or Codex channel on your other computer now reaches it, from the PC to the Mac and the other way round: Ctrl+V on Windows, ⌘V or Ctrl+V on a Mac. Claude Code there attaches it as if you had pasted it on that computer. It replaces what was on that computer's clipboard.

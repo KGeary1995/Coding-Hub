@@ -47,12 +47,29 @@ export function serveFailure(error: TailscaleError): ServeProblem & { url: strin
   return { kind: 'other', link: false, url: null, message: `Tailscale could not set up HTTPS: ${error.message}` };
 }
 
+interface TailscaleNode { DNSName?: string; UserID?: number; Online?: boolean; OS?: string; Tags?: string[] }
+interface TailscaleStatus { BackendState?: string; Self?: TailscaleNode; Peer?: Record<string, TailscaleNode>; User?: Record<string, { LoginName?: string }> }
+
+/** The login this computer is signed in with; a tagged computer belongs to no person, so it has none. */
+const ownerLogin = (status: TailscaleStatus) => status.Self && !status.Self.Tags?.length && status.Self.UserID !== undefined ? status.User?.[String(status.Self.UserID)]?.LoginName?.toLowerCase() || null : null;
+
+/**
+ * The HTTPS addresses of the other computers signed in to this one's Tailscale login and online now: where Trace may be
+ * running. Phones run the phone page, not Trace, and tagged or shared devices are someone else's, so they are left out.
+ */
+export async function tailscalePeers(run: RunTailscale): Promise<string[]> {
+  const status = JSON.parse(await run(['status', '--json'])) as TailscaleStatus;
+  if (status.BackendState !== 'Running' || !ownerLogin(status)) return [];
+  return Object.values(status.Peer ?? {}).filter((peer) => peer.Online && peer.UserID === status.Self!.UserID && !peer.Tags?.length && !/^(android|ios)$/i.test(peer.OS ?? '') && peer.DNSName)
+    .map((peer) => `https://${peer.DNSName!.replace(/\.$/, '').toLowerCase()}/`);
+}
+
 const proxies = (value: unknown, port: number) => typeof value === 'string' && new RegExp(`^https?://(127\\.0\\.0\\.1|localhost):${port}/?$`).test(value);
 
 /** Reads whether Tailscale is connected, this computer's tailnet name, and whether HTTPS on the tailnet reaches the remote. */
 export async function tailscaleState(run: RunTailscale, port: number): Promise<TailscaleState> {
   const state: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
-  let status: { BackendState?: string; Self?: { DNSName?: string } };
+  let status: TailscaleStatus;
   try { status = JSON.parse(await run(['status', '--json'])); state.installed = true; }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return state;
@@ -61,6 +78,7 @@ export async function tailscaleState(run: RunTailscale, port: number): Promise<T
   }
   state.running = status.BackendState === 'Running';
   state.host = status.Self?.DNSName?.replace(/\.$/, '') || null;
+  state.login = ownerLogin(status);
   if (!state.running) return { ...state, error: `Tailscale is ${status.BackendState?.toLowerCase() ?? 'not connected'}. Open Tailscale and sign in.` };
   try {
     const serve = JSON.parse((await run(['serve', 'status', '--json'])).trim() || '{}') as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>; AllowFunnel?: Record<string, boolean> };

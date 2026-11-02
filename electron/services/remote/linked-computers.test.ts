@@ -297,4 +297,33 @@ describe('linked computers', () => {
     expect(linkableAddress('http://127.0.0.1:47821/')).toBe('http://127.0.0.1:47821/');
     expect(linkableAddress(null)).toBeNull();
   });
+
+  it('finds the person\'s computers on the tailnet and links them without a code, but not one they unlinked', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
+    pc.server.tailscale = { ...pc.server.tailscale, host: 'pc.example.ts.net', serving: true, login: 'person@example.com' };
+    // Tailscale Serve writes who is connecting; here the requests come from the same login.
+    let login = 'someone@else.com';
+    const serve: typeof fetch = (input, init) => fetch(input, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'Tailscale-User-Login': login } });
+    // Not in Drive at all (the Drive folders differ): found only through Tailscale.
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, serve);
+    mac.peers = async () => [pc.url]; cleanup.push(() => mac.stop());
+
+    // Another person's login gets nothing, not even the computer's name.
+    await mac.autoLink(); expect(mac.status()).toEqual([]); expect(pc.server.status().devices).toEqual([]);
+    login = 'person@example.com'; await mac.autoLink();
+    expect(mac.status()[0]).toMatchObject({ id: PC, name: 'Obsidian-Halo', linked: true });
+    expect(pc.server.status().devices).toEqual([expect.objectContaining({ name: 'MacBook', kind: 'computer' })]);
+    await until(() => mac.status()[0].connected && mac.status()[0].channels.length === 1, 'the stream');
+
+    // Unlinked by the person: still listed, never linked again by itself, and a code links it again.
+    await mac.unlink(PC); await mac.autoLink();
+    expect(mac.status()[0]).toMatchObject({ id: PC, linked: false }); expect(pc.server.status().devices).toEqual([]);
+    await mac.link(PC, pc.server.pair('computer').pairing!.code); expect(mac.status()[0].linked).toBe(true);
+    await mac.unlink(PC);
+
+    // With auto-link off there, it is listed only once linked with a code.
+    pc.server.setAutoLink(false); const other = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, serve);
+    other.peers = async () => [pc.url]; cleanup.push(() => other.stop());
+    await other.autoLink(); expect(other.status()).toEqual([]);
+  });
 });
