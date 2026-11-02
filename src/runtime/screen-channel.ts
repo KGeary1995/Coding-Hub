@@ -72,3 +72,27 @@ export class ScreenChannel {
     this.onmessage?.(new MessageEvent('message', { data: buffer }));
   }
 }
+
+/** One key for noVNC's sendKey: an X keysym, the physical key (only some servers use it), and down or up. */
+export interface KeyStroke { keysym: number; code: string | null; down: boolean }
+const XK_SHIFT_L = 0xffe1; const XK_RETURN = 0xff0d;
+/** Characters typed with Shift on a US keyboard, which is how a VNC server expects them: Shift held, then the shifted symbol. */
+const SHIFTED = /[A-Z~!@#$%^&*()_+{}|:"<>?]/;
+/**
+ * The keys that type a password at a locked Mac's login window and press Return. macOS Screen Sharing shows that window
+ * only to Apple's viewer (others get black), but takes keys there all the same. Latin-1 characters are their own
+ * keysyms; anything else is sent as Unicode (0x01000000 + its code point).
+ */
+export function unlockKeys(password: string): KeyStroke[] {
+  const keys: KeyStroke[] = [];
+  for (const char of password) {
+    const point = char.codePointAt(0)!; const keysym = (point >= 0x20 && point <= 0x7e) || (point >= 0xa0 && point <= 0xff) ? point : 0x01000000 + point;
+    const shift = SHIFTED.test(char);
+    if (shift) keys.push({ keysym: XK_SHIFT_L, code: 'ShiftLeft', down: true });
+    keys.push({ keysym, code: null, down: true }, { keysym, code: null, down: false });
+    if (shift) keys.push({ keysym: XK_SHIFT_L, code: 'ShiftLeft', down: false });
+  }
+  return [...keys, { keysym: XK_RETURN, code: 'Enter', down: true }, { keysym: XK_RETURN, code: 'Enter', down: false }];
+}
+/** A tap of Shift: wakes the Mac's displays and brings up its password field without typing anything into it. */
+export const WAKE_KEYS: KeyStroke[] = [{ keysym: XK_SHIFT_L, code: 'ShiftLeft', down: true }, { keysym: XK_SHIFT_L, code: 'ShiftLeft', down: false }];

@@ -1,12 +1,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const http = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 // A linked computer's screen end to end: the Screen button on its tab connects noVNC, through the host, to a stand-in
 // screen-sharing server on loopback (CODING_HUB_TEST_SCREEN_PORT). It checks sign-in with a saved password, the
-// picture, Ctrl sent as ⌘, Ctrl+V handing this computer's text over first, and reconnecting after the server ends it.
+// picture, the note and unlock when that Mac is locked, Ctrl sent as ⌘, Ctrl+V handing this computer's text over first, and
+// reconnecting after the server ends it.
 const MAC = '6c119c8a-b055-4476-b16f-b3e50e873bb8'; const WIDTH = 64; const HEIGHT = 48;
 
 /** Just enough of a VNC server (RFB 3.8, VNC password security, raw pixels), recording what the viewer sends. */
@@ -46,13 +48,23 @@ function vncServer() {
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, keys, cutText, sockets, connections: () => connections })));
 }
+/** Just enough of the other computer's remote to say whether its screen is locked; the rest is not there. */
+function remote() {
+  const state = { locked: false };
+  const server = http.createServer((request, response) => {
+    const known = request.url === '/api/screen-state' && request.headers.authorization === 'Bearer ' + 'a'.repeat(43);
+    response.writeHead(known ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(known ? { locked: state.locked } : { error: 'Not found.' }));
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, state, url: `http://127.0.0.1:${server.address().port}/` })));
+}
 const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 50)); } throw new Error('Timed out waiting for ' + what); };
 
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-screen-'))); const storage = path.join(root, 'storage');
   await fs.mkdir(storage, { recursive: true });
-  // Linked already; its remote does not answer here (nothing at that name), which the screen does not need.
-  await fs.writeFile(path.join(storage, 'linked-computers.json'), JSON.stringify([{ id: MAC, name: 'Test-Mac', url: 'https://test-mac.example.ts.net/', token: 'a'.repeat(43), linkedAt: new Date().toISOString() }]));
+  // Linked already; its remote answers only whether it is locked, which is all the screen asks it.
+  const other = await remote();
+  await fs.writeFile(path.join(storage, 'linked-computers.json'), JSON.stringify([{ id: MAC, name: 'Test-Mac', url: other.url, token: 'a'.repeat(43), linkedAt: new Date().toISOString() }]));
   const vnc = await vncServer();
   const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_SCREEN_PORT: String(vnc.port) }; delete env.ELECTRON_RUN_AS_NODE;
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
@@ -60,7 +72,12 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
   let app;
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); const page = await app.firstWindow(); page.setDefaultTimeout(20000);
+    // The smoke checks Ctrl as ⌘, which only a computer other than a Mac offers: on a Mac, the window runs as a PC's would.
     await page.waitForSelector('.tr-empty, .session-tile');
+    if (process.platform === 'darwin') {
+      await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'); window.webContents.reload(); } });
+      await page.waitForFunction(() => !navigator.userAgent.includes('Mac')); await page.waitForSelector('.tr-empty, .session-tile');
+    }
     await page.locator('.tr-computer-tab', { hasText: 'Test-Mac' }).click();
     await page.getByRole('button', { name: 'Screen', exact: true }).click();
     const panel = page.locator('.linked-screen');
@@ -77,6 +94,16 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
       assert.doesNotMatch(await fs.readFile(path.join(storage, 'screen-sharing.json'), 'utf8'), /hunter2/, 'Only the encrypted password is stored');
     } else console.log('safeStorage is unavailable here: saving the password is not checked');
 
+    // Locked: a note instead of a black screen, and the password typed at its lock screen after a Shift tap to wake it.
+    other.state.locked = true;
+    await panel.getByText('Test-Mac is locked').waitFor({ timeout: 10000 });
+    vnc.keys.length = 0; await panel.getByLabel('Password for Test-Mac').fill('Pw1!');
+    await panel.getByRole('button', { name: 'Wake and unlock', exact: true }).click();
+    await until(() => vnc.keys.some((key) => key.key === 0xff0d && !key.down), 'Return after the password');
+    other.state.locked = false;
+    assert.deepEqual(vnc.keys.map((key) => `${key.down ? '+' : '-'}${key.key.toString(16)}`).join(' '), '+ffe1 -ffe1 +ffe1 +50 -50 -ffe1 +77 -77 +31 -31 +ffe1 +21 -21 -ffe1 +ff0d -ff0d', 'Shift to wake, then the password with Shift where it needs it, then Return');
+    await panel.locator('.linked-screen-unlock').waitFor({ state: 'detached', timeout: 10000 });
+
     // Keys: Ctrl goes as ⌘ (Super_L), down and up, and letters as themselves.
     // On by default only on Windows, where the Windows key cannot be sent.
     await panel.getByLabel('Ctrl as ⌘').check(); await canvas.click(); vnc.keys.length = 0;
@@ -84,10 +111,13 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
     await until(() => vnc.keys.length >= 4, 'the key events');
     assert.deepEqual(vnc.keys.slice(0, 4), [{ down: true, key: 0xffeb }, { down: false, key: 0xffeb }, { down: true, key: 0x61 }, { down: false, key: 0x61 }]);
     // Ctrl+V: this computer's text reaches the other clipboard, then ⌘V pastes it.
-    await app.evaluate(async ({ clipboard }) => { await clipboard.writeText('hello mac'); });
-    vnc.keys.length = 0; await page.keyboard.press('Control+V');
-    await until(() => vnc.cutText.includes('hello mac') && vnc.keys.some((key) => key.key === 0x76 && !key.down), 'the paste');
-    assert.deepEqual(vnc.keys.map((key) => key.key), [0xffeb, 0x76, 0x76, 0xffeb], 'V is sent once, inside ⌘');
+    // Only Windows and Linux paste on Ctrl+V; a Mac's browser does not, whatever it is called.
+    if (process.platform !== 'darwin') {
+      await app.evaluate(async ({ clipboard }) => { await clipboard.writeText('hello mac'); });
+      vnc.keys.length = 0; await page.keyboard.press('Control+V');
+      await until(() => vnc.cutText.includes('hello mac') && vnc.keys.some((key) => key.key === 0x76 && !key.down), 'the paste');
+      assert.deepEqual(vnc.keys.map((key) => key.key), [0xffeb, 0x76, 0x76, 0xffeb], 'V is sent once, inside ⌘');
+    } else console.log('Ctrl+V pastes only on Windows and Linux: the paste is not checked on a Mac');
 
     // View only sends nothing.
     await panel.getByRole('button', { name: 'Control', exact: true }).click(); await panel.getByRole('status').filter({ hasText: 'Viewing' }).waitFor();
@@ -110,7 +140,7 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
     await until(() => vnc.sockets.every((socket) => socket.destroyed || socket.readableEnded), 'the connection to close');
     console.log('screen smoke passed');
   } finally {
-    await app?.close().catch(() => {}); vnc.server.close();
+    await app?.close().catch(() => {}); vnc.server.close(); other.server.close();
     await fs.rm(root, { recursive: true, force: true }).catch(() => {});
   }
 })().catch((error) => { console.error(error); process.exit(1); });

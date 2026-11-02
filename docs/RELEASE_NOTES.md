@@ -1,5 +1,10 @@
 ## What's new
 
+1.13.1 says when your Mac is locked, and unlocks it from your PC (update both computers):
+
+- **Locked Mac, said plainly.** A Mac's screen goes black to Trace while the Mac is locked. Trace now says the Mac is locked instead, and asks for its password.
+- **Wake and unlock from the PC.** **Wake and unlock** wakes the Mac, types your password at its lock screen and presses Return, then shows the desktop. **Use saved password** uses the password you saved for Screen. Trace on the Mac must be open for it to say it is locked.
+
 1.13.0 finds your other computers on Tailscale and links them without a code (update both computers):
 
 - **Your computers find each other on Tailscale.** Every computer signed in to your Tailscale account with Trace open appears under **Settings → Other computers** within a minute. This works even when their Drive sync folders differ.
