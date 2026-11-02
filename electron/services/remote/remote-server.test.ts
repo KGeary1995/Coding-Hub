@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
 import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscalePeers, tailscaleState } from './tailscale';
@@ -226,6 +227,55 @@ describe('phone remote', () => {
     server.personInput('s1', '\x1b[I'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', '\x1b[12;40R\x1b[?1;2c'); expect(server.channels()[0].attention).toBe('Approve?');
     server.personInput('s1', 'y'); expect(server.channels()[0].attention).toBeNull();
+  });
+});
+
+describe('channel controls', () => {
+  it('lets a linked computer close a channel here, and never a phone', async () => {
+    const { server } = await remote(); const asked: { sessionId: string; control: string }[] = [];
+    (server as unknown as { host: RemoteHost }).host.control = async (sessionId, control) => { asked.push({ sessionId, control }); };
+    await server.setEnabled(true);
+    const post = (token: string, body: unknown) => fetch(base(server) + '/api/control', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post(await computer(server), { sessionId: 's1', control: 'close' })).status).toBe(200);
+    expect(asked).toEqual([{ sessionId: 's1', control: 'close' }]);
+    expect((await post(await paired(server), { sessionId: 's1', control: 'close' })).status).toBe(403);
+    expect(asked).toHaveLength(1);
+  });
+});
+
+describe('channel transcripts', () => {
+  it('gives phones and linked computers a channel\'s conversation, and refuses unknown channels', async () => {
+    const { server } = await remote();
+    const history = { type: 'history' as const, messages: [{ role: 'user' as const, text: 'hello', images: 0 }], results: {} };
+    (server as unknown as { host: RemoteHost }).host.transcript = (sessionId) => sessionId === 's1' ? history : null;
+    await server.setEnabled(true);
+    const read = async (token: string, sessionId: string) => { const response = await fetch(base(server) + `/api/transcript?sessionId=${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }); return { status: response.status, body: await response.json() as { transcript?: unknown } }; };
+    expect(await read(await paired(server), 's1')).toEqual({ status: 200, body: { transcript: history } });
+    expect(await read(await computer(server), 's2')).toEqual({ status: 200, body: { transcript: null } });
+    expect((await read(await paired(server), 'nope')).status).toBe(400);
+  });
+});
+
+describe('phone screen', () => {
+  it('opens this computer\'s screen server for a phone with a one-time ticket, and nobody else', async () => {
+    const received: Buffer[] = [];
+    const vnc = net.createServer((socket) => { socket.write('RFB 003.889\n'); socket.on('data', (data) => received.push(data)); });
+    await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => vnc.close(() => resolve())));
+    const { server } = await remote();
+    (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: (vnc.address() as net.AddressInfo).port });
+    await server.setEnabled(true);
+    const ticketFor = async (token: string) => fetch(base(server) + '/api/screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    expect((await ticketFor(await computer(server))).status).toBe(403);
+    const { ticket } = await (await ticketFor(await paired(server))).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/screen?ticket=${ticket}`); socket.binaryType = 'arraybuffer';
+    const greeting = await new Promise<string>((resolve, reject) => { socket.onmessage = (event) => resolve(Buffer.from(event.data as ArrayBuffer).toString()); socket.onerror = () => reject(new Error('refused')); });
+    expect(greeting).toBe('RFB 003.889\n');
+    socket.send(new TextEncoder().encode('RFB 003.008\n'));
+    for (let i = 0; i < 100 && !received.length; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(Buffer.concat(received).toString()).toBe('RFB 003.008\n'); socket.close();
+    // A ticket works once.
+    const again = new WebSocket(`ws://127.0.0.1:${server.address}/api/screen?ticket=${ticket}`);
+    expect(await new Promise((resolve) => { again.onopen = () => resolve('open'); again.onerror = () => resolve('refused'); })).toBe('refused');
   });
 });
 

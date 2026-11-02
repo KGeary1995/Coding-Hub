@@ -182,3 +182,7 @@
 @keyframes chat-blink { to { opacity: 0; } }
 @keyframes chat-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .chat-dots i, .chat-streaming .chat-markdown > :last-child::after { animation: none; } }
+/* A terminal channel's whole conversation (TranscriptView), shown in place of its terminal. */
+.transcript-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; color: var(--tr-fg-muted); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); }
+/* Over the terminal rather than instead of it, so the running CLI keeps its size. */
+.transcript-overlay { position: absolute; inset: 0; display: flex; z-index: 2; }

@@ -129,8 +129,8 @@ export async function stopSession(id: string): Promise<boolean> {
 }
 
 /**
- * Carries out a linked computer's request to start, stop or restart one of this computer's channels, the same way the
- * buttons on its tile would. Returns why it could not, for the other computer to show.
+ * Carries out a linked computer's request to start, stop, restart or close one of this computer's channels, the same
+ * way the buttons on its tile would. Returns why it could not, for the other computer to show.
  */
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
 export function remoteAdd(engine: ChannelEngine): string | undefined {
@@ -148,6 +148,12 @@ export async function remoteControl(id: string, control: ChannelControl): Promis
     for (let i = 0; i < 50 && current()?.status === 'running'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (control === 'stop') return undefined;
+  if (control === 'close') {
+    // The same rule as the X on its tile: a computer keeps at least two channels.
+    if (useWorkspaceStore.getState().sessions.length <= 2) return 'This computer keeps at least two channels, so this one was stopped but not closed.';
+    useWorkspaceStore.getState().removeSession(id);
+    return current() ? 'The channel could not be closed.' : undefined;
+  }
   const ready = current(); if (!ready) return 'That channel is no longer on this computer.';
   if (ready.status === 'running' || ready.status === 'starting') return control === 'start' ? undefined : 'The channel is still running.';
   await startSession(id);

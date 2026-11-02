@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ChannelControl, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
+import type { ChannelControl, ChannelTranscript, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
 import type { ChannelEngine } from '../../../shared/types';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -176,6 +176,12 @@ export class LinkedComputers implements RemoteRelay {
     try { const body = await (await this.request(link, 'api/screen-state', { signal: AbortSignal.timeout(5000) })).json() as { locked?: unknown }; return { locked: typeof body.locked === 'boolean' ? body.locked : null }; }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_REVOKED') throw error; return { locked: null }; }
   }
+  /** A channel's whole conversation there, from its CLI's transcript. */
+  async transcript(id: string, sessionId: string): Promise<ChannelTranscript> {
+    const link = this.linked(id);
+    try { return ((await (await this.request(link, `api/transcript?sessionId=${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(20000) })).json()) as { transcript?: ChannelTranscript }).transcript ?? null; }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to read its conversations from here.`); throw error; }
+  }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
   /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */
   async phoneKey(id: string, name: string, relayKey: string) {
@@ -241,6 +247,12 @@ export class LinkedComputers implements RemoteRelay {
       const mirror = connection.mirrors.get(sessionId); if (mirror) { mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; }
     }
     return false;
+  }
+  /** For a phone of this computer: the conversation of a channel on whichever linked computer runs it. */
+  async relayTranscript(sessionId: string) {
+    const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
+    if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
+    return this.transcript(connection.link.id, sessionId);
   }
   async write(sessionId: string, runId: string, data: string) {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));

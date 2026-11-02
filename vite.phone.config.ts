@@ -6,5 +6,7 @@ export default defineConfig({
   root: 'phone',
   base: '/',
   publicDir: 'public',
-  build: { outDir: '../dist/phone', emptyOutDir: true, assetsInlineLimit: 0 },
+  // noVNC (the phone's Screen) awaits at the top of a module, which Vite's default target refuses.
+  optimizeDeps: { esbuildOptions: { target: 'es2022' } },
+  build: { outDir: '../dist/phone', emptyOutDir: true, assetsInlineLimit: 0, target: 'es2022' },
 });

@@ -1,17 +1,19 @@
 import http from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
 import type { AccountLabel } from '../../../shared/accounts';
-import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { phoneFile } from './phone-files';
 import { ScreenMirror } from './screen-mirror';
+import { acceptKey, frame, FrameReader } from './websocket';
 import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } from './web-push';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
@@ -31,7 +33,13 @@ export interface RemoteHost {
   idleSeconds?(): number;
   /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
   screenLocked?(): boolean | null | Promise<boolean | null>;
+  /** A channel's conversation from its CLI's transcript, across restarts. */
+  transcript?(sessionId: string): ChannelTranscript;
+  /** This computer's own screen-sharing server (macOS Screen Sharing on loopback), for a phone's Screen; null when there is none. */
+  screenTarget?(): { host: string; port: number } | null;
 }
+/** One-time tickets a phone opens its screen with: a browser's WebSocket cannot send the Authorization header. */
+const SCREEN_TICKET_MS = 30000; const MAX_SCREENS = 2;
 /** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
 export const DESKTOP_IDLE_SECONDS = 120;
 /** Channels running on linked computers, which this computer passes on to its phones. */
@@ -47,6 +55,8 @@ export interface RemoteRelay {
   revokePhone?(relayKey: string): Promise<void>;
   /** Draws a linked computer's channel at a phone's size, or (null) gives it back. */
   size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
+  /** A linked computer's channel's conversation, for a phone of this computer. */
+  relayTranscript?(sessionId: string): Promise<ChannelTranscript>;
 }
 /**
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
@@ -79,7 +89,7 @@ export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u20
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
 const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']) }).strict();
-const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart']) }).strict();
+const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict();
 /** A pasted image (PNG or JPEG, base64), at most 15 MB. */
 const IMAGE_LIMIT = 15 * 1024 * 1024;
 const pasteSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(Math.ceil(IMAGE_LIMIT / 3) * 4).regex(/^[A-Za-z0-9+/]+=*$/) }).strict();
@@ -103,6 +113,7 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
 export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
+  private screenTickets = new Map<string, { device: string; expires: number }>(); private screens = new Set<Duplex>();
   private replay = new Map<string, ScreenMirror>();
   private attention = new Map<string, { runId: string; message: string }>();
   private pairing: { code: string; expires: number; attempts: number; kind: RemoteDeviceKind } | null = null;
@@ -185,6 +196,7 @@ export class RemoteServer {
     try {
       await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
       this.server = server; this.error = null;
+      server.on('upgrade', (request, socket, head) => void this.upgrade(request, socket, head).catch(() => socket.destroy()));
       for (const run of this.host.running()) if (!this.replay.has(run.sessionId)) this.mirror(run.sessionId, run.runId);
       this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); }, 25000);
     } catch (error) {
@@ -194,9 +206,48 @@ export class RemoteServer {
   async stop() {
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
+    for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenTickets.clear();
     for (const id of [...this.replay.keys()]) this.forget(id);
     const server = this.server; this.server = null; this.pairing = null;
     if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
+  }
+  /**
+   * A phone's Screen: its WebSocket, opened with a ticket from /api/screen-ticket, carries this computer's own screen-sharing
+   * server's VNC stream. The Mac still asks for its user name and password, which go from the phone to it, not to Trace.
+   */
+  private async upgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer) {
+    const refuse = (status: number, text: string) => { socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); };
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    if (url.pathname !== '/api/screen') return refuse(404, 'Not Found');
+    if (!this.allowedHost(request.headers.host) || request.headers['tailscale-funnel-request'] !== undefined) return refuse(403, 'Forbidden');
+    const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return refuse(403, 'Forbidden');
+    const ticket = this.screenTickets.get(url.searchParams.get('ticket') ?? ''); this.screenTickets.delete(url.searchParams.get('ticket') ?? '');
+    if (!ticket || ticket.expires < Date.now() || !this.devices().some((device) => device.id === ticket.device)) return refuse(401, 'Unauthorized');
+    const key = request.headers['sec-websocket-key'];
+    if (request.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string') return refuse(400, 'Bad Request');
+    const target = this.host.screenTarget?.(); if (!target) return refuse(409, 'Conflict');
+    if (this.screens.size >= MAX_SCREENS) return refuse(429, 'Too Many Requests');
+    const server = net.connect(target.port, target.host); this.screens.add(socket);
+    const end = () => { this.screens.delete(socket); server.destroy(); socket.destroy(); };
+    server.once('error', () => { if (!socket.writableEnded) refuse(502, 'Bad Gateway'); end(); });
+    server.once('connect', () => {
+      const protocol = String(request.headers['sec-websocket-protocol'] ?? '').split(',')[0].trim();
+      socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptKey(key)}\r\n${protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : ''}\r\n`);
+      const reader = new FrameReader();
+      const receive = (chunk: Buffer) => {
+        try {
+          for (const event of reader.push(chunk)) {
+            if (event.type === 'data') server.write(event.data);
+            else if (event.type === 'ping') socket.write(frame(event.data, 0xa));
+            else { socket.write(frame(Buffer.alloc(0), 0x8)); end(); return; }
+          }
+        } catch { end(); }
+      };
+      if (head.length) receive(head);
+      socket.on('data', receive);
+      server.on('data', (data: Buffer) => socket.write(frame(data)));
+      server.once('close', end); socket.once('close', end); socket.once('error', end);
+    });
   }
   get address() { return this.server ? (this.server.address() as AddressInfo).port : null; }
 
@@ -558,6 +609,22 @@ export class RemoteServer {
       if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/screen-ticket') {
+      if (kind !== 'phone') return this.send(response, 403, { error: 'Only a phone opens this computer\'s screen here.' });
+      if (!this.host.screenTarget?.()) return this.send(response, 409, { error: 'This computer has no screen sharing for phones yet. On a Mac, turn on System Settings → General → Sharing → Screen Sharing.' });
+      for (const [id, item] of this.screenTickets) if (item.expires < Date.now()) this.screenTickets.delete(id);
+      const ticket = randomBytes(24).toString('base64url'); this.screenTickets.set(ticket, { device: device.id, expires: Date.now() + SCREEN_TICKET_MS });
+      return this.send(response, 200, { ticket });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/transcript') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (this.local(sessionId)) return this.send(response, 200, { transcript: this.host.transcript?.(sessionId) ?? null });
+      if (kind === 'phone' && this.relay?.relayTranscript) {
+        try { return this.send(response, 200, { transcript: await this.relay.relayTranscript(sessionId) }); }
+        catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That conversation could not be read.' }); }
+      }
+      return this.send(response, 400, { error: 'Unknown channel.' });
     }
     if (request.method === 'GET' && url.pathname === '/api/screen-state') {
       // A locked Mac sends its screen to viewers other than Apple's as black: the linked computer says so instead.

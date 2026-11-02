@@ -1,5 +1,6 @@
 import type { ChannelEngine } from './types';
 import type { AccountLabel } from './accounts';
+import type { ChatEvent } from './chat';
 
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
@@ -17,7 +18,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind }
 export type RemoteDeviceKind = 'phone' | 'computer';
 /** What a linked computer may ask this one to do with a channel, beyond typing into it. */
-export type ChannelControl = 'start' | 'stop' | 'restart';
+/** `close` stops the channel if it is running and removes it, as the X on its tile does. */
+export type ChannelControl = 'start' | 'stop' | 'restart' | 'close';
 /** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
 export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine };
 export interface TailscaleState {
@@ -77,6 +79,11 @@ export interface LinkedComputer {
   linked: boolean; connected: boolean; error: string | null;
   channels: RemoteChannel[];
 }
+/**
+ * A Claude Code or Codex channel's conversation, from its CLI's own transcript: every run of it, since each restart
+ * resumes the same conversation. Null for terminals and channels that have not run yet.
+ */
+export type ChannelTranscript = Extract<ChatEvent, { type: 'history' }> | null;
 /** `locked` is null when that computer cannot say: Trace there is closed or older, or its system does not report it. */
 export interface LinkedScreenState { locked: boolean | null }
 export type LinkedComputerRequest =
@@ -94,7 +101,9 @@ export type LinkedComputerRequest =
   /** Whether that computer's screen is locked, which its screen shows here as black (a Mac). */
   | { action: 'linked-screen-state'; id: string }
   /** A tile here shows that channel at its own size (`cols`/`rows`), or gives it back (without them). */
-  | { action: 'linked-fit'; id: string; sessionId: string; runId: string; cols?: number; rows?: number };
+  | { action: 'linked-fit'; id: string; sessionId: string; runId: string; cols?: number; rows?: number }
+  /** That channel's whole conversation (ChannelTranscript). */
+  | { action: 'linked-transcript'; id: string; sessionId: string };
 /** Live updates about linked computers for the desktop window. */
 export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }

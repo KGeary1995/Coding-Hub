@@ -102,3 +102,13 @@ footer { padding: 16px; text-align: center; }
 .copy-bar strong { flex: 1; }
 .copy-sheet > p { margin: 0; }
 .copy-text { flex: 1; margin: 0; overflow: auto; padding: 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control, 6px); background: var(--tr-term); color: var(--tr-fg); font: 12px/1.4 var(--tr-font-mono, monospace); white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+/* A channel's conversation: messages as plain paragraphs, wrapped, the person's set apart. */
+.conversation { white-space: normal; font: var(--tr-t-body, 14px/1.45 system-ui); }
+.conversation .said { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation .said.you { padding: 6px 8px; border-left: 2px solid var(--tr-focus); background: var(--tr-surface); }
+.conversation .said.tool { margin-bottom: 4px; font-family: var(--tr-font-mono, monospace); font-size: 12px; }
+/* A computer's screen: the picture scaled to the phone's width, a field for the phone keyboard, and keys it lacks. */
+main.screen { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+.screen-view { flex: 1; min-height: 200px; background: var(--tr-term); border: 1px solid var(--tr-line); border-radius: var(--tr-r-control, 6px); overflow: hidden; touch-action: none; }
+.screen-signin input { flex: 1; min-width: 0; }
+.screen-typing { width: 100%; }
