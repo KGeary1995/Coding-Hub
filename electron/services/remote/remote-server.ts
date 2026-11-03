@@ -27,6 +27,8 @@ export interface RemoteHost {
   add?(engine: ChannelEngine): Promise<void>;
   /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
   pasteImage?(reference: RunReference, image: Buffer): Promise<void>;
+  /** Restart and install the latest version, for a linked computer; says what will happen. */
+  update?(): Promise<string>;
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
@@ -686,6 +688,13 @@ export class RemoteServer {
       try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }
       return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/update') {
+      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can update Trace here.' });
+      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      if (!this.host.update) return this.send(response, 409, { error: 'This computer cannot update Trace right now.' });
+      try { return this.send(response, 200, { message: await this.host.update() }); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Trace could not be updated there.' }); }
     }
     if (request.method === 'POST' && url.pathname === '/api/unpair') { this.revoke(device.id); return this.send(response, 200, { ok: true }); }
     if (request.method === 'GET' && url.pathname === '/api/alerts') return this.send(response, 200, { publicKey: this.vapid().publicKey, on: Boolean(device.push) });

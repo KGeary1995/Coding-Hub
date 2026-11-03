@@ -19,7 +19,7 @@ import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import type { ChannelControl, ChannelTranscript } from '../shared/remote';
+import { REMOTE_PORT, type ChannelControl, type ChannelTranscript } from '../shared/remote';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
@@ -55,6 +55,7 @@ import { ScreenShare } from './services/remote/screen-share';
 import { SCREEN_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
+import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
@@ -195,6 +196,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
   z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
+  z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
@@ -226,6 +228,21 @@ async function screenRequest(owner: number, payload: unknown) {
   if (request.action === 'screen-forget-credentials') return screens.forgetCredentials(request.id);
   return screens.credentials(request.id);
 }
+/**
+ * Restart and install, asked for by a linked computer. An edition that updates itself does so; a Mac copy that cannot
+ * (not signed with Trace's Developer ID) runs the install script, which puts the old version back if the new one does
+ * not answer. Either way the workspace is saved first and running channels must be stopped.
+ */
+async function remoteUpdate(): Promise<string> {
+  if (updates && updates.status().phase !== 'disabled') return updates.remoteInstall();
+  if (process.platform !== 'darwin' || !app.isPackaged) throw new HubError('UPDATES_DISABLED', 'This copy of Trace is updated by hand (a portable or source copy).');
+  const version = await latestMacVersion(); if (!version) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
+  if (version === app.getVersion()) return `Trace ${version} there is already the latest version.`;
+  if (manager.hasSessions) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
+  if (workspaceLoaded) await flushWorkspace();
+  startMacUpdate(storageRoot, version, REMOTE_PORT);
+  return `Installing Trace ${version} there. It quits, restarts and is back in about a minute; if the new version does not start, the old one is put back.`;
+}
 async function linkedRequest(payload: unknown) {
   if (!linked) throw new HubError('LINK_UNAVAILABLE', 'Linking computers needs writable local storage.');
   const request = linkedSchema.parse(payload);
@@ -234,6 +251,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
+  if (request.action === 'linked-update') return linked.update(request.id);
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
   if (request.action === 'linked-screen-state') return linked.screenState(request.id);
   if (request.action === 'linked-transcript') return linked.transcript(request.id, request.sessionId);
@@ -498,6 +516,7 @@ else app.whenReady().then(() => {
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
     },
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
+    update: () => remoteUpdate(),
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
@@ -654,8 +673,8 @@ else app.whenReady().then(() => {
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
     hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active),
     installationFailed: () => { updateRestart = false; },
-    prepareRestart: async () => {
-      const answer = await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
+    prepareRestart: async (remote) => {
+      const answer = remote ? { response: 0 } : await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {

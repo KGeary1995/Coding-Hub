@@ -100,6 +100,7 @@ export type LinkedComputerRequest =
   | { action: 'linked-add'; id: string; engine: ChannelEngine }
   /** An image pasted here (PNG or JPEG, base64) for a channel there; that computer attaches it as if pasted there. */
   | { action: 'linked-paste-image'; id: string; sessionId: string; runId: string; image: string }
+  | { action: 'linked-update'; id: string }
   /** Whether that computer's screen is locked, which its screen shows here as black (a Mac). */
   | { action: 'linked-screen-state'; id: string }
   /** A tile here shows that channel at its own size (`cols`/`rows`), or gives it back (without them). */

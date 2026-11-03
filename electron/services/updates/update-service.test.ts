@@ -22,6 +22,18 @@ function fixture(enabled = true) {
 }
 afterEach(() => { vi.useRealTimers(); directories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true })); });
 describe('Windows update lifecycle', () => {
+  it('installs when a linked computer asks: checks, downloads, saves without a dialog, then restarts after answering', async () => {
+    vi.useFakeTimers(); const { service, updater, prepareRestart, hasSessions } = fixture();
+    hasSessions.mockReturnValueOnce(true); await expect(service.remoteInstall()).rejects.toMatchObject({ code: 'ACTIVE_SESSIONS' });
+    expect(await service.remoteInstall()).toMatch(/Installing Trace 1\.3\.0 there/);
+    expect(updater.checkForUpdates).toHaveBeenCalled(); expect(updater.downloadUpdate).toHaveBeenCalled(); expect(prepareRestart).toHaveBeenCalledWith(true);
+    expect(updater.quitAndInstall).not.toHaveBeenCalled(); vi.advanceTimersByTime(1500); expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+  });
+  it('says so when a linked computer asks and it is already up to date', async () => {
+    const { service, updater } = fixture(); updater.checkForUpdates.mockImplementationOnce(async () => { updater.emit('update-not-available'); });
+    expect(await service.remoteInstall()).toMatch(/already the latest/); expect(updater.downloadUpdate).not.toHaveBeenCalled();
+    await expect(fixture(false).service.remoteInstall()).rejects.toMatchObject({ code: 'UPDATES_DISABLED' });
+  });
   it('checks stable releases, explicitly downloads and restarts; never installs on normal quit', async () => {
     const { service, updater, publish } = fixture();
     expect(updater.autoDownload).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(false);

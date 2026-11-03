@@ -170,6 +170,12 @@ export class LinkedComputers implements RemoteRelay {
     try { await this.request(link, 'api/paste-image', { method: 'POST', body: JSON.stringify({ sessionId, runId, image }), signal: AbortSignal.timeout(60000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to paste images there from here.`); throw error; }
   }
+  /** Restart and install the latest version there. A Trace before 1.15 there answers 404. */
+  async update(id: string): Promise<{ message: string }> {
+    const link = this.linked(id);
+    try { const body = await (await this.request(link, 'api/update', { method: 'POST', body: '{}', signal: AbortSignal.timeout(10 * 60000) })).json() as { message?: unknown }; return { message: typeof body.message === 'string' ? body.message.slice(0, 300) : `Trace on ${link.name} is updating.` }; }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Trace on ${link.name} is older than 1.15, so it can't be updated from here. Install the latest version there by hand once.`); throw error; }
+  }
   /** Whether that computer's screen is locked; null when it cannot say (Trace there is closed, or older than this check). */
   async screenState(id: string): Promise<LinkedScreenState> {
     const link = this.linked(id);
