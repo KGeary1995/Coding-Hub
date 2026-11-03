@@ -51,7 +51,7 @@ This release adds all eight workflow improvements. See [the usage guide](workflo
 | Live design review | Design workspace: approve a local dev server, capture screenshots, pin annotations, prepare agent feedback |
 | Coaching experiments | AI coaching: compare A/B prompt wording, measured CLI tokens, time, rework, and outcome evidence |
 | Backup and restore | Settings: verified local backups, export/import, separate restored data copy, explicit restart |
-| Task coordination | Task coordination: assign sessions and file scopes, audit overlaps and Git changes, record review evidence |
+| Tasks | Tasks: give a channel a job and its files, send it, follow its status and changed files, warn about clashes |
 | Repository verification | Verification profiles: saved argument-based npm/pnpm/yarn/Python/Cargo/Go/.NET checks and recorded results |
 
 Conversation resume uses the installed CLI's advertised resume support and recorded conversation ID. Resumed-run telemetry counts newly reported usage rather than previous conversation totals. Login and terminal diagnostics leave actual provider/model completion unverified until you send a task. Live previews execute browser JavaScript in a separate sandboxed window restricted to one loopback origin; static archive previews continue to block scripts. Backups exclude CLI credentials and external repositories. Task scopes help coordinate work; they do not enforce permissions or identify who edited a file.
@@ -121,7 +121,7 @@ Trace replaces the sidebar with a top bar and a status bar:
 - **Top bar:**
   - the project switcher;
   - the **Workspace**, **Changes** and **Projects** tabs;
-  - the **Insight** menu: Usage, Session history, Files and **More tools** (Design workspace, AI coaching, Task coordination and Verification profiles);
+  - the **Insight** menu: Usage, Session history, Files and **More tools** (Design workspace, AI coaching, Tasks and Verification profiles);
   - the layout controls (Workspace only) and the command field (**Ctrl+Shift+P**);
   - Help, and the **Agent setup** menu: Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings and Workflow center;
   - **+ Channel** to add a channel (up to eight): Claude Code, Claude chat, Codex chat, Codex CLI, or Terminal.

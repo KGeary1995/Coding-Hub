@@ -51,7 +51,8 @@ export type SessionEvent =
   /** `at` is when the host saw the request, so a later answer from a phone can be ordered against it. */
   | ({ type: 'attention'; message: string; at: string } & RunReference)
   /** The person typed into the CLI from a paired phone; clears a waiting prompt raised before `at`. */
-  | ({ type: 'answered'; at: string } & RunReference);
+  /** `finished`: the agent's turn ended (Claude Code's Stop hook), not just a tool. */
+  | ({ type: 'answered'; at: string; finished?: true } & RunReference);
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {

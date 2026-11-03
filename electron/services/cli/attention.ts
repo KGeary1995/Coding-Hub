@@ -44,7 +44,8 @@ export class AttentionServer {
   private port: number | null = null;
   private runs = new Map<string, Buffer>();
   /** `onResolved` hears that the agent carried on (a tool finished or the turn ended), so a waiting prompt was answered. */
-  constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string) => void = () => {}) {}
+  /** `finished`: the turn ended (the Stop hook), so the agent is done with what it was asked. */
+  constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string, finished: boolean) => void = () => {}) {}
 
   /** Starts listening on a random loopback port. Sessions started before it is ready run without attention hooks. */
   start() {
@@ -57,11 +58,11 @@ export class AttentionServer {
 
   private handle(request: http.IncomingMessage, response: http.ServerResponse) {
     const done = (status: number) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end('{}'); };
-    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})(\/resolved)?$/.exec(request.url ?? '');
+    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})(\/resolved|\/finished)?$/.exec(request.url ?? '');
     const token = match && this.runs.get(match[1]);
     if (request.method !== 'POST' || !match || !token || !timingSafeEqual(token, Buffer.from(match[2], 'hex'))) { request.resume(); done(404); return; }
     // The path alone says the agent moved on; tool results can be large, so the body is never read.
-    if (match[3]) { request.resume(); done(200); this.onResolved(match[1]); return; }
+    if (match[3]) { request.resume(); done(200); this.onResolved(match[1], match[3] === '/finished'); return; }
     let size = 0; const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= 64 * 1024) chunks.push(chunk); });
     request.on('end', () => {
@@ -90,7 +91,8 @@ export class AttentionServer {
  */
 export function claudeAttentionSettings(url: string) {
   const resolved = [{ hooks: [{ type: 'http', url: `${url}/resolved`, timeout: 5 }] }];
-  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: resolved } });
+  const finished = [{ hooks: [{ type: 'http', url: `${url}/finished`, timeout: 5 }] }];
+  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: finished } });
 }
 
 /** Codex config that reports approval requests as OSC 9 notifications in its terminal. */

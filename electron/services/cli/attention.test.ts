@@ -46,7 +46,12 @@ describe('Claude attention endpoint', () => {
   });
   it('builds Claude settings with an HTTP Notification hook', () => {
     const resolved = [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y/resolved', timeout: 5 }] }];
-    expect(JSON.parse(claudeAttentionSettings('http://127.0.0.1:1/hook/x/y'))).toEqual({ hooks: { Notification: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y', timeout: 5 }] }], PostToolUse: resolved, Stop: resolved } });
+    expect(JSON.parse(claudeAttentionSettings('http://127.0.0.1:1/hook/x/y'))).toEqual({ hooks: { Notification: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y', timeout: 5 }] }], PostToolUse: resolved, Stop: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y/finished', timeout: 5 }] }] } });
+  });
+  it('reports the end of a turn as finished', async () => {
+    const resolved: [string, boolean][] = []; const server = new AttentionServer(() => {}, (runId, finished) => resolved.push([runId, finished])); servers.push(server); await server.start();
+    const runId = randomUUID(); const url = server.register(runId)!;
+    await post(url + '/finished', '{}'); await post(url + '/resolved', '{}'); expect(resolved).toEqual([[runId, true], [runId, false]]);
   });
   it('reports a finished tool or turn as resolved without reading its body, only for a valid token', async () => {
     const resolved: string[] = []; const seen: [string, string][] = [];

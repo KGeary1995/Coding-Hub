@@ -197,3 +197,10 @@
 .live-tip-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .live-tip-actions .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
 .pasted-clear { margin-left: 6px; padding: 0 4px; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-muted); }
+
+/* The channel's task, under its tile; red while it has a warning. Clicking opens Tasks. */
+.task-strip { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; border-top: 1px solid var(--tr-line); background: var(--tr-panel); color: var(--tr-fg-muted); font: 12px/1.4 var(--tr-font-ui); text-align: left; cursor: pointer; flex-shrink: 0; min-width: 0; }
+.task-strip.warned { border-top-color: var(--tr-st-failed); }
+.task-strip-state { color: var(--tr-fg-strong); font-weight: 600; white-space: nowrap; }
+.task-strip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.task-strip .error-message { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
