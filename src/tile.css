@@ -196,3 +196,4 @@
 .live-tip-body pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); color: var(--tr-fg); }
 .live-tip-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .live-tip-actions .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
+.pasted-clear { margin-left: 6px; padding: 0 4px; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-muted); }

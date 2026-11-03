@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addPastedImage, clearPastedImages, markPastedImagesSent, MAX_PASTED_IMAGES, quotePath, removePastedImage, usePastedImages } from './pasted-images';
+import { addPastedImage, clearPastedImages, clearSentImages, markPastedImagesSent, MAX_PASTED_IMAGES, quotePath, removePastedImage, usePastedImages } from './pasted-images';
 
 const image = (label: string) => ({ label, thumbnail: 'data:image/png;base64,AA', full: 'data:image/png;base64,AA' });
 const labels = (sessionId: string) => (usePastedImages.getState().images[sessionId] ?? []).map((item) => item.label);
@@ -34,6 +34,11 @@ describe('pasted images', () => {
     const [first, second] = usePastedImages.getState().images.a;
     removePastedImage('a', first.id); expect(usePastedImages.getState().images.a).toEqual([second]);
     removePastedImage('a', second.id); expect('a' in usePastedImages.getState().images).toBe(false);
+  });
+  it('clears sent images from the strip, keeping ones still to be sent', () => {
+    addPastedImage('a', image('sent')); markPastedImagesSent('a'); addPastedImage('a', image('next'));
+    clearSentImages('a'); expect(labels('a')).toEqual(['next']);
+    removePastedImage('a', usePastedImages.getState().images.a[0].id); addPastedImage('a', image('only')); markPastedImagesSent('a'); clearSentImages('a'); expect('a' in usePastedImages.getState().images).toBe(false);
   });
 });
 

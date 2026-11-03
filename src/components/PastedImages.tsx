@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { removePastedImage, usePastedImages, type PastedImage } from '../state/pasted-images';
+import { clearSentImages, removePastedImage, usePastedImages, type PastedImage } from '../state/pasted-images';
 
 const NONE: PastedImage[] = [];
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -19,7 +19,7 @@ export function PastedImages({ sessionId }: { sessionId: string }) {
   const attached = images.filter((image) => !image.sentAt); const sent = images.filter((image) => image.sentAt);
   const thumb = (image: PastedImage, small = false) => <li key={image.id} className={small ? 'sent' : ''}>
     <button className="pasted-thumb" title={`#${image.number} · ${image.label}${image.sentAt ? ` · sent ${time(image.sentAt)}` : ''} · click to enlarge`} aria-label={`Enlarge image ${image.number}`} onClick={() => setOpen(image)}><img src={image.thumbnail} alt="" /><span className="pasted-number">#{image.number}</span></button>
-    {!image.sentAt && <button className="pasted-remove" aria-label={`Remove image ${image.number} from the strip`} title="Remove from the strip (the CLI keeps what it was given)" onClick={() => removePastedImage(sessionId, image.id)}><X size={11} /></button>}
+    <button className="pasted-remove" aria-label={`Remove image ${image.number} from the strip`} title="Remove from the strip (the CLI keeps what it was given)" onClick={() => removePastedImage(sessionId, image.id)}><X size={11} /></button>
   </li>;
   return (
     <div className="pasted-images" role="region" aria-label="Pasted images">
@@ -28,7 +28,7 @@ export function PastedImages({ sessionId }: { sessionId: string }) {
         <ul>{attached.map((image) => thumb(image))}</ul>
       </div>}
       {sent.length > 0 && <div className="pasted-group sent">
-        <span className="pasted-heading">Sent{sent.length === 1 ? ` ${time(sent[0].sentAt!)}` : ''}</span>
+        <span className="pasted-heading">Sent{sent.length === 1 ? ` ${time(sent[0].sentAt!)}` : ''}<button className="quiet-button pasted-clear" title="Hide the sent images (the CLI keeps what it was given)" onClick={() => clearSentImages(sessionId)}>Clear</button></span>
         <ul>{sent.slice().reverse().map((image) => thumb(image, true))}</ul>
       </div>}
       <dialog ref={dialog} className="pasted-viewer" onClose={() => setOpen(null)} onClick={(event) => { if (event.target === event.currentTarget) setOpen(null); }}>
