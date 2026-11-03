@@ -1,11 +1,12 @@
 import { PlanLimitsCard } from './PlanLimitsCard';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { UsageRecord } from '../../../shared/hub';
 import { useHubStore, dollars } from '../../state/hub-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState } from '../../state/channel-state';
-import { USAGE_WINDOWS, axisMax, lastContext, dailySeries, delta, inWindow, median, usageTotals, type UsageWindow } from '../../state/usage-summary';
+import { USAGE_WINDOWS, axisMax, lastContext, dailySeries, delta, inWindow, logRecords, median, usageTotals, type UsageWindow } from '../../state/usage-summary';
+import { refreshUsageDays, useDayUsage } from '../../state/day-usage-store';
 import { compact } from '../shell/StatusBar';
 
 type EngineFilter = 'all' | 'claude' | 'codex';
@@ -25,14 +26,21 @@ export function UsageScreen() {
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   // Windows end today: re-anchored whenever usage changes or is refreshed, so a screen left open over midnight moves on.
   const now = useMemo(() => new Date(), [updated, usage]);
+  const logs = useDayUsage((state) => state.days);
+  useEffect(() => { void refreshUsageDays(); }, [updated, usage]);
   const filtered = useMemo(() => engine === 'all' ? usage : usage.filter((record) => record.engine === engine), [usage, engine]);
+  // Tokens and cost: this computer's from the CLIs' logs, by the day they were used (in Trace or not), and other
+  // computers' synced runs. The session rows, counts and context stay Trace's own runs.
+  const measured = useMemo(() => logs ? [...logRecords(logs).filter((record) => engine === 'all' || record.engine === engine), ...filtered.filter((record) => record.machine)] : filtered, [logs, filtered, engine]);
   const current = useMemo(() => inWindow(filtered, days, now), [filtered, days, now]);
-  const totals = usageTotals(current); const prior = usageTotals(inWindow(filtered, days, now, 1));
-  const series = useMemo(() => dailySeries(current, days, now), [current, days, now]);
+  const counted = useMemo(() => inWindow(measured, days, now), [measured, days, now]);
+  const sessionTotals = usageTotals(current);
+  const totals = { ...usageTotals(counted), sessions: sessionTotals.sessions, overContext: sessionTotals.overContext, unpriced: sessionTotals.unpriced }; const prior = usageTotals(inWindow(measured, days, now, 1));
+  const series = useMemo(() => dailySeries(counted, days, now), [counted, days, now]);
   const top = axisMax(Math.max(...series.map((day) => day.claude + day.codex)));
   const focus = series[hovered ?? series.length - 1];
   const contexts = current.map(lastContext).filter((value): value is number => value !== null);
-  const byEngine = (['claude', 'codex'] as const).map((name) => { const records = current.filter((record) => record.engine === name); const sum = usageTotals(records); return { name, tokens: sum.input + sum.output, cost: sum.cost, unpriced: sum.unpriced, runs: records.length }; });
+  const byEngine = (['claude', 'codex'] as const).map((name) => { const records = counted.filter((record) => record.engine === name); const sum = usageTotals(records); return { name, tokens: sum.input + sum.output, cost: sum.cost, unpriced: sum.unpriced, runs: current.filter((record) => record.engine === name).length }; });
   const engineTotal = Math.max(1, byEngine.reduce((sum, item) => sum + item.tokens, 0));
   const windowLabel = days === 1 ? 'today' : `${days} d`;
   async function refresh() {
@@ -105,6 +113,6 @@ export function UsageScreen() {
       </table>
       {!current.length && <p className="tr-empty-note">No reported usage in this window. Usage appears after a CLI writes its session log.</p>}
     </div>
-    <p className="control-note">Token totals come from local CLI records, not provider billing. Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are already inside its totals. Days follow each session's start.</p>
+    <p className="control-note">Token totals come from local CLI records, not provider billing. Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are already inside its totals. {logs ? "Totals and the chart count this computer's use from Claude Code's and Codex's own logs, on the day it happened, in Trace or not (the last 60 days), plus other computers' synced sessions. The table lists Trace's sessions." : "Days follow each session's start."}</p>
   </section>;
 }

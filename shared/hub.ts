@@ -29,7 +29,7 @@ export interface MemoryNote { id: string; project: string; title: string; conten
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 /** `machine` names the other computer a record was synced from; it is absent for this computer's own runs. */
 /** `incomplete`: Trace could not read all of the run's usage log, so its totals may be low. */
-export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null;
+export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl' | 'cli-logs'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null;
   /** New tokens and cost by the local day they were used on (`localDay`), for runs that span midnight. */
   days?: Record<string, { tokens: number; cost: number | null }> }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
@@ -57,3 +57,8 @@ export const localDay = (date: Date) => `${date.getFullYear()}-${String(date.get
 export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'>) => freshInput(usage) + usage.output;
 /** Today's new tokens on this computer from the CLIs' own logs, in Trace or not; `complete` is false while a long day is still being read. */
 export interface DayUsage { day: string; claude: number; codex: number; cost: number | null; complete: boolean }
+/** How many local days of the CLIs' logs are kept: the Usage screen's longest window and the one before it. */
+export const LOG_DAYS = 60;
+/** One engine's usage on one day from the CLIs' logs; `input` is input outside the cache. */
+export interface LogDay { input: number; output: number; cached: number; cacheWrite: number; cost: number | null }
+export interface LogUsage { days: Record<string, { claude?: LogDay; codex?: LogDay }>; complete: boolean }

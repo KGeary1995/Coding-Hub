@@ -586,6 +586,7 @@ else app.whenReady().then(() => {
     if (action.startsWith('linked-')) return linkedRequest(payload);
     if (action === 'channel-transcript') return channelTranscript(z.object({ action: z.literal('channel-transcript'), sessionId: z.string().min(1).max(100) }).strict().parse(payload).sessionId);
     if (action === 'usage-today') { z.object({ action: z.literal('usage-today') }).strict().parse(payload); return dayUsage.totals(); }
+    if (action === 'usage-days') { z.object({ action: z.literal('usage-days') }).strict().parse(payload); return dayUsage.days(); }
     if (action === 'plan-limits') { const request = z.object({ action: z.literal('plan-limits'), force: z.boolean().optional() }).strict().parse(payload); return planLimits.refresh(request.force); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
