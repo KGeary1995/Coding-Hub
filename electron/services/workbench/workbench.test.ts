@@ -61,11 +61,11 @@ describe('backup and restore integrity', () => {
   });
 });
 describe('native history and task scope', () => {
-  it('discovers profile conversations without loading full prompts and validates resume identity and directories', () => {
+  it('discovers profile conversations without loading full prompts and validates resume identity and directories', async () => {
     const root = fixture(); const profiles = new ClaudeProfiles(root); const account = profiles.create('Work'); const folder = path.join(profiles.directory(account.id), 'projects/project'); fs.mkdirSync(folder, { recursive: true }); const id = randomUUID(); fs.writeFileSync(path.join(folder, id + '.jsonl'), JSON.stringify({ type: 'user', cwd: root, sessionId: id, message: { content: 'Private prompt not listed' } }) + '\n');
-    const sessions = new NativeSessions(profiles); const found = sessions.list().find((item) => item.id === id)!; expect(found.profileId).toBe(account.id); expect(JSON.stringify(found)).not.toContain('Private prompt'); expect((sessions.execute({ action: 'native-resume', key: found.key }) as any).directory).toBe(root); expect(() => sessions.execute({ action: 'native-resume', key: 'unknown' })).toThrow('no longer available');
+    const sessions = new NativeSessions(profiles); const found = (await sessions.list()).find((item) => item.id === id)!; expect(found.profileId).toBe(account.id); expect(JSON.stringify(found)).not.toContain('Private prompt'); expect((await sessions.execute({ action: 'native-resume', key: found.key }) as any).directory).toBe(root); await expect(sessions.execute({ action: 'native-resume', key: 'unknown' })).rejects.toThrow('no longer available');
   });
-  it('lists the newest conversations from every CLI, and finds an older one by its id', () => {
+  it('lists the newest conversations from every CLI, and finds an older one by its id', async () => {
     const root = fixture(); const claude = path.join(root, 'claude'); const codex = path.join(root, 'codex'); vi.stubEnv('CLAUDE_CONFIG_DIR', claude); vi.stubEnv('CODEX_HOME', codex);
     try {
       const folder = path.join(claude, 'projects', 'project'); fs.mkdirSync(folder, { recursive: true }); const write = (file: string, at: number) => { fs.writeFileSync(file, JSON.stringify({ type: 'user', cwd: root }) + '\n'); fs.utimesSync(file, at, at); };
@@ -73,7 +73,7 @@ describe('native history and task scope', () => {
       const newest = ids[0]; write(path.join(folder, newest + '.jsonl'), 3_000_000); const oldest = ids[1];
       const rollouts = path.join(codex, 'sessions', '2026', '10', '26'); fs.mkdirSync(rollouts, { recursive: true }); const thread = randomUUID();
       fs.writeFileSync(path.join(rollouts, `rollout-${thread}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { id: thread, cwd: root } }) + '\n'); fs.utimesSync(path.join(rollouts, `rollout-${thread}.jsonl`), 2_000_000, 2_000_000);
-      const sessions = new NativeSessions(new ClaudeProfiles(root)); const listed = sessions.list();
+      const sessions = new NativeSessions(new ClaudeProfiles(root)); const listed = await sessions.list();
       expect(listed).toHaveLength(500); expect(listed[0].id).toBe(newest); expect(listed[1]).toMatchObject({ id: thread, engine: 'codex' });
       expect(listed.some((item) => item.id === oldest)).toBe(false); expect(sessions.source('claude', oldest)).toBe(path.join(folder, oldest + '.jsonl'));
     } finally { vi.unstubAllEnvs(); }
