@@ -188,6 +188,32 @@ export class TelemetryService {
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
+  /**
+   * Usage recorded before Trace kept each reply's day counts on the day its run started. For Claude runs, each reply's
+   * day is read once from Claude Code's transcripts (in `homes`, by the reply's message id), so older days are right
+   * too; replies it cannot find, and Codex runs (one running total), stay as they were. Returns how many were dated.
+   */
+  backfillDays(homes: string[]): number {
+    const marker = path.join(this.root, 'days-backfilled'); if (fs.existsSync(marker)) return 0;
+    const missing = this.database.prepare("SELECT u.run, u.event, u.snapshot, json_extract(m.value,'$.conversationId') conversation FROM usage u JOIN metadata m ON m.run=u.run WHERE json_extract(m.value,'$.engine')='claude' AND json_extract(u.snapshot,'$.day') IS NULL").all() as { run: string; event: string; snapshot: string; conversation: string | null }[];
+    const days = new Map<string, string>(); const read = new Set<string>();
+    const scan = (file: string) => {
+      if (read.has(file)) return; read.add(file);
+      let text: string; try { if (fs.statSync(file).size > 256 * 1024 * 1024) return; text = fs.readFileSync(file, 'utf8'); } catch { return; }
+      for (const line of text.split('\n')) { if (!line.includes('"usage"')) continue; try { const raw = JSON.parse(line); const at = new Date(raw.timestamp); if (raw.type === 'assistant' && raw.message?.id && !Number.isNaN(at.getTime())) days.set(String(raw.message.id).slice(0, 200), localDay(at)); } catch { /* Partial line. */ } }
+    };
+    for (const id of new Set(missing.map((row) => row.conversation ?? row.run))) for (const home of homes) {
+      let projects: string[] = []; try { projects = fs.readdirSync(path.join(home, 'projects')); } catch { continue; }
+      for (const project of projects) {
+        const file = path.join(home, 'projects', project, id + '.jsonl'); if (!fs.existsSync(file)) continue; scan(file);
+        try { for (const name of fs.readdirSync(path.join(home, 'projects', project, id, 'subagents'))) if (name.endsWith('.jsonl')) scan(path.join(home, 'projects', project, id, 'subagents', name)); } catch { /* No subagents. */ }
+      }
+    }
+    let dated = 0; const update = this.database.prepare('UPDATE usage SET snapshot=? WHERE run=? AND event=?');
+    for (const row of missing) { const day = days.get(row.event); if (!day) continue; update.run(JSON.stringify({ ...JSON.parse(row.snapshot), day }), row.run, row.event); dated++; }
+    try { fs.writeFileSync(marker, new Date().toISOString(), { mode: 0o600 }); } catch { /* Tried again next start. */ }
+    return dated;
+  }
   /** A run that was prepared but never started: its resume baseline and Codex log folder go. */
   abandon(runId: string) { this.baselines.delete(runId); if (!this.watches.has(runId)) try { fs.rmSync(path.join(this.root, runId), { recursive: true, force: true }); } catch { /* Removed at the next restart. */ } }
   /** The CLI's own session file for a run, once it has been located. */

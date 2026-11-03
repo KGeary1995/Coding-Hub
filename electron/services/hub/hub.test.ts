@@ -157,6 +157,23 @@ describe('structured telemetry', () => {
       expect(telemetry.runUsage(third.runId)).toMatchObject({ input: 1, output: 1 }); expect(telemetry.runUsage(run.runId)).toMatchObject({ input: 5100, output: 310 });
     } finally { telemetry.close(); vi.useRealTimers(); }
   });
+  it('dates older replies by the day Claude Code wrote them, once', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    try {
+      // Recorded as an older Trace did: no timestamps in what it read, so no day per reply.
+      const reply = (id: string, at?: string) => JSON.stringify({ type: 'assistant', ...(at ? { timestamp: at } : {}), message: { id, model: 'm', usage: { input_tokens: 10, output_tokens: 90 } } }) + '\n';
+      fs.writeFileSync(file, reply('late') + reply('next'));
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }); vi.advanceTimersByTime(750); await telemetry.end(run.runId);
+      const started = Object.keys(telemetry.runUsage(run.runId)!.days!); expect(started).toHaveLength(1);
+      // Claude Code's transcript has the times: the second reply came the next day.
+      const first = new Date(2026, 9, 26, 23, 50); const second = new Date(2026, 9, 27, 0, 10);
+      fs.writeFileSync(file, reply('late', first.toISOString()) + reply('next', second.toISOString()));
+      expect(telemetry.backfillDays([home])).toBe(2);
+      expect(telemetry.runUsage(run.runId)!.days).toEqual({ '2026-10-26': { tokens: 100, cost: null }, '2026-10-27': { tokens: 100, cost: null } });
+      expect(telemetry.backfillDays([home])).toBe(0);
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
   it('hands over a short run’s transcript found only by the last read, for its memory summary', async () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
     const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));

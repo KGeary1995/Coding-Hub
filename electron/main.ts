@@ -457,6 +457,8 @@ else app.whenReady().then(() => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
     hub.telemetry.onError = (_run, message) => { hostHealth?.record('telemetry-read-failed'); reportStorageError(message); };
+    // Once, two minutes after starting (it reads Claude Code's older transcripts): each older reply's day.
+    const telemetry = hub.telemetry; setTimeout(() => { try { telemetry.backfillDays([process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), ...claudeProfiles.list().map((profile) => claudeProfiles.directory(profile.id))]); } catch { hostHealth?.record('usage-days-backfill-failed'); } }, 120000).unref();
   } catch { /* Live sessions remain available without optional storage integrations. */ }
   if (hub) {
     const memoryHub = hub;
