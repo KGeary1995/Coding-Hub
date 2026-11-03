@@ -188,6 +188,8 @@ export class TelemetryService {
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
+  /** A run that was prepared but never started: its resume baseline and Codex log folder go. */
+  abandon(runId: string) { this.baselines.delete(runId); if (!this.watches.has(runId)) try { fs.rmSync(path.join(this.root, runId), { recursive: true, force: true }); } catch { /* Removed at the next restart. */ } }
   /** The CLI's own session file for a run, once it has been located. */
   transcript(runId: string): string | null { return this.watches.get(runId)?.file ?? null; }
   /**

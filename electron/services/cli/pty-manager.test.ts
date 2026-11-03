@@ -157,6 +157,18 @@ describe('signalled exits', () => {
   });
 });
 
+describe('launches that fail to start', () => {
+  it('release what was prepared for them, and nothing for a run that started', async () => {
+    const abandonLaunch = vi.fn(); const prepareLaunch = vi.fn();
+    const spawn = vi.fn(() => { throw new Error('spawn failed'); });
+    const manager = new PtyManager(() => {}, { spawn: spawn as never, discover: async (engine) => engines(engine), prepareLaunch, abandonLaunch, environment: () => ({ PATH: '/bin' }) }); managers.push(manager);
+    await expect(manager.start(1, request())).rejects.toMatchObject({ code: 'PTY_START_FAILED' });
+    expect(abandonLaunch).toHaveBeenCalledTimes(1); expect(abandonLaunch.mock.calls[0][0]).toBe(prepareLaunch.mock.calls[0][0]);
+    const working = fixture(); const release = vi.fn(); (working.manager as unknown as { dependencies: { abandonLaunch: () => void } }).dependencies.abandonLaunch = release;
+    await working.manager.start(1, request('session-two')); expect(release).not.toHaveBeenCalled();
+  });
+});
+
 describe('Terminal channels', () => {
   it('run the login shell in the channel folder without agent discovery, usage, rules or memory', async () => {
     const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine));

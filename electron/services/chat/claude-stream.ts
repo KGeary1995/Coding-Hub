@@ -108,6 +108,11 @@ export class ClaudeStream implements ChatStream {
       }
       return;
     }
+    if (type === 'control_cancel_request') {
+      // Claude withdrew an approval it asked for (the turn was interrupted, or it moved on): close its card.
+      const requestId = text(message.request_id); if (this.pending.delete(requestId)) this.emit({ type: 'permission-done', requestId });
+      return;
+    }
     if (type === 'result') {
       const isError = message.is_error === true || (typeof message.subtype === 'string' && message.subtype.startsWith('error'));
       this.emit({ type: 'done', isError, error: isError ? (text(message.result) || (Array.isArray(message.errors) ? (message.errors as unknown[]).map(text).join(' ') : '') || 'The reply ended with an error.') : null });
