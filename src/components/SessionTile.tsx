@@ -21,7 +21,7 @@ import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, dollars } from '../state/hub-store';
-import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, limitRatio, usageFor } from '../state/channel-state';
+import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, channelToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { compact } from './shell/StatusBar';
@@ -46,6 +46,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const [conversation, setConversation] = useState(false);
   const [stopping, setStopping] = useState(false);
   const usage = useHubStore((s) => usageFor(session, s.usage));
+  const today = { tokens: useHubStore((s) => channelToday(session.id, s.usage).tokens) };
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
@@ -115,7 +116,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           {account && <span className="tr-profile-chip account-profile-chip" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           <span className="tr-spacer" />
           {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
-          <span className="tr-tile-metric tnum" title={usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
+          <span className="tr-tile-metric tnum" title={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{today.tokens > 0 ? compact(today.tokens) : usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
             <span aria-hidden="true">{meta.glyph}</span>{meta.word}

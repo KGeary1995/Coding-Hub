@@ -55,3 +55,5 @@ export const freshInput = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached
 /** A computer's local calendar day, as `days` keys it: 2026-10-26. */
 export const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'>) => freshInput(usage) + usage.output;
+/** Today's new tokens on this computer from the CLIs' own logs, in Trace or not; `complete` is false while a long day is still being read. */
+export interface DayUsage { day: string; claude: number; codex: number; cost: number | null; complete: boolean }

@@ -125,7 +125,7 @@ Trace replaces the sidebar with a top bar and a status bar:
   - the layout controls (Workspace only) and the command field (**Ctrl+Shift+P**);
   - Help, and the **Agent setup** menu: Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings and Workflow center;
   - **+ Channel** to add a channel (up to eight): Claude Code, Claude chat, Codex chat, Codex CLI, or Terminal.
-- **Status bar:** every channel's state and tokens, the project, today's reported tokens and cost, alerts, save status and the host connection. Click a channel or an alert to jump to its terminal.
+- **Status bar:** every channel's state and tokens today, the project, today's tokens and cost on this computer (**Σ today**: read from Claude Code's and Codex's own logs every 15 seconds, so it also counts use outside Trace or while Trace was closed, for every Claude account; a reply counts once, on the local day it was written), alerts, save status and the host connection. Click a channel or an alert to jump to its terminal.
 - **Keyboard:** **Alt+1…8** focuses a channel. **G** then a letter opens a view:
   - W Workspace, C Changes, P Projects;
   - U Usage, H History, F Files, L More tools, T Tasks, V Verification, D Design, O Coaching;
@@ -145,7 +145,7 @@ The app installs as **Trace** (Trace.app, Trace.exe, Start Menu and desktop shor
 ## Channel tiles
 
 Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile shows:
-- **Header:** the channel badge in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, the Claude account it runs on (also a coloured stripe down the tile's left edge), `ctx` (context used: a percentage for Codex; for Claude Code, the tokens in context after the last reply, with no percentage because Claude Code does not record its window size) and `tok` (new tokens: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
+- **Header:** the channel badge in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, the Claude account it runs on (also a coloured stripe down the tile's left edge), `ctx` (context used: a percentage for Codex; for Claude Code, the tokens in context after the last reply, with no percentage because Claude Code does not record its window size) and `tok` (the channel's new tokens today, across restarts of the channel and of Trace: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
 - **Scope strip:** the terminal's output per second over the last two minutes, a dashed limit rail and, along the bottom, a bar for the context or session budget used, with a marker at 80%. The trace only ever shows real output.
 - **Detail row:** point at the header, or tab into it, to swap the strip for the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Settings, Duplicate, Maximize and Close buttons.
 - **The terminal.**

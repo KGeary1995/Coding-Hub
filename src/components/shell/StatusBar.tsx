@@ -2,9 +2,10 @@ import { useEffect } from 'react';
 import { channelNameNow } from '../../state/channel-names';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
-import { useHubStore, tokens, formatNumber, dollars } from '../../state/hub-store';
-import { CHANNEL_STATES, channelAlerts, channelState, todayTotals, usageFor } from '../../state/channel-state';
+import { useHubStore, formatNumber, dollars } from '../../state/hub-store';
+import { CHANNEL_STATES, channelAlerts, channelState, channelToday, todayTotals, usageFor } from '../../state/channel-state';
 import { focusTerminal } from '../../runtime/terminals';
+import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
 
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
@@ -49,7 +50,11 @@ function PlanLimitCells() {
 export function StatusBar() {
   const { sessions, rootDirectory, persistenceStatus } = useWorkspaceStore();
   const usage = useHubStore((state) => state.usage);
-  const today = todayTotals(usage);
+  const logs = useDayUsage((state) => state.usage);
+  const today = dayTotal(logs, todayTotals(usage));
+  // The CLIs' logs are read every 15 s, and soon after Trace's own channels report usage.
+  useEffect(() => { void refreshDayUsage(); const timer = setInterval(() => void refreshDayUsage(), 15000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const timer = setTimeout(() => void refreshDayUsage(), 2000); return () => clearTimeout(timer); }, [usage]);
   const alerts = channelAlerts(sessions, usage);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'no project';
   const jump = jumpToChannel;
@@ -60,13 +65,13 @@ export function StatusBar() {
       return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${channelNameNow(session)}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
         <i className="tr-engine-square" style={{ background: `var(--tr-ch-${session.config.engine})` }} aria-hidden="true" />CH{index + 1}
         <span style={{ color }}><span aria-hidden="true">{meta.glyph}</span> {meta.word.toLowerCase()}</span>
-        {record && <span className="tnum" title={`New tokens (input outside the cache, plus output); ${compact(record.cached)} cache reads not counted`}>{compact(tokens(record))} tok</span>}
+        {(() => { const day = channelToday(session.id, usage); return day.tokens > 0 && <span className="tnum" title="New tokens in this channel today (input outside the cache, plus output), across restarts; cache reads not counted">{compact(day.tokens)} tok</span>; })()}
       </button>;
     })}
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>
     <span className="tr-spacer" />
     <PlanLimitCells />
-    <span className="tr-sb-cell tnum" title="New tokens reported today on this computer: input outside the cache, plus output">Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
+    <span className="tr-sb-cell tnum" title={`New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's and Codex's own logs, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}` : ', in Trace channels'}`}>Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
         <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>

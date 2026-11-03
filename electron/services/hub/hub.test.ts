@@ -137,6 +137,26 @@ describe('structured telemetry', () => {
       vi.advanceTimersByTime(750); expect(published.at(-1)).toMatchObject({ input: 5111, output: 332 });
     } finally { telemetry.close(); vi.useRealTimers(); }
   });
+  it('does not count a resumed conversation’s earlier subagent usage again, and counts a reply once across runs', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    const config = { engine: 'claude' as const, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } };
+    try {
+      const usage = (id: string, input: number, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: input, output_tokens: output } } }) + '\n';
+      fs.writeFileSync(file, usage('main', 100, 10)); const subagents = path.join(dir, run.runId, 'subagents'); fs.mkdirSync(subagents, { recursive: true }); fs.writeFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-1', 5000, 300));
+      telemetry.start(run, config); vi.advanceTimersByTime(750); await telemetry.end(run.runId);
+      expect(telemetry.runUsage(run.runId)).toMatchObject({ input: 5100, output: 310 });
+      // The channel restarts and resumes the conversation; it then replies once more and runs another subagent.
+      const resumed = { ...run, runId: randomUUID() }; telemetry.setResumeSource(resumed.runId, file, 'claude', '');
+      telemetry.start(resumed, { ...config, resumeId: run.runId } as never);
+      fs.appendFileSync(file, usage('main-2', 7, 3)); fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-2', 20, 2)); vi.advanceTimersByTime(750); await telemetry.end(resumed.runId);
+      expect(telemetry.runUsage(resumed.runId)).toMatchObject({ input: 27, output: 5 });
+      // A run that recorded an earlier run's reply again (as 1.14 and before did) counts it only for the first run.
+      const third = { ...run, runId: randomUUID() }; fs.writeFileSync(path.join(dir, third.runId + '.jsonl'), usage('sub-1', 5000, 300) + usage('new', 1, 1));
+      telemetry.start(third, config); vi.advanceTimersByTime(750); await telemetry.end(third.runId);
+      expect(telemetry.runUsage(third.runId)).toMatchObject({ input: 1, output: 1 }); expect(telemetry.runUsage(run.runId)).toMatchObject({ input: 5100, output: 310 });
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
   it('hands over a short run’s transcript found only by the last read, for its memory summary', async () => {
     vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
     const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));

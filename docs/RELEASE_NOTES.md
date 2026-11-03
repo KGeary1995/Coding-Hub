@@ -1,8 +1,10 @@
 ## What's new
 
-1.15.0 coaches your prompts as you send them, keeps a single channel if you want, and opens Windows terminals as administrator:
+1.15.0 coaches your prompts as you send them, keeps today's token counts through restarts, allows a single channel, and opens Windows terminals as administrator:
 
 - **Live coaching.** Trace checks each prompt you send in a Claude Code or Codex channel and shows up to two tips under that channel, for example when an error has no message or a task has no way to tell it worked. The checks run on your computer and use none of your plan. **Ask AI** has Claude Haiku review that prompt in a few seconds, with advice and a rewrite you can copy; that uses a little of your Claude plan. Every prompt is also listed under **AI coaching → Live coaching**, where you can save it as an example or turn live coaching off.
+- **Today's tokens hold through restarts.** Each channel's `tok` shows its tokens today, and keeps counting when the channel or Trace restarts. **Σ today** now reads Claude Code's and Codex's own logs, so it also counts what you did outside Trace or while it was closed.
+- **Resumed conversations no longer count twice.** When a channel resumed a conversation that had used subagents (the Task tool), Trace counted those subagents' usage again, so a channel could show far more than it used. Usage history is corrected too.
 - **One channel is enough.** You can close channels until only one is left. Before, Trace always kept two.
 - **Terminals as administrator on Windows.** Terminal channels open PowerShell as administrator through Windows' own sudo, and Windows asks for approval each time one starts. Turn sudo on once in Windows Settings → System → Advanced → **Enable sudo**, and set it to **Inline**. Until then, terminals open normally and say how to turn it on.
 
