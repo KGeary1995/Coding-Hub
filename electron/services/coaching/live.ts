@@ -117,8 +117,9 @@ export class LiveCoach {
     const running = this.reviews.get(id); if (running) return running;
     const context = this.context.get(id) ?? { previous: '' };
     const review = (async () => {
-      // A Codex channel's prompt is reviewed by Codex, a Claude channel's by Claude (on its account); either falls back to the other.
-      const order = tip.engine === 'codex' ? ['codex', 'claude'] as const : ['claude', 'codex'] as const; let engine: 'claude' | 'codex' = order[0];
+      // Claude Haiku reviews every prompt (Codex channels' too): a few hundred tokens, where Codex spends about 24,000 on its
+      // own instructions. Codex reviews only when Claude Code is not installed.
+      const order = ['claude', 'codex'] as const; let engine: 'claude' | 'codex' = order[0];
       let cli = await this.reviewer(engine, context.profileId); if (!cli) { engine = order[1]; cli = await this.reviewer(engine, context.profileId); }
       if (!cli) throw new HubError('ENGINE_UNAVAILABLE', 'Ask AI uses Claude Code or Codex, and neither was found on this computer.');
       fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });

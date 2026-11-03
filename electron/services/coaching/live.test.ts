@@ -84,12 +84,12 @@ describe('live coaching', () => {
     live.observe(run(), config(), user('Add a footer to every page with the version number'));
     expect(published).toHaveLength(0); expect(live.list().enabled).toBe(false);
   });
-  it('has Codex review the prompt of a Codex channel, and Claude when Codex is not installed', async () => {
+  it('has Claude review every prompt, Codex channels too, and Codex only when Claude Code is not installed', async () => {
     const { live, published, review, codexReview, installed } = coach(); const codexRun = { ...run(), engine: 'codex' as const, runId: 'run-2' };
     live.observe(codexRun, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the login' } });
-    expect((await live.ask(published[0].id)).review?.advice).toBe('From Codex.'); expect(review).not.toHaveBeenCalled();
-    installed.delete('codex'); live.observe({ ...codexRun, runId: 'run-3' }, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the signup' } });
-    await live.ask(published.at(-1)!.id); expect(review).toHaveBeenCalledTimes(1); expect(codexReview).toHaveBeenCalledTimes(1);
+    expect((await live.ask(published[0].id)).review?.advice).toBe('Name the page.'); expect(codexReview).not.toHaveBeenCalled();
+    installed.delete('claude'); live.observe({ ...codexRun, runId: 'run-3' }, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the signup' } });
+    expect((await live.ask(published.at(-1)!.id)).review?.advice).toBe('From Codex.'); expect(review).toHaveBeenCalledTimes(1);
     expect(live.latest('session-1')?.prompt).toBe('fix the signup');
   });
   it('asks Claude Haiku with no tools and no MCP servers, keeping its session so its usage is counted', () => {

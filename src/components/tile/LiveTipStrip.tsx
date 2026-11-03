@@ -19,7 +19,7 @@ export function TipStrip({ tips, review, prompt, asking, error, ask, dismiss, wh
     </div>
     <div className="live-tip-actions">
       {review ? rewrite && <button className="quiet-button" title="Copy the suggested rewrite" onClick={() => void window.codingHub?.copyText(rewrite)}><Copy size={12} />Copy rewrite</button>
-        : <button className="quiet-button" disabled={asking} title={`Claude Code (or Codex, for a Codex channel)${where ? ` on ${where}` : ''} reviews this prompt, using a little of that plan`} onClick={ask}>{asking ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{asking ? 'Asking' : 'Ask AI'}</button>}
+        : <button className="quiet-button" disabled={asking} title={`Claude Haiku (or Codex, without Claude Code)${where ? ` on ${where}` : ''} reviews this prompt, using a little of that plan`} onClick={ask}>{asking ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{asking ? 'Asking' : 'Ask AI'}</button>}
       <button className="icon-button" aria-label="Dismiss coaching tip" onClick={dismiss}><X size={12} /></button>
     </div>
   </div>;
