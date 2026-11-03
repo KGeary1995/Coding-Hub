@@ -5,11 +5,13 @@ import { z } from 'zod';
 import type { CoachingResponse } from '../../../shared/coaching';
 import { HubError } from '../cli/engine-adapter';
 import type { RulesService } from '../hub/rules';
+import type { LiveCoach } from './live';
 const example = z.object({ id: z.uuid(), text: z.string().trim().min(1).max(2000), outcome: z.enum(['successful', 'partial', 'failed']), notes: z.string().max(500), createdAt: z.iso.datetime() }).strict();
-const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('list') }).strict(), z.object({ action: z.literal('add'), text: example.shape.text, outcome: example.shape.outcome, notes: example.shape.notes }).strict(), z.object({ action: z.literal('remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('prepare'), report: z.string().min(1).max(30000).refine((text) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) }).strict()]);
+const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('list') }).strict(), z.object({ action: z.literal('add'), text: example.shape.text, outcome: example.shape.outcome, notes: example.shape.notes }).strict(), z.object({ action: z.literal('remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('prepare'), report: z.string().min(1).max(30000).refine((text) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) }).strict(),
+  z.object({ action: z.literal('live') }).strict(), z.object({ action: z.literal('live-set'), enabled: z.boolean() }).strict(), z.object({ action: z.literal('live-review'), id: z.uuid() }).strict()]);
 export class CoachingService {
   private root: string;
-  constructor(storageRoot: string, private rules: RulesService, private inUse: (directory: string) => boolean = () => false) { this.root = path.join(storageRoot, 'coaching'); }
+  constructor(storageRoot: string, private rules: RulesService, private inUse: (directory: string) => boolean = () => false, private live: LiveCoach | null = null) { this.root = path.join(storageRoot, 'coaching'); }
   /** Keeps the newest prepared folders: removes the oldest ones no session uses until a new one fits. */
   private evict(limit: number) {
     const reports = fs.readdirSync(this.root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name))
@@ -25,9 +27,13 @@ export class CoachingService {
     catch { throw new HubError('COACHING_STORAGE', 'Prompt examples could not be read. Existing data was preserved.'); }
   }
   private write(value: z.infer<typeof example>[]) { const file = path.join(this.root, 'examples.json'); const temporary = path.join(this.root, randomUUID() + '.tmp'); try { fs.writeFileSync(temporary, JSON.stringify(value), { flag: 'wx', mode: 0o600 }); fs.renameSync(temporary, file); } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } }
-  execute(input: unknown): CoachingResponse {
+  execute(input: unknown): CoachingResponse | Promise<CoachingResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_COACHING_REQUEST', 'Invalid coaching request.'); const request = parsed.data;
     if (request.action === 'list') return this.list();
+    if (request.action === 'live' || request.action === 'live-set' || request.action === 'live-review') {
+      if (!this.live) throw new HubError('COACHING_LIVE', 'Live coaching is unavailable.');
+      return request.action === 'live' ? this.live.list() : request.action === 'live-set' ? this.live.setEnabled(request.enabled) : this.live.ask(request.id);
+    }
     if (request.action === 'prepare') {
       this.ensure(); if (this.evict(100) >= 100) throw new HubError('COACHING_LIMIT', 'All 100 prepared coaching and design-feedback folders are used by session tiles. Remove some of those tiles, then retry.');
       const directory = path.join(this.root, randomUUID()); fs.mkdirSync(directory, { mode: 0o700 });

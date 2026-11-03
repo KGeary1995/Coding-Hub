@@ -2,7 +2,7 @@ import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
-import type { CoachingRequest, CoachingResponse } from './coaching';
+import type { CoachingRequest, CoachingResponse, LiveTip } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
@@ -96,6 +96,7 @@ export interface CodingHubHost {
   /** A linked computer's screen: its connection, the bytes both ways, and its saved sign-in. */
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
+  onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
@@ -148,6 +149,7 @@ export const IPC_CHANNELS = {
   linkedEvent: 'coding-hub:linked-event',
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
+  coachingEvent: 'coding-hub:coaching-event',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',

@@ -153,7 +153,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),
   removeSession: (id) => set((state) => {
-    if (state.sessions.length <= 2 || state.sessions.some((session) => session.id === id && (session.status === 'running' || session.status === 'starting'))) return state;
+    if (state.sessions.length <= 1 || state.sessions.some((session) => session.id === id && (session.status === 'running' || session.status === 'starting'))) return state;
     const sessions = state.sessions.filter((session) => session.id !== id);
     return {
       sessions,

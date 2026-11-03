@@ -2,6 +2,7 @@ import { stopProcess, type StopDependencies } from './stop-process';
 import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
@@ -28,14 +29,27 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
   return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
 }
 
+/** Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. */
+export function windowsSudoMode(): number {
+  try {
+    const output = execFileSync('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    const value = /Enabled\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(output)?.[1]; return value ? parseInt(value, 16) : 0;
+  } catch { return 0; /* No key: sudo was never turned on. */ }
+}
+/** Shown in a Windows terminal that could not start as administrator, unless PowerShell already is one. */
+const NOT_ADMIN = "if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Trace: this terminal is not running as administrator. To open terminals as administrator, turn on sudo in Windows Settings > System > Advanced and set it to Inline.' -ForegroundColor Yellow }";
 /**
- * The program a Terminal channel runs: PowerShell on Windows, otherwise the person's login shell (as Terminal.app
- * starts it), falling back to zsh on macOS and bash elsewhere.
+ * The program a Terminal channel runs: PowerShell on Windows, as administrator through Windows' sudo when it runs
+ * inline (Windows asks for approval each time), otherwise the person's login shell (as Terminal.app starts it),
+ * falling back to zsh on macOS and bash elsewhere.
  */
-export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync): { file: string; args: string[]; name: string } {
+export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync, sudoMode: () => number = windowsSudoMode): { file: string; args: string[]; name: string } {
   if (platform === 'win32') {
-    const file = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    return { file: exists(file) ? file : 'powershell.exe', args: ['-NoLogo'], name: 'PowerShell' };
+    const system = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32');
+    const powershell = path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'); const file = exists(powershell) ? powershell : 'powershell.exe';
+    const sudo = path.win32.join(system, 'sudo.exe');
+    if (exists(sudo) && sudoMode() === 3) return { file: sudo, args: ['--inline', file, '-NoLogo'], name: 'PowerShell (administrator)' };
+    return { file, args: ['-NoLogo', '-NoExit', '-Command', NOT_ADMIN], name: 'PowerShell' };
   }
   const file = env.SHELL && path.isAbsolute(env.SHELL) && exists(env.SHELL) ? env.SHELL : platform === 'darwin' ? '/bin/zsh' : '/bin/bash';
   return { file, args: ['-l'], name: path.basename(file) };

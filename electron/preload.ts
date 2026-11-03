@@ -6,6 +6,7 @@ import type { UsageRecord } from '../shared/hub';
 import type { LinkedComputerEvent, RemoteControlRequest } from '../shared/remote';
 import type { ChatEnvelope } from '../shared/chat';
 import type { ScreenEvent } from '../shared/screen';
+import type { LiveTip } from '../shared/coaching';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
@@ -79,6 +80,11 @@ const host: CodingHubHost = {
     const receive = (_event: Electron.IpcRendererEvent, value: ScreenEvent) => listener(value);
     ipcRenderer.on('coding-hub:screen-event', receive);
     return () => ipcRenderer.removeListener('coding-hub:screen-event', receive);
+  },
+  onCoachingEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: LiveTip) => listener(value);
+    ipcRenderer.on('coding-hub:coaching-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:coaching-event', receive);
   },
   onRemoteControl: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: RemoteControlRequest) => listener(value);

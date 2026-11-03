@@ -64,6 +64,8 @@ export class TelemetryService {
   private assigned = new Set<string>(); private closed = false; private closing = false;
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
   onError: (run: AgentRunningSession, message: string) => void = () => {};
+  /** Each new line of a run's own transcript (not a subagent's), for live coaching; never the lines before a resume. */
+  onLine: (run: AgentRunningSession, config: CLIEngineConfig, raw: Json) => void = () => {};
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
     this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -155,7 +157,7 @@ export class TelemetryService {
     const data = Buffer.concat([state.partial, buffer.subarray(0, read)]); let start = 0; let changed = false;
     for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
       if (end - start <= 2 * 1024 * 1024) try {
-        const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
+        const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
         const parsed = parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
         if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
           this.database.prepare('INSERT INTO usage(run,event,snapshot) VALUES(?,?,?) ON CONFLICT(run,event) DO UPDATE SET snapshot=excluded.snapshot').run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;

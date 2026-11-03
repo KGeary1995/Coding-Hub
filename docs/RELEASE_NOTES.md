@@ -1,5 +1,11 @@
 ## What's new
 
+1.15.0 coaches your prompts as you send them, keeps a single channel if you want, and opens Windows terminals as administrator:
+
+- **Live coaching.** Trace checks each prompt you send in a Claude Code or Codex channel and shows up to two tips under that channel, for example when an error has no message or a task has no way to tell it worked. The checks run on your computer and use none of your plan. **Ask AI** has Claude Haiku review that prompt in a few seconds, with advice and a rewrite you can copy; that uses a little of your Claude plan. Every prompt is also listed under **AI coaching → Live coaching**, where you can save it as an example or turn live coaching off.
+- **One channel is enough.** You can close channels until only one is left. Before, Trace always kept two.
+- **Terminals as administrator on Windows.** Terminal channels open PowerShell as administrator through Windows' own sudo, and Windows asks for approval each time one starts. Turn sudo on once in Windows Settings → System → Advanced → **Enable sudo**, and set it to **Inline**. Until then, terminals open normally and say how to turn it on.
+
 1.14.0 lets you read whole conversations, see your Mac's screen from your phone, and close and arrange another computer's channels (update both computers and reload the phone app):
 
 - **Conversation.** Claude Code and Codex channels have **Conversation**, which shows the channel's whole conversation, including what was said before restarts. It works on the computer itself, on another computer's tab and on the phone.

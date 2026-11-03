@@ -93,3 +93,9 @@
 .linked-screen-signin label:not(.linked-screen-toggle) { display: grid; gap: 4px; width: 100%; }
 .linked-screen-unlock p svg { vertical-align: -2px; }
 .linked-screen-actions { display: flex; align-items: center; gap: 8px; }
+
+.live-feed { display: grid; gap: 10px; margin-top: 10px; max-height: 520px; overflow-y: auto; }
+.live-feed > article { border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); padding: 10px 12px; }
+.live-feed blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--tr-line-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-feed pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); }
+.live-feed ul, .live-feed p { margin: 6px 0; }

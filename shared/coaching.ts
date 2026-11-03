@@ -2,8 +2,39 @@ import type { UsageRecord } from './hub';
 export interface PromptExample { id: string; text: string; outcome: 'successful' | 'partial' | 'failed'; notes: string; createdAt: string }
 export interface CoachingFindings { runs: number; tokens: number; reasoning: number; cost: number | null; days: { date: string; tokens: number; runs: number }[]; engines: { engine: string; runs: number; tokens: number }[]; advice: string[] }
 export interface CoachingPrepared { directory: string; prompt: string }
-export type CoachingRequest = { action: 'list' } | { action: 'add'; text: string; outcome: PromptExample['outcome']; notes: string } | { action: 'remove'; id: string } | { action: 'prepare'; report: string };
-export type CoachingResponse = PromptExample[] | PromptExample | CoachingPrepared | null;
+/** A prompt sent in a channel, as live coaching saw it: local tips at once, and Claude's review when asked for. */
+export interface LiveTip { id: string; sessionId: string; engine: 'claude' | 'codex'; prompt: string; tips: string[]; at: string; review: LiveReview | null }
+export interface LiveReview { advice: string; rewrite: string }
+export interface LiveCoaching { enabled: boolean; tips: LiveTip[] }
+export type CoachingRequest = { action: 'list' } | { action: 'add'; text: string; outcome: PromptExample['outcome']; notes: string } | { action: 'remove'; id: string } | { action: 'prepare'; report: string }
+  | { action: 'live' } | { action: 'live-set'; enabled: boolean } | { action: 'live-review'; id: string };
+export type CoachingResponse = PromptExample[] | PromptExample | CoachingPrepared | LiveCoaching | LiveTip | null;
+/** The longest prompt kept for live coaching, and the most prompts kept. */
+export const LIVE_PROMPT_LIMIT = 4000; export const LIVE_TIPS = 50;
+
+const TASK = /\b(add|fix|build|implement|create|change|update|refactor|make|write|remove|delete|rename|migrate|improve|debug|set ?up|support|convert)\b/i;
+const CHECK = /\b(tests?|verify|check|should|must|expect(ed)?|done when|so that|until|make sure|pass(es)?|works? (when|if)|acceptance|success)\b/i;
+const PROBLEM = /\b(error|exception|crash(es|ed)?|fail(s|ed|ing)?|broken|doesn'?t work|not working|bug)\b/i;
+const DETAIL = /```|\n {4}|\bat \S+:\d+|\w*(Error|Exception)\b:|exit code|line \d+|steps?:|when I /i;
+const VAGUE = /\b(better|nicer|cleaner|polish|optimi[sz]e|fix it|make it work|clean ?up)\b/i;
+/**
+ * Instant local tips for a prompt someone just sent: heuristics, so they say what to check, not what is wrong.
+ * Slash commands and short replies (yes, continue, an answer to the agent's question) get none.
+ */
+export function coachable(prompt: string, first: boolean) { const text = prompt.trim(); return Boolean(text) && !text.startsWith('/') && (first || text.split(/\s+/).length >= 6); }
+export function promptTips(prompt: string, first: boolean): string[] {
+  const text = prompt.trim(); const words = text.split(/\s+/).filter(Boolean).length;
+  if (!coachable(text, first)) return [];
+  const tips: string[] = [];
+  if (first && words < 10) tips.push('This starts a conversation with little to go on. Say what should change, where (a file, page or feature), and what done looks like.');
+  else if (first && /^(it|this|that|they|these|those)\b/i.test(text)) tips.push('A new conversation doesn\'t know what "it" is yet. Name the file, feature or screen first.');
+  if (PROBLEM.test(text) && !DETAIL.test(text)) tips.push('Paste the exact error message, or the steps that make it happen. Otherwise the agent has to guess.');
+  if (TASK.test(text) && words >= 12 && !CHECK.test(text)) tips.push('Say how you\'ll know it worked: the behavior you expect, or a test or command that should pass.');
+  if (VAGUE.test(text) && words < 25) tips.push('Say what "better" means here: faster, simpler, a particular look or behavior.');
+  if ((text.match(/(^|\n)\s*(\d+[.)]|[-*•])\s+\S/g) ?? []).length >= 4) tips.push('This asks for several things at once. Say which comes first or matters most.');
+  if (words > 700) tips.push('A long prompt: put the main request in the first sentence or two, and the background after it.');
+  return tips.slice(0, 2);
+}
 const tokens = (record: UsageRecord) => record.input + record.output + (record.engine === 'claude' ? record.cached + record.cacheWrite : 0);
 /** Local descriptive analysis. These hints are heuristics, not model-generated judgments. */
 export function coachingFindings(usage: UsageRecord[], examples: PromptExample[]): CoachingFindings {

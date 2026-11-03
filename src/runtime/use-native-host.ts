@@ -7,6 +7,7 @@ import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
+import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 
 export async function refreshEngines() {
@@ -57,6 +58,7 @@ export function useNativeHost() {
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
+    const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
     const unsubscribeControl = host.onRemoteControl((request) => {
       void ('add' in request ? Promise.resolve(remoteAdd(request.add)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
@@ -89,7 +91,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeCoaching(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -149,8 +151,8 @@ export async function remoteControl(id: string, control: ChannelControl): Promis
   }
   if (control === 'stop') return undefined;
   if (control === 'close') {
-    // The same rule as the X on its tile: a computer keeps at least two channels.
-    if (useWorkspaceStore.getState().sessions.length <= 2) return 'This computer keeps at least two channels, so this one was stopped but not closed.';
+    // The same rule as the X on its tile: a computer keeps at least one channel.
+    if (useWorkspaceStore.getState().sessions.length <= 1) return 'This is the only channel on this computer, so it was stopped but not closed.';
     useWorkspaceStore.getState().removeSession(id);
     return current() ? 'The channel could not be closed.' : undefined;
   }

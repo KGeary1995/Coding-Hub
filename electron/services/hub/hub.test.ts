@@ -100,6 +100,18 @@ describe('structured telemetry', () => {
       expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
     } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
   });
+  it('passes each new line of a run\'s own transcript to live coaching, not its subagents\' lines', async () => {
+    const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(path.join(dir, run.runId, 'subagents'), { recursive: true });
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); const lines: unknown[] = [];
+    telemetry.onLine = (_run, _config, raw) => lines.push(raw);
+    try {
+      fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), JSON.stringify({ type: 'user', message: { content: 'Add a footer' } }) + '\n');
+      fs.writeFileSync(path.join(dir, run.runId, 'subagents', 'agent-1.jsonl'), JSON.stringify({ type: 'user', message: { content: 'subagent task' } }) + '\n');
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      await telemetry.end(run.runId);
+      expect(lines).toEqual([{ type: 'user', message: { content: 'Add a footer' } }]);
+    } finally { telemetry.close(); }
+  });
   it('finds a folder in .claude.json projects however Claude Code wrote its Windows path', () => {
     const projects = { 'C:/Users/me/App': { mcpServers: {} }, '/home/me/app': {} };
     // Claude Code writes C:/…; Trace's paths are C:\…, and on Windows the case may differ.

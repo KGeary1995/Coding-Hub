@@ -95,7 +95,7 @@ describe('multi-session workspace transitions', () => {
     expect(useWorkspaceStore.getState().sessions[0].config.engine).toBe('claude');
   });
 
-  it('restores the grid after closing an isolated tile, preserving the two-session minimum', () => {
+  it('restores the grid after closing an isolated tile, and keeps the last channel', () => {
     useWorkspaceStore.getState().addSession('codex');
     const third = useWorkspaceStore.getState().sessions[2];
     useWorkspaceStore.getState().toggleFocus(third.id);
@@ -103,7 +103,9 @@ describe('multi-session workspace transitions', () => {
     expect(useWorkspaceStore.getState().focusedSessionId).toBeNull();
     expect(useWorkspaceStore.getState().tiles).toHaveLength(2);
     useWorkspaceStore.getState().removeSession(useWorkspaceStore.getState().sessions[0].id);
-    expect(useWorkspaceStore.getState().sessions).toHaveLength(2);
+    expect(useWorkspaceStore.getState().sessions).toHaveLength(1);
+    useWorkspaceStore.getState().removeSession(useWorkspaceStore.getState().sessions[0].id);
+    expect(useWorkspaceStore.getState().sessions).toHaveLength(1);
   });
 
   it('rearranges horizontally and vertically without changing working directories or config', () => {
