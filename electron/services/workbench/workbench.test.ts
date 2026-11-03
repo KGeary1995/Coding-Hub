@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { Backups, resolveStorageRoot } from './backups';
 import { ClaudeProfiles } from '../cli/claude-profiles';
 import { NativeSessions } from './native-sessions';
-import { Tasks, scopesOverlap, matchesScope } from './tasks';
+import { Tasks, scopesOverlap, matchesScope, taskPrompt } from './tasks';
+import { execFileSync } from 'node:child_process';
 import { Verification } from './verification';
 import { Experiments } from './experiments';
 const roots: string[] = [];
@@ -61,11 +62,11 @@ describe('backup and restore integrity', () => {
   });
 });
 describe('native history and task scope', () => {
-  it('discovers profile conversations without loading full prompts and validates resume identity and directories', () => {
+  it('discovers profile conversations without loading full prompts and validates resume identity and directories', async () => {
     const root = fixture(); const profiles = new ClaudeProfiles(root); const account = profiles.create('Work'); const folder = path.join(profiles.directory(account.id), 'projects/project'); fs.mkdirSync(folder, { recursive: true }); const id = randomUUID(); fs.writeFileSync(path.join(folder, id + '.jsonl'), JSON.stringify({ type: 'user', cwd: root, sessionId: id, message: { content: 'Private prompt not listed' } }) + '\n');
-    const sessions = new NativeSessions(profiles); const found = sessions.list().find((item) => item.id === id)!; expect(found.profileId).toBe(account.id); expect(JSON.stringify(found)).not.toContain('Private prompt'); expect((sessions.execute({ action: 'native-resume', key: found.key }) as any).directory).toBe(root); expect(() => sessions.execute({ action: 'native-resume', key: 'unknown' })).toThrow('no longer available');
+    const sessions = new NativeSessions(profiles); const found = (await sessions.list()).find((item) => item.id === id)!; expect(found.profileId).toBe(account.id); expect(JSON.stringify(found)).not.toContain('Private prompt'); expect((await sessions.execute({ action: 'native-resume', key: found.key }) as any).directory).toBe(root); await expect(sessions.execute({ action: 'native-resume', key: 'unknown' })).rejects.toThrow('no longer available');
   });
-  it('lists the newest conversations from every CLI, and finds an older one by its id', () => {
+  it('lists the newest conversations from every CLI, and finds an older one by its id', async () => {
     const root = fixture(); const claude = path.join(root, 'claude'); const codex = path.join(root, 'codex'); vi.stubEnv('CLAUDE_CONFIG_DIR', claude); vi.stubEnv('CODEX_HOME', codex);
     try {
       const folder = path.join(claude, 'projects', 'project'); fs.mkdirSync(folder, { recursive: true }); const write = (file: string, at: number) => { fs.writeFileSync(file, JSON.stringify({ type: 'user', cwd: root }) + '\n'); fs.utimesSync(file, at, at); };
@@ -73,19 +74,41 @@ describe('native history and task scope', () => {
       const newest = ids[0]; write(path.join(folder, newest + '.jsonl'), 3_000_000); const oldest = ids[1];
       const rollouts = path.join(codex, 'sessions', '2026', '10', '26'); fs.mkdirSync(rollouts, { recursive: true }); const thread = randomUUID();
       fs.writeFileSync(path.join(rollouts, `rollout-${thread}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { id: thread, cwd: root } }) + '\n'); fs.utimesSync(path.join(rollouts, `rollout-${thread}.jsonl`), 2_000_000, 2_000_000);
-      const sessions = new NativeSessions(new ClaudeProfiles(root)); const listed = sessions.list();
+      const sessions = new NativeSessions(new ClaudeProfiles(root)); const listed = await sessions.list();
       expect(listed).toHaveLength(500); expect(listed[0].id).toBe(newest); expect(listed[1]).toMatchObject({ id: thread, engine: 'codex' });
       expect(listed.some((item) => item.id === oldest)).toBe(false); expect(sessions.source('claude', oldest)).toBe(path.join(folder, oldest + '.jsonl'));
     } finally { vi.unstubAllEnvs(); }
   });
-  it('detects nested overlaps and requires evidence to complete tasks', async () => {
+  it('detects nested overlaps and lets a task be marked done without notes', async () => {
     expect(scopesOverlap(['src/**'], ['src/ui/**'])).toBe(true); expect(scopesOverlap(['src/**'], ['docs/**'])).toBe(false); expect(matchesScope('src/a.ts', ['src/**'])).toBe(true); expect(matchesScope('secret.txt', ['src/**'])).toBe(false);
     const root = fixture(); const verification = new Verification(root, async () => true); const tasks = new Tasks(root, verification);
-    await expect(tasks.execute({ action: 'task-save', title: 'Task', directory: root, sessionId: null, scope: ['src/**'], status: 'done', notes: '', verificationId: null })).rejects.toMatchObject({ code: 'TASK_REVIEW' });
+    await tasks.execute({ action: 'task-save', title: 'Done', directory: root, sessionId: null, scope: ['src/**'], status: 'done', notes: '', verificationId: null });
+    await tasks.execute({ action: 'task-remove', id: tasks.list()[0].id }); expect(tasks.list()).toEqual([]);
     const record = await tasks.execute({ action: 'task-save', title: 'Task', directory: root, sessionId: null, scope: ['src/**'], status: 'queued', notes: '', verificationId: null }) as any; expect(tasks.list()[0].id).toBe(record.id);
     // Folder scopes saved before stricter validation (`src/`) stay readable; empty and dot segments are still rejected.
     await tasks.execute({ action: 'task-save', title: 'Folder', directory: root, sessionId: null, scope: ['src/'], status: 'queued', notes: '', verificationId: null }); expect(tasks.list()).toHaveLength(2);
     for (const bad of ['src//a.ts', 'src/./a.ts']) await expect(tasks.execute({ action: 'task-save', title: 'Bad', directory: root, sessionId: null, scope: [bad], status: 'queued', notes: '', verificationId: null })).rejects.toThrow();
+  });
+  it('sends a task as one message, and follows what its agent changes from then on', async () => {
+    expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. When you are done, list the files you changed and how you checked the result.');
+    expect(taskPrompt({ title: 'Fix the footer.', scope: ['**'] })).toBe('Task: Fix the footer. When you are done, list the files you changed and how you checked the result.');
+    const root = fixture(); const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root });
+    git('init'); fs.mkdirSync(path.join(root, 'src')); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'a'); fs.writeFileSync(path.join(root, 'README.md'), 'r'); git('add', '.'); git('commit', '-m', 'base');
+    fs.writeFileSync(path.join(root, 'README.md'), 'already changed before the task');
+    const tasks = new Tasks(fixture(), new Verification(fixture(), async () => true)); const session = randomUUID();
+    const saved = await tasks.execute({ action: 'task-save', title: 'Settings', directory: root, sessionId: session, scope: ['src/**'], status: 'queued', notes: '', verificationId: null }) as any;
+    const sent = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(sent.task.status).toBe('active'); expect(sent.prompt).toContain('src/**');
+    expect(await tasks.execute({ action: 'task-watch' })).toEqual({ changed: { [saved.id]: [] }, warnings: [] });
+    // The agent changes its file, and one outside its task.
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'changed'); fs.writeFileSync(path.join(root, 'package.json'), '{}');
+    const watched = await tasks.execute({ action: 'task-watch' }) as any;
+    expect(watched.changed[saved.id].sort()).toEqual(['package.json', 'src/a.ts']); expect(watched.warnings).toEqual([{ taskIds: [saved.id], text: "Changed package.json outside this task's files." }]);
+    // A second limited task over the same files: both are told.
+    const other = await tasks.execute({ action: 'task-save', title: 'Styles', directory: root, sessionId: randomUUID(), scope: ['src/a.ts'], status: 'queued', notes: '', verificationId: null }) as any;
+    await tasks.execute({ action: 'task-send', id: other.id }); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'changed again');
+    const both = await tasks.execute({ action: 'task-watch' }) as any;
+    expect(both.warnings.some((warning: { taskIds: string[]; text: string }) => warning.taskIds.length === 2 && /same files|src\/a\.ts/.test(warning.text))).toBe(true);
+    expect((await tasks.execute({ action: 'task-status', id: saved.id, status: 'review' }) as any).status).toBe('review');
   });
 });
 describe('verification and experiment evidence', () => {

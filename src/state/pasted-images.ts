@@ -36,6 +36,13 @@ export function removePastedImage(sessionId: string, id: string) {
   usePastedImages.setState({ images: next });
 }
 
+/** Hides a channel's sent images from the strip; attached ones, still to be sent, stay. */
+export function clearSentImages(sessionId: string) {
+  const { images } = usePastedImages.getState(); const current = images[sessionId]; if (!current) return;
+  const next = { ...images, [sessionId]: current.filter((image) => !image.sentAt) }; if (!next[sessionId].length) delete next[sessionId];
+  usePastedImages.setState({ images: next });
+}
+
 /** A channel restarted (a new run numbers its images from 1) or was removed. */
 export function clearPastedImages(sessionId: string) {
   const { images, counts } = usePastedImages.getState();

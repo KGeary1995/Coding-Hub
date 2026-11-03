@@ -2,6 +2,7 @@ import { stopProcess, type StopDependencies } from './stop-process';
 import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
@@ -28,14 +29,27 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
   return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
 }
 
+/** Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. */
+export function windowsSudoMode(): number {
+  try {
+    const output = execFileSync('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    const value = /Enabled\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(output)?.[1]; return value ? parseInt(value, 16) : 0;
+  } catch { return 0; /* No key: sudo was never turned on. */ }
+}
+/** Shown in a Windows terminal that could not start as administrator, unless PowerShell already is one. */
+const NOT_ADMIN = "if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Trace: this terminal is not running as administrator. To open terminals as administrator, turn on sudo in Windows Settings > System > Advanced and set it to Inline.' -ForegroundColor Yellow }";
 /**
- * The program a Terminal channel runs: PowerShell on Windows, otherwise the person's login shell (as Terminal.app
- * starts it), falling back to zsh on macOS and bash elsewhere.
+ * The program a Terminal channel runs: PowerShell on Windows, as administrator through Windows' sudo when it runs
+ * inline (Windows asks for approval each time), otherwise the person's login shell (as Terminal.app starts it),
+ * falling back to zsh on macOS and bash elsewhere.
  */
-export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync): { file: string; args: string[]; name: string } {
+export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync, sudoMode: () => number = windowsSudoMode): { file: string; args: string[]; name: string } {
   if (platform === 'win32') {
-    const file = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    return { file: exists(file) ? file : 'powershell.exe', args: ['-NoLogo'], name: 'PowerShell' };
+    const system = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32');
+    const powershell = path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'); const file = exists(powershell) ? powershell : 'powershell.exe';
+    const sudo = path.win32.join(system, 'sudo.exe');
+    if (exists(sudo) && sudoMode() === 3) return { file: sudo, args: ['--inline', file, '-NoLogo'], name: 'PowerShell (administrator)' };
+    return { file, args: ['-NoLogo', '-NoExit', '-Command', NOT_ADMIN], name: 'PowerShell' };
   }
   const file = env.SHELL && path.isAbsolute(env.SHELL) && exists(env.SHELL) ? env.SHELL : platform === 'darwin' ? '/bin/zsh' : '/bin/bash';
   return { file, args: ['-l'], name: path.basename(file) };
@@ -81,7 +95,9 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
+    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+      /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
+      abandonLaunch?: (session: AgentRunningSession) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
       /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
       chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null } = {},
   ) {
@@ -99,10 +115,10 @@ export class PtyManager {
   }
 
   /** Tells the owning window the CLI carried on, so a waiting prompt clears even if no keystroke came after it. */
-  notifyResolved(runId: string) {
+  notifyResolved(runId: string, finished = false) {
     const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
     if (!run || run.finished) return;
-    this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId, at: new Date().toISOString() });
+    this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId, at: new Date().toISOString(), ...(finished ? { finished: true as const } : {}) });
   }
 
   /** Runs still going, for the phone remote. */
@@ -160,6 +176,7 @@ export class PtyManager {
     const nativeKey = resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${resumeId}` : undefined;
     if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');
     const reservation = { owner, cancelled: false, profileId, nativeKey };
+    let prepared: AgentRunningSession | null = null;
     this.pending.set(request.sessionId, reservation);
     try {
       if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working directory.');
@@ -189,7 +206,7 @@ export class PtyManager {
         if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
         const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
-        this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
+        prepared = agent; this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
         file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(codexChat ? ['app-server'] : chat ? CHAT_ARGS : []), ...launch.args];
@@ -202,7 +219,7 @@ export class PtyManager {
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
-      this.runs.set(request.sessionId, run);
+      this.runs.set(request.sessionId, run); prepared = null;
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } : null);
       else pty.onData((data) => {
         if (run.finished) return;
@@ -221,6 +238,9 @@ export class PtyManager {
         if (history) try { this.dependencies.onChat?.(owner, { sessionId: session.sessionId, runId: session.runId, event: history }); } catch { this.dependencies.onEventError?.(); }
       }
       return session;
+    } catch (error) {
+      if (prepared) try { this.dependencies.abandonLaunch?.(prepared); } catch { /* Released at exit or restart. */ }
+      throw error;
     } finally {
       if (this.pending.get(request.sessionId) === reservation) this.pending.delete(request.sessionId);
     }

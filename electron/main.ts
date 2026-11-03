@@ -13,15 +13,16 @@ import { Experiments } from './services/workbench/experiments';
 import { LivePreview } from './services/workbench/live-preview';
 import { z } from 'zod';
 import { CoachingService } from './services/coaching/service';
+import { LiveCoach } from './services/coaching/live';
 import { DesignArchive } from './services/design/archive';
 import { HandoffImport } from './services/design/handoff';
 import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import type { ChannelControl, ChannelTranscript } from '../shared/remote';
+import { REMOTE_PORT, type ChannelControl, type ChannelTranscript } from '../shared/remote';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -33,7 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -53,6 +54,10 @@ import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
 import { ScreenShare } from './services/remote/screen-share';
 import { SCREEN_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
+import { DayUsage } from './services/hub/day-usage';
+import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
+import { LinkedAlerts } from './services/remote/linked-alerts';
+import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
@@ -103,14 +108,17 @@ const channelAccount = (config: { engine: string; accountProfileId?: string }): 
   return (config.accountProfileId ? labelCache.value.profiles[config.accountProfileId] : labelCache.value.default) ?? undefined;
 };
 /** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
+/** Today's usage from the CLIs' own logs: the default homes and every Claude profile's. */
+const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? []);
 const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id));
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
-const nativeSessions = new NativeSessions(claudeProfiles);
+// Live coaching's reviews run in its coaching folder; their sessions are kept so their usage counts, but are not history.
+const nativeSessions = new NativeSessions(claudeProfiles, [path.join(storageRoot, 'coaching')]);
 const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 // Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
-const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId) => manager.notifyResolved(runId));
+const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished));
 const manager = new PtyManager((owner, event) => {
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
@@ -125,6 +133,8 @@ const manager = new PtyManager((owner, event) => {
     const ended = hub?.telemetry ? hub.telemetry.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); return transcript; }) : Promise.resolve(null);
     void autoMemory?.finish(event.runId, ended).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
+  if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
+  if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
 }, { onChat: (owner, envelope) => {
@@ -144,7 +154,7 @@ const manager = new PtyManager((owner, event) => {
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch);
-}, onStarted: (run, config, owner) => {
+}, abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onStarted: (run, config, owner) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
@@ -157,6 +167,25 @@ const manager = new PtyManager((owner, event) => {
   }
 } });
 
+/** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
+function workspaceChannels() {
+  const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
+    ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
+}
+/**
+ * A desktop notification, unless they are turned off in Settings. A channel's alert is shown only while Trace is not in
+ * front (the window shows it then); budget and plan-limit warnings always are. Clicking brings Trace forward on it.
+ */
+function desktopAlert(alert: DesktopAlert, always = false) {
+  try { if (hub?.preferences().alerts === false) return; } catch { /* Unreadable preferences: alerts stay on. */ }
+  if (!Notification.isSupported() || (!always && window && !window.isDestroyed() && window.isFocused())) return;
+  const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
+  notice.on('click', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.alertClick, alert.target); });
+  notice.show();
+}
+/** This computer's channel, by number and name as its tile shows it, for alerts. */
+function channelLabel(sessionId: string) { const channels = workspaceChannels(); const index = channels.findIndex((channel) => channel.id === sessionId); return index >= 0 ? `CH${index + 1} · ${channels[index].title}` : 'A channel'; }
 function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
   try {
     const id = owner ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
@@ -190,6 +219,8 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
   z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
+  z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
@@ -221,6 +252,21 @@ async function screenRequest(owner: number, payload: unknown) {
   if (request.action === 'screen-forget-credentials') return screens.forgetCredentials(request.id);
   return screens.credentials(request.id);
 }
+/**
+ * Restart and install, asked for by a linked computer. An edition that updates itself does so; a Mac copy that cannot
+ * (not signed with Trace's Developer ID) runs the install script, which puts the old version back if the new one does
+ * not answer. Either way the workspace is saved first and running channels must be stopped.
+ */
+async function remoteUpdate(): Promise<string> {
+  if (updates && updates.status().phase !== 'disabled') return updates.remoteInstall();
+  if (process.platform !== 'darwin' || !app.isPackaged) throw new HubError('UPDATES_DISABLED', 'This copy of Trace is updated by hand (a portable or source copy).');
+  const version = await latestMacVersion(); if (!version) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
+  if (version === app.getVersion()) return `Trace ${version} there is already the latest version.`;
+  if (manager.hasSessions) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
+  if (workspaceLoaded) await flushWorkspace();
+  startMacUpdate(storageRoot, version, REMOTE_PORT);
+  return `Installing Trace ${version} there. It quits, restarts and is back in about a minute; if the new version does not start, the old one is put back.`;
+}
 async function linkedRequest(payload: unknown) {
   if (!linked) throw new HubError('LINK_UNAVAILABLE', 'Linking computers needs writable local storage.');
   const request = linkedSchema.parse(payload);
@@ -229,6 +275,8 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
+  if (request.action === 'linked-update') return linked.update(request.id);
+  if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
   if (request.action === 'linked-screen-state') return linked.screenState(request.id);
   if (request.action === 'linked-transcript') return linked.transcript(request.id, request.sessionId);
@@ -409,6 +457,8 @@ else app.whenReady().then(() => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
     hub.telemetry.onError = (_run, message) => { hostHealth?.record('telemetry-read-failed'); reportStorageError(message); };
+    // Once, two minutes after starting (it reads Claude Code's older transcripts): each older reply's day.
+    const telemetry = hub.telemetry; setTimeout(() => { try { telemetry.backfillDays([process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), ...claudeProfiles.list().map((profile) => claudeProfiles.directory(profile.id))]); } catch { hostHealth?.record('usage-days-backfill-failed'); } }, 120000).unref();
   } catch { /* Live sessions remain available without optional storage integrations. */ }
   if (hub) {
     const memoryHub = hub;
@@ -450,7 +500,12 @@ else app.whenReady().then(() => {
       return Boolean(binding && isWithinDirectory(directory, binding));
     }));
   };
-  const coaching = hub ? new CoachingService(storageRoot, hub.rules, directoryInUse) : null;
+  const liveCoach = new LiveCoach(path.join(storageRoot, 'coaching'), (tip) => { sendToRenderer(IPC_CHANNELS.coachingEvent, tip); remote?.channelsChanged(); }, async (engine, profileId) => {
+    const env = hostEnvironment(); const executable = await findExecutable(engine, env).catch(() => null);
+    return executable ? { executable, env: engine === 'claude' && profileId ? claudeProfiles.environment(env, profileId) : env } : null;
+  });
+  if (hub?.telemetry) hub.telemetry.onLine = (run, config, raw) => liveCoach.observe(run, config, raw);
+  const coaching = hub ? new CoachingService(storageRoot, hub.rules, directoryInUse, liveCoach) : null;
   handle(IPC_CHANNELS.coaching, (_owner, payload) => { if (!coaching) throw new HubError('COACHING_STORAGE', 'Local coaching storage is unavailable.'); if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return coaching.execute(payload); });
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
@@ -470,9 +525,7 @@ else app.whenReady().then(() => {
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
   remote = new RemoteServer(storageRoot, {
     // Channels still called by their engine's name are named after their folder, as on the desktop.
-    sessions: () => { const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
-        ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
+    sessions: () => workspaceChannels(),
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
@@ -488,6 +541,9 @@ else app.whenReady().then(() => {
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
     },
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
+    update: () => remoteUpdate(),
+    coaching: (sessionId) => liveCoach.latest(sessionId),
+    askCoach: (id) => liveCoach.ask(id),
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
@@ -496,7 +552,8 @@ else app.whenReady().then(() => {
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
-  }, undefined, path.join(__dirname, '../../dist/phone'));
+  // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
+  }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
   screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);
@@ -505,7 +562,9 @@ else app.whenReady().then(() => {
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
-    linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
+    // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
+    const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
+    linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
     phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
@@ -576,6 +635,8 @@ else app.whenReady().then(() => {
     if (action.startsWith('remote-')) return remoteControl(payload);
     if (action.startsWith('linked-')) return linkedRequest(payload);
     if (action === 'channel-transcript') return channelTranscript(z.object({ action: z.literal('channel-transcript'), sessionId: z.string().min(1).max(100) }).strict().parse(payload).sessionId);
+    if (action === 'usage-today') { z.object({ action: z.literal('usage-today') }).strict().parse(payload); return dayUsage.totals(); }
+    if (action === 'usage-days') { z.object({ action: z.literal('usage-days') }).strict().parse(payload); return dayUsage.days(); }
     if (action === 'plan-limits') { const request = z.object({ action: z.literal('plan-limits'), force: z.boolean().optional() }).strict().parse(payload); return planLimits.refresh(request.force); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
@@ -635,8 +696,8 @@ else app.whenReady().then(() => {
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
     hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active),
     installationFailed: () => { updateRestart = false; },
-    prepareRestart: async () => {
-      const answer = await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
+    prepareRestart: async (remote) => {
+      const answer = remote ? { response: 0 } : await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {
@@ -731,6 +792,18 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   createWindow();
   updates.start();
+  // Today's usage against the budgets set in Settings, and the plan limits the CLIs last reported (Usage and the status
+  // bar read them every 5 minutes): checked every minute. What was said is kept for the day, so a restart does not repeat it.
+  const warnedFile = path.join(storageRoot, 'usage-alerts.json'); let warned = new Set<string>();
+  try { warned = new Set(z.array(z.string().max(300)).max(500).parse(JSON.parse(fs.readFileSync(warnedFile, 'utf8')))); } catch { /* None yet. */ }
+  setInterval(() => {
+    if (!hub) return;
+    try {
+      const before = warned.size; const alerts = usageAlerts(dayUsage.totals(), planLimits.current(), hub.preferences(), warned);
+      for (const alert of alerts) desktopAlert(alert, true);
+      if (warned.size !== before) fs.writeFileSync(warnedFile, JSON.stringify([...warned].slice(-300)), { mode: 0o600 });
+    } catch { hostHealth?.record('usage-alerts-failed'); }
+  }, 60000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

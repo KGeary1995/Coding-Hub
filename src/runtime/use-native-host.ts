@@ -7,6 +7,9 @@ import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
+import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
+import { jumpToChannel } from '../components/shell/StatusBar';
+import { startTaskAutomation, taskTurnDone } from '../state/task-store';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 
 export async function refreshEngines() {
@@ -45,8 +48,10 @@ export function useNativeHost() {
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
     const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
-    const unsubscribeChat = host.onChatEvent(applyChatEvent);
+    const unsubscribeChat = host.onChatEvent((envelope) => { applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); });
+    const stopTasks = startTaskAutomation();
     const unsubscribe = host.onSessionEvent((event) => {
+      if (event.type === 'answered' && event.finished) taskTurnDone(event.sessionId);
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       if (event.type === 'started' && before && before.config.engine !== 'shell' && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
@@ -57,6 +62,9 @@ export function useNativeHost() {
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
+    const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
+    // A clicked desktop notification opens what it is about.
+    const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView('usage'); });
     const unsubscribeControl = host.onRemoteControl((request) => {
       void ('add' in request ? Promise.resolve(remoteAdd(request.add)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
@@ -89,7 +97,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -149,8 +157,8 @@ export async function remoteControl(id: string, control: ChannelControl): Promis
   }
   if (control === 'stop') return undefined;
   if (control === 'close') {
-    // The same rule as the X on its tile: a computer keeps at least two channels.
-    if (useWorkspaceStore.getState().sessions.length <= 2) return 'This computer keeps at least two channels, so this one was stopped but not closed.';
+    // The same rule as the X on its tile: a computer keeps at least one channel.
+    if (useWorkspaceStore.getState().sessions.length <= 1) return 'This is the only channel on this computer, so it was stopped but not closed.';
     useWorkspaceStore.getState().removeSession(id);
     return current() ? 'The channel could not be closed.' : undefined;
   }

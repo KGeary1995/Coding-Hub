@@ -186,3 +186,21 @@
 .transcript-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; color: var(--tr-fg-muted); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); }
 /* Over the terminal rather than instead of it, so the running CLI keeps its size. */
 .transcript-overlay { position: absolute; inset: 0; display: flex; z-index: 2; }
+
+/* Live coaching under a channel: quiet, outside the terminal, at most a few lines before it scrolls. */
+.live-tip { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); color: var(--tr-fg-muted); font: 12px/1.5 var(--tr-font-ui); max-height: 132px; overflow-y: auto; flex-shrink: 0; }
+.live-tip-icon { flex-shrink: 0; margin-top: 3px; color: var(--tr-st-waiting); }
+.live-tip-body { flex: 1; min-width: 0; }
+.live-tip-body p { margin: 0 0 3px; overflow-wrap: anywhere; }
+.live-tip-body summary { cursor: pointer; color: var(--tr-fg-dim); }
+.live-tip-body pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); color: var(--tr-fg); }
+.live-tip-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.live-tip-actions .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
+.pasted-clear { margin-left: 6px; padding: 0 4px; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-muted); }
+
+/* The channel's task, under its tile; red while it has a warning. Clicking opens Tasks. */
+.task-strip { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; border-top: 1px solid var(--tr-line); background: var(--tr-panel); color: var(--tr-fg-muted); font: 12px/1.4 var(--tr-font-ui); text-align: left; cursor: pointer; flex-shrink: 0; min-width: 0; }
+.task-strip.warned { border-top-color: var(--tr-st-failed); }
+.task-strip-state { color: var(--tr-fg-strong); font-weight: 600; white-space: nowrap; }
+.task-strip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.task-strip .error-message { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

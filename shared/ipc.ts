@@ -2,7 +2,7 @@ import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
-import type { CoachingRequest, CoachingResponse } from './coaching';
+import type { CoachingRequest, CoachingResponse, LiveTip } from './coaching';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
@@ -51,7 +51,8 @@ export type SessionEvent =
   /** `at` is when the host saw the request, so a later answer from a phone can be ordered against it. */
   | ({ type: 'attention'; message: string; at: string } & RunReference)
   /** The person typed into the CLI from a paired phone; clears a waiting prompt raised before `at`. */
-  | ({ type: 'answered'; at: string } & RunReference);
+  /** `finished`: the agent's turn ended (Claude Code's Stop hook), not just a tool. */
+  | ({ type: 'answered'; at: string; finished?: true } & RunReference);
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {
@@ -96,6 +97,9 @@ export interface CodingHubHost {
   /** A linked computer's screen: its connection, the bytes both ways, and its saved sign-in. */
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
+  onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
+  /** A desktop notification was clicked: open what it is about. */
+  onAlertClick(listener: (target: AlertTarget) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
@@ -109,6 +113,8 @@ export interface CodingHubHost {
 export interface ClipboardImage { thumbnail: string; full: string; width: number; height: number; hasText: boolean }
 /** The most a CLI can put on the clipboard at once. */
 export const COPY_LIMIT = 1024 * 1024;
+/** What a desktop notification opens: a channel here, another computer's tab, or Usage. */
+export type AlertTarget = { sessionId: string } | { computerId: string } | { view: 'usage' };
 export const IPC_CHANNELS = {
   workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
@@ -148,6 +154,8 @@ export const IPC_CHANNELS = {
   linkedEvent: 'coding-hub:linked-event',
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
+  coachingEvent: 'coding-hub:coaching-event',
+  alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',

@@ -2,7 +2,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, SquareChevronRight } from 'lucide-react';
+import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, SquareChevronRight, ClipboardList } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -21,8 +21,11 @@ import { PastedImages } from './PastedImages';
 import { startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, dollars } from '../state/hub-store';
-import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, limitRatio, usageFor } from '../state/channel-state';
+import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, channelToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
+import { LiveTipStrip } from './tile/LiveTipStrip';
+import { TaskStrip } from './tile/TaskStrip';
+import { newTaskFor } from '../state/task-store';
 import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
@@ -45,6 +48,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const [conversation, setConversation] = useState(false);
   const [stopping, setStopping] = useState(false);
   const usage = useHubStore((s) => usageFor(session, s.usage));
+  const today = { tokens: useHubStore((s) => channelToday(session.id, s.usage).tokens) };
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
@@ -114,7 +118,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           {account && <span className="tr-profile-chip account-profile-chip" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           <span className="tr-spacer" />
           {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
-          <span className="tr-tile-metric tnum" title={usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{usage ? compact(tokens(usage)) : '—'}</b></span></>}
+          <span className="tr-tile-metric tnum" title={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{today.tokens > 0 ? compact(today.tokens) : usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
             <span aria-hidden="true">{meta.glyph}</span>{meta.word}
@@ -129,9 +133,10 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
           {!shell && !chat && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of session ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
           <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
+          {!shell && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
           <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
           <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
-          <button className="tr-detail-button" title="Stop and close (keep at least two channels)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 2 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
+          <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 1 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
@@ -148,6 +153,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <TerminalViewport session={session} />}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : shell ? <SquareChevronRight size={25} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">CH{channel} · {resumeId ? 'RESUME CONVERSATION' : shell ? 'LOCAL SHELL' : 'LOCAL CLI'}</span><h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : 'OpenAI Codex'}</h3><p>{resumeId ? 'Continue your saved conversation with its original context.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : 'Codex'} as a conversation: images, formatted replies and approvals as buttons.` : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? folderName(cwd) : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${channel}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Press Start in the channel header{resumeId ? ' to resume' : ''}.{shell ? '' : ' CLI permissions and approvals apply.'}</small></div>}</div>
+      {!shell && <TaskStrip sessionId={session.id} />}
+      {!shell && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}
     </article>
   );

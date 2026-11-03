@@ -22,7 +22,8 @@ interface Dependencies {
   updater: Updater;
   publish: (status: UpdateStatus) => void;
   hasSessions: () => boolean;
-  prepareRestart: () => Promise<boolean>;
+  /** `remote`: asked for from a linked computer, so no one is here to answer a dialog. */
+  prepareRestart: (remote?: boolean) => Promise<boolean>;
   installationFailed?: () => void;
   /** Opens the public downloads page, for editions that are updated by hand. */
   openDownloads?: () => Promise<void>;
@@ -81,6 +82,34 @@ export class UpdateService {
     this.timer.unref?.(); this.interval.unref?.();
   }
   close() { if (this.timer) clearTimeout(this.timer); if (this.interval) clearInterval(this.interval); this.timer = undefined; this.interval = undefined; }
+  /**
+   * Restart and install, asked for from a linked computer: checks for and downloads the update first if needed, then
+   * restarts shortly after answering, so the answer reaches that computer. Returns what will happen, in its words.
+   */
+  async remoteInstall(): Promise<string> {
+    if (!this.dependencies.enabled) throw new HubError('UPDATES_DISABLED', this.state.message);
+    if (this.busy) throw new HubError('UPDATE_BUSY', 'An update is already being checked or downloaded there. Try again in a minute.');
+    if (this.dependencies.hasSessions()) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
+    this.busy = true;
+    try {
+      const phase = this.state.phase === 'error' ? this.recoveryPhase : this.state.phase;
+      if (phase === 'idle' || phase === 'current' || phase === 'available') {
+        if (phase !== 'available') { this.set({ phase: 'checking', lastChecked: new Date().toISOString(), message: 'Checking GitHub for stable releases…' }); await this.dependencies.updater.checkForUpdates(); }
+        if (this.state.phase === 'current') return `Trace ${this.dependencies.version} there is already the latest version.`;
+        if (this.state.phase !== 'available') throw new HubError('UPDATE_FAILED', 'Trace there could not check for updates. Check its connection.');
+        this.set({ phase: 'downloading', progress: 0, message: 'Downloading and verifying the update…' }); await this.dependencies.updater.downloadUpdate();
+      }
+      if (this.state.phase !== 'ready') throw new HubError('UPDATE_FAILED', 'Trace there could not download the update.');
+      if (!await this.dependencies.prepareRestart(true)) throw new HubError('UPDATE_FAILED', 'Trace there could not get ready to restart.');
+      const version = this.state.availableVersion;
+      this.set({ phase: 'installing', message: 'Restarting to install the update…' });
+      setTimeout(() => this.dependencies.updater.quitAndInstall(false, true), 1500);
+      return `Installing Trace ${version ?? 'update'} there. It restarts and is back in about a minute.`;
+    } catch (error) {
+      if (error instanceof HubError) throw error;
+      this.fail(); throw new HubError('UPDATE_FAILED', 'Trace there could not download the update. Check its connection.');
+    } finally { this.busy = false; }
+  }
   async execute(payload: unknown): Promise<UpdateStatus> {
     const parsed = requestSchema.safeParse(payload);
     if (!parsed.success) throw new HubError('INVALID_UPDATE_REQUEST', 'Invalid update request.');

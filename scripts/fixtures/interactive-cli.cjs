@@ -38,7 +38,7 @@ if ((sessionIndex >= 0 || resumeIndex >= 0) && process.env.CLAUDE_CONFIG_DIR) {
 let turn = 0; if (resumeId && engine === 'codex' && usageFile) try { for (const line of fs.readFileSync(usageFile, 'utf8').split('\n')) { try { const event = JSON.parse(line); if (event.payload?.info?.total_token_usage) turn = Math.floor(event.payload.info.total_token_usage.input_tokens / 100); } catch {} } } catch {}
 function reportUsage() {
   if (!usageFile) return; turn++;
-  const event = engine === 'claude' ? { type: 'assistant', message: { id: 'message-' + turn, model: 'fixture-model', usage: { input_tokens: 100, output_tokens: 25, cache_read_input_tokens: 20 } } } : { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: turn * 100, cached_input_tokens: turn * 20, output_tokens: turn * 25, reasoning_output_tokens: turn * 10 }, last_token_usage: { input_tokens: 100, output_tokens: 25 }, model_context_window: 1000 } } };
+  const event = engine === 'claude' ? { type: 'assistant', message: { id: `message-${process.pid}-${turn}`, model: 'fixture-model', usage: { input_tokens: 100, output_tokens: 25, cache_read_input_tokens: 20 } } } : { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: turn * 100, cached_input_tokens: turn * 20, output_tokens: turn * 25, reasoning_output_tokens: turn * 10 }, last_token_usage: { input_tokens: 100, output_tokens: 25 }, model_context_window: 1000 } } };
   fs.appendFileSync(usageFile, JSON.stringify(event) + '\n');
 }
 console.log(`\x1b[32mREADY\x1b[0m CWD:${process.cwd()}`);

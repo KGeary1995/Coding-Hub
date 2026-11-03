@@ -20,7 +20,8 @@ it('isolates two agents from uncommitted files and blocks removing changed or bo
   await expect(service.execute({ action: 'worktree-remove', id: a.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
   inUse.mockReturnValue(true); await expect(service.execute({ action: 'worktree-remove', id: b.id })).rejects.toMatchObject({ code: 'WORKTREE_IN_USE' });
   inUse.mockReturnValue(false); await service.execute({ action: 'worktree-remove', id: b.id }); expect(service.list()).toHaveLength(1);
-  expect(git('branch', '--list', b.branch).toString()).toContain(b.branch);
+  // Its branch had nothing of its own, so it goes with it; the other worktree's branch stays.
+  expect(git('branch', '--list', b.branch).toString()).toBe(''); expect(git('branch', '--list', a.branch).toString()).toContain(a.branch);
   await expect(service.execute({ action: 'worktree-create', directory: 'relative' })).rejects.toMatchObject({ code: 'INVALID_WORKTREE_REQUEST' });
 });
 it('refuses to remove a worktree whose only contents are ignored files', async () => {
@@ -55,3 +56,16 @@ it('drops a record whose worktree was removed outside the app and refuses large 
   for (let index = 0; index < 12000; index++) writeFileSync(path.join(modules, `package-file-${index}-${'x'.repeat(60)}.js`), '');
   await expect(service.execute({ action: 'worktree-remove', id: big.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' });
 }, 60_000);
+it('deletes a removed worktree branch, and earlier leftover ones, only when their commits exist elsewhere', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository }).toString();
+  git('init'); writeFileSync(path.join(repository, 'app.txt'), 'committed'); git('add', '.'); git('commit', '-m', 'baseline');
+  // A branch an older Trace left behind, already merged.
+  git('branch', 'coding-hub/00000000-0000-4000-8000-000000000000');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  const tree = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  const gitIn = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: tree.directory });
+  writeFileSync(path.join(tree.directory, 'app.txt'), 'agent work'); gitIn('commit', '-am', 'agent work');
+  await service.execute({ action: 'worktree-remove', id: tree.id });
+  expect(git('branch', '--list', tree.branch)).toContain(tree.branch); expect(git('branch', '--list', 'coding-hub/00000000-0000-4000-8000-000000000000')).toBe('');
+});

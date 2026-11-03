@@ -1,4 +1,4 @@
-import { localDay, type UsageRecord } from '../../shared/hub';
+import { localDay, type LogUsage, type UsageRecord } from '../../shared/hub';
 import { freshInput } from './channel-state';
 
 /** Usage windows on the Usage screen, in days ("Today" is the current local day). */
@@ -78,4 +78,17 @@ export function median(values: number[]) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b); const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
+ * This computer's usage from the CLIs' own logs as one record per day and engine, so the Usage screen's totals and
+ * chart count every day's use (in Trace or not, by the day it happened) the way the status bar's "Σ today" does.
+ * Codex's input keeps its cached input inside it, as its run records do.
+ */
+export function logRecords(logs: LogUsage): UsageRecord[] {
+  return Object.entries(logs.days).flatMap(([day, engines]) => (['claude', 'codex'] as const).flatMap((engine) => {
+    const used = engines[engine]; if (!used) return [];
+    const [year, month, date] = day.split('-').map(Number);
+    return [{ runId: `log:${day}:${engine}`, sessionId: '', engine, model: '', cwd: '', timestamp: new Date(year, month - 1, date, 12).toISOString(), input: engine === 'codex' ? used.input + used.cached : used.input, output: used.output, cached: used.cached, cacheWrite: used.cacheWrite, reasoning: null, context: null, cost: used.cost, days: { [day]: { tokens: used.input + used.output, cost: used.cost } }, source: 'cli-logs' as const }];
+  }));
 }

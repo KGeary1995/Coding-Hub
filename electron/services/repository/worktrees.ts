@@ -13,6 +13,18 @@ async function git(directory: string, args: string[], checkout = false): Promise
   const safe = checkout ? ['-c', 'core.hooksPath=', '-c', 'core.fsmonitor=false'] : await readOnlyGitOptions(directory);
   return new Promise((resolve, reject) => execFile('git', [...safe, ...args], { cwd: directory, timeout: 30_000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(new HubError('WORKTREE_GIT_FAILED', 'Git could not complete the worktree operation. Check that the repository has a commit, is unlocked, and has no unsaved changes before removal.')) : resolve(stdout.trim())));
 }
+/**
+ * Deletes Trace's worktree branches (`coding-hub/<id>`) in a repository that no worktree uses any more, but only those
+ * already merged (`git branch -d`): a branch with commits that exist nowhere else is kept, so no work is lost.
+ */
+export async function pruneBranches(repository: string, keep: string[] = []) {
+  let branches: string[]; let used: string;
+  try { branches = (await git(repository, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/coding-hub/'])).split(/\r?\n/).filter(Boolean); used = await git(repository, ['worktree', 'list', '--porcelain']); } catch { return; }
+  for (const branch of branches) {
+    if (keep.includes(branch) || used.includes(`branch refs/heads/${branch}`)) continue;
+    try { await git(repository, ['branch', '-d', branch], true); } catch { /* Not merged: kept. */ }
+  }
+}
 export class WorktreeService {
   private busy = false;
   get active() { return this.busy; }
@@ -24,6 +36,8 @@ export class WorktreeService {
     try { return z.array(recordSchema).max(100).parse(JSON.parse(fs.readFileSync(this.file, 'utf8'))); }
     catch { throw new HubError('WORKTREE_STORAGE', 'Worktree records are unreadable. The existing file was preserved.'); }
   }
+  /** The branches of the other worktrees Trace manages, which pruning leaves alone. */
+  private branches(records: ManagedWorktree[], removed: ManagedWorktree) { return records.filter((item) => item.id !== removed.id).map((item) => item.branch); }
   private save(records: ManagedWorktree[]) { fs.mkdirSync(path.dirname(this.file), { recursive: true }); const temporary = this.file + '.tmp'; fs.writeFileSync(temporary, JSON.stringify(records, null, 2), { mode: 0o600 }); fs.renameSync(temporary, this.file); }
   async execute(input: unknown): Promise<ProjectToolsResponse> {
     const parsed = requestSchema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_WORKTREE_REQUEST', 'Invalid worktree request.');
@@ -54,7 +68,9 @@ export class WorktreeService {
       // Removed outside the app (terminal, agent, restore elsewhere): let Git forget it and drop the record.
       if (!fs.existsSync(record.directory)) {
         if (fs.existsSync(record.repository)) { try { await git(record.repository, ['worktree', 'prune']); } catch { /* The record is still stale. */ } }
-        this.save(records.filter((item) => item.id !== record.id)); return null;
+        this.save(records.filter((item) => item.id !== record.id));
+        if (fs.existsSync(record.repository)) await pruneBranches(record.repository, this.branches(records, record));
+        return null;
       }
       const directory = fs.realpathSync(record.directory);
       if (directory !== record.directory) throw new HubError('WORKTREE_PATH', 'Worktree path changed. Inspect it before removal.');
@@ -64,6 +80,7 @@ export class WorktreeService {
       if (await git(directory, ['status', '--porcelain', '--ignored', '--untracked-files=normal'])) throw new HubError('WORKTREE_DIRTY', 'This worktree has changes or ignored files (for example .env or build output). Review and preserve them before removal.');
       await git(record.repository, ['worktree', 'remove', record.directory]);
       this.save(records.filter((item) => item.id !== record.id));
+      await pruneBranches(record.repository, this.branches(records, record));
       return null;
     } finally { this.busy = false; }
   }

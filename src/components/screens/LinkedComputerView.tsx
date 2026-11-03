@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
-import { GripVertical, MessagesSquare, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
+import { Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
 import type { ChannelControl, ChannelTranscript, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import { TranscriptView } from '../chat/TranscriptView';
 import { linkedTerminal } from '../../runtime/linked-terminals';
@@ -9,6 +9,26 @@ import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { LinkedScreen } from './LinkedScreen';
+import { LinkedTipStrip } from '../tile/LiveTipStrip';
+
+/**
+ * Restart and install on another computer, after asking: Trace there saves its workspace, installs the latest version
+ * and restarts (a Mac that cannot update itself puts the old version back if the new one does not start).
+ */
+function UpdateThere({ computer }: { computer: LinkedComputer }) {
+  const [confirm, setConfirm] = useState(false); const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  async function update() {
+    setConfirm(false); setBusy(true); setNote(null);
+    try { setNote({ text: (await workbench<{ message: string }>({ action: 'linked-update', id: computer.id })).message, error: false }); }
+    catch (error) { setNote({ text: (error as Error).message, error: true }); }
+    finally { setBusy(false); }
+  }
+  return <>
+    {confirm ? <span className="linked-update-confirm">Restart Trace on {computer.name} to install the latest version?<button className="tr-detail-button stop" onClick={() => void update()}><span className="tr-detail-label">Restart and install</span></button><button className="tr-detail-button" onClick={() => setConfirm(false)}><span className="tr-detail-label">Cancel</span></button></span>
+      : <button className="tr-detail-button" disabled={busy || !computer.connected} title={`Install the latest Trace on ${computer.name} and restart it there`} onClick={() => setConfirm(true)}>{busy ? <LoaderCircle size={13} className="spin" /> : <Download size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{busy ? 'Updating' : 'Update'}</span></button>}
+    {note && <span className={note.error ? 'error-message' : 'muted'} role="status">{note.text}</span>}
+  </>;
+}
 
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 /** One channel on a linked computer: its live terminal at that CLI's size, and start, stop, restart and interrupt. */
@@ -75,6 +95,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       ? <p className="history-empty">This is a chat channel. Its conversation is shown on {computer.name}, and answered there.</p>
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}
+    {channel.coaching && <LinkedTipStrip computerId={computer.id} computerName={computer.name} coaching={channel.coaching} />}
   </article>;
 }
 
@@ -94,6 +115,7 @@ export function LinkedComputerView() {
     <header className="linked-computer-head"><h1 id="linked-computer-title"><Monitor size={16} aria-hidden="true" />{computer.name}</h1>
       <span className={`storage-status ${computer.connected ? 'saved' : ''}`}>{computer.connected ? `${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…'}</span>
       <span className="tr-spacer" />
+      <UpdateThere computer={computer} />
       {/* Its own screen-sharing server answers even while Trace there is closed. */}
       <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => setScreenOf(showScreen ? null : computer.id)}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
     {addError && <p className="session-error" role="alert">{addError}</p>}

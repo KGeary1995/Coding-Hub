@@ -100,6 +100,18 @@ describe('structured telemetry', () => {
       expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
     } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
   });
+  it('passes each new line of a run\'s own transcript to live coaching, not its subagents\' lines', async () => {
+    const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(path.join(dir, run.runId, 'subagents'), { recursive: true });
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); const lines: unknown[] = [];
+    telemetry.onLine = (_run, _config, raw) => lines.push(raw);
+    try {
+      fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), JSON.stringify({ type: 'user', message: { content: 'Add a footer' } }) + '\n');
+      fs.writeFileSync(path.join(dir, run.runId, 'subagents', 'agent-1.jsonl'), JSON.stringify({ type: 'user', message: { content: 'subagent task' } }) + '\n');
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      await telemetry.end(run.runId);
+      expect(lines).toEqual([{ type: 'user', message: { content: 'Add a footer' } }]);
+    } finally { telemetry.close(); }
+  });
   it('finds a folder in .claude.json projects however Claude Code wrote its Windows path', () => {
     const projects = { 'C:/Users/me/App': { mcpServers: {} }, '/home/me/app': {} };
     // Claude Code writes C:/…; Trace's paths are C:\…, and on Windows the case may differ.
@@ -123,6 +135,43 @@ describe('structured telemetry', () => {
       // A second subagent, and more from the first, are picked up as they are written.
       fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-2', 10, 20)); fs.writeFileSync(path.join(subagents, 'agent-b2.jsonl'), usage('sub-3', 1, 2));
       vi.advanceTimersByTime(750); expect(published.at(-1)).toMatchObject({ input: 5111, output: 332 });
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
+  it('does not count a resumed conversation’s earlier subagent usage again, and counts a reply once across runs', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    const config = { engine: 'claude' as const, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } };
+    try {
+      const usage = (id: string, input: number, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: input, output_tokens: output } } }) + '\n';
+      fs.writeFileSync(file, usage('main', 100, 10)); const subagents = path.join(dir, run.runId, 'subagents'); fs.mkdirSync(subagents, { recursive: true }); fs.writeFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-1', 5000, 300));
+      telemetry.start(run, config); vi.advanceTimersByTime(750); await telemetry.end(run.runId);
+      expect(telemetry.runUsage(run.runId)).toMatchObject({ input: 5100, output: 310 });
+      // The channel restarts and resumes the conversation; it then replies once more and runs another subagent.
+      const resumed = { ...run, runId: randomUUID() }; telemetry.setResumeSource(resumed.runId, file, 'claude', '');
+      telemetry.start(resumed, { ...config, resumeId: run.runId } as never);
+      fs.appendFileSync(file, usage('main-2', 7, 3)); fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-2', 20, 2)); vi.advanceTimersByTime(750); await telemetry.end(resumed.runId);
+      expect(telemetry.runUsage(resumed.runId)).toMatchObject({ input: 27, output: 5 });
+      // A run that recorded an earlier run's reply again (as 1.14 and before did) counts it only for the first run.
+      const third = { ...run, runId: randomUUID() }; fs.writeFileSync(path.join(dir, third.runId + '.jsonl'), usage('sub-1', 5000, 300) + usage('new', 1, 1));
+      telemetry.start(third, config); vi.advanceTimersByTime(750); await telemetry.end(third.runId);
+      expect(telemetry.runUsage(third.runId)).toMatchObject({ input: 1, output: 1 }); expect(telemetry.runUsage(run.runId)).toMatchObject({ input: 5100, output: 310 });
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
+  it('dates older replies by the day Claude Code wrote them, once', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    try {
+      // Recorded as an older Trace did: no timestamps in what it read, so no day per reply.
+      const reply = (id: string, at?: string) => JSON.stringify({ type: 'assistant', ...(at ? { timestamp: at } : {}), message: { id, model: 'm', usage: { input_tokens: 10, output_tokens: 90 } } }) + '\n';
+      fs.writeFileSync(file, reply('late') + reply('next'));
+      telemetry.start(run, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }); vi.advanceTimersByTime(750); await telemetry.end(run.runId);
+      const started = Object.keys(telemetry.runUsage(run.runId)!.days!); expect(started).toHaveLength(1);
+      // Claude Code's transcript has the times: the second reply came the next day.
+      const first = new Date(2026, 9, 26, 23, 50); const second = new Date(2026, 9, 27, 0, 10);
+      fs.writeFileSync(file, reply('late', first.toISOString()) + reply('next', second.toISOString()));
+      expect(telemetry.backfillDays([home])).toBe(2);
+      expect(telemetry.runUsage(run.runId)!.days).toEqual({ '2026-10-26': { tokens: 100, cost: null }, '2026-10-27': { tokens: 100, cost: null } });
+      expect(telemetry.backfillDays([home])).toBe(0);
     } finally { telemetry.close(); vi.useRealTimers(); }
   });
   it('hands over a short run’s transcript found only by the last read, for its memory summary', async () => {

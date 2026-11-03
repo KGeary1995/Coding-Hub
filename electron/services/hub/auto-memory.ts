@@ -202,6 +202,8 @@ export class AutoMemory {
     tracked.ready = Promise.all([changedFiles(run.cwd), git(run.cwd, ['rev-parse', 'HEAD'])]).then(([files, head]) => { tracked.files = files; tracked.head = head[0] ?? null; });
   }
 
+  /** A run that was prepared but never started: no summary, and its MCP config file goes. */
+  abandon(runId: string) { this.runs.delete(runId); try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder. */ } }
   /** Resolves once background Git checks started by prepare() have finished. */
   async settled() { await Promise.all([...this.runs.values()].map((run) => run.ready)); }
 

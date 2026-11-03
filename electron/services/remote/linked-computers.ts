@@ -16,7 +16,7 @@ const FILE = 'linked-computers.json';
 const DECLINED = 'linked-computers-declined.json';
 const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), url: z.string().max(500), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), linkedAt: z.iso.datetime() }).strict();
 type Link = z.infer<typeof linkSchema>;
-const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), chat: z.literal(true).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
+const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
 const RETRY_MAX = 30000;
 
 /**
@@ -169,6 +169,18 @@ export class LinkedComputers implements RemoteRelay {
     const link = this.linked(id);
     try { await this.request(link, 'api/paste-image', { method: 'POST', body: JSON.stringify({ sessionId, runId, image }), signal: AbortSignal.timeout(60000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to paste images there from here.`); throw error; }
+  }
+  /** Has the AI review the prompt a channel there was coached on (that computer's Claude Code or Codex does it). */
+  async coachReview(id: string, tip: string) {
+    const link = this.linked(id);
+    try { await this.request(link, 'api/coaching-review', { method: 'POST', body: JSON.stringify({ id: tip }), signal: AbortSignal.timeout(150000) }); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to ask about its prompts from here.`); throw error; }
+  }
+  /** Restart and install the latest version there. A Trace before 1.15 there answers 404. */
+  async update(id: string): Promise<{ message: string }> {
+    const link = this.linked(id);
+    try { const body = await (await this.request(link, 'api/update', { method: 'POST', body: '{}', signal: AbortSignal.timeout(10 * 60000) })).json() as { message?: unknown }; return { message: typeof body.message === 'string' ? body.message.slice(0, 300) : `Trace on ${link.name} is updating.` }; }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Trace on ${link.name} is older than 1.15, so it can't be updated from here. Install the latest version there by hand once.`); throw error; }
   }
   /** Whether that computer's screen is locked; null when it cannot say (Trace there is closed, or older than this check). */
   async screenState(id: string): Promise<LinkedScreenState> {

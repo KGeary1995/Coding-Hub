@@ -157,6 +157,18 @@ describe('signalled exits', () => {
   });
 });
 
+describe('launches that fail to start', () => {
+  it('release what was prepared for them, and nothing for a run that started', async () => {
+    const abandonLaunch = vi.fn(); const prepareLaunch = vi.fn();
+    const spawn = vi.fn(() => { throw new Error('spawn failed'); });
+    const manager = new PtyManager(() => {}, { spawn: spawn as never, discover: async (engine) => engines(engine), prepareLaunch, abandonLaunch, environment: () => ({ PATH: '/bin' }) }); managers.push(manager);
+    await expect(manager.start(1, request())).rejects.toMatchObject({ code: 'PTY_START_FAILED' });
+    expect(abandonLaunch).toHaveBeenCalledTimes(1); expect(abandonLaunch.mock.calls[0][0]).toBe(prepareLaunch.mock.calls[0][0]);
+    const working = fixture(); const release = vi.fn(); (working.manager as unknown as { dependencies: { abandonLaunch: () => void } }).dependencies.abandonLaunch = release;
+    await working.manager.start(1, request('session-two')); expect(release).not.toHaveBeenCalled();
+  });
+});
+
 describe('Terminal channels', () => {
   it('run the login shell in the channel folder without agent discovery, usage, rules or memory', async () => {
     const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine));
@@ -178,9 +190,13 @@ describe('Terminal channels', () => {
     await expect(manager.start(1, { sessionId: 'shell-two', cwd: process.cwd(), config: { engine: 'shell', model: 'x' }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(spawn).not.toHaveBeenCalled();
   });
-  it('pick PowerShell on Windows and the login shell elsewhere, with safe fallbacks', () => {
-    expect(shellProgram({ SystemRoot: 'C:\\Windows' }, 'win32', () => true)).toEqual({ file: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', args: ['-NoLogo'], name: 'PowerShell' });
-    expect(shellProgram({}, 'win32', () => false).file).toBe('powershell.exe');
+  it('pick PowerShell on Windows (as administrator when sudo runs inline) and the login shell elsewhere, with safe fallbacks', () => {
+    const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    expect(shellProgram({ SystemRoot: 'C:\\Windows' }, 'win32', () => true, () => 3)).toEqual({ file: 'C:\\Windows\\System32\\sudo.exe', args: ['--inline', powershell, '-NoLogo'], name: 'PowerShell (administrator)' });
+    // Sudo off, or set to a new window or no input: a normal PowerShell that says how to turn sudo on.
+    for (const mode of [0, 1, 2]) { const program = shellProgram({ SystemRoot: 'C:\\Windows' }, 'win32', () => true, () => mode); expect(program.file).toBe(powershell); expect(program.args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']); expect(program.args[3]).toContain('set it to Inline'); }
+    expect(shellProgram({ SystemRoot: 'C:\\Windows' }, 'win32', (file) => !file.endsWith('sudo.exe'), () => 3).file).toBe(powershell);
+    expect(shellProgram({}, 'win32', () => false, () => 0).file).toBe('powershell.exe');
     expect(shellProgram({ SHELL: '/opt/homebrew/bin/fish' }, 'darwin', () => true)).toEqual({ file: '/opt/homebrew/bin/fish', args: ['-l'], name: 'fish' });
     expect(shellProgram({ SHELL: 'zsh' }, 'darwin', () => true).file).toBe('/bin/zsh');
     expect(shellProgram({ SHELL: '/missing/zsh' }, 'linux', () => false).file).toBe('/bin/bash');

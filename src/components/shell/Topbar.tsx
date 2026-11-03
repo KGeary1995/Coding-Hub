@@ -14,7 +14,7 @@ export const INSIGHT_VIEWS: { view: NavigationView; label: string }[] = [
 export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
   { view: 'design', label: 'Design workspace', detail: 'Design previews and versions, live preview of a local app, annotations and screenshot comparison.' },
   { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
-  { view: 'tasks', label: 'Task coordination', detail: 'A task board that gives each agent a file scope and flags overlapping edits.' },
+  { view: 'tasks', label: 'Tasks', detail: 'Give each agent a job and its files; Trace sends it, follows it and warns about clashes.' },
   { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string }[] = [

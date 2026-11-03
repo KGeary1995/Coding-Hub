@@ -33,7 +33,7 @@ export class Workflows {
   const request = schema.parse(input);
   if (request.action === 'flow-conversations') return this.labels();
   if (request.action === 'flow-conversation-save') {
-   if (!this.native.list().some((item) => item.key === request.key)) throw new HubError('CONVERSATION_MISSING', 'Refresh native conversations before saving this reference.');
+   if (!(await this.native.list()).some((item) => item.key === request.key)) throw new HubError('CONVERSATION_MISSING', 'Refresh native conversations before saving this reference.');
    const labels = this.labels(); const value = { key: request.key, name: request.name, pinned: request.pinned };
    if (labels.length >= 500 && !labels.some((item) => item.key === request.key)) throw new HubError('CONVERSATION_LIMIT', 'Up to 500 conversation labels are supported.');
    save(this.root, 'conversation-labels.json', [...labels.filter((item) => item.key !== request.key), value]); return value;

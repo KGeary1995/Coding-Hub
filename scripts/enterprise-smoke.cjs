@@ -108,7 +108,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
     await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(3).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Resume preparation must remain idle');
-    for (const name of ['Task coordination', 'Verification profiles', 'AI coaching', 'Settings']) {
+    for (const name of ['Tasks', 'Verification profiles', 'AI coaching', 'Settings']) {
       await openView(page, name); await page.waitForTimeout(150);
       if (process.env.CODING_HUB_REVIEW_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_REVIEW_SCREENSHOTS, 'AI-Coding-Hub-v' + runtime.version + '-' + name.toLowerCase().replaceAll(' ', '-') + '.png') });
     }

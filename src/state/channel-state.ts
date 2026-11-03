@@ -84,3 +84,8 @@ export function todayTotals(records: UsageRecord[], now = new Date()) {
   }
   return { tokens, cost };
 }
+/**
+ * One channel's tokens today on this computer, over all its runs: a channel that restarts (or Trace that restarts)
+ * starts a new run, often resuming the same conversation, and the day's count carries on.
+ */
+export const channelToday = (sessionId: string, records: UsageRecord[], now = new Date()) => todayTotals(records.filter((record) => record.sessionId === sessionId), now);

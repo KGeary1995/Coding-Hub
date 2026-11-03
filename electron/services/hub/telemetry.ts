@@ -54,19 +54,24 @@ interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHo
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
-  private baselines = new Map<string, { file: string; offset: number; usage: Snapshot | null }>();
+  private baselines = new Map<string, { file: string; offset: number; usage: Snapshot | null; subagents?: Map<string, number> }>();
   isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || Boolean(watch.file && path.basename(watch.file).includes(id)) || (engine === 'claude' ? watch.run.runId === id : watch.thread === id))); }
   setResumeSource(runId: string, file: string, engine: 'claude' | 'codex', model: string) {
     const size = fs.statSync(file).size; let usage: Snapshot | null = null; let actualModel = model || 'CLI default';
     if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
-    this.baselines.set(runId, { file, offset: size, usage });
+    // A resumed Claude conversation's subagent transcripts were counted by the runs that wrote them; only what they gain now is this run's.
+    const subagents = new Map<string, number>(); const id = path.basename(file, '.jsonl');
+    if (engine === 'claude') try { const folder = path.join(path.dirname(file), id, 'subagents'); for (const name of fs.readdirSync(folder)) if (/^agent-[\w-]+\.jsonl$/.test(name)) subagents.set(name, fs.statSync(path.join(folder, name)).size); } catch { /* No subagents. */ }
+    this.baselines.set(runId, { file, offset: size, usage, subagents });
   }
   private assigned = new Set<string>(); private closed = false; private closing = false;
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
   onError: (run: AgentRunningSession, message: string) => void = () => {};
+  /** Each new line of a run's own transcript (not a subagent's), for live coaching; never the lines before a resume. */
+  onLine: (run: AgentRunningSession, config: CLIEngineConfig, raw: Json) => void = () => {};
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
-    this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL);');
+    this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE INDEX IF NOT EXISTS usage_event ON usage(event);');
     const cutoff = new Date(Date.now() - 366 * 86400000).toISOString(); this.database.prepare('DELETE FROM metadata WHERE json_extract(value,\'$.timestamp\') < ?').run(cutoff); this.database.exec('DELETE FROM usage WHERE run NOT IN(SELECT run FROM metadata);');
   }
   prepare(run: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
@@ -75,7 +80,7 @@ export class TelemetryService {
   }
   start(run: AgentRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
-    const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId) };
+    const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId), ...(baseline?.subagents?.size ? { subagents: new Map([...baseline.subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])) } : {}) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() }));
     if (run.engine === 'codex') for (const other of this.watches.values()) { if (other.run.engine === 'codex' && other.run.cwd === run.cwd && !other.stopped) { other.requiresThread = true; watch.requiresThread = true; } }
     this.watches.set(run.runId, watch); watch.timer = setInterval(() => this.poll(watch), 750); this.poll(watch);
@@ -155,7 +160,7 @@ export class TelemetryService {
     const data = Buffer.concat([state.partial, buffer.subarray(0, read)]); let start = 0; let changed = false;
     for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
       if (end - start <= 2 * 1024 * 1024) try {
-        const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
+        const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
         const parsed = parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
         if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.database.prepare('SELECT snapshot FROM usage WHERE run=? AND event=?').get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
           this.database.prepare('INSERT INTO usage(run,event,snapshot) VALUES(?,?,?) ON CONFLICT(run,event) DO UPDATE SET snapshot=excluded.snapshot').run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
@@ -170,7 +175,9 @@ export class TelemetryService {
   private safeRates(): PriceRate[] { try { return this.rates(); } catch { return []; } }
   runUsage(runId: string, rates = this.safeRates()): UsageRecord | null {
     const meta = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (!meta) return null;
-    const rows = this.database.prepare('SELECT snapshot FROM usage WHERE run=? ORDER BY rowid').all(runId); if (!rows.length) return null;
+    // A Claude reply (by message id) counts once, for the run that recorded it first: before 1.15, a resumed run read its
+    // conversation's old subagent transcripts again. Codex keeps one running total per run, so it is never shared.
+    const rows = this.database.prepare("SELECT snapshot FROM usage u WHERE run=? AND (event='cumulative' OR NOT EXISTS (SELECT 1 FROM usage o WHERE o.event=u.event AND o.run<>u.run AND o.rowid<u.rowid)) ORDER BY rowid").all(runId); if (!rows.length) return null;
     const usage: UsageRecord = { ...JSON.parse(String(meta.value)), input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: null, context: null, cost: null };
     let cost = 0; let priced = true; const days: NonNullable<UsageRecord['days']> = {}; const started = localDay(new Date(usage.timestamp));
     for (const row of rows) { const snapshot = JSON.parse(String(row.snapshot)) as Snapshot;
@@ -181,6 +188,34 @@ export class TelemetryService {
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
+  /**
+   * Usage recorded before Trace kept each reply's day counts on the day its run started. For Claude runs, each reply's
+   * day is read once from Claude Code's transcripts (in `homes`, by the reply's message id), so older days are right
+   * too; replies it cannot find, and Codex runs (one running total), stay as they were. Returns how many were dated.
+   */
+  backfillDays(homes: string[]): number {
+    const marker = path.join(this.root, 'days-backfilled'); if (fs.existsSync(marker)) return 0;
+    const missing = this.database.prepare("SELECT u.run, u.event, u.snapshot, json_extract(m.value,'$.conversationId') conversation FROM usage u JOIN metadata m ON m.run=u.run WHERE json_extract(m.value,'$.engine')='claude' AND json_extract(u.snapshot,'$.day') IS NULL").all() as { run: string; event: string; snapshot: string; conversation: string | null }[];
+    const days = new Map<string, string>(); const read = new Set<string>();
+    const scan = (file: string) => {
+      if (read.has(file)) return; read.add(file);
+      let text: string; try { if (fs.statSync(file).size > 256 * 1024 * 1024) return; text = fs.readFileSync(file, 'utf8'); } catch { return; }
+      for (const line of text.split('\n')) { if (!line.includes('"usage"')) continue; try { const raw = JSON.parse(line); const at = new Date(raw.timestamp); if (raw.type === 'assistant' && raw.message?.id && !Number.isNaN(at.getTime())) days.set(String(raw.message.id).slice(0, 200), localDay(at)); } catch { /* Partial line. */ } }
+    };
+    for (const id of new Set(missing.map((row) => row.conversation ?? row.run))) for (const home of homes) {
+      let projects: string[] = []; try { projects = fs.readdirSync(path.join(home, 'projects')); } catch { continue; }
+      for (const project of projects) {
+        const file = path.join(home, 'projects', project, id + '.jsonl'); if (!fs.existsSync(file)) continue; scan(file);
+        try { for (const name of fs.readdirSync(path.join(home, 'projects', project, id, 'subagents'))) if (name.endsWith('.jsonl')) scan(path.join(home, 'projects', project, id, 'subagents', name)); } catch { /* No subagents. */ }
+      }
+    }
+    let dated = 0; const update = this.database.prepare('UPDATE usage SET snapshot=? WHERE run=? AND event=?');
+    for (const row of missing) { const day = days.get(row.event); if (!day) continue; update.run(JSON.stringify({ ...JSON.parse(row.snapshot), day }), row.run, row.event); dated++; }
+    try { fs.writeFileSync(marker, new Date().toISOString(), { mode: 0o600 }); } catch { /* Tried again next start. */ }
+    return dated;
+  }
+  /** A run that was prepared but never started: its resume baseline and Codex log folder go. */
+  abandon(runId: string) { this.baselines.delete(runId); if (!this.watches.has(runId)) try { fs.rmSync(path.join(this.root, runId), { recursive: true, force: true }); } catch { /* Removed at the next restart. */ } }
   /** The CLI's own session file for a run, once it has been located. */
   transcript(runId: string): string | null { return this.watches.get(runId)?.file ?? null; }
   /**
