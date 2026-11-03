@@ -5,6 +5,8 @@ import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../../state/hub-store';
 import { CHANNEL_STATES, channelAlerts, channelState, channelToday, todayTotals, usageFor } from '../../state/channel-state';
 import { focusTerminal } from '../../runtime/terminals';
+import { useLinkedStore } from '../../state/linked-store';
+import type { LinkedComputer } from '../../../shared/remote';
 import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
 
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
@@ -46,6 +48,11 @@ function PlanLimitCells() {
   })}</>;
 }
 
+/** Linked computers' channels that wait for the person or stopped with an error, for the alert cell. */
+type LinkedAlert = { sessionId: string; computerId: string; state: 'waiting' | 'failed'; text: string };
+const linkedAlerts = (computers: LinkedComputer[]): LinkedAlert[] => computers.filter((computer) => computer.linked && computer.connected).flatMap((computer) => computer.channels.flatMap((channel): LinkedAlert[] =>
+  channel.running && channel.attention ? [{ sessionId: channel.sessionId, computerId: computer.id, state: 'waiting' as const, text: `${computer.name} CH${channel.channel} needs approval` }]
+    : !channel.running && channel.failed ? [{ sessionId: channel.sessionId, computerId: computer.id, state: 'failed' as const, text: `${computer.name} CH${channel.channel} failed` }] : []));
 /** The one global status layer: every channel's state, the project, today's usage, alerts and the host. */
 export function StatusBar() {
   const { sessions, rootDirectory, persistenceStatus } = useWorkspaceStore();
@@ -55,7 +62,9 @@ export function StatusBar() {
   // The CLIs' logs are read every 15 s, and soon after Trace's own channels report usage.
   useEffect(() => { void refreshDayUsage(); const timer = setInterval(() => void refreshDayUsage(), 15000); return () => clearInterval(timer); }, []);
   useEffect(() => { const timer = setTimeout(() => void refreshDayUsage(), 2000); return () => clearTimeout(timer); }, [usage]);
-  const alerts = channelAlerts(sessions, usage);
+  const computers = useLinkedStore((state) => state.computers);
+  // This computer's channels first, then linked computers' channels that wait or failed (clicking opens their tab).
+  const alerts: { sessionId: string; computerId?: string; state: 'waiting' | 'failed' | 'limit'; text: string }[] = [...channelAlerts(sessions, usage), ...linkedAlerts(computers)];
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'no project';
   const jump = jumpToChannel;
   return <footer className="app-statusbar tr-statusbar">
@@ -73,7 +82,7 @@ export function StatusBar() {
     <PlanLimitCells />
     <span className="tr-sb-cell tnum" title={`New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's and Codex's own logs, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}` : ', in Trace channels'}`}>Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
-      ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
+      ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => alerts[0].computerId ? useWorkspaceStore.setState({ computerId: alerts[0].computerId, activeView: 'computer' }) : jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
         <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>
       </button>
       : <span className="tr-sb-cell tr-sb-quiet">no alerts</span>}

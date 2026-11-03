@@ -9,6 +9,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   computer?: { id: string; name: string };
   /** What the session is working on, from its CLI's terminal title (Claude Code's task summary). */
   topic?: string;
+  /** Why its last run stopped with an error, while it is stopped (from 1.15). */
+  failed?: string;
   /** A chat channel: its conversation is shown only on the computer it runs on, which is where it is answered too. */
   chat?: true;
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
@@ -109,4 +111,6 @@ export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }
   | { type: 'output'; id: string; sessionId: string; runId: string; data: string }
   | { type: 'replay'; id: string; sessionId: string; runId: string; data: string; cols: number; rows: number }
-  | { type: 'resize'; id: string; sessionId: string; runId: string; cols: number; rows: number };
+  | { type: 'resize'; id: string; sessionId: string; runId: string; cols: number; rows: number }
+  /** An alert about that computer's channel was clicked: open its tab. */
+  | { type: 'open'; id: string };

@@ -22,7 +22,7 @@ import type { ChannelEngine } from '../shared/types';
 import type { ChannelControl, ChannelTranscript } from '../shared/remote';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -55,6 +55,7 @@ import { ScreenShare } from './services/remote/screen-share';
 import { SCREEN_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
+import { LinkedAlerts } from './services/remote/linked-alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
@@ -514,7 +515,14 @@ else app.whenReady().then(() => {
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
-    linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => sendToRenderer(IPC_CHANNELS.linkedEvent, event),
+    // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
+    const linkedAlerts = new LinkedAlerts((alert) => {
+      if (!Notification.isSupported() || (window && !window.isDestroyed() && window.isFocused())) return;
+      const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
+      notice.on('click', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.linkedEvent, { type: 'open', id: alert.id }); });
+      notice.show();
+    });
+    linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
     phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.

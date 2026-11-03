@@ -116,6 +116,8 @@ export class RemoteServer {
   private screenTickets = new Map<string, { device: string; expires: number }>(); private screens = new Set<Duplex>();
   private replay = new Map<string, ScreenMirror>();
   private attention = new Map<string, { runId: string; message: string }>();
+  /** Why a channel's last run stopped with an error, until it starts again; linked computers alert on it. */
+  private failures = new Map<string, string>();
   private pairing: { code: string; expires: number; attempts: number; kind: RemoteDeviceKind } | null = null;
   private relay: RemoteRelay | null = null;
   /** This computer's sync identity, given to a computer that links to it so it can recognise this one in Drive. */
@@ -286,7 +288,7 @@ export class RemoteServer {
     if (event.type === 'started' || event.type === 'exit') { this.phoneSizes.delete(event.sessionId); this.wants.delete(event.sessionId); }
     if (event.type === 'started') {
       this.forget(event.sessionId); if (this.server) this.mirror(event.sessionId, event.runId);
-      this.attention.delete(event.sessionId); this.broadcastChannels(); return;
+      this.attention.delete(event.sessionId); this.failures.delete(event.sessionId); this.broadcastChannels(); return;
     }
     if (event.type === 'data') { this.output(event.sessionId, event.runId, event.data); return; }
     if (event.type === 'attention') {
@@ -297,6 +299,7 @@ export class RemoteServer {
     // The phone shows why a CLI stopped the way the desktop does.
     if (event.type === 'exit') this.output(event.sessionId, event.runId, exitNotice(event.exitCode, event.signal, event.diagnostic));
     // A run that failed carries a diagnostic; a run the person stopped does not.
+    if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) this.failures.set(event.sessionId, event.diagnostic.split('\n')[0].slice(0, 160));
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic && this.server) void this.alert(event.sessionId, 'failed', `${this.channelLabel(event.sessionId)} stopped with an error`, event.diagnostic.split('\n')[0].slice(0, 160)).catch(() => {});
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
@@ -415,7 +418,7 @@ export class RemoteServer {
     const local = this.host.sessions().map((session, index): RemoteChannel => {
       const run = running.get(session.id); const waiting = this.attention.get(session.id);
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.
