@@ -530,7 +530,8 @@ else app.whenReady().then(() => {
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
-  }, undefined, path.join(__dirname, '../../dist/phone'));
+  // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
+  }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
   screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);

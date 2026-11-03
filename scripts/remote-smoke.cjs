@@ -4,6 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, tileControl } = require('./lib/navigate.cjs');
+/** Not Trace's own port (47821), so the test also runs while an installed Trace is open. */
+const PORT = 47831;
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
 // its approval prompt from the phone, and remove the phone. Tailscale is not installed here; the page is reached on
 // loopback, which the remote also accepts.
@@ -20,7 +22,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
   }
   // The computer counts as away (idle for 10 minutes), so the phone gets its size as soon as it asks; while the person
   // uses the computer the desktop keeps its size, which linked-computers.test.ts covers.
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_DESKTOP_IDLE: '600' }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_DESKTOP_IDLE: '600', CODING_HUB_TEST_REMOTE_PORT: String(PORT) }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -32,7 +34,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await page.getByRole('button', { name: 'Open project', exact: true }).click(); await page.waitForSelector('.session-tile');
 
     // Off by default: nothing listens until it is turned on.
-    assert.equal(await fetch('http://127.0.0.1:47821/').then(() => 'open', () => 'closed'), 'closed');
+    assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
     await openView(page, 'Settings');
     const card = page.locator('.phone-access'); await card.scrollIntoViewIfNeeded();
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).check();
@@ -41,11 +43,11 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await card.getByRole('button', { name: 'Pair a phone', exact: true }).click();
     const code = (await card.locator('p.phone-code').textContent()).replace(/\s/g, '');
     assert.match(code, /^[A-HJ-NP-Z2-9]{10}$/); assert.equal(await card.getByRole('img', { name: /QR code/ }).count(), 1);
-    assert.equal((await fetch('http://127.0.0.1:47821/api/channels')).status, 401, 'The API needs a paired device key');
+    assert.equal((await fetch(`http://127.0.0.1:${PORT}/api/channels`)).status, 401, 'The API needs a paired device key');
 
     // The "phone": a separate window on the remote page, opened by the pairing link.
-    await app.evaluate(({ BrowserWindow }, url) => { const phone = new BrowserWindow({ width: 390, height: 844, show: true }); void phone.loadURL(url); }, `http://127.0.0.1:47821/#pair=${code}`);
-    let phone; for (let i = 0; i < 50 && !phone; i++) { phone = app.windows().find((item) => item.url().startsWith('http://127.0.0.1:47821')); if (!phone) await new Promise((resolve) => setTimeout(resolve, 100)); }
+    await app.evaluate(({ BrowserWindow }, url) => { const phone = new BrowserWindow({ width: 390, height: 844, show: true }); void phone.loadURL(url); }, `http://127.0.0.1:${PORT}/#pair=${code}`);
+    let phone; for (let i = 0; i < 50 && !phone; i++) { phone = app.windows().find((item) => item.url().startsWith(`http://127.0.0.1:${PORT}`)); if (!phone) await new Promise((resolve) => setTimeout(resolve, 100)); }
     phone.setDefaultTimeout(20000); await phone.waitForLoadState();
     assert.equal(await phone.locator('#code').inputValue(), code);
     await phone.getByRole('button', { name: 'Pair', exact: true }).click();
@@ -96,7 +98,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('z'); await page.keyboard.press('Backspace');
     for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) > 60, 'typing at the desktop gives the desktop its size back');
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith('http://127.0.0.1:47821'))?.setSize(390, 700)); await phone.waitForTimeout(600);
+    await app.evaluate(({ BrowserWindow }, port) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith(`http://127.0.0.1:${port}`))?.setSize(390, 700), PORT); await phone.waitForTimeout(600);
     assert.ok((await width()) > 60, 'a phone screen change does not take the channel back');
     await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
@@ -129,7 +131,7 @@ const { openView, tileControl } = require('./lib/navigate.cjs');
 const fs = require('node:fs'); const state = ${JSON.stringify(state)}; const args = process.argv.slice(2).join(' ');
 const serving = fs.existsSync(state + '.serving');
 if (args === 'status --json') console.log(JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }));
-else if (args === 'serve status --json') console.log(serving ? JSON.stringify({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:47821' } } } } }) : '');
+else if (args === 'serve status --json') console.log(serving ? JSON.stringify({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:${PORT}' } } } } }) : '');
 else if (args.startsWith('serve --bg --https=443')) {
   fs.appendFileSync(state + '.calls', 'serve\\n');
   if (!fs.existsSync(state + '.certificates')) { console.error('HTTPS certificates must be enabled for your tailnet in the Tailscale admin console.'); process.exit(1); }
@@ -170,7 +172,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.getByRole('heading', { name: 'Pair this phone', exact: true }).waitFor();
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
-    assert.equal(await fetch('http://127.0.0.1:47821/').then(() => 'open', () => 'closed'), 'closed');
+    assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
     console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
