@@ -2,13 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { coachable, LIVE_PROMPT_LIMIT, LIVE_TIPS, promptTips, type LiveCoaching, type LiveReview, type LiveTip } from '../../../shared/coaching';
+import { coachable, coachingWeek, LIVE_PROMPT_LIMIT, LIVE_TIPS, promptAdvice, type LiveCoaching, type LiveReview, type LiveTip } from '../../../shared/coaching';
+import { z } from 'zod';
 import type { CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession } from '../../../shared/ipc';
 import type { Executable } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
 
 type Json = Record<string, any>;
+/** The most coached prompts kept on disk (30 days of them at most). */
+const KEPT = 500;
+const advice = (prompt: string, first: boolean) => { const tips = promptAdvice(prompt, first); return { tips: tips.map((tip) => tip.text), kinds: tips.map((tip) => tip.kind) }; };
+const tipsSchema = z.array(z.object({ id: z.uuid(), sessionId: z.string().max(100), engine: z.enum(['claude', 'codex']), prompt: z.string().max(LIVE_PROMPT_LIMIT), tips: z.array(z.string().max(500)).max(4), at: z.iso.datetime(), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(LIVE_PROMPT_LIMIT * 2) }).nullable(), kinds: z.array(z.enum(['thin', 'unnamed', 'error', 'check', 'vague', 'many', 'long'])).max(4).optional() })).max(KEPT * 2);
 export interface Turn { role: 'user' | 'assistant'; text: string }
 const person = (value: string): Turn | null => { const text = value.trim(); return !text || text.startsWith('<') || /^\[Request interrupted/.test(text) ? null : { role: 'user', text }; };
 const texts = (content: unknown) => Array.isArray(content) ? content.filter((block) => block?.type === 'text' && typeof block.text === 'string').map((block) => block.text as string).join('\n') : '';
@@ -82,12 +87,27 @@ interface RunState { prompts: number; previous: string; resumed: boolean }
 type Reviewer = (engine: 'claude' | 'codex', profileId?: string) => Promise<{ executable: Executable; env: Record<string, string> } | null>;
 /**
  * Live coaching: watches the prompts sent in channels (through the transcripts usage recording already reads), gives
- * each one instant local tips, and on request has Claude review it. Prompts are kept in memory only, the newest 50.
+ * each one instant local tips, and on request has Claude review it. The coached prompts are kept on this computer only
+ * (`live-tips.json` in the coaching folder), for 30 days and at most 500, for the weekly summary; the window lists the
+ * newest 50.
  */
 export class LiveCoach {
   private tips: LiveTip[] = []; private runs = new Map<string, RunState>();
   private context = new Map<string, { previous: string; profileId?: string }>(); private reviews = new Map<string, Promise<LiveTip>>();
-  constructor(private root: string, private publish: (tip: LiveTip) => void, private reviewer: Reviewer, private review = runReview, private codexReview = runCodexReview) {}
+  constructor(private root: string, private publish: (tip: LiveTip) => void, private reviewer: Reviewer, private review = runReview, private codexReview = runCodexReview, private now = () => new Date()) {
+    try { const saved = tipsSchema.parse(JSON.parse(fs.readFileSync(this.saved, 'utf8'))); this.tips = this.recent(saved); } catch { /* None kept yet, or unreadable: start empty. */ }
+  }
+  private get saved() { return path.join(this.root, 'live-tips.json'); }
+  /** The last 30 days, at most 500, newest first. */
+  private recent(tips: LiveTip[]) { const since = this.now().getTime() - 30 * 86400000; return tips.filter((tip) => Date.parse(tip.at) >= since).slice(0, KEPT); }
+  private save() {
+    try {
+      fs.mkdirSync(this.root, { recursive: true, mode: 0o700 }); const temporary = path.join(this.root, randomUUID() + '.tmp');
+      try { fs.writeFileSync(temporary, JSON.stringify(this.tips), { flag: 'wx', mode: 0o600 }); fs.renameSync(temporary, this.saved); } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
+    } catch { /* Kept in memory; written with the next prompt. */ }
+  }
+  /** Forgets every coached prompt, here and on disk. */
+  clear() { this.tips = []; this.context.clear(); try { fs.rmSync(this.saved, { force: true }); } catch { /* Gone already. */ } return this.list(); }
   private get file() { return path.join(this.root, 'live.json'); }
   enabled(): boolean { try { return JSON.parse(fs.readFileSync(this.file, 'utf8')).enabled !== false; } catch { return true; } }
   setEnabled(enabled: boolean) {
@@ -95,7 +115,7 @@ export class LiveCoach {
     try { fs.writeFileSync(temporary, JSON.stringify({ enabled }), { flag: 'wx', mode: 0o600 }); fs.renameSync(temporary, this.file); } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
     return this.list();
   }
-  list(): LiveCoaching { return { enabled: this.enabled(), tips: this.tips }; }
+  list(): LiveCoaching { return { enabled: this.enabled(), tips: this.tips.slice(0, LIVE_TIPS), week: coachingWeek(this.tips, this.now()) }; }
   /** A channel's last coached prompt, while live coaching is on. */
   latest(sessionId: string): LiveTip | null { return this.enabled() ? this.tips.find((tip) => tip.sessionId === sessionId) ?? null : null; }
   observe(run: AgentRunningSession, config: CLIEngineConfig, raw: Json) {
@@ -106,10 +126,10 @@ export class LiveCoach {
     const first = !state.resumed && state.prompts === 0; state.prompts++;
     // The coaching channels Trace prepares (in its own coaching folder) are not coached themselves.
     if (!coachable(turn.text, first) || path.resolve(run.cwd).startsWith(path.resolve(this.root)) || !this.enabled()) return;
-    const tip: LiveTip = { id: randomUUID(), sessionId: run.sessionId, engine: run.engine, prompt: turn.text.slice(0, LIVE_PROMPT_LIMIT), tips: promptTips(turn.text, first), at: new Date().toISOString(), review: null };
+    const tip: LiveTip = { id: randomUUID(), sessionId: run.sessionId, engine: run.engine, prompt: turn.text.slice(0, LIVE_PROMPT_LIMIT), ...advice(turn.text, first), at: this.now().toISOString(), review: null };
     this.context.set(tip.id, { previous: state.previous, ...(config.engine === 'claude' && config.accountProfileId ? { profileId: config.accountProfileId } : {}) });
-    this.tips = [tip, ...this.tips]; for (const old of this.tips.splice(LIVE_TIPS)) this.context.delete(old.id);
-    this.publish(tip);
+    this.tips = this.recent([tip, ...this.tips]); for (const id of [...this.context.keys()]) if (!this.tips.some((item) => item.id === id)) this.context.delete(id);
+    this.save(); this.publish(tip);
   }
   ask(id: string): Promise<LiveTip> {
     const tip = this.tips.find((item) => item.id === id); if (!tip) throw new HubError('COACHING_LIVE', 'That prompt is no longer in live coaching.');
@@ -123,7 +143,7 @@ export class LiveCoach {
       let cli = await this.reviewer(engine, context.profileId); if (!cli) { engine = order[1]; cli = await this.reviewer(engine, context.profileId); }
       if (!cli) throw new HubError('ENGINE_UNAVAILABLE', 'Ask AI uses Claude Code or Codex, and neither was found on this computer.');
       fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
-      tip.review = await (engine === 'codex' ? this.codexReview : this.review)(cli.executable, cli.env, reviewInput(tip.prompt, context.previous), this.root); this.publish(tip); return tip;
+      tip.review = await (engine === 'codex' ? this.codexReview : this.review)(cli.executable, cli.env, reviewInput(tip.prompt, context.previous), this.root); this.save(); this.publish(tip); return tip;
     })().finally(() => this.reviews.delete(id));
     this.reviews.set(id, review); return review;
   }

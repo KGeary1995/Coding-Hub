@@ -8,7 +8,7 @@ import type { RulesService } from '../hub/rules';
 import type { LiveCoach } from './live';
 const example = z.object({ id: z.uuid(), text: z.string().trim().min(1).max(2000), outcome: z.enum(['successful', 'partial', 'failed']), notes: z.string().max(500), createdAt: z.iso.datetime() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('list') }).strict(), z.object({ action: z.literal('add'), text: example.shape.text, outcome: example.shape.outcome, notes: example.shape.notes }).strict(), z.object({ action: z.literal('remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('prepare'), report: z.string().min(1).max(30000).refine((text) => !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) }).strict(),
-  z.object({ action: z.literal('live') }).strict(), z.object({ action: z.literal('live-set'), enabled: z.boolean() }).strict(), z.object({ action: z.literal('live-review'), id: z.uuid() }).strict()]);
+  z.object({ action: z.literal('live') }).strict(), z.object({ action: z.literal('live-set'), enabled: z.boolean() }).strict(), z.object({ action: z.literal('live-review'), id: z.uuid() }).strict(), z.object({ action: z.literal('live-clear') }).strict()]);
 export class CoachingService {
   private root: string;
   constructor(storageRoot: string, private rules: RulesService, private inUse: (directory: string) => boolean = () => false, private live: LiveCoach | null = null) { this.root = path.join(storageRoot, 'coaching'); }
@@ -30,9 +30,9 @@ export class CoachingService {
   execute(input: unknown): CoachingResponse | Promise<CoachingResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_COACHING_REQUEST', 'Invalid coaching request.'); const request = parsed.data;
     if (request.action === 'list') return this.list();
-    if (request.action === 'live' || request.action === 'live-set' || request.action === 'live-review') {
+    if (request.action === 'live' || request.action === 'live-set' || request.action === 'live-review' || request.action === 'live-clear') {
       if (!this.live) throw new HubError('COACHING_LIVE', 'Live coaching is unavailable.');
-      return request.action === 'live' ? this.live.list() : request.action === 'live-set' ? this.live.setEnabled(request.enabled) : this.live.ask(request.id);
+      return request.action === 'live' ? this.live.list() : request.action === 'live-clear' ? this.live.clear() : request.action === 'live-set' ? this.live.setEnabled(request.enabled) : this.live.ask(request.id);
     }
     if (request.action === 'prepare') {
       this.ensure(); if (this.evict(100) >= 100) throw new HubError('COACHING_LIMIT', 'All 100 prepared coaching and design-feedback folders are used by session tiles. Remove some of those tiles, then retry.');

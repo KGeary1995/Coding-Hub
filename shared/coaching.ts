@@ -3,11 +3,17 @@ export interface PromptExample { id: string; text: string; outcome: 'successful'
 export interface CoachingFindings { runs: number; tokens: number; reasoning: number; cost: number | null; days: { date: string; tokens: number; runs: number }[]; engines: { engine: string; runs: number; tokens: number }[]; advice: string[] }
 export interface CoachingPrepared { directory: string; prompt: string }
 /** A prompt sent in a channel, as live coaching saw it: local tips at once, and Claude's review when asked for. */
-export interface LiveTip { id: string; sessionId: string; engine: 'claude' | 'codex'; prompt: string; tips: string[]; at: string; review: LiveReview | null }
+export interface LiveTip { id: string; sessionId: string; engine: 'claude' | 'codex'; prompt: string; tips: string[]; at: string; review: LiveReview | null;
+  /** What each tip is about, for the weekly summary (from 1.15). */
+  kinds?: TipKind[] }
+/** What a local tip is about. */
+export type TipKind = 'thin' | 'unnamed' | 'error' | 'check' | 'vague' | 'many' | 'long';
+/** The last seven days of coached prompts on this computer: how many, and how often each kind of tip came up. */
+export interface CoachingWeek { prompts: number; coached: number; reviewed: number; kinds: Partial<Record<TipKind, number>> }
 export interface LiveReview { advice: string; rewrite: string }
-export interface LiveCoaching { enabled: boolean; tips: LiveTip[] }
+export interface LiveCoaching { enabled: boolean; tips: LiveTip[]; week: CoachingWeek }
 export type CoachingRequest = { action: 'list' } | { action: 'add'; text: string; outcome: PromptExample['outcome']; notes: string } | { action: 'remove'; id: string } | { action: 'prepare'; report: string }
-  | { action: 'live' } | { action: 'live-set'; enabled: boolean } | { action: 'live-review'; id: string };
+  | { action: 'live' } | { action: 'live-set'; enabled: boolean } | { action: 'live-review'; id: string } | { action: 'live-clear' };
 export type CoachingResponse = PromptExample[] | PromptExample | CoachingPrepared | LiveCoaching | LiveTip | null;
 /** The longest prompt kept for live coaching, and the most prompts kept. */
 export const LIVE_PROMPT_LIMIT = 4000; export const LIVE_TIPS = 50;
@@ -22,18 +28,30 @@ const VAGUE = /\b(better|nicer|cleaner|polish|optimi[sz]e|fix it|make it work|cl
  * Slash commands and short replies (yes, continue, an answer to the agent's question) get none.
  */
 export function coachable(prompt: string, first: boolean) { const text = prompt.trim(); return Boolean(text) && !text.startsWith('/') && (first || text.split(/\s+/).length >= 6); }
-export function promptTips(prompt: string, first: boolean): string[] {
+/** Up to two local tips for a prompt, each with what it is about. */
+export function promptAdvice(prompt: string, first: boolean): { kind: TipKind; text: string }[] {
   const text = prompt.trim(); const words = text.split(/\s+/).filter(Boolean).length;
   if (!coachable(text, first)) return [];
-  const tips: string[] = [];
-  if (first && words < 10) tips.push('This starts a conversation with little to go on. Say what should change, where (a file, page or feature), and what done looks like.');
-  else if (first && /^(it|this|that|they|these|those)\b/i.test(text)) tips.push('A new conversation doesn\'t know what "it" is yet. Name the file, feature or screen first.');
-  if (PROBLEM.test(text) && !DETAIL.test(text)) tips.push('Paste the exact error message, or the steps that make it happen. Otherwise the agent has to guess.');
-  if (TASK.test(text) && words >= 12 && !CHECK.test(text)) tips.push('Say how you\'ll know it worked: the behavior you expect, or a test or command that should pass.');
-  if (VAGUE.test(text) && words < 25) tips.push('Say what "better" means here: faster, simpler, a particular look or behavior.');
-  if ((text.match(/(^|\n)\s*(\d+[.)]|[-*•])\s+\S/g) ?? []).length >= 4) tips.push('This asks for several things at once. Say which comes first or matters most.');
-  if (words > 700) tips.push('A long prompt: put the main request in the first sentence or two, and the background after it.');
+  const tips: { kind: TipKind; text: string }[] = [];
+  if (first && words < 10) tips.push({ kind: 'thin', text: 'This starts a conversation with little to go on. Say what should change, where (a file, page or feature), and what done looks like.' });
+  else if (first && /^(it|this|that|they|these|those)\b/i.test(text)) tips.push({ kind: 'unnamed', text: 'A new conversation doesn\'t know what "it" is yet. Name the file, feature or screen first.' });
+  if (PROBLEM.test(text) && !DETAIL.test(text)) tips.push({ kind: 'error', text: 'Paste the exact error message, or the steps that make it happen. Otherwise the agent has to guess.' });
+  if (TASK.test(text) && words >= 12 && !CHECK.test(text)) tips.push({ kind: 'check', text: 'Say how you\'ll know it worked: the behavior you expect, or a test or command that should pass.' });
+  if (VAGUE.test(text) && words < 25) tips.push({ kind: 'vague', text: 'Say what "better" means here: faster, simpler, a particular look or behavior.' });
+  if ((text.match(/(^|\n)\s*(\d+[.)]|[-*•])\s+\S/g) ?? []).length >= 4) tips.push({ kind: 'many', text: 'This asks for several things at once. Say which comes first or matters most.' });
+  if (words > 700) tips.push({ kind: 'long', text: 'A long prompt: put the main request in the first sentence or two, and the background after it.' });
   return tips.slice(0, 2);
+}
+export const promptTips = (prompt: string, first: boolean): string[] => promptAdvice(prompt, first).map((tip) => tip.text);
+/** The weekly summary of coached prompts, from the last seven days of them. */
+export function coachingWeek(tips: LiveTip[], now = new Date()): CoachingWeek {
+  const since = now.getTime() - 7 * 86400000; const week: CoachingWeek = { prompts: 0, coached: 0, reviewed: 0, kinds: {} };
+  for (const tip of tips) {
+    if (Date.parse(tip.at) < since) continue;
+    week.prompts++; if (tip.tips.length) week.coached++; if (tip.review) week.reviewed++;
+    for (const kind of tip.kinds ?? []) week.kinds[kind] = (week.kinds[kind] ?? 0) + 1;
+  }
+  return week;
 }
 const tokens = (record: UsageRecord) => record.input + record.output + (record.engine === 'claude' ? record.cached + record.cacheWrite : 0);
 /** Local descriptive analysis. These hints are heuristics, not model-generated judgments. */

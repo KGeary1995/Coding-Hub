@@ -56,6 +56,19 @@ describe('conversation turns from CLI transcripts', () => {
 });
 
 describe('live coaching', () => {
+  it('keeps coached prompts across restarts for 30 days, sums up the last 7, and forgets them on Clear', () => {
+    const { root, live } = coach();
+    live.observe(run(), config(), user('fix the login'));
+    live.observe(run(), config(), assistant('Which page?'));
+    live.observe(run(), config(), user('Please add a dark mode toggle to the settings screen next to the font size option'));
+    expect(live.list().week).toEqual({ prompts: 2, coached: 2, reviewed: 0, kinds: { thin: 1, check: 1 } });
+    const later = new LiveCoach(root, () => {}, async () => null, undefined, undefined, () => new Date(Date.now() + 3 * 86400000));
+    expect(later.list().tips.map((tip) => tip.prompt)).toEqual(['Please add a dark mode toggle to the settings screen next to the font size option', 'fix the login']);
+    const muchLater = new LiveCoach(root, () => {}, async () => null, undefined, undefined, () => new Date(Date.now() + 10 * 86400000));
+    expect(muchLater.list().tips).toHaveLength(2); expect(muchLater.list().week.prompts).toBe(0);
+    expect(new LiveCoach(root, () => {}, async () => null, undefined, undefined, () => new Date(Date.now() + 31 * 86400000)).list().tips).toEqual([]);
+    later.clear(); expect(new LiveCoach(root, () => {}, async () => null).list().tips).toEqual([]);
+  });
   it('coaches each prompt with local tips, treats the first prompt of a new conversation as first, and keeps the reply before it for a review', async () => {
     const { live, published, review } = coach();
     live.observe(run(), config(), user('fix the login'));
