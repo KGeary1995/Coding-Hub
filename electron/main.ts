@@ -57,6 +57,7 @@ import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
 import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
+import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory } from './services/hub/auto-memory';
@@ -132,6 +133,8 @@ const manager = new PtyManager((owner, event) => {
     const ended = hub?.telemetry ? hub.telemetry.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); return transcript; }) : Promise.resolve(null);
     void autoMemory?.finish(event.runId, ended).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
+  if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
+  if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
 }, { onChat: (owner, envelope) => {
@@ -164,6 +167,25 @@ const manager = new PtyManager((owner, event) => {
   }
 } });
 
+/** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
+function workspaceChannels() {
+  const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
+    ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
+}
+/**
+ * A desktop notification, unless they are turned off in Settings. A channel's alert is shown only while Trace is not in
+ * front (the window shows it then); budget and plan-limit warnings always are. Clicking brings Trace forward on it.
+ */
+function desktopAlert(alert: DesktopAlert, always = false) {
+  try { if (hub?.preferences().alerts === false) return; } catch { /* Unreadable preferences: alerts stay on. */ }
+  if (!Notification.isSupported() || (!always && window && !window.isDestroyed() && window.isFocused())) return;
+  const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
+  notice.on('click', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.alertClick, alert.target); });
+  notice.show();
+}
+/** This computer's channel, by number and name as its tile shows it, for alerts. */
+function channelLabel(sessionId: string) { const channels = workspaceChannels(); const index = channels.findIndex((channel) => channel.id === sessionId); return index >= 0 ? `CH${index + 1} · ${channels[index].title}` : 'A channel'; }
 function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
   try {
     const id = owner ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
@@ -501,9 +523,7 @@ else app.whenReady().then(() => {
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
   remote = new RemoteServer(storageRoot, {
     // Channels still called by their engine's name are named after their folder, as on the desktop.
-    sessions: () => { const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-      return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
-        ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) })); },
+    sessions: () => workspaceChannels(),
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
@@ -541,12 +561,7 @@ else app.whenReady().then(() => {
     const devices = hub.devices; phone.identity = devices.machine;
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
     // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
-    const linkedAlerts = new LinkedAlerts((alert) => {
-      if (!Notification.isSupported() || (window && !window.isDestroyed() && window.isFocused())) return;
-      const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
-      notice.on('click', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.linkedEvent, { type: 'open', id: alert.id }); });
-      notice.show();
-    });
+    const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
     phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
@@ -775,6 +790,18 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   createWindow();
   updates.start();
+  // Today's usage against the budgets set in Settings, and the plan limits the CLIs last reported (Usage and the status
+  // bar read them every 5 minutes): checked every minute. What was said is kept for the day, so a restart does not repeat it.
+  const warnedFile = path.join(storageRoot, 'usage-alerts.json'); let warned = new Set<string>();
+  try { warned = new Set(z.array(z.string().max(300)).max(500).parse(JSON.parse(fs.readFileSync(warnedFile, 'utf8')))); } catch { /* None yet. */ }
+  setInterval(() => {
+    if (!hub) return;
+    try {
+      const before = warned.size; const alerts = usageAlerts(dayUsage.totals(), planLimits.current(), hub.preferences(), warned);
+      for (const alert of alerts) desktopAlert(alert, true);
+      if (warned.size !== before) fs.writeFileSync(warnedFile, JSON.stringify([...warned].slice(-300)), { mode: 0o600 });
+    } catch { hostHealth?.record('usage-alerts-failed'); }
+  }, 60000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

@@ -1,7 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import type { LinkedComputer, LinkedComputerEvent } from '../../shared/remote';
 import { useLinkedStore } from '../state/linked-store';
-import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { workbench } from './workbench';
@@ -74,7 +73,6 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
 
 /** Live output, screens and sizes from linked computers, and their channel lists. */
 export function routeLinkedEvent(event: LinkedComputerEvent) {
-  if (event.type === 'open') { useWorkspaceStore.setState({ computerId: event.id, activeView: 'computer' }); return; }
   if (event.type === 'computers') {
     useLinkedStore.setState({ computers: event.computers });
     // Channels that went away (or whose computer was unlinked) drop their terminals.

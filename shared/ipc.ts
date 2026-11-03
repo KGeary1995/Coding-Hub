@@ -97,6 +97,8 @@ export interface CodingHubHost {
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
+  /** A desktop notification was clicked: open what it is about. */
+  onAlertClick(listener: (target: AlertTarget) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
   chat(request: ChatRequest): Promise<HostResult<null>>;
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
@@ -110,6 +112,8 @@ export interface CodingHubHost {
 export interface ClipboardImage { thumbnail: string; full: string; width: number; height: number; hasText: boolean }
 /** The most a CLI can put on the clipboard at once. */
 export const COPY_LIMIT = 1024 * 1024;
+/** What a desktop notification opens: a channel here, another computer's tab, or Usage. */
+export type AlertTarget = { sessionId: string } | { computerId: string } | { view: 'usage' };
 export const IPC_CHANNELS = {
   workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
@@ -150,6 +154,7 @@ export const IPC_CHANNELS = {
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
+  alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',

@@ -59,6 +59,10 @@ export function StatusBar() {
   const usage = useHubStore((state) => state.usage);
   const logs = useDayUsage((state) => state.usage);
   const today = dayTotal(logs, todayTotals(usage));
+  // Against the daily budgets in Settings: amber from the warning share, red once one is used up.
+  const preferences = useHubStore((state) => state.preferences); const share = Math.max(preferences.dailyTokens ? today.tokens / preferences.dailyTokens : 0, preferences.dailyCost && today.cost !== null ? today.cost / preferences.dailyCost : 0);
+  const budgetLevel = share >= 1 ? 'critical' : share >= (preferences.limitWarning ?? 80) / 100 ? 'warning' : '';
+  const budgetNote = share > 0 ? `${Math.round(share * 100)}% of today's budget. ` : '';
   // The CLIs' logs are read every 15 s, and soon after Trace's own channels report usage.
   useEffect(() => { void refreshDayUsage(); const timer = setInterval(() => void refreshDayUsage(), 15000); return () => clearInterval(timer); }, []);
   useEffect(() => { const timer = setTimeout(() => void refreshDayUsage(), 2000); return () => clearTimeout(timer); }, [usage]);
@@ -80,7 +84,7 @@ export function StatusBar() {
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>
     <span className="tr-spacer" />
     <PlanLimitCells />
-    <span className="tr-sb-cell tnum" title={`New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's and Codex's own logs, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}` : ', in Trace channels'}`}>Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
+    <span className={`tr-sb-cell tr-sb-limits tnum ${budgetLevel}`} title={`${budgetNote}New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's and Codex's own logs, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}` : ', in Trace channels'}`}>Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => alerts[0].computerId ? useWorkspaceStore.setState({ computerId: alerts[0].computerId, activeView: 'computer' }) : jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
         <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>

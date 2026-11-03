@@ -115,6 +115,4 @@ export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }
   | { type: 'output'; id: string; sessionId: string; runId: string; data: string }
   | { type: 'replay'; id: string; sessionId: string; runId: string; data: string; cols: number; rows: number }
-  | { type: 'resize'; id: string; sessionId: string; runId: string; cols: number; rows: number }
-  /** An alert about that computer's channel was clicked: open its tab. */
-  | { type: 'open'; id: string };
+  | { type: 'resize'; id: string; sessionId: string; runId: string; cols: number; rows: number };

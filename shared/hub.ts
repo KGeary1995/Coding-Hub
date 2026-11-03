@@ -33,7 +33,9 @@ export interface UsageRecord { machine?: string; conversationId?: string; incomp
   /** New tokens and cost by the local day they were used on (`localDay`), for runs that span midnight. */
   days?: Record<string, { tokens: number; cost: number | null }> }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
-export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; syncDevices?: boolean }
+export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; syncDevices?: boolean;
+  /** Desktop notifications (on unless false); daily budgets for this computer (null or absent: none); the plan-limit share to warn at. */
+  alerts?: boolean; dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number }
 export type SyncedDocument = 'settings' | 'rules';
 export interface SyncedComputer { id: string; name: string; updatedAt: string }
 export interface DeviceSyncStatus { enabled: boolean; connected: boolean; machine: { id: string; name: string }; lastSync: string | null; error: string | null; computers: SyncedComputer[]; conflicts: { document: SyncedDocument; from: string; at: string }[]; rulesFrom: { name: string; at: string } | null }
