@@ -15,9 +15,10 @@ const user = (content: unknown) => ({ type: 'user', message: { role: 'user', con
 const assistant = (text: string) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 function coach() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-live-')); roots.push(root);
-  const published: LiveTip[] = []; const review = vi.fn(async () => ({ advice: 'Name the page.', rewrite: 'Fix the sign-in page.' }));
-  const live = new LiveCoach(root, (tip) => published.push(structuredClone(tip)), async () => ({ executable: { file: 'claude', prefixArgs: [], extraEnv: {}, displayPath: 'claude' }, env: {} }), review);
-  return { root, live, published, review };
+  const published: LiveTip[] = []; const review = vi.fn(async () => ({ advice: 'Name the page.', rewrite: 'Fix the sign-in page.' })); const codexReview = vi.fn(async () => ({ advice: 'From Codex.', rewrite: 'x' }));
+  const installed = new Set(['claude', 'codex']);
+  const live = new LiveCoach(root, (tip) => published.push(structuredClone(tip)), async (engine) => installed.has(engine) ? { executable: { file: engine, prefixArgs: [], extraEnv: {}, displayPath: engine }, env: {} } : null, review, codexReview);
+  return { root, live, published, review, codexReview, installed };
 }
 
 describe('local prompt tips', () => {
@@ -83,8 +84,16 @@ describe('live coaching', () => {
     live.observe(run(), config(), user('Add a footer to every page with the version number'));
     expect(published).toHaveLength(0); expect(live.list().enabled).toBe(false);
   });
-  it('asks Claude Haiku with no tools, no MCP servers and no saved session', () => {
-    expect(REVIEW_ARGS).toEqual(expect.arrayContaining(['-p', '--model', 'haiku', '--no-session-persistence', '--strict-mcp-config', '--json-schema']));
+  it('has Codex review the prompt of a Codex channel, and Claude when Codex is not installed', async () => {
+    const { live, published, review, codexReview, installed } = coach(); const codexRun = { ...run(), engine: 'codex' as const, runId: 'run-2' };
+    live.observe(codexRun, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the login' } });
+    expect((await live.ask(published[0].id)).review?.advice).toBe('From Codex.'); expect(review).not.toHaveBeenCalled();
+    installed.delete('codex'); live.observe({ ...codexRun, runId: 'run-3' }, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the signup' } });
+    await live.ask(published.at(-1)!.id); expect(review).toHaveBeenCalledTimes(1); expect(codexReview).toHaveBeenCalledTimes(1);
+    expect(live.latest('session-1')?.prompt).toBe('fix the signup');
+  });
+  it('asks Claude Haiku with no tools and no MCP servers, keeping its session so its usage is counted', () => {
+    expect(REVIEW_ARGS).toEqual(expect.arrayContaining(['-p', '--model', 'haiku', '--strict-mcp-config', '--json-schema'])); expect(REVIEW_ARGS).not.toContain('--no-session-persistence');
     expect(REVIEW_ARGS[REVIEW_ARGS.indexOf('--tools') + 1]).toBe('');
   });
 });

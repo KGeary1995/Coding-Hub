@@ -243,6 +243,28 @@ describe('channel controls', () => {
   });
 });
 
+describe('failures, coaching and updates for other devices', () => {
+  it('says why a channel stopped with an error until it starts again, and carries its coaching, reviewed on request', async () => {
+    const { server } = await remote(); const host = (server as unknown as { host: RemoteHost }).host;
+    const tip = { id: '3f1c2c8e-0000-4000-8000-000000000001', sessionId: 's1', engine: 'claude' as const, prompt: 'fix it', tips: ['Say what done looks like.'], at: new Date().toISOString(), review: null as null | { advice: string; rewrite: string } };
+    host.coaching = (sessionId) => sessionId === 's1' ? tip : null; host.askCoach = async () => { tip.review = { advice: 'Name the page.', rewrite: 'Fix [page].' }; return tip; };
+    await server.setEnabled(true);
+    expect(server.channels()[0].coaching).toEqual({ id: tip.id, tips: ['Say what done looks like.'], review: null }); expect(server.channels()[1].coaching).toBeUndefined();
+    const review = (token: string) => fetch(base(server) + '/api/coaching-review', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: tip.id }) });
+    expect((await review(await paired(server))).status).toBe(200); expect(server.channels()[0].coaching?.review?.advice).toBe('Name the page.');
+    server.onSessionEvent({ type: 'exit', sessionId: 's2', runId: 'r2', exitCode: 1, signal: null, diagnostic: 'Claude Code exited with code 1\nmore' } as never);
+    expect(server.channels()[1].failed).toBe('Claude Code exited with code 1');
+    server.onSessionEvent({ type: 'started', sessionId: 's2', runId: 'r3', engine: 'claude', pid: 1, cwd: '/' } as never); expect(server.channels()[1].failed).toBeUndefined();
+  });
+  it('lets a linked computer, and never a phone, update Trace here', async () => {
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.update = async () => 'Installing Trace 1.15.0 there.';
+    await server.setEnabled(true);
+    const update = (token: string) => fetch(base(server) + '/api/update', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}' });
+    const answer = await update(await computer(server)); expect(answer.status).toBe(200); expect(await answer.json()).toEqual({ message: 'Installing Trace 1.15.0 there.' });
+    expect((await update(await paired(server))).status).toBe(403);
+  });
+});
+
 describe('channel transcripts', () => {
   it('gives phones and linked computers a channel\'s conversation, and refuses unknown channels', async () => {
     const { server } = await remote();

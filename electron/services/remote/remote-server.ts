@@ -17,6 +17,8 @@ import { acceptKey, frame, FrameReader } from './websocket';
 import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } from './web-push';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
+/** A channel's live coaching as phones and linked computers see it: only while it has something to say. */
+const coached = (tip: import('../../../shared/coaching').LiveTip | null) => tip && (tip.tips.length || tip.review) ? { coaching: { id: tip.id, tips: tip.tips, review: tip.review } } : {};
 export interface RemoteHost {
   sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel }[];
   running(): (RunningSession & { cols?: number; rows?: number; title?: string })[];
@@ -27,6 +29,9 @@ export interface RemoteHost {
   add?(engine: ChannelEngine): Promise<void>;
   /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
   pasteImage?(reference: RunReference, image: Buffer): Promise<void>;
+  /** Live coaching on a channel's last prompt, and its AI review on request (see LiveCoach). */
+  coaching?(sessionId: string): import('../../../shared/coaching').LiveTip | null;
+  askCoach?(id: string): Promise<unknown>;
   /** Restart and install the latest version, for a linked computer; says what will happen. */
   update?(): Promise<string>;
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
@@ -420,7 +425,7 @@ export class RemoteServer {
     const local = this.host.sessions().map((session, index): RemoteChannel => {
       const run = running.get(session.id); const waiting = this.attention.get(session.id);
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.
@@ -688,6 +693,12 @@ export class RemoteServer {
       try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }
       return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/coaching-review') {
+      const parsed = z.object({ id: z.uuid() }).strict().safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Unknown prompt.' });
+      if (!this.host.askCoach) return this.send(response, 409, { error: 'Live coaching is not available on this computer.' });
+      try { await this.host.askCoach(parsed.data.id); } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The prompt could not be reviewed.' }); }
+      this.channelsChanged(); return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/update') {
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can update Trace here.' });

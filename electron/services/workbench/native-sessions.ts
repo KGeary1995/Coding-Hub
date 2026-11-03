@@ -15,7 +15,8 @@ interface Candidate { source: Source; file: string; id: string; modified: number
 
 export class NativeSessions {
   private sources = new Map<string, string>();
-  constructor(private profiles: ClaudeProfiles) {}
+  /** `hidden`: folders whose conversations are Trace's own (live coaching's reviews), left out of the list. */
+  constructor(private profiles: ClaudeProfiles, private hidden: string[] = []) {}
   private roots(): Source[] {
     return [{ engine: 'claude', root: process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude') }, { engine: 'codex', root: process.env.CODEX_HOME ?? path.join(homedir(), '.codex') }, ...this.profiles.list().map((profile) => ({ engine: 'claude' as const, root: this.profiles.directory(profile.id), profileId: profile.id }))];
   }
@@ -75,7 +76,7 @@ export class NativeSessions {
     for (const candidate of candidates) {
       if (result.length >= LISTED) break;
       const key = `${candidate.source.engine}:${candidate.source.profileId ?? 'default'}:${candidate.id}`; if (sources.has(key)) continue;
-      const conversation = await this.describe(candidate); if (!conversation) continue;
+      const conversation = await this.describe(candidate); if (!conversation || this.hidden.some((folder) => conversation.directory && path.resolve(conversation.directory).toLowerCase() === path.resolve(folder).toLowerCase())) continue;
       sources.set(key, candidate.file); result.push(conversation);
     }
     this.sources = sources;

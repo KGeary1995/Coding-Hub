@@ -111,7 +111,8 @@ const channelAccount = (config: { engine: string; accountProfileId?: string }): 
 const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? []);
 const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id));
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
-const nativeSessions = new NativeSessions(claudeProfiles);
+// Live coaching's reviews run in its coaching folder; their sessions are kept so their usage counts, but are not history.
+const nativeSessions = new NativeSessions(claudeProfiles, [path.join(storageRoot, 'coaching')]);
 const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
@@ -197,6 +198,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
   z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
   z.object({ action: z.literal('linked-watch'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-unwatch'), id: z.uuid() }).strict(),
@@ -252,6 +254,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
   if (request.action === 'linked-update') return linked.update(request.id);
+  if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
   if (request.action === 'linked-screen-state') return linked.screenState(request.id);
   if (request.action === 'linked-transcript') return linked.transcript(request.id, request.sessionId);
@@ -473,9 +476,9 @@ else app.whenReady().then(() => {
       return Boolean(binding && isWithinDirectory(directory, binding));
     }));
   };
-  const liveCoach = new LiveCoach(path.join(storageRoot, 'coaching'), (tip) => sendToRenderer(IPC_CHANNELS.coachingEvent, tip), async (profileId) => {
-    const env = hostEnvironment(); const executable = await findExecutable('claude', env).catch(() => null);
-    return executable ? { executable, env: profileId ? claudeProfiles.environment(env, profileId) : env } : null;
+  const liveCoach = new LiveCoach(path.join(storageRoot, 'coaching'), (tip) => { sendToRenderer(IPC_CHANNELS.coachingEvent, tip); remote?.channelsChanged(); }, async (engine, profileId) => {
+    const env = hostEnvironment(); const executable = await findExecutable(engine, env).catch(() => null);
+    return executable ? { executable, env: engine === 'claude' && profileId ? claudeProfiles.environment(env, profileId) : env } : null;
   });
   if (hub?.telemetry) hub.telemetry.onLine = (run, config, raw) => liveCoach.observe(run, config, raw);
   const coaching = hub ? new CoachingService(storageRoot, hub.rules, directoryInUse, liveCoach) : null;
@@ -517,6 +520,8 @@ else app.whenReady().then(() => {
     },
     resize: (reference, cols, rows) => manager.resizeRemote(reference, cols, rows),
     update: () => remoteUpdate(),
+    coaching: (sessionId) => liveCoach.latest(sessionId),
+    askCoach: (id) => liveCoach.ask(id),
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),

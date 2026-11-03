@@ -11,6 +11,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   topic?: string;
   /** Why its last run stopped with an error, while it is stopped (from 1.15). */
   failed?: string;
+  /** Live coaching on the prompt last sent there: local tips, and the AI review once asked for (from 1.15). */
+  coaching?: { id: string; tips: string[]; review: { advice: string; rewrite: string } | null };
   /** A chat channel: its conversation is shown only on the computer it runs on, which is where it is answered too. */
   chat?: true;
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
@@ -101,6 +103,7 @@ export type LinkedComputerRequest =
   /** An image pasted here (PNG or JPEG, base64) for a channel there; that computer attaches it as if pasted there. */
   | { action: 'linked-paste-image'; id: string; sessionId: string; runId: string; image: string }
   | { action: 'linked-update'; id: string }
+  | { action: 'linked-coach-review'; id: string; tip: string }
   /** Whether that computer's screen is locked, which its screen shows here as black (a Mac). */
   | { action: 'linked-screen-state'; id: string }
   /** A tile here shows that channel at its own size (`cols`/`rows`), or gives it back (without them). */

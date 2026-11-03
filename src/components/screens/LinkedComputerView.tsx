@@ -9,6 +9,7 @@ import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { LinkedScreen } from './LinkedScreen';
+import { LinkedTipStrip } from '../tile/LiveTipStrip';
 
 /**
  * Restart and install on another computer, after asking: Trace there saves its workspace, installs the latest version
@@ -94,6 +95,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       ? <p className="history-empty">This is a chat channel. Its conversation is shown on {computer.name}, and answered there.</p>
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}
+    {channel.coaching && <LinkedTipStrip computerId={computer.id} computerName={computer.name} coaching={channel.coaching} />}
   </article>;
 }
 

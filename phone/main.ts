@@ -261,6 +261,7 @@ function showChannel(sessionId: string) {
   }
   const title = h('span', { className: 'title', id: 'channel-title' });
   const waiting = h('p', { id: 'waiting', className: 'ask-banner', hidden: true, aria: { role: 'status' } });
+  const coach = h('div', { id: 'coach', className: 'coach', hidden: true, aria: { role: 'status', label: 'Prompt coaching' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
   const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type here, then Send', enterKeyHint: 'send', aria: { label: 'Message' } });
@@ -284,7 +285,7 @@ function showChannel(sessionId: string) {
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
-  app.replaceChildren(header(showList, title), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, output, selected, problem, tools, keys, form));
+  app.replaceChildren(header(showList, title), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   fit = new FitAddon(); terminal.loadAddon(fit);
@@ -443,12 +444,31 @@ async function showConversation(sessionId: string) {
   } catch (error) { status.textContent = ''; body.append(h('p', { className: 'error', aria: { role: 'alert' } }, (error as Error).message)); }
 }
 
+/** Live coaching on the prompt last sent in the channel, as on the desktop, with Ask AI for a channel on the computer this phone talks to. */
+let coachAsking: string | null = null; let coachDismissed: string | null = null; let coachError = '';
+function renderCoach(channel: RemoteChannel) {
+  const box = document.getElementById('coach'); if (!box) return;
+  const tip = channel.coaching; if (!tip || coachDismissed === tip.id) { box.hidden = true; return; }
+  box.hidden = false;
+  const ask = !tip.review && !channel.computer && h('button', { className: 'quiet', disabled: coachAsking === tip.id, onclick: async () => {
+    coachAsking = tip.id; coachError = ''; renderCoach(channel);
+    try { const response = await api('/api/coaching-review', { method: 'POST', body: JSON.stringify({ id: tip.id }) }); if (!response.ok) coachError = ((await response.json().catch(() => ({}))) as { error?: string }).error ?? 'The prompt could not be reviewed.'; }
+    catch (error) { coachError = (error as Error).message; }
+    finally { coachAsking = null; const now = channels.find((item) => item.sessionId === channel.sessionId); if (now) renderCoach(now); }
+  } }, coachAsking === tip.id ? 'Asking…' : 'Ask AI');
+  box.replaceChildren(
+    ...(tip.review ? [h('p', {}, tip.review.advice), h('details', {}, h('summary', {}, 'Suggested rewrite'), h('pre', {}, tip.review.rewrite))] : tip.tips.map((text) => h('p', {}, text))),
+    ...(coachError ? [h('p', { className: 'error' }, coachError)] : []),
+    h('div', { className: 'coach-actions' }, ...(ask ? [ask] : []), h('button', { className: 'quiet', onclick: () => { coachDismissed = tip.id; box.hidden = true; } }, 'Dismiss')));
+}
+
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
   const title = document.getElementById('channel-title');
   title?.replaceChildren(h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title} `, account(channel), h('small', { className: `state-${state(channel)}` }, word[state(channel)]));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
+  renderCoach(channel);
   // A restarted channel is a new process: its screen starts afresh, as on the desktop.
   if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); requestSize(); }
   if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);

@@ -13,7 +13,7 @@ export function LiveCoachingCard({ save }: { save: (text: string, outcome: Promp
   const sessions = useWorkspaceStore((state) => state.sessions);
   const [saved, setSaved] = useState<string[]>([]); const [error, setError] = useState('');
   return <article className="storage-card live-coaching"><h2>Live coaching</h2>
-    <p>Trace checks each prompt you send in a Claude Code or Codex channel and shows tips under that channel. The checks run on this computer. Ask AI sends that prompt, and the end of the reply before it, to Claude Haiku through your Claude account, which uses a little of your plan.</p>
+    <p>Trace checks each prompt you send in a Claude Code or Codex channel and shows tips under that channel. The checks run on this computer. Ask AI sends that prompt, and the end of the reply before it, to Claude Haiku through your Claude account (Codex, for a Codex channel), which uses a little of that plan. Another computer's channels are coached there, and shown on its tab here and on your phone.</p>
     <label className="update-checkbox"><input type="checkbox" aria-label="Live coaching" checked={enabled} onChange={(event) => void setLiveCoaching(event.target.checked).catch((e) => setError(e.message))} />Coach my prompts as I send them</label>
     {error && <p role="alert" className="error-message">{error}</p>}
     {enabled && !tips.length && <p className="muted">No prompts yet. Send one in a channel and its tips appear here.</p>}
