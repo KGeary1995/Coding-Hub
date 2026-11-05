@@ -13,10 +13,10 @@ describe('input from a viewer of the Windows screen', () => {
     expect(keyCommand(0x61, true)).toBe('c 97 1'); expect(keyCommand(0xffff, false)).toBe('k 46 0 1');
   });
 
-  it('moves in absolute units across the main display, and presses only buttons that changed', () => {
-    expect(pointerCommands(0, 0, 0, 0, 1920, 1080)).toEqual(['m 0 0 32769 0']);
-    expect(pointerCommands(1919, 1079, 1, 0, 1920, 1080)).toEqual(['m 65535 65535 32769 0', 'm 65535 65535 32770 0']);
-    expect(pointerCommands(10, 10, 0, 1, 1920, 1080).at(-1)).toMatch(/ 32772 0$/);
+  it('moves in absolute units across every display, and presses only buttons that changed', () => {
+    expect(pointerCommands(0, 0, 0, 0, 1920, 1080)).toEqual(['m 0 0 49153 0']);
+    expect(pointerCommands(1919, 1079, 1, 0, 1920, 1080)).toEqual(['m 65535 65535 49153 0', 'm 65535 65535 49154 0']);
+    expect(pointerCommands(10, 10, 0, 1, 1920, 1080).at(-1)).toMatch(/ 49156 0$/);
     expect(pointerCommands(10, 10, 8, 0, 1920, 1080).at(-1)).toBe('m 0 0 2048 120');
     expect(pointerCommands(10, 10, 0, 8, 1920, 1080)).toHaveLength(1);
   });
