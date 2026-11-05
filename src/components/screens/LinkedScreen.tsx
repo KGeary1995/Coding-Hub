@@ -8,7 +8,7 @@ import { workbench } from '../../runtime/workbench';
 
 const XK_SUPER_L = 0xffeb; const XK_CONTROL_L = 0xffe3; const XK_V = 0x0076;
 type Status = 'connecting' | 'signin' | 'connected' | 'ended';
-/** How often an open Mac screen asks whether that Mac is locked, so the note comes and goes with it. */
+/** How often an open screen asks whether that computer is locked, so the note comes and goes with it. */
 const LOCK_CHECK_MS = 5000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const mac = navigator.userAgent.includes('Mac');
@@ -80,10 +80,11 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
 
   useEffect(() => { if (rfb.current) rfb.current.viewOnly = !control; }, [control]);
 
-  // A locked Mac sends its screen black to every viewer but Apple's: ask Trace there, and say so here instead.
+  // A locked Mac sends its screen black to every viewer but Apple's, and a locked Windows computer takes no keys or clicks
+  // from Trace at its lock screen: ask Trace there, and say so here instead.
   const checkLock = () => workbench<LinkedScreenState>({ action: 'linked-screen-state', id: computer.id }).then((state) => { setLocked(state.locked); return state.locked; }, () => null);
   useEffect(() => {
-    if (status !== 'connected' || kind !== 'system') { setLocked(null); return; }
+    if (status !== 'connected' || !kind) { setLocked(null); return; }
     void checkLock(); const timer = setInterval(() => void checkLock(), LOCK_CHECK_MS);
     return () => clearInterval(timer);
   }, [status, kind, computer.id]);
@@ -135,7 +136,9 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   const retry = () => { setMessage(''); setAttempt((value) => value + 1); };
   const named = types.includes('username');
   const lockUnknown = status === 'connected' && kind === 'system' && locked === null;
-  const showUnlock = status === 'connected' && (locked === true || (lockUnknown && unlockOpen));
+  const showUnlock = status === 'connected' && kind === 'system' && (locked === true || (lockUnknown && unlockOpen));
+  /** Windows lets no other program type at its lock screen, so there is nothing to offer but to say so. */
+  const windowsLocked = status === 'connected' && kind === 'trace' && locked === true;
 
   return <section className="linked-screen" aria-label={`${computer.name} screen`}>
     <header className="linked-screen-bar">
@@ -150,6 +153,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>
     </header>
     {message && <p className="session-error" role="alert">{message}</p>}
+    {windowsLocked && <div className="linked-screen-signin linked-screen-unlock" role="status"><p><LockKeyhole size={13} aria-hidden="true" /> <strong>{computer.name} is locked.</strong> Windows takes no keys or clicks from other programs at its lock screen, so typing here does nothing until it is unlocked there, at the computer. To keep it from locking while you are away, set Settings → Accounts → Sign-in options → “If you’ve been away” to Never there.</p></div>}
     {showUnlock && <form className="linked-screen-signin linked-screen-unlock" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
       <p><LockKeyhole size={13} aria-hidden="true" /> {locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} With only Screen Sharing turned on there, macOS 26 also takes no keys from Trace at its lock screen, so unlock it at the Mac. If its Remote Management is on with Control allowed, Trace can try to wake it and type your password.</p>
       <label>Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} onChange={(event) => setUnlockPassword(event.target.value)} /></label>

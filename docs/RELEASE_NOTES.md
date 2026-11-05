@@ -1,5 +1,11 @@
 ## What's new
 
+1.15.1 fixes seeing and controlling a Windows computer's screen from another computer (update both computers):
+
+- **No more "Screen sharing is off" when it isn't.** When the Windows computer took a while to start sharing its screen, the other computer gave up after 10 seconds and said sharing was off. It now waits up to 30 seconds, and if the screen still hasn't started, it says so and offers **Reconnect**.
+- **A stuck screen no longer leaves you waiting.** If the Windows computer can't start capturing its screen within 20 seconds, it stops trying and says why. Turning **Share this screen** off and on there starts it fresh.
+- **Says when a Windows computer is locked.** Windows takes no keys or clicks from other programs at its lock screen, so typing did nothing with no explanation. **Screen** now says the computer is locked and that it has to be unlocked there, and names the setting that keeps it from locking while you're away. This needs Trace open on the Windows computer.
+
 1.15.0 coaches your prompts as you send them, keeps today's token counts through restarts, allows a single channel, and opens Windows terminals as administrator:
 
 - **Live coaching.** Trace checks each prompt you send in a Claude Code or Codex channel and shows up to two tips under that channel, for example when an error has no message or a task has no way to tell it worked. The checks run on your computer and use none of your plan. **Ask AI** has Claude Haiku review that prompt in a few seconds, with advice and a rewrite you can copy; that uses a little of your Claude plan. Every prompt is also listed under **AI coaching → Live coaching**, where you can save it as an example or turn live coaching off.
