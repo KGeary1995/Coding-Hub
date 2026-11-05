@@ -1,5 +1,9 @@
 ## What's new
 
+1.15.2 shows every screen of a Windows computer (update the Windows computer):
+
+- **All displays, not just the main one.** Viewing a Windows computer from another computer showed only its main display. **Screen** now shows every display side by side, arranged as in Windows' display settings, and clicks and drags land on whichever display you point at. One display is sent as before (up to 1920×1200); several share up to 3840 wide, so two ordinary monitors stay full size. The viewer fits the whole picture in its window, so with two displays each one shows at about half the size; make the window wide or full screen.
+
 1.15.1 fixes seeing and controlling a Windows computer's screen from another computer (update both computers):
 
 - **No more "Screen sharing is off" when it isn't.** When the Windows computer took a while to start sharing its screen, the other computer gave up after 10 seconds and said sharing was off. It now waits up to 30 seconds, and if the screen still hasn't started, it says so and offers **Reconnect**.

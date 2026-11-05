@@ -1,39 +1,51 @@
 import { ipcRenderer } from 'electron';
 
 /**
- * The hidden window that captures this computer's main display for a linked computer's viewer (screen-capture.ts).
+ * The hidden window that captures this computer's displays (all of them, side by side as Windows arranges them) for a linked computer's viewer (screen-capture.ts).
  * It keeps the newest frame of the capture, and on request returns the parts that changed since the last request as
  * JPEG: the screen is compared in 64-pixel tiles, and each row's run of changed tiles is one picture.
  */
 declare class MediaStreamTrackProcessor { constructor(init: { track: MediaStreamTrack }); readable: ReadableStream<VideoFrame> }
 const TILE = 64; const QUALITY = 0.7;
-let track: MediaStreamTrack | null = null; let latest: VideoFrame | null = null; let previous: Uint32Array | null = null;
+interface Part { sourceId: string; x: number; y: number; width: number; height: number }
+/** One capture per display, each keeping its newest frame, drawn into its place in the one picture. */
+let captures: { part: Part; track: MediaStreamTrack; latest: VideoFrame | null }[] = []; let previous: Uint32Array | null = null;
 /** A frame has arrived since the last comparison; without one nothing can have changed, so nothing is read back. */
-let fresh = false;
+let fresh = false; let generation = 0;
 let canvas: OffscreenCanvas | null = null; let context: OffscreenCanvasRenderingContext2D | null = null;
 
-function stop() { track?.stop(); track = null; latest?.close(); latest = null; previous = null; canvas = null; context = null; }
+function stop() { generation++; for (const capture of captures) { capture.track.stop(); capture.latest?.close(); } captures = []; previous = null; canvas = null; context = null; }
 
-ipcRenderer.on('trace-capture-start', async (_event, request: { sourceId: string; maxWidth: number; maxHeight: number }) => {
-  stop();
+async function open(part: Part, current: number) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: part.sourceId, maxWidth: part.width, maxHeight: part.height, maxFrameRate: 30 } } } as unknown as MediaStreamConstraints);
+  const track = stream.getVideoTracks()[0]; const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const first = await reader.read(); if (first.done) { track.stop(); throw new Error('The capture ended at once.'); }
+  const capture = { part, track, latest: first.value as VideoFrame | null };
+  if (current !== generation) { track.stop(); first.value.close(); return; }
+  captures.push(capture); fresh = true;
+  // Keeps only the newest frame; each older one is closed so the capture does not stall.
+  void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || current !== generation) { next.value?.close(); return; } capture.latest?.close(); capture.latest = next.value; fresh = true; } })();
+}
+
+ipcRenderer.on('trace-capture-start', async (_event, request: { width: number; height: number; parts: Part[] }) => {
+  stop(); const current = generation;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: request.sourceId, maxWidth: request.maxWidth, maxHeight: request.maxHeight, maxFrameRate: 30 } } } as unknown as MediaStreamConstraints);
-    const current = stream.getVideoTracks()[0]; track = current;
-    const reader = new MediaStreamTrackProcessor({ track: current }).readable.getReader();
-    const first = await reader.read(); if (first.done) throw new Error('The capture ended at once.');
-    latest = first.value; fresh = true; const width = latest.displayWidth & ~1; const height = latest.displayHeight & ~1;
+    const width = request.width & ~1; const height = request.height & ~1;
     canvas = new OffscreenCanvas(width, height); context = canvas.getContext('2d', { willReadFrequently: true });
-    // Keeps only the newest frame; each older one is closed so the capture does not stall.
-    void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || track !== current) { next.value?.close(); return; } latest?.close(); latest = next.value; fresh = true; } })();
+    context!.fillStyle = '#000'; context!.fillRect(0, 0, width, height);
+    // A display that cannot be captured stays black; only none at all is an error.
+    const opened = await Promise.allSettled(request.parts.map((part) => open(part, current)));
+    if (!captures.length) throw (opened.find((item) => item.status === 'rejected') as PromiseRejectedResult | undefined)?.reason ?? new Error('The screen could not be captured.');
     ipcRenderer.send('trace-capture-started', { width, height });
   } catch (error) { stop(); ipcRenderer.send('trace-capture-started', { error: (error as Error).message || 'The screen could not be captured.' }); }
 });
 
 ipcRenderer.on('trace-capture-frame', async (_event, request: { id: number; full: boolean }) => {
   try {
-    if (!canvas || !context || !latest) throw new Error('Not capturing.');
+    if (!canvas || !context || !captures.length) throw new Error('Not capturing.');
     if (!request.full && !fresh) { ipcRenderer.send('trace-capture-frame', { id: request.id, rects: [] }); return; }
-    fresh = false; const { width, height } = canvas; context.drawImage(latest, 0, 0, width, height);
+    fresh = false; const { width, height } = canvas;
+    for (const { part, latest } of captures) if (latest) context.drawImage(latest, part.x, part.y, part.width, part.height);
     const pixels = new Uint32Array(context.getImageData(0, 0, width, height).data.buffer); const before = request.full ? null : previous; previous = pixels;
     const rects: { x: number; y: number; width: number; height: number; jpeg: Uint8Array }[] = [];
     for (let ty = 0; ty < height; ty += TILE) {

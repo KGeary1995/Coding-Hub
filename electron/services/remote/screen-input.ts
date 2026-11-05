@@ -5,7 +5,7 @@ import type { ScreenInput } from './rfb-server';
 /**
  * Presses keys and moves the mouse on Windows for a linked computer's viewer, with SendInput, through Windows
  * PowerShell (part of every Windows install): its Add-Type compiles this small C# loop, so Trace needs no native module.
- * Lines on stdin: `m <x> <y> <flags> <data>` (x, y 0–65535 across the main display), `k <vk> <down> <extended>`, and
+ * Lines on stdin: `m <x> <y> <flags> <data>` (x, y 0–65535 across the virtual desktop: every display), `k <vk> <down> <extended>`, and
  * `c <code point> <down>` (a character: its key on this layout, else typed as Unicode).
  */
 const HELPER = String.raw`
@@ -41,7 +41,8 @@ public static class TraceInput {
 const SCRIPT = `$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition @'\n${HELPER}\n'@; [TraceInput]::Run()`;
 /** How the helper is started (exported so a Windows test can check that it compiles). */
 export const helperArguments = () => ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')];
-const MOVE = 0x0001; const ABSOLUTE = 0x8000; const WHEEL = 0x0800; const HWHEEL = 0x1000;
+/** ABSOLUTE with VIRTUALDESK: 0–65535 spans every display, matching the shared picture (screen-layout.ts). */
+const MOVE = 0x0001; const ABSOLUTE = 0x8000 | 0x4000; const WHEEL = 0x0800; const HWHEEL = 0x1000;
 /** VNC button bit → [down flag, up flag]: left, middle, right. */
 const BUTTONS: [number, number, number][] = [[1, 0x0002, 0x0004], [2, 0x0020, 0x0040], [4, 0x0008, 0x0010]];
 

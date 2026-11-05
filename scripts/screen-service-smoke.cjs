@@ -41,6 +41,10 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     // The real screen arrives: the picture is not one flat colour.
     await until(() => canvas.evaluate((element) => { const context = element.getContext('2d'); const { width, height } = element; if (width < 100) return false; const data = context.getImageData(0, 0, width, height).data; const colours = new Set(); for (let i = 0; i < data.length; i += 4 * 997) colours.add(data[i] << 16 | data[i + 1] << 8 | data[i + 2]); return colours.size > 20; }), 'the captured screen');
     const size = await canvas.evaluate((element) => [element.width, element.height]); console.log('captured at', size.join('×'));
+    // Every display is in the picture: with several side by side (wider than 2.5:1), each half has its own content.
+    const halves = await canvas.evaluate((element) => [0, 1].map((half) => { const { width, height } = element; const data = element.getContext('2d').getImageData(half * (width >> 1), 0, width >> 1, height).data; const colours = new Set(); for (let i = 0; i < data.length; i += 4 * 499) colours.add(data[i] << 16 | data[i + 1] << 8 | data[i + 2]); return colours.size; }));
+    if (size[0] / size[1] > 2.5) assert.ok(halves.every((count) => count > 20), `both displays show a picture (colours per half: ${halves.join(', ')})`);
+    console.log('colours per half', halves.join(', '));
     // A Windows viewer of Windows needs no key swap.
     assert.equal(await panel.locator('.linked-screen-toggle').count(), 0);
     await canvas.click({ position: { x: 40, y: 30 } }); await page.keyboard.press('a');
