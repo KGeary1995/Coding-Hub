@@ -8,6 +8,11 @@ import { SCREEN_SERVICE_PATH, type ScreenCredentials, type ScreenEvent, type Scr
 const FILE = 'screen-sharing.json';
 const MAX_STREAMS = 4;
 const CONNECT_TIMEOUT = 10000;
+/**
+ * How long a Trace screen service may take to answer once connected. It answers when its capture has started, which it
+ * gives up on after 20 seconds (OPEN_TIMEOUT in screen-service-server.ts): wait longer than that, so its own reason arrives.
+ */
+export const ANSWER_TIMEOUT = 30000;
 /** Passwords are stored only as the OS encrypts them (DPAPI on Windows, the Keychain on a Mac): `password` is that ciphertext. */
 const savedSchema = z.record(z.uuid(), z.object({ username: z.string().min(1).max(256), password: z.string().min(1).max(16384) }).strict());
 /** Electron's safeStorage, behind an interface so tests need no Electron. */
@@ -48,9 +53,10 @@ function connected(socket: net.Socket, event: 'connect' | 'secureConnect') {
 /**
  * Opens the Trace screen service on that computer: an HTTP request upgraded to the VNC stream, with the link key. It
  * resolves with the socket and any VNC bytes that came with the answer. Refused (401, 403, 503) means the service is
- * there and said no; anything else (Trace there is older, or the computer is a Mac) means there is no such service.
+ * there and said no, as does no answer in time; anything else (Trace there is older, or the computer is a Mac) means
+ * there is no such service.
  */
-export async function openTraceScreen(name: string, url: string, token: string): Promise<{ socket: net.Socket; head: Buffer }> {
+export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT): Promise<{ socket: net.Socket; head: Buffer }> {
   const address = new URL(url); const secure = address.protocol === 'https:';
   const socket = secure ? tls.connect({ host: address.hostname, port: Number(address.port) || 443, servername: address.hostname }) : net.connect({ host: address.hostname, port: Number(address.port) || 80 });
   socket.on('error', () => { /* Reported below. */ });
@@ -60,7 +66,9 @@ export async function openTraceScreen(name: string, url: string, token: string):
     const answer = await new Promise<Buffer>((resolve, reject) => {
       let received = Buffer.alloc(0); let done = false;
       const finish = (error?: Error) => { if (done) return; done = true; clearTimeout(timer); socket.off('data', data); socket.off('close', end); if (error) reject(error); else resolve(received); };
-      const timer = setTimeout(() => finish(new Error('timeout')), CONNECT_TIMEOUT);
+      // Something is there and took the request but did not answer: that is a screen service starting slowly or stuck,
+      // not a computer without one, so say so rather than try its system's screen sharing (which Windows has none of).
+      const timer = setTimeout(() => finish(new Refused(`${name} did not start sharing its screen in time. Try Reconnect. If it keeps happening, turn Settings → Other computers → Share this screen off and on again there.`)), answerTimeout);
       const data = (chunk: Buffer) => {
         received = Buffer.concat([received, chunk]); const split = received.indexOf('\r\n\r\n'); if (split < 0) return;
         // A refusal carries its reason as JSON: wait for all of it (Content-Length) before reading it.
@@ -88,7 +96,7 @@ export async function openTraceScreen(name: string, url: string, token: string):
  */
 export class ScreenSharing {
   private streams = new Map<string, Stream>();
-  constructor(private root: string, private target: (id: string) => ScreenTarget | null, private emit: (owner: number, event: ScreenEvent) => void, private cipher: SecretCipher) {}
+  constructor(private root: string, private target: (id: string) => ScreenTarget | null, private emit: (owner: number, event: ScreenEvent) => void, private cipher: SecretCipher, private answerTimeout = ANSWER_TIMEOUT) {}
 
   async open(owner: number, id: string, streamId: string): Promise<{ kind: ScreenKind }> {
     const target = this.target(id);
@@ -100,7 +108,7 @@ export class ScreenSharing {
     try {
       // Trace's own screen service first (Windows). Where there is none (a Mac), its own Screen Sharing.
       let opened: { socket: net.Socket; head: Buffer } | null = null;
-      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token); } catch (error) { if (error instanceof Refused || !target.system) throw error; }
+      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token, this.answerTimeout); } catch (error) { if (error instanceof Refused || !target.system) throw error; }
       if (opened) { stream.socket = opened.socket; head = opened.head; }
       else { kind = 'system'; stream.socket = net.connect({ host: target.system!.host, port: target.system!.port }); await connected(stream.socket, 'connect'); }
       if (this.streams.get(streamId) !== stream) throw new HubError('SCREEN_CLOSED', 'That screen connection has closed.');

@@ -12,15 +12,15 @@ const until = async (check: () => boolean, what: string) => { for (let i = 0; i 
 const COMPUTER = 'c'.repeat(43); const PHONE = 'p'.repeat(43);
 const device = (name: string, token: string, kind: 'phone' | 'computer') => ({ id: crypto.randomUUID(), name, tokenHash: createHash('sha256').update(token).digest('hex'), createdAt: new Date().toISOString(), lastSeen: null, kind });
 
-async function service(enabled = true) {
+async function service(enabled = true, options: { open?: () => Promise<never | { source: unknown }>; openTimeout?: number } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-service-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'remote-devices.json'), JSON.stringify([device('MacBook-Air-2.local', COMPUTER, 'computer'), device('Phone', PHONE, 'phone')]));
   fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled }));
   const viewers: (string | null)[] = []; let opened = 0; let stopped = 0;
   const screen = new ScreenService(root, () => 'Obsidian-Halo', {
-    open: async () => { opened++; return { source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => { stopped++; } }; },
+    open: options.open as never ?? (async () => { opened++; return { source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => { stopped++; } }; }),
     viewing: (name) => viewers.push(name),
-  });
+  }, options.openTimeout);
   const port = await screen.listen(0); cleanup.push(() => screen.close());
   return { root, screen, url: `http://127.0.0.1:${port}/`, viewers, counts: () => ({ opened, stopped }) };
 }
@@ -55,5 +55,25 @@ describe('the Windows screen service', () => {
     await until(() => first.socket.destroyed || first.socket.readableEnded, 'the first viewer to be replaced');
     await until(() => counts().opened === 2 && counts().stopped === 1, 'the first capture to stop');
     second.socket.destroy(); await until(() => counts().stopped === 2, 'the capture to stop'); expect(viewers.at(-1)).toBeNull();
+  });
+
+  it('tells the viewer when its capture does not start in time, and stops it should it start later', async () => {
+    let start: (capture: unknown) => void = () => {}; let stopped = 0; let closed = 0;
+    const open = () => new Promise<never>((resolve) => { start = resolve as never; });
+    const { url, screen } = await service(true, { open: open as never, openTimeout: 50 });
+    await expect(openTraceScreen('Obsidian-Halo', url, COMPUTER)).rejects.toThrow(/Obsidian-Halo could not capture its screen: it did not start in time/);
+    expect(screen.watching).toBeNull();
+    start({ source: { width: 1, height: 1, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => { closed++; } }, stop: () => { stopped++; } });
+    await until(() => stopped === 1 && closed === 1, 'the late capture to stop');
+  });
+
+  it('a service that takes the request but never answers is reported as such, not as missing', async () => {
+    const http = await import('node:http');
+    const server = http.createServer(); const sockets: import('node:stream').Duplex[] = [];
+    server.on('upgrade', (_request, socket) => { sockets.push(socket); });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanup.push(() => new Promise<void>((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
+    const url = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}/`;
+    await expect(openTraceScreen('Obsidian-Halo', url, COMPUTER, 50)).rejects.toThrow(/Obsidian-Halo did not start sharing its screen in time/);
   });
 });

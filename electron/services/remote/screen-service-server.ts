@@ -12,6 +12,8 @@ const shareSchema = z.object({ enabled: z.boolean() }).strict();
 /** Only what the service needs from Trace's paired devices; the remote owns that file and its full shape. */
 const devicesSchema = z.array(z.object({ name: z.string(), tokenHash: z.string(), kind: z.enum(['phone', 'computer']).optional() }).passthrough()).max(20);
 export function shareEnabled(root: string) { try { return load(root, SHARE_FILE, shareSchema, { enabled: false }).enabled; } catch { return false; } }
+/** How long a capture may take to start before the viewer is told; it waits longer (ANSWER_TIMEOUT in screen-sharing.ts). */
+export const OPEN_TIMEOUT = 20000;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -33,7 +35,7 @@ export interface ScreenServiceHost {
 export class ScreenService {
   private server: http.Server | null = null;
   private viewer: { name: string; socket: Duplex; session: RfbSession | null; capture: ScreenCaptureSession | null } | null = null;
-  constructor(private root: string, private name: () => string, private host: ScreenServiceHost) {}
+  constructor(private root: string, private name: () => string, private host: ScreenServiceHost, private openTimeout = OPEN_TIMEOUT) {}
 
   async listen(port: number) {
     const server = http.createServer((request, response) => {
@@ -72,11 +74,16 @@ export class ScreenService {
     this.disconnect();
     const viewer: NonNullable<ScreenService['viewer']> = { name: device.name, socket, session: null, capture: null }; this.viewer = viewer;
     const left = () => { if (this.viewer === viewer) this.disconnect(); }; socket.on('close', left); socket.on('end', left);
-    try { viewer.capture = await this.host.open(); }
+    // A capture that never starts (the hidden capture window hung, say) must not leave the viewer waiting with no reason.
+    const opening = this.host.open(); let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('it did not start in time. Try Reconnect; if it keeps happening, turn Share this screen off and on again there')), this.openTimeout); });
+    try { viewer.capture = await Promise.race([opening, late]); }
     catch (error) {
+      // Should it start after all, nobody is waiting for it.
+      void opening.then((capture) => { if (this.viewer?.capture !== capture) { capture.input.close(); capture.stop(); } }, () => {});
       if (this.viewer === viewer) this.viewer = null;
       return this.refuse(socket, 503, `${this.name()} could not capture its screen: ${(error as Error).message}`);
-    }
+    } finally { clearTimeout(timer); }
     if (this.viewer !== viewer || socket.destroyed) { viewer.capture.input.close(); viewer.capture.stop(); return; }
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: trace-screen\r\nConnection: Upgrade\r\n\r\n');
     if (head.length) socket.unshift(head);

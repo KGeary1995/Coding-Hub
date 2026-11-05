@@ -22,10 +22,10 @@ async function vncServer() {
   cleanup.push(() => new Promise<void>((resolve) => { for (const socket of sockets) socket.destroy(); server.close(() => resolve()); }));
   return { port: (server.address() as net.AddressInfo).port, received, sockets };
 }
-function sharing(port: number, options: { cipher?: SecretCipher; linked?: boolean; trace?: string } = {}) {
+function sharing(port: number, options: { cipher?: SecretCipher; linked?: boolean; trace?: string; answerTimeout?: number } = {}) {
   const events: { owner: number; event: ScreenEvent }[] = []; const root = temporary();
   const target = { name: 'MacBook-Air-2.local', trace: options.trace ? { url: options.trace, token: 'c'.repeat(43) } : null, system: { host: '127.0.0.1', port } };
-  const screens = new ScreenSharing(root, (id) => options.linked !== false && id === MAC ? target : null, (owner, event) => events.push({ owner, event }), options.cipher ?? cipher());
+  const screens = new ScreenSharing(root, (id) => options.linked !== false && id === MAC ? target : null, (owner, event) => events.push({ owner, event }), options.cipher ?? cipher(), options.answerTimeout);
   cleanup.push(() => screens.closeAll());
   return { screens, events, root };
 }
@@ -75,6 +75,16 @@ describe('screen sharing with a linked computer', () => {
     const nowhere = `http://127.0.0.1:${(closed.address() as net.AddressInfo).port}/`; await new Promise<void>((resolve) => closed.close(() => resolve()));
     const { screens } = sharing(server.port, { trace: nowhere });
     expect(await screens.open(1, MAC, STREAM)).toEqual({ kind: 'system' });
+  });
+
+  it("does not try the system's screen sharing when the Trace screen service there is too slow to answer", async () => {
+    const server = await vncServer();
+    const slow = http.createServer(); const held: import('node:stream').Duplex[] = []; slow.on('upgrade', (_request, socket) => { held.push(socket); });
+    await new Promise<void>((resolve) => slow.listen(0, '127.0.0.1', resolve));
+    cleanup.push(() => new Promise<void>((resolve) => { for (const socket of held) socket.destroy(); slow.close(() => resolve()); }));
+    const { screens } = sharing(server.port, { trace: `http://127.0.0.1:${(slow.address() as net.AddressInfo).port}/`, answerTimeout: 50 });
+    await expect(screens.open(1, MAC, STREAM)).rejects.toMatchObject({ code: 'SCREEN_CONNECT', message: expect.stringContaining('did not start sharing its screen in time') });
+    expect(server.sockets).toHaveLength(0);
   });
 
   it("says why when the computer's Trace screen service refuses, without trying anything else", async () => {
