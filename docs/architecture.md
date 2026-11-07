@@ -24,8 +24,8 @@ shared/  typed contracts and pure logic used by both sides
 | `electron/services/hub/` | The `hub` request dispatcher (`service.ts`), MCP/skills/plugins config (`config.ts`), shared rules, memory (`memory.ts`, `memory-server.ts`, `auto-memory.ts`), Drive mirror, device sync, telemetry/usage, plan limits |
 | `electron/services/remote/` | Phone server, Tailscale, linked computers, web push, screen mirror |
 | `electron/services/repository/` | File browsing, Git status/diff, project checks, project setup (clone), worktrees |
-| `electron/services/workbench/` | Backups and restores, delivery (commit/push/PR), workflows, tasks, experiments, verification, live preview, diagnostics, native session lists |
-| `electron/services/{coaching,design,updates}/` | AI coaching, design archive and handoff import, Windows auto-update |
+| `electron/services/workbench/` | Backups and restores, delivery (commit/push/PR), workflows, tasks, experiments, verification, diagnostics, native session lists |
+| `electron/services/{coaching,design,updates}/` | AI coaching, Claude Design handoff import (host side only; no window uses it until the planned Claude tab), Windows auto-update |
 | `src/` | React renderer. See [Renderer](#renderer) |
 | `phone/` | Phone web app, built to `dist/phone` |
 | `shared/` | Types and pure logic shared by host and renderer (`ipc.ts`, `hub.ts`, `types.ts`, `chat.ts`, `schemas.ts`, `terminal-input.ts`, `help-content.ts`, …) |
@@ -48,7 +48,7 @@ shared/  typed contracts and pure logic used by both sides
    - HostHealth and local crash dumps (`crash-dumps/`, never uploaded)
    - `WorkspaceStorage`
    - `HubService` + `TelemetryService`, which are **optional**: built in try/catch, so `hub` may be null
-   - `AutoMemory`, design archive, coaching, diagnostics, verification, tasks, experiments, live preview, backups, delivery, workflows
+   - `AutoMemory`, handoff import, coaching, diagnostics, verification, tasks, experiments, backups, delivery, workflows
    - `RemoteServer`, Tailscale polling, linked computers
    - IPC handlers, the window, `updates.start()`
 
@@ -199,7 +199,8 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
 | `memory/<key>/<uuid>.json`, `auto-memory/` | Handoff notes; per-run `--mcp-config` scratch files |
 | `preferences.json`, `shared-rules.json`, `updates.json`, `host-health.json` | Preferences, the rules source, update checks, lifecycle events |
 | `machine.json`, `device-sync.json`, `linked-computers.json`, `remote*.json` | Sync identity and state, linked computers, phone server, devices, push keys |
-| `worktrees.json`, `worktrees/`, `designs/`, `coaching/`, `tasks.json`, `verification.json`, `experiments.json`, `backups/`, `restores/`, `crash-dumps/` | Feature data |
+| `worktrees.json`, `worktrees/`, `coaching/`, `tasks.json`, `verification.json`, `experiments.json`, `backups/`, `restores/`, `crash-dumps/` | Feature data |
+| `designs/`, `design-annotations.json` | Left by the removed Design workspace: no longer read or written, still backed up, never deleted |
 | `claude-profiles/` | Named Claude profiles (labels; credentials stay with Claude Code) |
 
 **Outside the root:**

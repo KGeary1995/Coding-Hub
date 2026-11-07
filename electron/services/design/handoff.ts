@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
 import { z } from 'zod';
-import type { DesignSnapshot, HandoffResult } from '../../../shared/design';
+import type { HandoffResult } from '../../../shared/design';
 import { HubError } from '../cli/engine-adapter';
 
 const MAX_FILES = 2000;
@@ -82,18 +81,12 @@ function stripSharedFolder(entries: Entry[]): Entry[] {
 }
 const depth = (file: string) => file.split('/').length;
 const shallowest = (files: string[]) => [...files].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0] ?? null;
-/** Inlines the bundle's own stylesheets so the archive's static, network-free preview keeps its styling. */
-export function inlineStylesheets(html: string, base: string, files: Map<string, Buffer>): string {
-  return html.replace(/<link\b[^>]*>/gi, (tag) => {
-    if (!/\brel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
-    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]; if (!href || /^[a-z][a-z0-9+.-]*:|^\/\//i.test(href)) return tag;
-    const target = path.posix.normalize(path.posix.join(path.posix.dirname(base), href.split(/[?#]/)[0])); const css = files.get(target);
-    return css ? `<style>${css.toString('utf8').replace(/<\/style/gi, '<\\/style')}</style>` : tag;
-  });
-}
-
+/**
+ * Copies a Claude Design handoff bundle into the project's design-handoff folder for a coding agent to build from.
+ * Nothing in the window calls it since the Design workspace was removed; the planned Claude tab will.
+ */
 export class HandoffImport {
-  constructor(private scratch: string, private pick: (source: 'zip' | 'folder') => Promise<string | null>, private archive: (title: string, notes: string, projectDirectory: string, file: string) => Promise<DesignSnapshot | null>) {}
+  constructor(private pick: (source: 'zip' | 'folder') => Promise<string | null>) {}
   async execute(input: unknown): Promise<HandoffResult | null> {
     const parsed = requestSchema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_DESIGN_REQUEST', 'Invalid handoff import request.');
     let project: string;
@@ -111,23 +104,8 @@ export class HandoffImport {
     const target = path.join(parent, name); fs.mkdirSync(target);
     try { for (const entry of entries) { const file = path.join(target, ...entry.path.split('/')); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, entry.data, { flag: 'wx' }); } }
     catch (error) { fs.rmSync(target, { recursive: true, force: true }); throw error instanceof HubError ? error : new HubError('HANDOFF_COPY', 'The bundle could not be copied into the project. Check for duplicate file names and folder permissions.'); }
-    const files = new Map(entries.map((entry) => [entry.path, entry.data]));
-    const paths = [...files.keys()];
-    const readme = shallowest(paths.filter((file) => /^readme(\.md|\.txt)?$/i.test(path.posix.basename(file))));
-    const html = shallowest(paths.filter((file) => /^index\.html?$/i.test(path.posix.basename(file)))) ?? shallowest(paths.filter((file) => /\.html?$/i.test(file)));
-    const image = shallowest(paths.filter((file) => /\.(png|jpe?g|webp)$/i.test(file)));
+    const readme = shallowest(entries.map((entry) => entry.path).filter((file) => /^readme(\.md|\.txt)?$/i.test(path.posix.basename(file))));
     const relative = path.relative(project, target).split(path.sep).join('/');
-    let snapshot: DesignSnapshot | null = null; let warning: string | null = null;
-    const preview = html ?? image;
-    if (preview) {
-      fs.mkdirSync(this.scratch, { recursive: true, mode: 0o700 });
-      const temporary = path.join(this.scratch, `${randomUUID()}${path.posix.extname(preview).toLowerCase()}`);
-      try {
-        fs.writeFileSync(temporary, html ? inlineStylesheets(files.get(html)!.toString('utf8'), html, files) : files.get(preview)!, { mode: 0o600 });
-        snapshot = await this.archive(`Claude Design: ${name}`.slice(0, 100), `Imported from a Claude Design handoff bundle. Files: ${relative}`, project, temporary);
-      } catch (error) { warning = `The bundle was copied, but its preview could not be saved in the design archive: ${error instanceof Error ? error.message : 'unknown error'}`; }
-      finally { fs.rmSync(temporary, { force: true }); }
-    }
-    return { directory: target, relative, readme: readme ? `${relative}/${readme}` : null, snapshot, files: entries.length, warning };
+    return { directory: target, relative, readme: readme ? `${relative}/${readme}` : null, files: entries.length };
   }
 }

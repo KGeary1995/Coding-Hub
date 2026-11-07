@@ -72,7 +72,6 @@ export function TasksPanel() {
             {task.status === 'review' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'done'))}>Mark done</button>}
             {task.status === 'done' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Reopen</button>}
             <button className="quiet-button" onClick={() => edit(task)}>Edit</button>
-            {task.designRef && <button className="quiet-button" onClick={() => { useWorkspaceStore.setState({ designSnapshotId: task.designRef!.snapshotId }); useWorkspaceStore.getState().setView('design'); }}>View linked design</button>}
             <button className="quiet-button" disabled={busy} onClick={() => void run(() => removeTask(task.id))}>Remove</button>
           </div>
         </article>;

@@ -10,13 +10,10 @@ import { Backups, resolveStorageRoot } from './services/workbench/backups';
 import { Verification } from './services/workbench/verification';
 import { Tasks } from './services/workbench/tasks';
 import { Experiments } from './services/workbench/experiments';
-import { LivePreview } from './services/workbench/live-preview';
 import { z } from 'zod';
 import { CoachingService } from './services/coaching/service';
 import { LiveCoach } from './services/coaching/live';
-import { DesignArchive } from './services/design/archive';
 import { HandoffImport } from './services/design/handoff';
-import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
 import { REMOTE_PORT, type ChannelControl, type ChannelTranscript } from '../shared/remote';
@@ -74,7 +71,6 @@ app.on('child-process-gone', (_event, details) => { if (details.reason !== 'clea
 let workflows: Workflows | null = null;
 let delivery: Delivery | null = null;
 let verification: Verification | null = null;
-let livePreview: LivePreview | null = null;
 let backups: Backups | null = null;
 let worktrees: WorktreeService | null = null;
 const production = process.argv.includes('--production') || app.isPackaged;
@@ -426,8 +422,6 @@ function createWindow() {
     event.preventDefault();
     if (delivery?.running || workflows?.running || worktrees?.active) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before closing the app.' }); return; }
     closing = true;
-    // The preview is a separate top-level window; left open it would keep the app alive with no main window.
-    livePreview?.close();
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).then(async () => {
       // Closing the window takes away every control for a channel, so never do that silently while one still runs.
       const left = [...manager.ownedProcessIds(owner), ...accounts.processIds(owner)];
@@ -481,23 +475,16 @@ else app.whenReady().then(() => {
     // Once startup settles: repair stale memory entries in the folders this computer has run agents in (issue #19).
     const sweeping = autoMemory; setTimeout(() => { try { sweeping.sweep([...new Set((memoryHub.telemetry?.list() ?? []).map((record) => record.cwd))]); } catch { hostHealth?.record('auto-memory-sweep-failed'); } }, 90000).unref();
   }
-  const designs = new DesignArchive(storageRoot, async () => {
-    const result = await dialog.showOpenDialog(window!, { title: 'Save a design preview', properties: ['openFile'], filters: [{ name: 'HTML or screenshots', extensions: ['html', 'htm', 'png', 'jpg', 'jpeg', 'webp'] }] });
-    return result.canceled ? null : result.filePaths[0] ?? null;
-  }, (bytes) => { const image = nativeImage.createFromBuffer(bytes); const size = image.getSize(); return !image.isEmpty() && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 40000000; });
-  const handoffs = new HandoffImport(path.join(storageRoot, 'handoff-scratch'), async (source) => {
+  /** Claude Design handoff import only (the Design workspace was removed). No window calls it yet; the planned Claude tab will. */
+  const handoffs = new HandoffImport(async (source) => {
     const result = source === 'zip'
       ? await dialog.showOpenDialog(window!, { title: 'Import a Claude Design handoff bundle', properties: ['openFile'], filters: [{ name: 'ZIP bundle', extensions: ['zip'] }] })
       : await dialog.showOpenDialog(window!, { title: 'Import an extracted Claude Design handoff folder', properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
-  }, async (title, notes, projectDirectory, file) => {
-    const preview = await designs.execute({ action: 'import', title, notes, projectDirectory }, file);
-    return preview && 'snapshot' in preview ? (preview.snapshot as DesignSnapshot) : null;
   });
   handle(IPC_CHANNELS.designs, (_owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.');
-    if (payload && typeof payload === 'object' && 'action' in payload && payload.action === 'handoff-import') return handoffs.execute(payload);
-    return designs.execute(payload);
+    return handoffs.execute(payload);
   });
   // A folder is in use while a session runs in it or a saved tile is bound to it.
   const directoryInUse = (directory: string) => {
@@ -519,7 +506,6 @@ else app.whenReady().then(() => {
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
-  livePreview = coaching ? new LivePreview(storageRoot, designs, coaching, async (url) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Open isolated preview', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Approve local design preview', message: url, detail: 'This local application can execute browser JavaScript in a separate sandboxed window. It cannot access Trace IPC, local files, permissions, downloads, or other network origins. Start the trusted development server yourself.' })).response === 0 && !updateRestart) : null;
   const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Trace-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Trace backup', extensions: ['gz'] }] })).filePath ?? null,
@@ -643,7 +629,7 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
-    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); livePreview?.close(); app.relaunch(); app.quit(); return null; }
+    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
     if (action === 'codex-models') return modelCatalog.execute(payload);
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
@@ -658,14 +644,6 @@ else app.whenReady().then(() => {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
       if (action.startsWith('flow-git-')) return delivery!.execute(payload);
       if (action === 'flow-open-pr') { const request = z.object({ action: z.literal('flow-open-pr'), url: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/) }).strict().parse(payload); await shell.openExternal(request.url); return null; }
-      if (action === 'flow-preview-size' || action === 'flow-design-diff') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
-      if (action === 'flow-design-task') {
-        const request = z.object({ action: z.literal('flow-design-task'), snapshotId: z.uuid(), annotationId: z.uuid(), directory: z.string().max(4096), scope: z.array(z.string().max(300)).min(1).max(30) }).strict().parse(payload);
-        if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.');
-        const comments = await livePreview.execute({ action: 'annotation-list', snapshotId: request.snapshotId }) as import('../shared/workbench').Annotation[];
-        const comment = comments.find((item) => item.id === request.annotationId); if (!comment) throw new HubError('DESIGN_TASK', 'Select an available annotation.');
-        return tasks.execute({ action: 'task-save', title: comment.text.slice(0, 150), directory: request.directory, sessionId: null, scope: request.scope, status: 'queued', notes: `Design ${request.snapshotId} at (${comment.x}%, ${comment.y}%): ${comment.text}`, verificationId: null, designRef: { snapshotId: request.snapshotId, annotationId: comment.id } });
-      }
       if (action === 'flow-release-status') {
         z.object({ action: z.literal('flow-release-status') }).strict().parse(payload);
         if (!app.isPackaged || process.platform !== 'win32') return { state: app.isPackaged ? 'Platform verification unavailable' : 'Source edition — no installer signature', publisher: null };
@@ -686,12 +664,11 @@ else app.whenReady().then(() => {
     }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
-    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'preview-capture', 'design-feedback', 'annotation-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);
     if (action.startsWith('backup-')) return backups!.execute(payload);
-    if (action.startsWith('preview-') || action.startsWith('annotation-') || action === 'design-feedback') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
     throw new HubError('INVALID_REQUEST', 'Unknown workbench operation.');
   });
   const projectSetup = new ProjectSetup();
@@ -844,6 +821,6 @@ app.on('before-quit', (event) => {
     if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
-    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

@@ -130,13 +130,15 @@ describe('verification and experiment evidence', () => {
   });
 });
 
-it('keeps the annotation link when the task editor updates an existing task', async () => {
+it('loads and edits a saved task that still links to a removed design annotation, and no longer accepts new links', async () => {
  const root=fixture(), tasks=new Tasks(root,new Verification(root,async()=>true));
  const designRef={snapshotId:randomUUID(),annotationId:randomUUID()};
  const fields={title:'Design fix',directory:root,sessionId:null,scope:['src/**'],status:'queued',notes:'',verificationId:null};
- const created=await tasks.execute({action:'task-save',...fields,designRef}) as any;
- const updated=await tasks.execute({action:'task-save',...fields,id:created.id,title:'Updated design fix'}) as any;
- expect(updated.designRef).toEqual(designRef);
+ const id=randomUUID(); fs.writeFileSync(path.join(root,'tasks.json'),JSON.stringify([{...fields,id,designRef,createdAt:new Date().toISOString()}]));
+ expect((await tasks.execute({action:'task-list'}) as any[]).map((task)=>task.id)).toEqual([id]);
+ const updated=await tasks.execute({action:'task-save',...fields,id,title:'Updated design fix'}) as any;
+ expect(updated.title).toBe('Updated design fix'); expect(updated.designRef).toEqual(designRef);
+ await expect(tasks.execute({action:'task-save',...fields,designRef})).rejects.toThrow();
 });
 
 it('persists all steps of noisy verification without exceeding the JSON record limit', async () => {
