@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, loginShellPath, npmEntryForShim, withoutAgentSession } from './discovery';
+import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, windowsRegistryPath, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -75,5 +75,23 @@ describe('withoutAgentSession', () => {
   it('leaves an environment alone when no agent started Trace', () => {
     const own = { PATH: '/bin', CLAUDE_CODE_SESSION_ID: 'set-by-hand' };
     expect(withoutAgentSession(own)).toBe(own);
+  });
+});
+
+describe('Windows PATH changes made while Trace runs', () => {
+  it('reads machine then user folders and expands their variables', () => {
+    const registry: Record<string, string> = { 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment': 'C:\\Windows\\system32;%SystemRoot%', 'HKCU\\Environment': '%USERPROFILE%\\tools;;%MISSING%\\bin' };
+    expect(windowsRegistryPath({ systemroot: 'C:\\Windows', USERPROFILE: 'C:\\Users\\me' }, (key) => registry[key] ?? null)).toEqual(['C:\\Windows\\system32', 'C:\\Windows', 'C:\\Users\\me\\tools', '%MISSING%\\bin']);
+    expect(windowsRegistryPath({}, () => null)).toEqual([]);
+  });
+  it('adds each folder once, comparing Windows paths without case or a trailing slash', () => {
+    expect(mergePath(['C:\\Tools', 'c:\\tools\\', '"C:\\Tools"', 'C:\\Other', ''], true)).toEqual(['C:\\Tools', 'C:\\Other']);
+    expect(mergePath(['/usr/bin', '/USR/BIN', '/usr/bin'], false)).toEqual(['/usr/bin', '/USR/BIN']);
+  });
+  it.runIf(process.platform === 'win32')('puts a folder added after Trace started on the PATH of new launches, after the current ones', () => {
+    const env = hostEnvironment(() => ['C:\\Installed\\Later']);
+    const folders = env[Object.keys(env).find((key) => key.toUpperCase() === 'PATH')!].split(';');
+    expect(folders).toContain('C:\\Installed\\Later');
+    expect(folders.indexOf('C:\\Installed\\Later')).toBeGreaterThan(0);
   });
 });

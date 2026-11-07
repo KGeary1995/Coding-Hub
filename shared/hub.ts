@@ -15,6 +15,8 @@ export type HubRequest =
   | { action: 'memory-key'; directory: string }
   | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
   | { action: 'memory-install'; directory: string; project?: string }
+  | { action: 'memory-entries'; directory: string }
+  | { action: 'memory-use-auto-key'; directory: string }
   | { action: 'usage' }
   | { action: 'preferences' }
   | { action: 'save-preferences'; preferences: HubPreferences }
@@ -39,11 +41,17 @@ export interface HubPreferences { folderId: string; driveDirectory: string; pric
 export type SyncedDocument = 'settings' | 'rules';
 export interface SyncedComputer { id: string; name: string; updatedAt: string }
 export interface DeviceSyncStatus { enabled: boolean; connected: boolean; machine: { id: string; name: string }; lastSync: string | null; error: string | null; computers: SyncedComputer[]; conflicts: { document: SyncedDocument; from: string; at: string }[]; rulesFrom: { name: string; at: string } | null }
-export interface DriveStatus { connected: boolean; clientConfigured: boolean; persistent: boolean; folderId: string }
+/** `problem` says why the Drive folder cannot be used, in words a person can act on; null when it can. */
+export interface DriveStatus { connected: boolean; clientConfigured: boolean; persistent: boolean; folderId: string; problem?: string | null }
 export interface RulesTargetReference { directory: string; claudeHash: string; codexHash: string }
 export interface RulesTarget extends RulesTargetReference { applied: boolean; error?: string }
 export interface SharedRules { content: string; revision: string; directories: string[]; targets: RulesTarget[] }
-export type HubResponse = MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
+/**
+ * A coding-hub-memory entry in a project's own settings; `key` and `root` are null when Trace did not write it, and
+ * `current` says whether it uses this computer's notes folder and the folder's automatic key.
+ */
+export interface MemoryEntry { engine: CLIEngine; file: string; key: string | null; root: string | null; current: boolean }
+export type HubResponse = MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
 export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };
 
@@ -51,12 +59,13 @@ export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOL
  * New tokens for a run: input not served from the prompt cache, plus output. This is what "tok" means everywhere in
  * Trace (tiles, status bar, today's total, Usage, budgets and Claude's session limit). Cache re-reads, which repeat the
  * whole conversation every turn and cost a fraction of new input, are shown separately. Codex's input already includes
- * its cached input; Claude's does not.
+ * its cached input; Claude's does not. Claude reports input it writes to the cache apart from `input`, but it is new
+ * input all the same (often most of a turn's), so it is counted.
  */
-export const freshInput = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached'>) => usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
+export const freshInput = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached'> & { cacheWrite?: number }) => usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input + (usage.cacheWrite ?? 0);
 /** A computer's local calendar day, as `days` keys it: 2026-10-26. */
 export const localDay = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'>) => freshInput(usage) + usage.output;
+export const newTokens = (usage: Pick<UsageRecord, 'engine' | 'input' | 'cached' | 'output'> & { cacheWrite?: number }) => freshInput(usage) + usage.output;
 /** Today's new tokens on this computer from the CLIs' own logs, in Trace or not; `complete` is false while a long day is still being read. */
 export interface DayUsage { day: string; claude: number; codex: number; cost: number | null; complete: boolean }
 /** How many local days of the CLIs' logs are kept: the Usage screen's longest window and the one before it. */

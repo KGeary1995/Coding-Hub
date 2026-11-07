@@ -50,7 +50,7 @@ export class DayUsage {
   totals(): DayUsageTotals {
     const { days, complete } = this.days(); const day = localDay(this.now()); const today = days[day] ?? {};
     const cost = [today.claude?.cost, today.codex?.cost].reduce<number | null>((sum, value) => value === null || value === undefined ? sum : (sum ?? 0) + value, null);
-    return { day, claude: today.claude ? today.claude.input + today.claude.output : 0, codex: today.codex ? today.codex.input + today.codex.output : 0, cost, complete };
+    return { day, claude: today.claude ? today.claude.input + today.claude.cacheWrite + today.claude.output : 0, codex: today.codex ? today.codex.input + today.codex.output : 0, cost, complete };
   }
   private add(day: string, engine: Engine, model: string, tokens: Tokens) {
     const key = `${day}\n${engine}`; let models = this.used.get(key); if (!models) { models = new Map(); this.used.set(key, models); }

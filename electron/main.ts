@@ -110,7 +110,7 @@ const channelAccount = (config: { engine: string; accountProfileId?: string }): 
 /** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
 /** Today's usage from the CLIs' own logs: the default homes and every Claude profile's. */
 const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? []);
-const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id));
+const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id), undefined, undefined, () => claudeProfiles.labels().default?.name ?? null);
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 // Live coaching's reviews run in its coaching folder; their sessions are kept so their usage counts, but are not history.
 const nativeSessions = new NativeSessions(claudeProfiles, [path.join(storageRoot, 'coaching')]);
@@ -472,6 +472,8 @@ else app.whenReady().then(() => {
       refresh: (key) => memoryHub.trackProject(key),
       onNotice: (message) => { hostHealth?.record('auto-memory-notice'); reportStorageError(message); },
     });
+    // Once startup settles: repair stale memory entries in the folders this computer has run agents in (issue #19).
+    const sweeping = autoMemory; setTimeout(() => { try { sweeping.sweep([...new Set((memoryHub.telemetry?.list() ?? []).map((record) => record.cwd))]); } catch { hostHealth?.record('auto-memory-sweep-failed'); } }, 90000).unref();
   }
   const designs = new DesignArchive(storageRoot, async () => {
     const result = await dialog.showOpenDialog(window!, { title: 'Save a design preview', properties: ['openFile'], filters: [{ name: 'HTML or screenshots', extensions: ['html', 'htm', 'png', 'jpg', 'jpeg', 'webp'] }] });

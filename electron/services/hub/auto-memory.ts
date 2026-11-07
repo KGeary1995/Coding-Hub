@@ -9,6 +9,7 @@ import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
 import { readConfig, updateConfig } from './config';
 import { readOnlyGitOptions } from '../repository/git-safety';
+import { HubError } from '../cli/engine-adapter';
 
 const SERVER = 'coding-hub-memory';
 const CONTEXT_LIMIT = 6000;
@@ -120,8 +121,50 @@ function codexInstructions(cwd: string, context: string): string {
 
 interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void> }
 export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void }
-/** A memory server the project configured itself; `key` is null when the entry is not one Trace wrote. */
-interface Configured { file: string; key: string | null }
+/** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
+export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null }
+
+/** The folder whose `.mcp.json` and `.codex/config.toml` sessions there read: the repository's top folder, else the folder. */
+export function projectConfigRoot(directory: string) { return gitLocation(directory)?.root ?? path.resolve(directory); }
+const slotOf = (engine: CLIEngine) => engine === 'claude' ? 'mcpServers' : 'mcp_servers';
+const configFile = (engine: CLIEngine, root: string) => engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
+/** An entry Trace's own install wrote: a program, then memory-server.js, the memory folder and the key. */
+const written = (entry: any): entry is { command: string; args: [string, string, string] } => typeof entry?.command === 'string' && Array.isArray(entry.args) && entry.args.length === 3 && entry.args.every((arg: unknown) => typeof arg === 'string') && path.basename(entry.args[0]) === 'memory-server.js';
+
+/**
+ * The memory server entries a folder's project configuration has, for the Memory panel; `current` says whether one Trace
+ * wrote uses this computer's notes folder and the folder's automatic key. Unreadable files are skipped.
+ */
+export function memoryEntries(directory: string, memoryRoot: string): (Configured & { current: boolean })[] {
+  const root = projectConfigRoot(directory); const key = projectMemoryKey(directory);
+  return (['claude', 'codex'] as const).flatMap((engine): (Configured & { current: boolean })[] => {
+    const file = configFile(engine, root);
+    try {
+      const entry = (readConfig(file).data as Record<string, any>)[slotOf(engine)]?.[SERVER]; if (!entry) return [];
+      return written(entry) ? [{ engine, file, key: entry.args[2], root: entry.args[1], current: entry.args[2] === key && entry.args[1] === memoryRoot }] : [{ engine, file, key: null, root: null, current: false }];
+    } catch { return []; }
+  });
+}
+
+/**
+ * Points the memory entries Trace wrote in a project at this computer's notes folder and the folder's automatic key,
+ * so sessions started outside Trace share notes with automatic memory. Only on request: `.mcp.json` is often committed,
+ * and other entries (anything Trace did not write) are left alone. Returns the files changed.
+ */
+export function useAutomaticKey(directory: string, memoryRoot: string, server: string, executable: string): string[] {
+  const key = projectMemoryKey(directory); const changed: string[] = []; let found = false;
+  for (const engine of ['claude', 'codex'] as const) {
+    const file = configFile(engine, projectConfigRoot(directory)); const slot = slotOf(engine);
+    const inspected = readConfig(file); const entry = (inspected.data as Record<string, any>)[slot]?.[SERVER];
+    if (!written(entry)) continue; found = true;
+    const stale = !fs.existsSync(entry.command) || !fs.existsSync(entry.args[0]);
+    if (entry.args[1] === memoryRoot && entry.args[2] === key && !stale) continue;
+    updateConfig(file, inspected.hash, (data) => { const target = data[slot][SERVER]; if (stale) target.command = executable; target.args = [stale ? server : target.args[0], memoryRoot, key]; });
+    changed.push(file);
+  }
+  if (!found) throw new HubError('MEMORY_NOT_INSTALLED', 'This project has no coding-hub-memory entry that Trace installed. Sessions started in Trace already use automatic memory.');
+  return changed;
+}
 
 /**
  * Gives every Trace session the project's shared memory without editing project files:
@@ -141,16 +184,13 @@ export class AutoMemory {
    * program paths no longer exist (the app moved, as with the rename to Trace) is pointed at this install first.
    */
   private configured(engine: CLIEngine, directory: string): Configured | null {
-    const root = gitLocation(directory)?.root ?? directory;
-    const file = engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
-    const slot = engine === 'claude' ? 'mcpServers' : 'mcp_servers';
+    const file = configFile(engine, projectConfigRoot(directory)); const slot = slotOf(engine);
     let inspected: ReturnType<typeof readConfig>;
     try { inspected = readConfig(file); } catch { return null; }
     const entry = (inspected.data as Record<string, any>)[slot]?.[SERVER];
     if (!entry) return null;
+    if (!written(entry)) return { engine, file, key: null, root: null };
     const args = entry.args;
-    const ours = typeof entry.command === 'string' && Array.isArray(args) && args.length === 3 && args.every((arg: unknown) => typeof arg === 'string') && path.basename(args[0]) === 'memory-server.js';
-    if (!ours) return { file, key: null };
     const { executable, server } = this.options;
     const stale = !fs.existsSync(entry.command) || !fs.existsSync(args[0]);
     if (stale && (entry.command !== executable || args[0] !== server) && fs.existsSync(executable) && fs.existsSync(server)) {
@@ -159,7 +199,23 @@ export class AutoMemory {
         this.notice(`repaired:${file}`, `Trace updated the memory server paths in ${file}, which pointed at a program that no longer exists. Restart CLIs started outside Trace to use it.`);
       } catch { this.notice(`repair-failed:${file}`, `The memory server in ${file} points at a program that no longer exists, and Trace could not update it. Fix or remove the coding-hub-memory entry.`); }
     }
-    return { file, key: args[2] };
+    return { engine, file, key: args[2], root: args[1] };
+  }
+
+  /**
+   * Repairs memory entries left pointing at a program that no longer exists (after a reinstall or the rename to Trace)
+   * in folders this computer already ran agents in, so CLIs started from other terminals work again without first
+   * opening each project in Trace. Only `directories` the host recorded itself are used, never paths from the window.
+   * Returns how many project folders were checked.
+   */
+  sweep(directories: string[], limit = 200): number {
+    const roots = new Set<string>();
+    for (const directory of directories) {
+      if (roots.size >= limit) break;
+      try { if (!path.isAbsolute(directory) || !fs.statSync(directory).isDirectory()) continue; roots.add(projectConfigRoot(directory)); } catch { /* Gone. */ }
+    }
+    for (const root of roots) for (const engine of ['claude', 'codex'] as const) { try { this.configured(engine, root); } catch { /* Next folder. */ } }
+    return roots.size;
   }
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
@@ -175,10 +231,12 @@ export class AutoMemory {
     const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } };
     const configured = this.configured(run.engine, run.cwd);
     // A project entry with another key would read and write a different set of notes than the context above.
-    if (configured?.key && configured.key !== key) {
-      context += `\n\nNote: this project's ${path.basename(configured.file)} starts ${SERVER} with the key ${configured.key}, so read_memory and write_handoff use those notes, not the ${key} notes above.`;
-      this.notice(`key:${configured.file}`, `${configured.file} configures ${SERVER} with the memory key ${configured.key}, but Trace's notes for this folder use ${key}. Sessions there read and write the other key. Remove the entry to use automatic memory, or reinstall it with the automatic key.`);
+    if (configured?.key && (configured.key !== key || configured.root !== this.options.memory.root)) {
+      context += `\n\nNote: this project's ${path.basename(configured.file)} starts ${SERVER} with ${configured.key !== key ? `the key ${configured.key}` : 'another notes folder'}, so read_memory and write_handoff use those notes, not the ${key} notes above.`;
+      this.notice(`key:${configured.file}`, `${configured.file} configures ${SERVER} with ${configured.key !== key ? `the memory key ${configured.key}, but Trace's notes for this folder use ${key}` : 'a notes folder other than Trace’s'}. Sessions there read and write other notes. Open Memory and choose Use automatic key, or remove the entry.`);
     }
+    // An entry Trace did not write keeps Trace from adding its own (two servers with one name would clash): say so.
+    if (configured && !configured.key) this.notice(`foreign:${configured.file}`, `${configured.file} has a ${SERVER} entry that Trace did not install, so Trace's automatic memory tools are off for sessions in this folder. Remove that entry to turn them back on.`);
     const extra: string[] = [];
     if (run.engine === 'claude') {
       if (info.supportsAppendSystemPrompt) extra.push('--append-system-prompt', context);

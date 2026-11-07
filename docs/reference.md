@@ -245,7 +245,7 @@ These commands need Claude Code signed in with a claude.ai Pro, Max, Team or Ent
 
 ## Shared Google Drive memory
 
-The default shared folder is **`G:\My Drive\Coding Hub`**, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Trace.
+On Windows the default shared folder is **`G:\My Drive\Coding Hub`**; on a Mac there is no default, so choose the folder Google Drive for desktop keeps there. When the folder can't be used (none chosen, not a full path on this computer, or missing), Memory and Settings → Sync between computers say why, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Trace.
 
 1. Confirm **Settings → Local Drive folder** points to the actual synced/mounted folder. Save preferences if you change it.
 2. Open your project, then open **Shared memory**. Use the same **shared project key** on every desktop participating in that project's handoffs. Different project keys keep notes separate.
@@ -356,7 +356,7 @@ Usage comes from the CLIs' **local structured JSONL session logs**. Claude sessi
 
 Repeated Claude message snapshots are deduplicated; Codex cumulative events replace earlier totals. Claude cache reads/writes are separate from noncached input. Codex cached input is already included in input, and reasoning tokens are already included in output. Missing reasoning or context limits remain unknown. Context percentage is shown only when the CLI supplies a usage/window pair.
 
-Configure exact model IDs and **USD per million tokens** rates in **Settings → Model pricing**. Unconfigured models show no cost estimate. Rates are user supplied; estimates are not an invoice and exclude discounts and billing adjustments. The Usage dashboard provides per-run counts, estimates, and the latest 14 active days. Daily totals group entire runs by session start date in local time, including sessions crossing midnight. Usage records retain up to one year and the UI loads the latest 2,000 runs.
+Configure model IDs and **USD per million tokens** rates in **Settings → Model pricing**. An exact ID wins; otherwise a rate also matches the same model logged with a release date (`-YYYYMMDD`), ignoring case. Context-size variants such as `[1m]` are not merged. Unconfigured models show no cost estimate. Rates are user supplied; estimates are not an invoice and exclude discounts and billing adjustments. The Usage dashboard provides per-run counts, estimates, and the latest 14 active days. Daily totals group entire runs by session start date in local time, including sessions crossing midnight. Usage records retain up to one year and the UI loads the latest 2,000 runs.
 
 ## Local storage
 

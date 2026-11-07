@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { EngineInfo, RunningSession } from '../../../shared/ipc';
-import { AutoMemory, lastAssistantMessage, memoryContext, normalizeRemote, projectMemoryKey } from './auto-memory';
+import { AutoMemory, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
 
 const roots: string[] = [];
@@ -161,5 +161,52 @@ describe('project-installed memory servers', () => {
     expect(notices).toHaveLength(1); expect(notices[0]).toContain('coding-hub'); expect(notices[0]).toContain(key);
     // A working entry is never rewritten.
     expect(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).toBe(before);
+  });
+
+  it('repairs stale entries at startup in folders agents ran in, once per project, skipping folders that are gone', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
+    const old = path.join(root, 'AI Coding Hub'); const sub = path.join(project, 'src'); fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': entry(path.join(old, 'AI Coding Hub.exe'), path.join(old, 'memory-server.js'), memory.root, key) } }));
+    const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
+    expect(auto.sweep([project, sub, path.join(root, 'deleted'), 'relative/path'])).toBe(1);
+    expect(JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers['coding-hub-memory']).toEqual(entry(current.executable, current.server, memory.root, key));
+  });
+
+  it('says once that an entry Trace did not write turns automatic memory tools off', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root);
+    fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': { command: 'node', args: ['mine.js'] } } }));
+    const notices: string[] = [];
+    const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch'), onNotice: (message) => notices.push(message) }));
+    for (let i = 0; i < 2; i++) { const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch); expect(launch.args).not.toContain('--mcp-config'); }
+    expect(notices).toHaveLength(1); expect(notices[0]).toContain('did not install');
+  });
+
+  it('warns when the entry uses another notes folder, even with the right key', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
+    fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': entry(current.executable, current.server, path.join(root, 'other-memory'), key) } }));
+    const notices: string[] = [];
+    const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch'), onNotice: (message) => notices.push(message) }));
+    const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch);
+    expect(launch.args[launch.args.indexOf('--append-system-prompt') + 1]).toContain('another notes folder');
+    expect(notices).toEqual([expect.stringContaining('Use automatic key')]);
+  });
+
+  it('switches the entries Trace wrote to the automatic key when asked, keeping other servers and entries it did not write', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
+    fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'other' }, 'coding-hub-memory': entry(current.executable, current.server, path.join(root, 'old-memory'), 'coding-hub') } }));
+    fs.mkdirSync(path.join(project, '.codex')); fs.writeFileSync(path.join(project, '.codex', 'config.toml'), '[mcp_servers.coding-hub-memory]\ncommand = "node"\nargs = ["mine.js"]\n');
+    const codexBefore = fs.readFileSync(path.join(project, '.codex', 'config.toml'), 'utf8');
+    expect(memoryEntries(project, memory.root)).toEqual([
+      { engine: 'claude', file: path.join(project, '.mcp.json'), key: 'coding-hub', root: path.join(root, 'old-memory'), current: false },
+      { engine: 'codex', file: path.join(project, '.codex', 'config.toml'), key: null, root: null, current: false },
+    ]);
+    expect(useAutomaticKey(project, memory.root, current.server, current.executable)).toEqual([path.join(project, '.mcp.json')]);
+    const saved = JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers;
+    expect(saved['coding-hub-memory']).toEqual(entry(current.executable, current.server, memory.root, key)); expect(saved.other).toEqual({ command: 'other' });
+    expect(fs.readFileSync(path.join(project, '.codex', 'config.toml'), 'utf8')).toBe(codexBefore);
+    expect(memoryEntries(project, memory.root)[0].current).toBe(true);
+    // Asking again changes nothing; a project without Trace's entry says so.
+    expect(useAutomaticKey(project, memory.root, current.server, current.executable)).toEqual([]);
+    const plain = repository(root, 'plain'); expect(() => useAutomaticKey(plain, memory.root, current.server, current.executable)).toThrow('no coding-hub-memory entry');
   });
 });

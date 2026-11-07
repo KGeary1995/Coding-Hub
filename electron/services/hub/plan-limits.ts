@@ -47,28 +47,40 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
 }
 
 /**
+ * Runs the tasks a few at a time, keeping their order. Each Claude account check starts a CLI, and up to eleven at once
+ * (the default sign-in and ten profiles) slowed the computer and could make the checks time out.
+ */
+export async function inBatches<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length); let next = 0;
+  const worker = async () => { while (next < tasks.length) { const index = next++; results[index] = await tasks[index](); } };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), tasks.length) }, worker));
+  return results;
+}
+
+/**
  * Keeps the usage limits of the person's Claude accounts (the CLI's own login and each connected profile) and Codex
  * fresh: at most every five minutes (Check now reads at once).
  */
 export class PlanLimitsService {
   private latest: PlanLimits[] = []; private reading: Promise<PlanLimits[]> | null = null; private last = 0;
-  constructor(private profiles: () => ClaudeAccountProfile[], private profileEnvironment: (base: Record<string, string>, id?: string) => Record<string, string>, private environment = hostEnvironment) {}
+  constructor(private profiles: () => ClaudeAccountProfile[], private profileEnvironment: (base: Record<string, string>, id?: string) => Record<string, string>, private environment = hostEnvironment, private concurrency = 2, private defaultName: () => string | null = () => null) {}
   current() { return this.latest; }
   refresh(force = false): Promise<PlanLimits[]> {
     if (this.reading) return this.reading;
     // Each check starts the CLIs, so only an explicit Check now reads more often than every five minutes.
     if (!force && Date.now() - this.last < 5 * 60000) return Promise.resolve(this.latest);
     this.reading = (async () => {
-      const env = this.environment(); const reads: Promise<PlanLimits>[] = [];
+      const env = this.environment(); const accounts: (() => Promise<PlanLimits>)[] = [];
       const claude = await findExecutable('claude', env).catch(() => null);
       if (claude) {
-        reads.push(readClaudeLimits(claude, env, 'Default'));
+        let signedInAs: string | null = null; try { signedInAs = this.defaultName(); } catch { /* Unknown. */ }
+        accounts.push(async () => ({ ...await readClaudeLimits(claude, this.profileEnvironment(env), 'Default'), signedInAs }));
         let profiles: ClaudeAccountProfile[] = []; try { profiles = this.profiles(); } catch { /* Unreadable registry: default account only. */ }
-        for (const profile of profiles) reads.push(readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name));
+        for (const profile of profiles) accounts.push(() => readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name));
       }
       const codex = await findExecutable('codex', env).catch(() => null);
-      if (codex) reads.push(readCodexLimits(codex, env));
-      this.latest = await Promise.all(reads); this.last = Date.now();
+      const [claudeLimits, codexLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? readCodexLimits(codex, env) : null]);
+      this.latest = codexLimits ? [...claudeLimits, codexLimits] : claudeLimits; this.last = Date.now();
       return this.latest;
     })().finally(() => { this.reading = null; });
     return this.reading;

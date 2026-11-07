@@ -9,6 +9,12 @@ import { HubError } from './engine-adapter';
 const profileSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(60), createdAt: z.iso.datetime() }).strict();
 const registrySchema = z.object({ version: z.literal(1), profiles: z.array(profileSchema).max(10) }).strict();
 const nameSchema = profileSchema.shape.name;
+/**
+ * Keys and login tokens. Inherited from wherever Trace was started (a shell with a work token or API key exported),
+ * they would make the default sign-in quietly run as that account, so every run drops them. The folder
+ * (CLAUDE_CONFIG_DIR) and provider settings are a deliberate choice and stay for the default sign-in.
+ */
+const credentials = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', 'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR']);
 const authOverrides = new Set([
   'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', 'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR',
@@ -98,7 +104,7 @@ export class ClaudeProfiles {
     return { ...result, default: label };
   }
   environment(base: Record<string, string>, id?: string): Record<string, string> {
-    if (!id) return { ...base };
+    if (!id) return Object.fromEntries(Object.entries(base).filter(([key]) => !credentials.has(key.toUpperCase())));
     const directory = this.directory(id);
     const env = Object.fromEntries(Object.entries(base).filter(([key]) => !authOverrides.has(key.toUpperCase())));
     return { ...env, CLAUDE_CONFIG_DIR: directory };
