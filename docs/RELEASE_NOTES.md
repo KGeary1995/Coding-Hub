@@ -1,5 +1,16 @@
 ## What's new
 
+1.16.0 brings a new look, the Round Table, and a much more capable phone app (update every computer and reload the phone app):
+
+- **A new look.** Trace has a new design, "Flight Deck": dark slate with a faint grid, Claude in amber and Codex in cyan, square frames, and the Chakra Petch typeface for the interface. Corner brackets mark the channel you are in and any channel that needs you, and only a channel waiting for you glows. Context shows as a segmented gauge. The phone app uses the same design.
+- **Round Table.** Bring Codex into a Claude chat, or Claude into a Codex chat, with the people button beside the message box. Both agents answer you, then each sees the other's answer and replies, for up to two rounds (you choose up to five), stopping early when both agree. One drives and edits files; the other reviews and stays read-only, and **Swap** changes who. The conversation shows as one thread, each agent in its own colour, with their tokens today. A Round Table comes back after a restart, and works on the phone and on your other computers' tabs.
+- **The phone does much more.**
+  - Chat channels are a real chat on the phone, with approvals, photos and Stop, instead of "use the computer".
+  - New tabs: **Usage** (today's tokens and cost, budget and plan limits), **Tasks**, **History** and **More** (memory handoffs).
+  - With **Can start and stop agents** turned on for that phone (Settings → Phone access, off by default), it can start, stop, restart and add channels, move tasks, resume conversations and open a Round Table. Removing a phone still locks it out at once.
+- **Chats on your other computers.** Another computer's tab now shows its chat channels in full, and you can write to them and answer their approvals from here.
+- **The Design workspace is gone.** It was hard to use and nothing put designs in it. Designs and notes you saved are left on disk; Claude Design is in Claude itself (claude.ai).
+
 1.15.4 fixes several problems with accounts, usage, sync, linked computers and shared memory:
 
 - **Default channels use your own Claude login.** When Trace was started from a terminal with an API key or login token exported (for example a work token), Default channels and the usage card quietly used that account. Trace now drops inherited keys and tokens for the default sign-in, as it already did for named profiles. A `CLAUDE_CONFIG_DIR` you set is still respected. The usage card names the account Default is signed in as.
