@@ -6,6 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
+import { HubError } from '../cli/engine-adapter';
 import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscalePeers, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -399,5 +400,133 @@ describe('tailscale state', () => {
     // A tagged computer belongs to no person, so nothing is linked from it either.
     expect(await tailscalePeers(runner({ 'status --json': JSON.stringify({ ...status, Self: { ...status.Self, Tags: ['tag:ci'] } }) }))).toEqual([]);
     expect(await tailscalePeers(runner({ 'status --json': JSON.stringify({ ...status, BackendState: 'Stopped' }) }))).toEqual([]);
+  });
+});
+
+describe('phone permissions and chat channels', () => {
+  const RUN = '11111111-2222-4333-8444-555555555555';
+  /** A remote whose host records starts, stops, adds and chat requests. */
+  async function chatRemote() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const controls: unknown[] = []; const adds: unknown[] = []; const chats: unknown[] = [];
+    const host: RemoteHost = {
+      sessions: () => [{ id: 's1', title: 'Claude Code', engine: 'claude', chat: true }, { id: 's2', title: 'Codex', engine: 'codex', chat: true }],
+      running: () => [{ sessionId: 's1', runId: RUN, pid: 1, cwd: '/p', engine: 'claude' }],
+      write: () => {},
+      control: async (sessionId, control) => { controls.push({ sessionId, control }); },
+      add: async (engine, chat) => { adds.push({ engine, chat }); },
+      chat: (request) => { if (request.runId !== RUN) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.'); chats.push(request); },
+    };
+    const server = new RemoteServer(root, host, 0, '', async () => 'sent'); cleanup.push(() => server.stop()); await server.setEnabled(true);
+    return { root, server, controls, adds, chats };
+  }
+  const post = (server: RemoteServer, token: string, pathname: string, body: unknown) => fetch(base(server) + pathname, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const get = async (server: RemoteServer, token: string, pathname: string) => { const response = await fetch(base(server) + pathname, { headers: { Authorization: `Bearer ${token}` } }); return { status: response.status, body: await response.json() as Record<string, unknown> }; };
+  /** Reads `count` server-sent events from /api/stream with this query, calling `during` once the stream is open. */
+  async function stream(server: RemoteServer, token: string, query: string, count: number, during?: () => void) {
+    const controller = new AbortController(); const response = await fetch(base(server) + '/api/stream' + query, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+    const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = ''; const seen: { type: string; data: unknown }[] = []; let triggered = false;
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      while (seen.length < count) {
+        const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
+        let end; while ((end = buffer.indexOf('\n\n')) >= 0) { const block = buffer.slice(0, end); buffer = buffer.slice(end + 2); const type = /^event: (.*)$/m.exec(block)?.[1]; const data = /^data: (.*)$/m.exec(block)?.[1]; if (type && data) seen.push({ type, data: JSON.parse(data) }); }
+        if (!triggered && during) { triggered = true; during(); }
+      }
+    } catch { /* Timed out: return what arrived. */ }
+    clearTimeout(timer); controller.abort(); return seen;
+  }
+
+  it('keeps a phone from starting, stopping or adding channels until it is allowed, and says where to allow it', async () => {
+    const { root, server, controls, adds, chats } = await chatRemote(); const token = await paired(server);
+    const phone = server.status().devices[0]; expect(phone).toMatchObject({ kind: 'phone', canRun: false });
+    // Records from before this setting have no canRun and load as not allowed.
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'remote-devices.json'), 'utf8'))[0]).not.toHaveProperty('canRun');
+    expect((await get(server, token, '/api/me')).body).toEqual({ id: phone.id, name: 'Test phone', kind: 'phone', canRun: false });
+    for (const [pathname, body] of [['/api/control', { sessionId: 's1', control: 'stop' }], ['/api/channel-add', { engine: 'claude', chat: true }], ['/api/chat', { action: 'table-open', sessionId: 's1', runId: RUN, partner: { sessionId: 's2', runId: RUN }, driver: 'claude', rounds: 1 }]] as const) {
+      const response = await post(server, token, pathname, body);
+      expect(response.status, pathname).toBe(403); expect((await response.json() as { error: string }).error).toMatch(/Can start and stop agents/);
+    }
+    expect(controls).toEqual([]); expect(adds).toEqual([]); expect(chats).toEqual([]);
+  });
+
+  it('lets an allowed phone start, stop and add channels (chat or terminal), and takes that back at once', async () => {
+    const { server, controls, adds } = await chatRemote(); const token = await paired(server); const id = server.status().devices[0].id;
+    const seen = await stream(server, token, '', 2, () => { server.setCanRun(id, true); });
+    expect(seen[1]).toEqual({ type: 'me', data: { id, name: 'Test phone', kind: 'phone', canRun: true } });
+    expect(server.status().devices[0].canRun).toBe(true); expect((await get(server, token, '/api/me')).body.canRun).toBe(true);
+    expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'restart' })).status).toBe(200);
+    expect((await post(server, token, '/api/channel-add', { engine: 'codex', chat: true })).status).toBe(200);
+    expect((await post(server, token, '/api/channel-add', { engine: 'shell' })).status).toBe(200);
+    // A terminal cannot be a chat, and a channel on no computer here is unknown.
+    expect((await post(server, token, '/api/channel-add', { engine: 'shell', chat: true })).status).toBe(400);
+    expect((await post(server, token, '/api/control', { sessionId: 'elsewhere', control: 'stop' })).status).toBe(400);
+    expect(controls).toEqual([{ sessionId: 's1', control: 'restart' }]); expect(adds).toEqual([{ engine: 'codex', chat: true }, { engine: 'shell', chat: false }]);
+    server.setCanRun(id, false);
+    expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'stop' })).status).toBe(403); expect(controls).toHaveLength(1);
+    // A linked computer always may, and its permission cannot be changed here.
+    const laptop = await computer(server); expect((await get(server, laptop, '/api/me')).body).toMatchObject({ kind: 'computer', canRun: true });
+    expect((await post(server, laptop, '/api/channel-add', { engine: 'claude' })).status).toBe(200);
+    expect(() => server.setCanRun(server.status().devices.find((device) => device.kind === 'computer')!.id, false)).toThrow(/linked computer/);
+  });
+
+  it('locks out a removed phone at once, even one allowed to start agents', async () => {
+    const { server, controls, chats } = await chatRemote(); const token = await paired(server); const id = server.status().devices[0].id;
+    server.setCanRun(id, true); server.revoke(id);
+    expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'stop' })).status).toBe(401);
+    expect((await post(server, token, '/api/chat', { action: 'interrupt', sessionId: 's1', runId: RUN })).status).toBe(401);
+    expect((await get(server, token, '/api/me')).status).toBe(401); expect((await get(server, token, '/api/chat-history?sessionId=s1')).status).toBe(401);
+    expect(controls).toEqual([]); expect(chats).toEqual([]);
+  });
+
+  it('passes a phone’s chat messages (with images), answers, interruptions and Round Table requests to the run', async () => {
+    const { server, chats } = await chatRemote(); const token = await paired(server); const ref = { sessionId: 's1', runId: RUN };
+    const image = { mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+    const requests = [
+      { action: 'send', ...ref, text: 'look at this', images: [image] },
+      { action: 'answer', ...ref, requestId: 'req-1', allow: true },
+      { action: 'interrupt', ...ref },
+      { action: 'table-send', ...ref, text: 'both of you', images: [] },
+      { action: 'table-driver', ...ref, driver: 'codex' },
+      { action: 'table-rounds', ...ref, rounds: 2 },
+      { action: 'table-stop', ...ref },
+      { action: 'table-close', ...ref },
+    ];
+    for (const body of requests) expect((await post(server, token, '/api/chat', body)).status, body.action).toBe(200);
+    expect(chats).toEqual(requests);
+    // Seating a partner takes the phone's permission; with it, the request reaches the run.
+    const open = { action: 'table-open', ...ref, partner: { sessionId: 's2', runId: RUN }, driver: 'claude', rounds: 1 };
+    expect((await post(server, token, '/api/chat', open)).status).toBe(403);
+    server.setCanRun(server.status().devices[0].id, true); expect((await post(server, token, '/api/chat', open)).status).toBe(200); expect(chats.at(-1)).toEqual(open);
+    expect((await post(server, token, '/api/chat', { ...open, partner: { sessionId: 'elsewhere', runId: RUN } })).status).toBe(400);
+    // Eleven images, an unknown image type, extra fields, an unknown channel and a stale run are refused.
+    expect((await post(server, token, '/api/chat', { action: 'send', ...ref, text: '', images: Array(11).fill(image) })).status).toBe(400);
+    expect((await post(server, token, '/api/chat', { action: 'send', ...ref, text: 'x', images: [{ mediaType: 'image/svg+xml', data: 'PHN2Zz4=' }] })).status).toBe(400);
+    expect((await post(server, token, '/api/chat', { action: 'interrupt', ...ref, path: '/etc/passwd' })).status).toBe(400);
+    expect((await post(server, token, '/api/chat', { action: 'interrupt', sessionId: 'elsewhere', runId: RUN })).status).toBe(400);
+    const stale = await post(server, token, '/api/chat', { action: 'interrupt', sessionId: 's1', runId: '00000000-0000-4000-8000-000000000000' });
+    expect(stale.status).toBe(409); expect((await stale.json() as { error: string }).error).toMatch(/stale/);
+  });
+
+  it('streams chat events to phones following the chat and to linked computers, after its recent thread', async () => {
+    const { server } = await chatRemote(); const token = await paired(server); const laptop = await computer(server);
+    server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'user', text: 'hello', images: 2 } });
+    server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'delta', messageId: 'm1', text: 'Hi ' } });
+    server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'delta', messageId: 'm1', text: 'there' } });
+    const replay = { sessionId: 's1', runId: RUN, events: [{ type: 'user', text: 'hello', images: 2 }, { type: 'delta', messageId: 'm1', text: 'Hi there' }] };
+    expect((await get(server, token, '/api/chat-history?sessionId=s1')).body).toEqual(replay);
+    expect((await get(server, token, '/api/chat-history?sessionId=s2')).body).toEqual({ sessionId: 's2', runId: null, events: [] });
+    expect((await get(server, token, '/api/chat-history?sessionId=elsewhere')).status).toBe(400);
+    const done = { sessionId: 's1', runId: RUN, event: { type: 'assistant' as const, messageId: 'm1', blocks: [{ type: 'text' as const, text: 'Hi there' }] } };
+    // A chat run also has the (empty) terminal screen every run has, as `replay`.
+    const phone = stream(server, token, '?sessionId=s1', 4); const other = stream(server, token, '?sessionId=s2', 2); const linked = stream(server, laptop, '?all=1', 4);
+    await new Promise((resolve) => setTimeout(resolve, 300)); server.onChat(done);
+    const [mine, theirs, computers] = (await Promise.all([phone, other, linked])).map((seen) => seen.filter((event) => event.type !== 'replay'));
+    expect(mine.map((event) => event.type)).toEqual(['channels', 'chat-replay', 'chat']); expect(mine[1].data).toEqual(replay); expect(mine[2].data).toEqual(done);
+    // A phone following another channel does not get it (its stream times out after the channel list).
+    expect(theirs.map((event) => event.type)).toEqual(['channels']);
+    expect(computers.map((event) => event.type)).toEqual(['channels', 'chat-replay', 'chat']); expect(computers[2].data).toEqual(done);
+    // The finished message replaced its streamed text in what is kept.
+    expect((await get(server, token, '/api/chat-history?sessionId=s1')).body.events).toEqual([{ type: 'user', text: 'hello', images: 2 }, done.event]);
   });
 });

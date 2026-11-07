@@ -133,7 +133,7 @@ export class PtyManager {
     const run = this.runs.get(reference.sessionId);
     if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
     if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
-    if (run.chat) throw new HubError('CHAT_REMOTE', 'This is a chat channel. Open it on the computer to write to it.');
+    if (run.chat) throw new HubError('CHAT_REMOTE', 'This is a chat channel: send messages and answers through the chat, not as typing.');
     try { run.pty.write(data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
     if (isPersonInput(data)) this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId: run.session.runId, at: new Date().toISOString() });
@@ -273,10 +273,23 @@ export class PtyManager {
   }
 
   /** The window's messages, approvals and interruptions for a chat run. */
-  chat(owner: number, payload: unknown) {
+  chat(owner: number, payload: unknown) { this.chatRequest(payload, (reference) => this.ownedRun(owner, reference)); }
+  /**
+   * The same from a paired phone or linked computer: the run is reached by its reference rather than through a window,
+   * and what it causes goes to the owning window as if sent there. Whether the device may open a Round Table is the
+   * remote server's check.
+   */
+  chatRemote(payload: unknown) {
+    this.chatRequest(payload, (reference) => {
+      const run = this.runs.get(reference.sessionId);
+      if (!run || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+      return run;
+    });
+  }
+  private chatRequest(payload: unknown, find: (reference: { sessionId: string; runId: string }) => ManagedRun) {
     const parsed = chatRequestSchema.safeParse(payload);
     if (!parsed.success) throw new HubError('INVALID_CHAT', 'Invalid chat request.');
-    const run = this.ownedRun(owner, parsed.data);
+    const run = find(parsed.data); const owner = run.owner;
     if (!run.chat || run.finished) throw new HubError('NOT_CHAT', 'This channel is not a running chat.');
     if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
     const request = parsed.data;
@@ -287,7 +300,11 @@ export class PtyManager {
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else if (request.action === 'interrupt') run.chat.interrupt();
-    else if (request.action === 'table-open') { this.ownedRun(owner, request.partner); this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds); }
+    else if (request.action === 'table-open') {
+      // Both agents' runs belong to the same window, which shows the table.
+      if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
+      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds);
+    }
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
       this.tables.send(request.runId, request.text, request.images);

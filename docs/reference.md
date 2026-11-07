@@ -174,7 +174,7 @@ With the tile focused, Enter starts an idle channel or moves into its terminal.
 - **Approvals:** when Claude asks to use a tool your permission settings do not already allow, a card offers **Allow**, **Allow edits this run** (when Claude suggests it) or **Deny**. The channel shows as waiting (status bar, notice, phone alert) until you answer; **Answer** goes to the card.
 - **Stop** interrupts the reply; Claude keeps what it has done. A restarted chat continues the conversation.
 - **Codex chat** runs Codex's app server (`codex app-server`, the protocol its IDE extension uses): images go in as images, commands and file changes appear as cards with their output, and Codex's approval requests offer **Allow**, **Allow for this session** or **Deny**. Codex's own settings (approval policy, sandbox) apply as in its terminal.
-- Terminal-only screens such as `/config` or the model picker are not part of chat; use a terminal channel for those. Chat channels are not yet shown on the phone.
+- Terminal-only screens such as `/config` or the model picker are not part of chat; use a terminal channel for those. On the phone, a chat channel's last 300 events (or 2 MB) of its current run are shown when it is opened, then it follows live; **Conversation** reads the whole transcript.
 
 ## Approval alerts
 
@@ -295,7 +295,7 @@ How it is protected:
 - Trace listens only on this computer (`127.0.0.1:47821`); the phone reaches it through Tailscale, which encrypts the connection and admits only your devices.
 - Every request also needs the key a phone received when it paired. Only a hash of each key is stored (`remote-devices.json`), and **Remove** in Settings locks a phone out at once. Turning phone access off closes the listener.
 - Requests must name this computer or its tailnet address, and Tailscale Funnel (public internet) requests are refused.
-- A paired phone can read channel output and type into channels that are already running, the same as typing at the desktop. It cannot start, stop, close or reconfigure channels, or reach any other part of Trace, except **Screen**, which still needs the computer's own sign-in. Treat a paired phone like an unlocked keyboard on this computer, and remove phones you no longer use.
+- A paired phone can read channel output and type into channels that are already running, the same as typing at the desktop, and use chat channels: send messages (up to 10 images), answer approvals, interrupt, and take part in a Round Table. It cannot start, stop, close or add channels unless **Can start and stop agents** is turned on for that phone in **Settings → Phone access** (off by default; it also lets the phone seat a Round Table partner). It cannot reconfigure channels or reach any other part of Trace, except **Screen**, which still needs the computer's own sign-in. Treat a paired phone like an unlocked keyboard on this computer, and remove phones you no longer use.
 
 ## Other computers
 
