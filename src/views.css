@@ -1,6 +1,6 @@
 /*
  * Trace type scale and surfaces for the remaining views (docs/design/trace, "Not yet designed": Projects, History,
- * Tasks, Verification, Design, Coaching, and the Agent setup areas). Loaded last. Every selector is wrapped in :where()
+ * Tasks, Verification, Coaching, and the Agent setup areas). Loaded last. Every selector is wrapped in :where()
  * so it adds no specificity: it replaces the old generic element styles, and the screens built in phases 3–5 keep their
  * own class rules.
  */
@@ -9,10 +9,10 @@
 /* Page heading: title and one line of description; the eyebrow label above it goes. */
 :where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel, .history-panel, .repository-panel:not(.tr-repo)) { max-width: 1200px; padding: 20px 4px 32px; }
 :where(.app-shell:not([data-view="workspace"]) .main-shell) .feature-panel-heading { margin-bottom: 8px; }
-:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading > div, .design-heading > div) > .eyebrow { display: none; }
-:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) h1 { gap: 10px; font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; color: var(--tr-fg-strong); }
-:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) h1 svg { width: 20px; height: 20px; color: var(--tr-fg-dim); }
-:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading, .design-heading) p { max-width: 90ch; margin: 4px 0 0; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading > div) > .eyebrow { display: none; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) h1 { gap: 10px; font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) h1 svg { width: 20px; height: 20px; color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) p { max-width: 90ch; margin: 4px 0 0; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 
 /* Text */
 :where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h1) { font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; }
@@ -55,7 +55,7 @@
 .phone-guide .button { margin-left: 0; }
 .phone-guide li .button { margin-left: 8px; }
 .phone-pairing { display: flex; gap: 20px; align-items: flex-start; margin: 12px 0; padding: 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); }
-.phone-qr { width: 200px; height: 200px; flex: none; border-radius: 4px; }
+.phone-qr { width: 200px; height: 200px; flex: none; border-radius: var(--tr-r-control); }
 .phone-code { font: 600 28px/1.2 var(--tr-font-mono); letter-spacing: .12em; color: var(--tr-fg-strong); margin: 8px 0; }
 .phone-devices li { display: flex; align-items: center; gap: 12px; }
 .phone-devices li .muted { flex: 1; }

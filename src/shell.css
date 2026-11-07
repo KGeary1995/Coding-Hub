@@ -94,9 +94,19 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 /* Linked computers get tabs after the main views; a dot of colour marks channels there that need the person. */
 .tr-tabs > button.tr-computer-tab { gap: 6px; }
 .tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-off); }
-.tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }
+.tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--tr-r-panel); background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }
 
 /* Subscription limits in the status bar: amber nearing a limit, red nearly out. */
 .tr-sb-limits { gap: 6px; }
 .tr-sb-limits.warning .tnum { color: var(--tr-st-limit); }
 .tr-sb-limits.critical .tnum { color: var(--tr-st-failed); font-weight: 600; }
+
+/* Flight Deck Lite: uppercase, tracked navigation; the active view in Codex cyan; + Channel outlined in Claude amber. */
+.tr-wordmark-reticle { flex: none; color: var(--tr-ch-codex); }
+.tr-wordmark-text { text-transform: uppercase; letter-spacing: .18em; }
+.tr-tabs > button, .tr-menu-button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; padding: 0 11px; }
+.tr-tabs > button.active { background: var(--tr-ch-codex); color: var(--tr-on-light); }
+.tr-topbar .tr-new-channel > .tr-menu-button, .tr-topbar .tr-new-channel.tr-menu-button { border: 1px solid var(--tr-ch-claude); background: color-mix(in srgb, var(--tr-ch-claude) 10%, transparent); color: var(--tr-ch-claude); font-weight: 700; }
+.tr-topbar .tr-new-channel > .tr-menu-button:hover, .tr-topbar .tr-new-channel.tr-menu-button:hover { background: color-mix(in srgb, var(--tr-ch-claude) 20%, transparent); color: var(--tr-ch-claude); }
+.app-statusbar.tr-statusbar { text-transform: uppercase; letter-spacing: .06em; }
+.tr-topbar .tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-ch-claude); }

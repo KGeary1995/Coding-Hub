@@ -2,6 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 // Fonts ship with the app so it renders the same offline.
+import '@fontsource/chakra-petch/400.css';
+import '@fontsource/chakra-petch/500.css';
+import '@fontsource/chakra-petch/600.css';
+import '@fontsource/chakra-petch/700.css';
 import '@fontsource/ibm-plex-sans-condensed/400.css';
 import '@fontsource/ibm-plex-sans-condensed/500.css';
 import '@fontsource/ibm-plex-sans-condensed/600.css';

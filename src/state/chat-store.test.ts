@@ -6,6 +6,14 @@ const event = (value: Parameters<typeof applyChatEvent>[0]['event']) => applyCha
 
 describe('chat threads', () => {
   beforeEach(() => { useChatStore.setState({ threads: {} }); chatStarted('s', 'r', false); });
+  it('shows a message sent from a phone or another computer, but not a message sent from this window twice', () => {
+    chatSent('s', 'from here', []);
+    applyChatEvent({ sessionId: 's', runId: 'r', event: { type: 'user', text: 'from here', images: 0 } });
+    applyChatEvent({ sessionId: 's', runId: 'r', event: { type: 'user', text: 'from the phone', images: 0, remote: true } });
+    const thread = useChatStore.getState().threads.s;
+    expect(thread.items.filter((item) => item.kind === 'user').map((item) => (item as { text: string }).text)).toEqual(['from here', 'from the phone']);
+    expect(thread.busy).toBe(true);
+  });
   it('streams a reply, then merges the per-block messages Claude sends under one id', () => {
     chatSent('s', 'hello', [{ mediaType: 'image/png', data: 'AAAA' }]);
     expect(items()[0]).toMatchObject({ kind: 'user', text: 'hello', images: ['data:image/png;base64,AAAA'] });

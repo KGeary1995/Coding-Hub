@@ -76,7 +76,8 @@ export function startTaskAutomation() {
       const recent = samples[session.id]?.slice(-45) ?? [];
       if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) void setTaskStatus(task.id, 'review').catch(() => {});
     }
-    if (++ticks % 6 === 0) void refreshTaskWatch();
+    // Every 30 s: the open tasks' changes, and the board itself, so a task moved from a phone shows here too.
+    if (++ticks % 6 === 0) { void refreshTaskWatch(); void loadTasks(); }
   };
   void loadTasks().then(() => refreshTaskWatch());
   const timer = setInterval(tick, 5000); return () => clearInterval(timer);

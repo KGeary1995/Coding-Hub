@@ -10,16 +10,14 @@ import { Backups, resolveStorageRoot } from './services/workbench/backups';
 import { Verification } from './services/workbench/verification';
 import { Tasks } from './services/workbench/tasks';
 import { Experiments } from './services/workbench/experiments';
-import { LivePreview } from './services/workbench/live-preview';
 import { z } from 'zod';
 import { CoachingService } from './services/coaching/service';
 import { LiveCoach } from './services/coaching/live';
-import { DesignArchive } from './services/design/archive';
 import { HandoffImport } from './services/design/handoff';
-import type { DesignSnapshot } from '../shared/design';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import { REMOTE_PORT, type ChannelControl, type ChannelTranscript } from '../shared/remote';
+import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteResumeRequest } from '../shared/remote';
+import type { NativeResume } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
@@ -42,7 +40,7 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, suppo
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
-import { finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
+import { chatRequestSchema, finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
@@ -60,7 +58,7 @@ import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
-import { AutoMemory } from './services/hub/auto-memory';
+import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -74,7 +72,6 @@ app.on('child-process-gone', (_event, details) => { if (details.reason !== 'clea
 let workflows: Workflows | null = null;
 let delivery: Delivery | null = null;
 let verification: Verification | null = null;
-let livePreview: LivePreview | null = null;
 let backups: Backups | null = null;
 let worktrees: WorktreeService | null = null;
 const production = process.argv.includes('--production') || app.isPackaged;
@@ -141,6 +138,8 @@ const manager = new PtyManager((owner, event) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
+  // Phones and linked computers following the channel get it too.
+  try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, chatHistory: (config) => { if (!config.resumeId) return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
@@ -172,6 +171,15 @@ function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
+}
+/** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
+function channelProjects(): { project: string; directory: string }[] {
+  const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd])); const found = new Map<string, string>();
+  for (const session of saved?.sessions ?? []) {
+    const cwd = running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null); if (!cwd) continue;
+    try { const project = projectMemoryKey(cwd); if (!found.has(project)) found.set(project, cwd); } catch { /* An unreadable folder has no notes to show. */ }
+  }
+  return [...found].map(([project, directory]) => ({ project, directory }));
 }
 /**
  * A desktop notification, unless they are turned off in Settings. A channel's alert is shown only while Trace is not in
@@ -218,7 +226,9 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
+  z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
@@ -274,7 +284,9 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
-  if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
+  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && request.engine !== 'shell'); return null; }
+  if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
+  if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
   if (request.action === 'linked-update') return linked.update(request.id);
   if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
@@ -297,15 +309,24 @@ function channelTranscript(sessionId: string): ChannelTranscript {
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
-/** A linked computer adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine): Promise<void> { return askWindow({ add: engine }); }
-function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine }): Promise<void> {
+/** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
+function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
+/**
+ * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
+ * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
+ */
+async function resumeConversation(key: string): Promise<void> {
+  const { conversation, directory } = await nativeSessions.execute({ action: 'native-resume', key }) as NativeResume;
+  const label = workflows?.labels().find((item) => item.key === conversation.key)?.name;
+  return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || (conversation.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed') }, IPC_CHANNELS.remoteResume);
+}
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | Omit<RemoteResumeRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pendingControls.delete(requestId); reject(new HubError('REMOTE_CONTROL_TIMEOUT', 'This computer did not finish in time. Check the channel there.')); }, 45000);
     pendingControls.set(requestId, { resolve, reject, timer });
-    if (!sendToRenderer(IPC_CHANNELS.remoteControl, { requestId, ...request })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
+    if (!sendToRenderer(channel, { requestId, ...request })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
   });
 }
 /**
@@ -420,8 +441,6 @@ function createWindow() {
     event.preventDefault();
     if (delivery?.running || workflows?.running || worktrees?.active) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before closing the app.' }); return; }
     closing = true;
-    // The preview is a separate top-level window; left open it would keep the app alive with no main window.
-    livePreview?.close();
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).then(async () => {
       // Closing the window takes away every control for a channel, so never do that silently while one still runs.
       const left = [...manager.ownedProcessIds(owner), ...accounts.processIds(owner)];
@@ -475,23 +494,16 @@ else app.whenReady().then(() => {
     // Once startup settles: repair stale memory entries in the folders this computer has run agents in (issue #19).
     const sweeping = autoMemory; setTimeout(() => { try { sweeping.sweep([...new Set((memoryHub.telemetry?.list() ?? []).map((record) => record.cwd))]); } catch { hostHealth?.record('auto-memory-sweep-failed'); } }, 90000).unref();
   }
-  const designs = new DesignArchive(storageRoot, async () => {
-    const result = await dialog.showOpenDialog(window!, { title: 'Save a design preview', properties: ['openFile'], filters: [{ name: 'HTML or screenshots', extensions: ['html', 'htm', 'png', 'jpg', 'jpeg', 'webp'] }] });
-    return result.canceled ? null : result.filePaths[0] ?? null;
-  }, (bytes) => { const image = nativeImage.createFromBuffer(bytes); const size = image.getSize(); return !image.isEmpty() && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 40000000; });
-  const handoffs = new HandoffImport(path.join(storageRoot, 'handoff-scratch'), async (source) => {
+  /** Claude Design handoff import only (the Design workspace was removed). No window calls it yet; the planned Claude tab will. */
+  const handoffs = new HandoffImport(async (source) => {
     const result = source === 'zip'
       ? await dialog.showOpenDialog(window!, { title: 'Import a Claude Design handoff bundle', properties: ['openFile'], filters: [{ name: 'ZIP bundle', extensions: ['zip'] }] })
       : await dialog.showOpenDialog(window!, { title: 'Import an extracted Claude Design handoff folder', properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
-  }, async (title, notes, projectDirectory, file) => {
-    const preview = await designs.execute({ action: 'import', title, notes, projectDirectory }, file);
-    return preview && 'snapshot' in preview ? (preview.snapshot as DesignSnapshot) : null;
   });
   handle(IPC_CHANNELS.designs, (_owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.');
-    if (payload && typeof payload === 'object' && 'action' in payload && payload.action === 'handoff-import') return handoffs.execute(payload);
-    return designs.execute(payload);
+    return handoffs.execute(payload);
   });
   // A folder is in use while a session runs in it or a saved tile is bound to it.
   const directoryInUse = (directory: string) => {
@@ -513,7 +525,6 @@ else app.whenReady().then(() => {
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
-  livePreview = coaching ? new LivePreview(storageRoot, designs, coaching, async (url) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Open isolated preview', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Approve local design preview', message: url, detail: 'This local application can execute browser JavaScript in a separate sandboxed window. It cannot access Trace IPC, local files, permissions, downloads, or other network origins. Start the trusted development server yourself.' })).response === 0 && !updateRestart) : null;
   const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Trace-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Trace backup', extensions: ['gz'] }] })).filePath ?? null,
@@ -531,7 +542,8 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
-    add: (engine) => addChannel(engine),
+    add: (engine, chat, like) => addChannel(engine, chat, like),
+    chat: (request) => manager.chatRemote(request),
     // Claude Code and Codex take an image from this computer's clipboard when they get their image key (Alt+V on
     // Windows, Ctrl+V on a Mac), so the pasted image is put there first, as a paste here would.
     pasteImage: async (reference, data) => {
@@ -554,6 +566,20 @@ else app.whenReady().then(() => {
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
+    // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
+    // asks for a fresh read in the background, at most every five minutes like Usage (PlanLimitsService.refresh).
+    usage: () => {
+      void planLimits.refresh().catch(() => {});
+      let budget: { dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number } | null = null; try { budget = hub?.preferences() ?? null; } catch { /* Unreadable preferences: no budget shown. */ }
+      return { today: dayUsage.totals(), limits: planLimits.current(), budget };
+    },
+    tasks: () => tasks.list(),
+    taskStatus: async (id, status) => { await tasks.execute({ action: 'task-status', id, status }); },
+    history: async () => { const labels = workflows?.labels() ?? []; return (await nativeSessions.list()).map((item) => { const label = labels.find((entry) => entry.key === item.key)?.name; return label ? { ...item, label } : item; }); },
+    resume: (key) => resumeConversation(key),
+    memoryProjects: () => channelProjects(),
+    memoryNotes: (project) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); return hub.memory.list(project); },
+    writeMemory: (project, title, content) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); hub.execute({ action: 'memory-write', project, title, content, author: 'human' }); },
   // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
   }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
@@ -567,8 +593,12 @@ else app.whenReady().then(() => {
     // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
     const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
-      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
-    phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
+      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged(), chat: (envelope) => phone.relayChat(envelope) }, fetch, () => powerMonitor.getSystemIdleTime());
+    linked.chatEvents = (event) => sendToRenderer(IPC_CHANNELS.linkedChatEvent, event);
+    // A smoke test (an unpackaged run on its own remote port) must never find or link the owner's real computers on
+    // the tailnet: it would leave links to a throwaway copy on them. CODING_HUB_TEST_TAILNET=1 opts a test back in.
+    const isolatedTest = !app.isPackaged && Boolean(process.env.CODING_HUB_TEST_REMOTE_PORT) && process.env.CODING_HUB_TEST_TAILNET !== '1';
+    phone.setRelay(linked); linked.peers = () => isolatedTest ? Promise.resolve([]) : tailscalePeers(runTailscale); linked.start();
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
@@ -589,7 +619,7 @@ else app.whenReady().then(() => {
     phone.tailscale = !next.host && next.error && phone.tailscale.host ? { ...next, host: phone.tailscale.host } : next;
     if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; }
     // The person's other computers on the tailnet are found and linked with each check (a minute apart).
-    if (phone.autoLink && phone.tailscale.running) void linked?.autoLink().catch(() => {});
+    if (phone.autoLink && phone.tailscale.running && !(!app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT && process.env.CODING_HUB_TEST_TAILNET !== '1')) void linked?.autoLink().catch(() => {});
   };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   // Every minute, and every ten seconds while the tailnet name is not known yet.
@@ -602,11 +632,13 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
       z.object({ action: z.literal('remote-auto-link'), enabled: z.boolean() }).strict(),
+      z.object({ action: z.literal('remote-can-run'), id: z.uuid(), canRun: z.boolean() }).strict(),
     ]).parse(payload);
     if (request.action === 'remote-auto-link') phone.setAutoLink(request.enabled);
     if (request.action === 'remote-enable') { await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
+    if (request.action === 'remote-can-run') return phone.setCanRun(request.id, request.canRun);
     if (request.action === 'remote-test-alert') return phone.testAlert(request.id);
     if (request.action === 'remote-open-tailscale') { if (phone.serveLink) await shell.openExternal(phone.serveLink); return phone.status(); }
     if (request.action === 'remote-serve') {
@@ -630,7 +662,7 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
-    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); livePreview?.close(); app.relaunch(); app.quit(); return null; }
+    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
     if (action === 'codex-models') return modelCatalog.execute(payload);
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
@@ -645,14 +677,6 @@ else app.whenReady().then(() => {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
       if (action.startsWith('flow-git-')) return delivery!.execute(payload);
       if (action === 'flow-open-pr') { const request = z.object({ action: z.literal('flow-open-pr'), url: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/) }).strict().parse(payload); await shell.openExternal(request.url); return null; }
-      if (action === 'flow-preview-size' || action === 'flow-design-diff') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
-      if (action === 'flow-design-task') {
-        const request = z.object({ action: z.literal('flow-design-task'), snapshotId: z.uuid(), annotationId: z.uuid(), directory: z.string().max(4096), scope: z.array(z.string().max(300)).min(1).max(30) }).strict().parse(payload);
-        if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.');
-        const comments = await livePreview.execute({ action: 'annotation-list', snapshotId: request.snapshotId }) as import('../shared/workbench').Annotation[];
-        const comment = comments.find((item) => item.id === request.annotationId); if (!comment) throw new HubError('DESIGN_TASK', 'Select an available annotation.');
-        return tasks.execute({ action: 'task-save', title: comment.text.slice(0, 150), directory: request.directory, sessionId: null, scope: request.scope, status: 'queued', notes: `Design ${request.snapshotId} at (${comment.x}%, ${comment.y}%): ${comment.text}`, verificationId: null, designRef: { snapshotId: request.snapshotId, annotationId: comment.id } });
-      }
       if (action === 'flow-release-status') {
         z.object({ action: z.literal('flow-release-status') }).strict().parse(payload);
         if (!app.isPackaged || process.platform !== 'win32') return { state: app.isPackaged ? 'Platform verification unavailable' : 'Source edition — no installer signature', publisher: null };
@@ -673,12 +697,11 @@ else app.whenReady().then(() => {
     }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
-    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'preview-capture', 'design-feedback', 'annotation-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);
     if (action.startsWith('backup-')) return backups!.execute(payload);
-    if (action.startsWith('preview-') || action.startsWith('annotation-') || action === 'design-feedback') { if (!livePreview) throw new HubError('PREVIEW_STORAGE', 'Preview storage is unavailable.'); return livePreview.execute(payload); }
     throw new HubError('INVALID_REQUEST', 'Unknown workbench operation.');
   });
   const projectSetup = new ProjectSetup();
@@ -831,6 +854,6 @@ app.on('before-quit', (event) => {
     if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
-    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); livePreview?.close(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
   });
 });

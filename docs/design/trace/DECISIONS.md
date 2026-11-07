@@ -50,3 +50,18 @@ The Claude Design handoff in this folder (`README.md`, `design/`, `tokens.css`) 
 - **Type scale:** the old 8–13 px sizes in `styles.css` and `workbench.css` are mapped to 11–14 px (8→11, 9 and 10→12, 11→13, 12 and 13→14), ending the phase 1 exception.
 - **Faint text:** `--tr-fg-faint` is `#7b8c87` instead of `#6f807b`, so faint labels reach 4.5:1 on the surface and hover colours (5.0 and 4.7) as well as on the background. `--tr-fg-off` stays as designed; it is used only for icons, borders and traces, which need 3:1.
 - **Removed CSS:** rules for elements the redesign removed (the sidebar, old tile header, run toolbar and footer, workspace header and summary strip) are deleted. Rendered screens are unchanged by the removal (pixel comparison of every view).
+
+## Flight Deck Lite (November 2026)
+
+The owner chose direction **11 · Flight Deck Lite** from the redesign canvas (Mission Control with a little of Flight Deck, intensity 35 of 100). It replaces the bench-scope look above; the structure (top bar, tiles, status bar, state model) stays.
+
+| Topic | Before | Now |
+|---|---|---|
+| Palette | Dark teal, Claude yellow, Codex cyan | Dark slate `#0a0e12`, Claude amber `#ffb547`, Codex cyan `#5fe1ff`, needs-you magenta `#ff5fcf`, the person lavender `#d0c4ff` (Round Table) |
+| Type | IBM Plex Sans Condensed | **Chakra Petch** for the interface (uppercase, tracked, for navigation and labels), IBM Plex Mono for terminals and every number |
+| Shape | 2–6 px radii | Square frames (overlays 2 px) |
+| Background | Flat | A faint cyan 32 px grid behind everything; panels and tiles are solid, so text never sits on it |
+| Emphasis | Frame colour only | **Corner brackets** on the focused channel (its engine colour) and on one that needs you or failed; a soft glow only on a channel waiting for you. "No glow" no longer holds for that one state |
+| Intensity | — | `--tr-grid`, `--tr-bracket-alpha`, `--tr-glow-*` in `src/tokens.css` carry the canvas's intensity 35; change them together |
+
+Still to come in this direction: segmented gauges for context and plan limits, hexagonal Round Table seats, the reticle focus marker on tiles, and the phone app rebuilt on the same components.

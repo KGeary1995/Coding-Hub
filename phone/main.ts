@@ -1,16 +1,21 @@
+import '@fontsource/chakra-petch/400.css';
+import '@fontsource/chakra-petch/600.css';
+import '@fontsource/chakra-petch/700.css';
 import '@fontsource/ibm-plex-sans-condensed/400.css';
 import '@fontsource/ibm-plex-sans-condensed/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
 import './phone.css';
+import { mountChat, receiveChat, receiveReplay } from './chat';
+import { mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
-import { PAIRING_PREFIX, type ChannelTranscript, type RemoteChannel } from '../shared/remote';
-import { activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe } from '../shared/remote';
+import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
@@ -42,13 +47,59 @@ let via: string | null = null;
 const drafts = new Map<string, string>();
 /** A channel an alert asked to open that the phone has not heard of yet: opened when the next channel list has it. */
 let opening: string | null = null;
+/** Who this phone is to the computer: whether it may start and stop agents (null until asked). */
+let me: RemoteMe | null = null;
+/** Removes the chat view shown for a chat channel, when there is one. */
+let unmountChat: (() => void) | null = null;
+const closeChat = () => { unmountChat?.(); unmountChat = null; };
+/** Removes the React screen shown under a tab (Usage, Tasks, History, More), when there is one. */
+let unmountScreen: (() => void) | null = null;
+const closeScreen = () => { unmountScreen?.(); unmountScreen = null; };
+
+/** The phone's sections, along the bottom as on the redesign: each a stroke icon and a word. */
+type Tab = 'channels' | 'usage' | 'tasks' | 'history' | 'more';
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'channels', label: 'Channels', icon: '<rect x="3" y="4" width="18" height="16"/><path d="M7 9l3 3-3 3M12 15h5"/>' },
+  { id: 'usage', label: 'Usage', icon: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>' },
+  { id: 'tasks', label: 'Tasks', icon: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>' },
+  { id: 'history', label: 'History', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
+  { id: 'more', label: 'More', icon: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>' },
+];
+function tabBar(active: Tab) {
+  return h('nav', { className: 'tabbar', aria: { label: 'Sections' } }, ...TABS.map((tab) => {
+    const button = h('button', { type: 'button', className: tab.id === active ? 'active' : '', aria: { current: tab.id === active ? 'page' : 'false' }, onclick: () => { if (tab.id === 'channels') showList(); else showTab(tab.id); } });
+    // Fixed markup: the icon is ours, not data.
+    button.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${tab.icon}</svg>`;
+    button.append(h('span', {}, tab.label));
+    return button;
+  }));
+}
+/** Usage, Tasks, History or More: a screen of this computer's state (phone/screens.tsx) above the tabs. */
+function showTab(tab: Exclude<Tab, 'channels'>) {
+  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  const label = TABS.find((item) => item.id === tab)!.label;
+  const screen = h('div', { className: 'screen-host' });
+  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), screen);
+  if (tab === 'more') main.append(h('h2', { className: 'section-title' }, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen'));
+  app.replaceChildren(header(), main, tabBar(tab));
+  unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
+  listen(null);
+}
+/** The chat shown, as it was when it was drawn: it is drawn again when that chat starts, stops or restarts. */
+let shownChat: string | null = null;
 
 const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
 const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
 
+/** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
+function mark(big = false) {
+  const element = h('span', { className: `mark ${big ? 'big' : ''}` });
+  element.innerHTML = '<svg width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="13" cy="13" r="10"/><circle cx="13" cy="13" r="5"/><path d="M13 1v5M13 20v5M1 13h5M20 13h5"/><circle cx="13" cy="13" r="1.2" fill="currentColor"/></svg><span>TRACE</span>';
+  return element;
+}
 function header(back?: () => void, title?: Node, ...tools: Node[]) {
   return h('header', { className: 'bar' },
-    back ? h('button', { className: 'icon', onclick: back, aria: { label: 'Back to channels' } }, '‹') : h('span', { className: 'mark' }, h('i'), h('i'), h('i'), ' trace'),
+    back ? h('button', { className: 'icon', onclick: back, aria: { label: 'Back to channels' } }, '‹') : mark(),
     title ?? h('span'), ...tools,
     h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, linkText()));
 }
@@ -61,7 +112,7 @@ function showPair(error = '') {
   const nameInput = h('input', { id: 'name', value: name, maxLength: 60 });
   const message = h('p', { className: 'error', aria: { role: 'alert' } }, error);
   const form = h('form', { className: 'pair' },
-    h('span', { className: 'mark big' }, h('i'), h('i'), h('i'), ' trace'),
+    mark(true),
     h('h1', {}, 'Pair this phone'),
     h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
     h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
@@ -86,11 +137,62 @@ function listen(sessionId: string | null) {
   }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
 }
 
+/** Start, Stop and Restart for a channel on this computer, when this phone may start and stop agents. */
+function channelControls(channel: RemoteChannel): Node[] {
+  // Only this computer's own channels: the server does not start or stop another computer's.
+  if (!me?.canRun || (channel.computer && channel.computer.id !== me.computer)) return [];
+  const press = (value: ChannelControl) => async (event: Event) => {
+    const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
+    try { await control(channel.sessionId, value); } catch (e) { alertText((e as Error).message); } finally { button.disabled = false; }
+  };
+  return channel.running
+    ? [h('button', { className: 'quiet', type: 'button', onclick: press('restart'), aria: { label: `Restart CH${channel.channel}` } }, 'Restart'), h('button', { className: 'quiet stop', type: 'button', onclick: press('stop'), aria: { label: `Stop CH${channel.channel}` } }, 'Stop')]
+    : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')];
+}
+/** Waits until `find` returns something from the channel list as the computer updates it; null after `ms`. */
+async function channelWhere<T>(find: () => T | undefined | null, ms: number): Promise<T | null> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 300))) { const found = find(); if (found) return found; }
+  return null;
+}
+/**
+ * Round Table from the phone: the other agent as a chat channel in the same folder on this computer, started, then
+ * seated at this chat's table (this chat's agent drives first, two rounds), as the desktop's people button does.
+ */
+async function openTableHere(channel: RemoteChannel): Promise<string | null> {
+  if (channel.engine === 'shell' || !channel.runId) return 'This chat is not running.';
+  const other = channel.engine === 'claude' ? 'codex' : 'claude'; const before = new Set(channels.map((item) => item.sessionId));
+  try {
+    await addChannel(other, true, channel.sessionId);
+    const added = await channelWhere(() => channels.find((item) => !before.has(item.sessionId) && item.engine === other && item.chat), 15000);
+    if (!added) return 'The other agent’s channel did not appear. Check the computer.';
+    await control(added.sessionId, 'start');
+    const partner = await channelWhere(() => { const item = channels.find((candidate) => candidate.sessionId === added.sessionId); return item?.running && item.runId ? item : null; }, 60000);
+    if (!partner?.runId) return `${other === 'codex' ? 'Codex' : 'Claude Code'} did not start. Check its channel.`;
+    await chat({ action: 'table-open', sessionId: channel.sessionId, runId: channel.runId, partner: { sessionId: partner.sessionId, runId: partner.runId }, driver: channel.engine, rounds: 2 });
+    return null;
+  } catch (e) { return (e as Error).message; }
+}
+/** A short message in the page's live region (the phone has no toast). */
+function alertText(text: string) { const line = document.getElementById('phone-alert'); if (line) { line.textContent = text; setTimeout(() => { if (line.textContent === text) line.textContent = ''; }, 6000); } }
+
+/** + Channel on the phone: the same kinds as the computer's, added there. Shown when this phone may start agents. */
+function addMenu() {
+  const kinds: { label: string; engine: 'claude' | 'codex' | 'shell'; chat: boolean }[] = [
+    { label: 'Claude chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true },
+    { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex CLI', engine: 'codex', chat: false }, { label: 'Terminal', engine: 'shell', chat: false }];
+  const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
+    ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
+  const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');
+  return h('div', { id: 'add-wrap', className: 'add-wrap', hidden: !me?.canRun }, menu, button);
+}
+
 function showList() {
-  leaveChannel(); disposeTerminal(); current = null; run = null;
+  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
   app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
 
@@ -103,6 +205,7 @@ let viewer: RFB | null = null;
  * it, not to Trace. A locked Mac shows black here and takes no keys: macOS shows its lock screen only to Apple's viewer.
  */
 async function showScreen() {
+  closeChat(); closeScreen();
   leaveChannel(); disposeTerminal(); current = null; run = null; viewer?.disconnect(); viewer = null;
   const status = h('p', { className: 'dim', aria: { live: 'polite' } }, 'Connecting…');
   const user = h('input', { autocomplete: 'username', autocapitalize: 'none', placeholder: 'Mac user name', aria: { label: 'User name' } });
@@ -180,6 +283,7 @@ function renderList() {
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
+  const add = document.getElementById('add-wrap'); if (add) add.hidden = !me?.canRun;
 }
 
 function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
@@ -252,11 +356,16 @@ function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
-  // A chat channel's conversation is not passed on to phones yet: say so rather than show an empty screen.
-  if (channel?.chat) {
-    holding = false;
-    app.replaceChildren(header(showList, h('span', { className: 'title' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title}`)),
-      h('main', { className: 'list' }, h('p', { className: 'ask-banner', aria: { role: 'status' } }, `This is a chat channel. Its conversation${channel.attention ? ', and the approval it is waiting for,' : ''} can only be seen and answered in Trace on ${channel.computer?.name ?? 'your computer'} for now.`)));
+  closeChat();
+  // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
+  if (channel?.chat && channel.engine !== 'shell') {
+    holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
+    const container = h('main', { className: 'chat-host' });
+    app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), ...channelControls(channel)), container);
+    unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
+      ...(me?.canRun && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
+      follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
+    renderChannel(); listen(sessionId);
     return;
   }
   const title = h('span', { className: 'title', id: 'channel-title' });
@@ -285,7 +394,7 @@ function showChannel(sessionId: string) {
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
-  app.replaceChildren(header(showList, title), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, tools, keys, form));
+  app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   fit = new FitAddon(); terminal.loadAddon(fit);
@@ -469,6 +578,8 @@ function renderChannel() {
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   renderCoach(channel);
+  // A chat has no screen to size or reset: its view follows the conversation itself.
+  if (channel.chat) return;
   // A restarted channel is a new process: its screen starts afresh, as on the desktop.
   if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); requestSize(); }
   if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);
@@ -497,8 +608,14 @@ async function type(data: string) {
 }
 
 function onEvent(event: StreamEvent) {
+  if (event.type === 'chat') { receiveChat(event.data); return; }
+  if (event.type === 'chat-replay') { receiveReplay(event.data); return; }
+  if (event.type === 'me') { me = event.data; renderList(); if (current) showChannel(current); return; }
   if (event.type === 'channels') {
     channels = event.data; renderList(); renderChannel();
+    // A chat shown here that started, stopped or restarted is drawn again for its new run.
+    const shown = channels.find((item) => item.sessionId === current);
+    if (shown?.chat && shownChat && shownChat !== `${shown.sessionId}:${shown.runId}:${shown.running}`) showChannel(shown.sessionId);
     // The list that arrives after an alert was tapped (on connecting, or just after) decides whether its channel opens.
     if (opening) { const id = opening; opening = null; if (channels.some((item) => item.sessionId === id)) showChannel(id); }
     return;

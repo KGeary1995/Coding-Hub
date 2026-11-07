@@ -117,3 +117,69 @@ main.screen { flex: 1; min-height: 0; display: flex; flex-direction: column; gap
 .coach p { margin: 0 0 4px; }
 .coach pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); margin: 4px 0 0; }
 .coach-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Flight Deck Lite on the phone (docs/design/trace/DECISIONS.md): the reticle mark, tracked uppercase labels,
+   a coloured edge per engine, and corner brackets with a soft glow on a channel that needs you. */
+.mark { align-items: center; gap: 8px; font: 700 16px/1 var(--tr-font-ui); letter-spacing: .18em; }
+.mark svg { color: var(--tr-ch-codex); } .mark i { display: none; }
+.mark.big { font-size: 20px; }
+h1, .bar .title, .channel .name { letter-spacing: .04em; }
+h1 { text-transform: uppercase; }
+.channel { position: relative; border-left: 3px solid var(--tr-line-control); background: var(--tr-surface); }
+.channel:has(.chip[data-engine="claude"]) { border-left-color: var(--tr-ch-claude); }
+.channel:has(.chip[data-engine="codex"]) { border-left-color: var(--tr-ch-codex); }
+.channel:has(.chip[data-engine="shell"]) { border-left-color: var(--tr-ch-shell); }
+.channel .tag, .channel .name small { text-transform: uppercase; letter-spacing: .06em; }
+.channel.waiting { --bracket: var(--tr-st-waiting); border-color: var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 7%, var(--tr-surface)); box-shadow: var(--tr-glow-waiting); }
+.channel.waiting::after { content: ""; position: absolute; inset: -1px; pointer-events: none; --c: color-mix(in srgb, var(--bracket) calc(var(--tr-bracket-alpha) * 100%), transparent);
+  background: linear-gradient(var(--c), var(--c)) left top / 12px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 12px, linear-gradient(var(--c), var(--c)) right bottom / 12px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 12px; background-repeat: no-repeat; }
+button.primary { background: var(--tr-ch-codex); color: var(--tr-on-light); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+
+/* A chat channel on the phone: the desktop's thread (src/tile.css), sized for touch. */
+.chat-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.phone-chat { height: calc(100dvh - 53px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+.phone-chat .chat-thread { font-size: 15px; }
+.phone-chat .chat-input-row textarea { font-size: 16px; }
+.phone-chat .chat-icon { min-width: 44px; min-height: 44px; }
+.phone-chat .table-bar { gap: 6px 10px; } .phone-chat .table-bar .quiet-button { min-height: 36px; }
+.phone-chat .chat-permission-actions .button { min-height: 44px; }
+.phone-image { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--tr-scrim); }
+.phone-image img { flex: 1; min-height: 0; object-fit: contain; }
+/* Start / Stop / Restart in a channel's header, and + Channel on the list, when this phone may start agents. */
+.bar button.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.bar button.stop { color: var(--tr-stop-fg); }
+.add-wrap { position: fixed; right: calc(18px + env(safe-area-inset-right)); bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 10; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.fab { width: 56px; height: 56px; padding: 0; border: 1px solid var(--tr-ch-claude); background: var(--tr-bg); color: var(--tr-ch-claude); font: 600 26px/1 var(--tr-font-ui); }
+.add-menu { display: flex; flex-direction: column; min-width: 180px; border: 1px solid var(--tr-line-control); background: var(--tr-surface); }
+.add-menu[hidden] { display: none; }
+.add-menu button { border: 0; border-bottom: 1px solid var(--tr-line); background: none; text-align: left; text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
+.phone-alert { position: fixed; left: 16px; right: 90px; bottom: calc(28px + env(safe-area-inset-bottom)); margin: 0; color: var(--tr-fg-muted); font: 400 13px var(--tr-font-mono); }
+.add-wrap[hidden] { display: none; }
+
+/* The tabs along the bottom (Channels, Usage, Tasks, History, More), and the screens above them. */
+#app:has(> .tabbar) { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; display: flex; justify-content: space-around; padding: 6px env(safe-area-inset-right) calc(6px + env(safe-area-inset-bottom)) env(safe-area-inset-left); border-top: 1px solid var(--tr-line); background: var(--tr-bg); }
+.tabbar button { flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0; border: 0; background: none; color: var(--tr-fg-dim); font: 500 10px var(--tr-font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.tabbar button.active { color: var(--tr-ch-codex); }
+.add-wrap { bottom: calc(84px + env(safe-area-inset-bottom)); }
+.phone-alert { bottom: calc(88px + env(safe-area-inset-bottom)); }
+.phone-card { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--tr-line); background: var(--tr-surface); }
+.phone-card h2, .section-title { margin: 0 0 8px; font: 600 12px var(--tr-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--tr-fg-dim); }
+.section-title { margin-top: 20px; }
+.mono { font-family: var(--tr-font-mono); font-size: 12px; }
+.metric { margin: 0 0 6px; font: 500 28px var(--tr-font-mono); color: var(--tr-fg-strong); } .metric small { font-size: 13px; color: var(--tr-fg-dim); }
+.metric-side { float: right; font-size: 16px; color: var(--tr-fg-muted); }
+.gauge { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 2px; height: 7px; margin: 6px 0; } .gauge i { background: var(--tr-line); }
+.limit { padding: 8px 0; border-bottom: 1px solid var(--tr-line-faint); } .limit p { margin: 0 0 4px; }
+.limit-row { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; }
+.task { padding: 8px 0; border-bottom: 1px solid var(--tr-line-faint); } .task p { margin: 0 0 4px; } .row { display: flex; gap: 8px; margin-top: 6px; }
+.history { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.history-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--tr-line); border-left: 3px solid var(--tr-line-control); background: var(--tr-surface); }
+.history-item > div { flex: 1; min-width: 0; } .history-item p { margin: 2px 0 0; } .history-item.engine-claude { border-left-color: var(--tr-ch-claude); } .history-item.engine-codex { border-left-color: var(--tr-ch-codex); }
+.field { display: grid; gap: 4px; margin: 0 0 10px; color: var(--tr-fg-muted); font-size: 14px; }
+.field select, .field textarea { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-term); color: var(--tr-fg); font: inherit; }
+.note summary { cursor: pointer; } .note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+button.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+/* A long tool card or line never widens the page: the thread scrolls inside itself, the page never sideways. */
+.chat-host, .phone-chat { min-width: 0; max-width: 100vw; overflow-x: hidden; }
+.bar .title { min-width: 72px; }

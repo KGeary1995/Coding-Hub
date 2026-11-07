@@ -32,7 +32,7 @@ export class RulesService {
   private file: string;
   private transientRoot: string;
   constructor(root: string) { this.file = path.join(root, 'shared-rules.json'); this.transientRoot = path.join(root, 'coaching'); }
-  /** Prepared coaching/design-feedback folders are registered but do not count as user projects. */
+  /** Prepared coaching folders are registered but do not count as user projects. */
   private transient(directory: string) {
     let root = this.transientRoot; try { root = fs.realpathSync(root); } catch { /* Not created yet. */ }
     return path.dirname(directory) === root;

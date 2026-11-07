@@ -1,10 +1,12 @@
 import type { ITheme } from '@xterm/xterm';
 
-/** Trace terminal colours (docs/design/trace), converted from OKLCH because xterm needs hex. */
+/** Trace terminal colours (docs/design/trace, Flight Deck Lite), as hex because xterm needs it. */
 export const TERMINAL_FONT = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
-export const ENGINE_CURSOR = { claude: '#f1d35d', codex: '#5cd0ea', shell: '#c3d2cc' } as const;
+export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', shell: '#a9c6bd' } as const;
 export const TERMINAL_THEME: ITheme = {
-  background: '#070a0a', foreground: '#d8e3df', cursor: '#d8e3df', cursorAccent: '#070a0a', selectionBackground: '#2a3835',
-  black: '#131a19', red: '#f97770', green: '#79dd9f', yellow: '#ffa44e', blue: '#8fb4e8', magenta: '#e995e2', cyan: '#5cd0ea', white: '#d8e3df',
-  brightBlack: '#6f807b', brightRed: '#f97770', brightGreen: '#79dd9f', brightYellow: '#ffa44e', brightBlue: '#8fb4e8', brightMagenta: '#e995e2', brightCyan: '#5cd0ea', brightWhite: '#eef4f1',
+  background: '#080b0e', foreground: '#dce7ee', cursor: '#dce7ee', cursorAccent: '#080b0e', selectionBackground: '#1d3340',
+  // xterm draws its own scroll slider; a slate one, not its default grey block.
+  scrollbarSliderBackground: 'rgba(61,98,116,.35)', scrollbarSliderHoverBackground: 'rgba(61,98,116,.6)', scrollbarSliderActiveBackground: 'rgba(95,225,255,.45)',
+  black: '#0d151b', red: '#ff6b6b', green: '#7fe89c', yellow: '#ffb547', blue: '#7fb2ff', magenta: '#ff8fdd', cyan: '#5fe1ff', white: '#dce7ee',
+  brightBlack: '#8aa0ad', brightRed: '#ff8c8c', brightGreen: '#9ff0b5', brightYellow: '#ffc876', brightBlue: '#a3c8ff', brightMagenta: '#ffb0e8', brightCyan: '#9cecff', brightWhite: '#f0f6fa',
 };

@@ -12,7 +12,6 @@ export const INSIGHT_VIEWS: { view: NavigationView; label: string }[] = [
 ];
 /** Rarely used tools, listed on the More tools page instead of in the menus. */
 export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
-  { view: 'design', label: 'Design workspace', detail: 'Design previews and versions, live preview of a local app, annotations and screenshot comparison.' },
   { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
   { view: 'tasks', label: 'Tasks', detail: 'Give each agent a job and its files; Trace sends it, follows it and warns about clashes.' },
   { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },
@@ -33,7 +32,7 @@ export async function openProjectFolder() {
 /** Four bars in the channel colours: two for Claude (CH1 yellow), two for Codex (CH2 cyan). */
 function Wordmark() {
   return <a className="tr-wordmark" href="#workspace" aria-label="Trace home" onClick={(event) => { event.preventDefault(); useWorkspaceStore.getState().setView('workspace'); }}>
-    <span className="tr-wordmark-bars" aria-hidden="true"><i style={{ height: 6 }} /><i style={{ height: 14 }} /><i style={{ height: 9 }} /><i style={{ height: 4 }} /></span><span className="tr-wordmark-text">trace</span>
+    <svg className="tr-wordmark-reticle" width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="13" cy="13" r="10" /><circle cx="13" cy="13" r="5" /><path d="M13 1v5M13 20v5M1 13h5M20 13h5" /><circle cx="13" cy="13" r="1.2" fill="currentColor" /></svg><span className="tr-wordmark-text">trace</span>
   </a>;
 }
 

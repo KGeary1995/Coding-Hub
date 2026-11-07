@@ -1,4 +1,4 @@
-import type { LinkedComputerEvent, RemoteControlRequest } from './remote';
+import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
@@ -58,6 +58,7 @@ export type SessionEvent =
 export interface CodingHubHost {
   workbench(request: WorkbenchRequest): Promise<HostResult<WorkbenchResponse>>;
   coaching(request: CoachingRequest): Promise<HostResult<CoachingResponse>>;
+  /** Claude Design handoff import into a project; unused by the window until the planned Claude tab. */
   designs(request: DesignRequest): Promise<HostResult<DesignResponse>>;
   projects(request: ProjectRequest): Promise<HostResult<ProjectResponse>>;
   accounts(request: AccountRequest): Promise<HostResult<AccountResponse>>;
@@ -94,6 +95,8 @@ export interface CodingHubHost {
   /** Puts text on the clipboard: what a full-screen CLI copied when the person selected text in it. */
   copyText(text: string): Promise<HostResult<null>>;
   onLinkedEvent(listener: (event: LinkedComputerEvent) => void): () => void;
+  /** Linked computers' chat channels, for their tabs: live events, and recent ones when a tab opens. */
+  onLinkedChatEvent(listener: (event: LinkedChatEvent) => void): () => void;
   /** A linked computer's screen: its connection, the bytes both ways, and its saved sign-in. */
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
@@ -105,6 +108,8 @@ export interface CodingHubHost {
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
   /** A linked computer asks this window to start, stop or restart a channel, or add one; answer with finishRemoteControl. */
   onRemoteControl(listener: (request: RemoteControlRequest) => void): () => void;
+  /** A phone allowed to start agents resumes a CLI conversation here in a new channel; answer with finishRemoteControl. */
+  onRemoteResume(listener: (request: RemoteResumeRequest) => void): () => void;
   finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
   /** The local path of a file dropped on the page, or '' when it has none. */
   pathForFile(file: File): string;
@@ -152,6 +157,7 @@ export const IPC_CHANNELS = {
   clipboardImage: 'coding-hub:clipboard-image',
   copyText: 'coding-hub:copy-text',
   linkedEvent: 'coding-hub:linked-event',
+  linkedChatEvent: 'coding-hub:linked-chat-event',
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
@@ -160,4 +166,5 @@ export const IPC_CHANNELS = {
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',
   finishRemoteControl: 'coding-hub:finish-remote-control',
+  remoteResume: 'coding-hub:remote-resume',
 } as const;

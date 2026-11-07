@@ -310,4 +310,49 @@ describe('Chat channels', () => {
     await manager.stop(1, { sessionId: session.sessionId, runId: session.runId });
     expect(events.at(-1)).toMatchObject({ type: 'exit' });
   });
+  it('takes messages, answers and interruptions from a phone or linked computer, as if the owning window sent them', async () => {
+    const chats: { owner: number; envelope: ChatEnvelope }[] = []; const events: SessionEvent[] = [];
+    const manager = new PtyManager((_owner, event) => events.push(event), { discover: async () => chatEngine(), environment: () => ({ ...process.env } as Record<string, string>), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (owner, envelope) => chats.push({ owner, envelope }) });
+    managers.push(manager);
+    const session = await manager.start(3, chatRequest('chat-remote'));
+    const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10)); expect(check()).toBe(true); };
+    const kinds = () => chats.map((chat) => chat.envelope.event.type);
+    manager.chatRemote({ action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'please write a file', images: [] });
+    await until(() => kinds().includes('permission'));
+    // What the phone caused goes to the window that owns the run.
+    expect(chats[0]).toEqual({ owner: 3, envelope: { sessionId: 'chat-remote', runId: session.runId, event: { type: 'user', text: 'please write a file', images: 0, remote: true } } });
+    expect(chats.every((chat) => chat.owner === 3)).toBe(true);
+    const permission = chats.find((chat) => chat.envelope.event.type === 'permission')!.envelope.event as { requestId: string };
+    manager.chatRemote({ action: 'answer', sessionId: session.sessionId, runId: session.runId, requestId: permission.requestId, allow: true });
+    await until(() => kinds().includes('done'));
+    expect(kinds()).toContain('permission-done'); expect(events.some((event) => event.type === 'answered')).toBe(true);
+    expect(() => manager.chatRemote({ action: 'interrupt', sessionId: session.sessionId, runId: session.runId })).not.toThrow();
+    // A stale run, a terminal-style or malformed request, and an unknown channel are refused.
+    expect(() => manager.chatRemote({ action: 'interrupt', sessionId: session.sessionId, runId: '00000000-0000-4000-8000-000000000000' })).toThrow(/stale/);
+    expect(() => manager.chatRemote({ action: 'interrupt', sessionId: 'nope', runId: session.runId })).toThrow(/stale/);
+    expect(() => manager.chatRemote({ action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'x', images: [], extra: true })).toThrow(/Invalid chat request/);
+  });
+  it('runs a Round Table from a phone or linked computer: open, send, driver, rounds, stop and close', async () => {
+    const processes: (FakePty & { onStderr: () => void })[] = []; const chats: { owner: number; envelope: ChatEnvelope }[] = [];
+    const manager = new PtyManager(() => {}, { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (owner, envelope) => chats.push({ owner, envelope }),
+      spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    const claude = await manager.start(1, chatRequest('lead'));
+    const codex = await manager.start(1, { sessionId: 'partner', cwd: process.cwd(), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null }, cols: 80, rows: 24 });
+    const other = await manager.start(2, { sessionId: 'elsewhere', cwd: process.cwd(), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null }, cols: 80, rows: 24 });
+    const lead = { sessionId: claude.sessionId, runId: claude.runId };
+    const table = () => chats.filter((chat) => chat.envelope.event.type === 'table').at(-1)!;
+    // A partner in another window cannot be seated from outside either.
+    expect(() => manager.chatRemote({ action: 'table-open', ...lead, partner: { sessionId: other.sessionId, runId: other.runId }, driver: 'claude', rounds: 1 })).toThrow(/same window/);
+    manager.chatRemote({ action: 'table-open', ...lead, partner: { sessionId: codex.sessionId, runId: codex.runId }, driver: 'claude', rounds: 1 });
+    expect(table()).toMatchObject({ owner: 1, envelope: { sessionId: 'lead', event: { table: { driver: 'claude', rounds: 1, partner: { sessionId: 'partner' } } } } });
+    const written = processes[0].write.mock.calls.length;
+    manager.chatRemote({ action: 'table-send', ...lead, text: 'How should phones start channels?', images: [] });
+    expect(processes[0].write.mock.calls.length).toBeGreaterThan(written); expect(String(processes[0].write.mock.calls.at(-1)![0])).toContain('How should phones start channels?');
+    expect(chats.some((chat) => chat.envelope.event.type === 'user' && chat.owner === 1)).toBe(true);
+    manager.chatRemote({ action: 'table-driver', ...lead, driver: 'codex' }); expect(table().envelope.event).toMatchObject({ table: { driver: 'codex' } });
+    manager.chatRemote({ action: 'table-rounds', ...lead, rounds: 3 }); expect(table().envelope.event).toMatchObject({ table: { rounds: 3 } });
+    manager.chatRemote({ action: 'table-stop', ...lead }); expect(table().envelope.event).toMatchObject({ table: { round: 3 } });
+    manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null });
+  });
 });

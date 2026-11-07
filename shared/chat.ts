@@ -28,14 +28,40 @@ export type ChatEvent =
   /** Something Claude reported that is worth a line in the thread (a refused tool, an API retry). */
   | { type: 'notice'; text: string }
   /** The person's message as the agent received it (the window shows it already; it is kept in the run's history). */
-  | { type: 'user'; text: string; images: number }
+  | { type: 'user'; text: string; images: number; remote?: true }
   /** A resumed conversation's earlier messages and tool results, sent once as it starts. */
-  | { type: 'history'; messages: ChatHistoryMessage[]; results: Record<string, { text: string; isError: boolean; image: boolean }> };
+  | { type: 'history'; messages: ChatHistoryMessage[]; results: Record<string, { text: string; isError: boolean; image: boolean }> }
+  /** The Round Table this chat leads changed (sent on the leading channel); null when it ended. */
+  | { type: 'table'; table: RoundTableState | null };
 export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent };
+
+/**
+ * A Round Table: the person, Claude Code and Codex in one conversation. It is led by a chat channel (the one it was
+ * started from); the other agent is a partner chat run in the same folder. Every message goes to both; then each sees
+ * the other's answer for up to `rounds` rounds, ending sooner when both agree. The driver edits files; the reviewer
+ * reads (Claude's plan mode, Codex's read-only sandbox).
+ */
+export interface RoundTableState {
+  partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' };
+  driver: 'claude' | 'codex'; rounds: number; round: number;
+  /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */
+  phase: 'joining' | 'answering' | 'discussing' | 'idle';
+  /** The last discussion ended with both agents agreeing. */
+  agreed: boolean;
+}
+export const ROUND_TABLE_MAX_ROUNDS = 5;
 export type ChatRequest =
   | { action: 'send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
   | { action: 'answer'; sessionId: string; runId: string; requestId: string; allow: boolean; allowEdits?: boolean }
-  | { action: 'interrupt'; sessionId: string; runId: string };
+  | { action: 'interrupt'; sessionId: string; runId: string }
+  /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number }
+  | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
+  | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex' }
+  | { action: 'table-rounds'; sessionId: string; runId: string; rounds: number }
+  /** Stops both agents and the discussion; the table stays open. */
+  | { action: 'table-stop'; sessionId: string; runId: string }
+  | { action: 'table-close'; sessionId: string; runId: string };
 
 /** The longest piece of a tool's output shown in the thread; the rest stays in Claude's own transcript. */
 export const TOOL_RESULT_LIMIT = 4000;

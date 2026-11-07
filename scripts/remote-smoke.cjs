@@ -12,8 +12,16 @@ const PORT = 47831;
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-remote-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
-  const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
+  const terminalFixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
+  // Claude's stand-in is the structured (chat) fixture when started as a chat channel, else the terminal one.
+  const chatFixture = await fs.readFile(path.join(__dirname, 'fixtures/claude-stream-fixture.cjs'), 'utf8');
+  const claudeFixture = `if (process.argv.includes('--input-format')) {
+${chatFixture}
+} else {
+${terminalFixture}
+}`;
   for (const engine of ['claude', 'codex']) {
+    const fixture = engine === 'claude' ? claudeFixture : terminalFixture;
     if (process.platform === 'win32') {
       const packageRoot = path.join(bin, 'node_modules', ...(engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex').split('/'));
       await fs.mkdir(packageRoot, { recursive: true }); await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { [engine]: 'fixture.cjs' } }));
@@ -69,6 +77,7 @@ const PORT = 47831;
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await tile.getByRole('button', { name: 'Start session', exact: true }).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'running' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();
     // Tapping the terminal opens the message box; the terminal itself takes no typing (a phone keyboard garbles it).
@@ -86,6 +95,7 @@ const PORT = 47831;
     await (await tileControl(tile, 'Stop')).click();
     await (await tileControl(tile, 'Restart')).click();
     await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-channel.png') });
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), '', 'a delivered message leaves the field');
@@ -165,6 +175,59 @@ else if (args.startsWith('serve --bg --https=443')) {
       await fs.rm(path.join(bin, 'tailscale'));
     }
 
+    // A phone may not start agents until the computer allows it (Settings → Phone access); then it can add and start a
+    // channel. A Claude chat's conversation, its approval and the reply work from the phone, and show on the desktop.
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    assert.equal(await phone.locator('#add-channel').isVisible(), false, 'no + Channel on a phone that may not start agents');
+    await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
+    // The box follows the computer's answer (it is checked once the permission is saved), so wait for it rather than check().
+    const allow = card.getByRole('checkbox', { name: 'Can start and stop agents' }); await allow.click();
+    for (let i = 0; i < 100 && !(await allow.isChecked()); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(await allow.isChecked(), 'the phone is allowed to start agents');
+    await phone.locator('#add-channel').waitFor({ state: 'visible' });
+    await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude chat', exact: true }).click();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).click();
+    await phone.getByRole('button', { name: 'Start CH3', exact: true }).click();
+    const box = phone.getByRole('textbox', { name: 'Message to Claude', exact: true });
+    await phone.waitForFunction(() => { const area = document.querySelector('.phone-chat textarea'); return area && !area.disabled; });
+    await box.fill('hello from the phone'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('.phone-chat').filter({ hasText: 'You said: hello from the phone' }).waitFor();
+    await phone.locator('.phone-chat .chat-user-text').filter({ hasText: 'hello from the phone' }).waitFor();
+    await openView(page, 'Workspace');
+    await page.locator('[data-chat-session]').filter({ hasText: 'hello from the phone' }).filter({ hasText: 'You said: hello from the phone' }).waitFor();
+    await box.fill('please write a note'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('.phone-chat .chat-permission').getByRole('button', { name: 'Allow', exact: true }).click();
+    await phone.locator('.phone-chat').filter({ hasText: 'Wrote notes.txt.' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-chat.png') });
+    // A Round Table from the phone: Codex joins this chat as a chat channel in the same folder, started, and seated.
+    await phone.getByRole('button', { name: 'Round Table: add Codex', exact: true }).click();
+    await phone.locator('.phone-chat .table-bar').filter({ hasText: 'Claude drives' }).waitFor({ timeout: 90000 });
+    await phone.locator('#channel-list, .phone-chat').first().waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-table.png') });
+    await phone.getByRole('button', { name: 'Stop CH3', exact: true }).click();
+    await phone.getByRole('button', { name: 'Start CH3', exact: true }).waitFor();
+    await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
+
+    // The phone's other tabs: today's usage, the task board, conversation history and memory, from this computer.
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('.tabbar').waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'Usage' }).click();
+    await phone.locator('.phone-card').filter({ hasText: 'Σ Today' }).filter({ hasText: 'tok' }).waitFor();
+    await phone.locator('.phone-card').filter({ hasText: 'Plan limits' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-usage.png') });
+    await phone.locator('.tabbar').getByRole('button', { name: 'Tasks' }).click();
+    await phone.getByText('No tasks. Give a channel a task on the computer', { exact: false }).waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'History' }).click();
+    await phone.locator('.screen-host').filter({ hasNotText: 'Loading' }).waitFor();
+    assert.equal(await phone.locator('.screen-host .error').count(), 0, 'history loads without an error');
+    await phone.locator('.tabbar').getByRole('button', { name: 'More' }).click();
+    await phone.getByRole('textbox', { name: 'Title' }).fill('From the phone'); await phone.getByRole('textbox', { name: 'Note' }).fill('Checked the build.');
+    await phone.getByRole('button', { name: 'Save handoff', exact: true }).click();
+    await phone.locator('.note').filter({ hasText: 'From the phone' }).waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'Channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    // The removal below is found from inside a channel, as before.
+    await phone.locator('#channel-list button').filter({ hasText: 'CH1' }).first().click(); await phone.getByRole('button', { name: 'Back to channels' }).waitFor();
+
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');
     await card.getByRole('button', { name: 'Remove Phone', exact: true }).click();
@@ -173,7 +236,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });

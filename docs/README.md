@@ -18,7 +18,7 @@ Keep these accurate when you change the behaviour they describe.
 
 ## Historical
 
-Snapshots from earlier versions. They are useful for the reasoning behind decisions, but not for current behaviour: names, limits and paths have changed since (for example "AI Coding Hub" became Trace in 1.11, and four channels became eight).
+Snapshots from earlier versions. They are useful for the reasoning behind decisions, but not for current behaviour: names, limits and paths have changed since (for example "AI Coding Hub" became Trace in 1.11, and four channels became eight). The Design workspace some of them describe (design archive, live preview, annotations, screenshot comparison, Claude Design buttons) has been removed.
 
 | Doc | From |
 |---|---|

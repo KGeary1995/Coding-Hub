@@ -94,6 +94,8 @@ export function PhoneAccessCard() {
       </div>}
       {phones.length > 0 && <ul className="hub-list phone-devices" aria-label="Paired phones">{phones.map((device) => <li key={device.id} className="extension-row">
         <strong>{device.name}</strong><span className="muted">Paired {new Date(device.createdAt).toLocaleDateString()} · {device.lastSeen ? `last used ${new Date(device.lastSeen).toLocaleString()}` : 'not used yet'} · {device.notifications ? 'alerts on' : 'alerts off'}</span>
+        <label className="update-checkbox"><input type="checkbox" checked={device.canRun} disabled={busy} onChange={(event) => void run({ action: 'remote-can-run', id: device.id, canRun: event.target.checked })} />Can start and stop agents</label>
+        <span className="control-note">Lets this phone start, stop, restart and add channels. Removing the phone still locks it out at once.</span>
         {device.notifications && <button className="quiet-button" disabled={busy} onClick={() => void run({ action: 'remote-test-alert', id: device.id })}>Send test alert</button>}
         <button className="quiet-button" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void run({ action: 'remote-revoke', id: device.id })}><X size={14} />Remove</button>
       </li>)}</ul>}

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { ChannelTranscript } from '../../../shared/remote';
-import { ToolCard } from './ChatView';
+import { ToolCard } from './ChatParts';
 import { Markdown } from './Markdown';
 
 /**

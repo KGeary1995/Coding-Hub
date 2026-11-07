@@ -1,4 +1,5 @@
-import type { RemoteChannel } from '../shared/remote';
+import type { ChannelControl, ChatReplay, RemoteChannel, RemoteMe } from '../shared/remote';
+import type { ChatEnvelope, ChatRequest } from '../shared/chat';
 
 /** The phone's device key, given once when it paired. */
 const KEY = 'trace-remote-token';
@@ -107,7 +108,22 @@ export type StreamEvent =
   | { type: 'output'; data: { sessionId: string; runId: string; data: string } }
   /** The channel's screen as it is now, at the size it is drawn at. */
   | { type: 'replay'; data: { sessionId: string; runId: string; data: string; cols: number; rows: number } }
-  | { type: 'resize'; data: { sessionId: string; runId: string; cols: number; rows: number } };
+  | { type: 'resize'; data: { sessionId: string; runId: string; cols: number; rows: number } }
+  /** A chat channel's message, reply, approval or Round Table change (for the chat this phone follows). */
+  | { type: 'chat'; data: ChatEnvelope }
+  /** A chat channel's recent events, sent once as the phone starts following it. */
+  | { type: 'chat-replay'; data: ChatReplay }
+  /** This phone's own permissions changed on the computer. */
+  | { type: 'me'; data: RemoteMe };
+
+/** Who this phone is to the computer, and whether it may start and stop agents. */
+export const whoAmI = async () => await (await api('/api/me')).json() as RemoteMe;
+/** A chat request (a message, an approval, a stop, a Round Table change) for a chat channel. */
+export const chat = async (request: ChatRequest) => { await api('/api/chat', { method: 'POST', body: JSON.stringify(request) }); };
+/** Start, stop, restart or close a channel on this computer (the phone needs Can start and stop agents). */
+export const control = async (sessionId: string, value: ChannelControl) => { await api('/api/control', { method: 'POST', body: JSON.stringify({ sessionId, control: value }) }); };
+/** Adds a channel on this computer: a terminal channel, or Claude chat / Codex chat with `chat`. */
+export const addChannel = async (engine: 'claude' | 'codex' | 'shell', chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
 
 /**
  * Follows a computer's event stream (server-sent events read through fetch, which can send the device key): the one

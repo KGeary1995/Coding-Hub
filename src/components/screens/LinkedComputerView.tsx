@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
 import { Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
-import type { ChannelControl, ChannelTranscript, LinkedComputer, RemoteChannel } from '../../../shared/remote';
+import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedComputer, RemoteChannel } from '../../../shared/remote';
+import type { ChatRequest } from '../../../shared/chat';
 import { TranscriptView } from '../chat/TranscriptView';
+import { linkedChatKey, RemoteChat, receiveReplay } from '../chat/RemoteChat';
 import { linkedTerminal } from '../../runtime/linked-terminals';
 import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
@@ -31,6 +33,17 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
 }
 
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
+
+/**
+ * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read
+ * once as it opens (and for each new run); after that they arrive with the computer's other events.
+ */
+function LinkedChat({ computer, channel, engine }: { computer: LinkedComputer; channel: RemoteChannel; engine: 'claude' | 'codex' }) {
+  const keyOf = linkedChatKey(computer.id);
+  useEffect(() => { void workbench<ChatReplay>({ action: 'linked-chat-history', id: computer.id, sessionId: channel.sessionId }).then((replay) => receiveReplay(replay, keyOf)).catch(() => {}); }, [computer.id, channel.sessionId, channel.runId]);
+  return <RemoteChat sessionId={channel.sessionId} runId={channel.runId} engine={engine} running={channel.running} keyOf={keyOf} className="linked-chat"
+    send={async (request: ChatRequest) => { await workbench({ action: 'linked-chat', id: computer.id, request }); }} />;
+}
 /** One channel on a linked computer: its live terminal at that CLI's size, and start, stop, restart and interrupt. */
 function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: RemoteChannel }) {
   const container = useRef<HTMLDivElement>(null);
@@ -91,8 +104,8 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
-    {channel.chat
-      ? <p className="history-empty">This is a chat channel. Its conversation is shown on {computer.name}, and answered there.</p>
+    {channel.chat && channel.engine !== 'shell'
+      ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}
     {channel.coaching && <LinkedTipStrip computerId={computer.id} computerName={computer.name} coaching={channel.coaching} />}

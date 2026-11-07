@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import type { ChannelControl, ChannelTranscript, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
+import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedChatEvent, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
+import type { ChatEnvelope, ChatEvent, ChatRequest } from '../../../shared/chat';
+import { ChatReplayBuffer, CHAT_REPLAY_EVENTS } from './chat-replay';
 import type { ChannelEngine } from '../../../shared/types';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
@@ -9,7 +11,7 @@ import { ScreenMirror } from './screen-mirror';
 /** A computer found through the Drive sync folder: its sync identity, and its remote's address when it has one. */
 export interface AdvertisedComputer { id: string; name: string; url: string | null }
 /** Where output from linked computers goes besides the desktop window: this computer's phones. */
-export interface RelaySink { output(sessionId: string, runId: string, data: string): void; resize(sessionId: string, runId: string, cols: number, rows: number): void; changed(): void }
+export interface RelaySink { output(sessionId: string, runId: string, data: string): void; resize(sessionId: string, runId: string, cols: number, rows: number): void; changed(): void; chat?(envelope: ChatEnvelope): void }
 
 const FILE = 'linked-computers.json';
 /** Computers the person unlinked: never linked again without a code. */
@@ -18,6 +20,10 @@ const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), ur
 type Link = z.infer<typeof linkSchema>;
 const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
 const RETRY_MAX = 30000;
+/** A chat event from a linked computer: its shape is that computer's (it may be newer), only the envelope is checked. */
+const chatEventSchema = z.object({ type: z.string().min(1).max(40) }).passthrough();
+const chatEnvelopeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), event: chatEventSchema }).strict();
+const chatReplaySchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), events: z.array(chatEventSchema).max(CHAT_REPLAY_EVENTS + 100) }).strict();
 
 /**
  * Only the other computer's remote on the tailnet (HTTPS on a *.ts.net name), or this computer's own loopback for
@@ -33,6 +39,8 @@ export function linkableAddress(value: string | null): string | null {
 interface Connection {
   link: Link; controller: AbortController | null; stopped: boolean; connected: boolean; error: string | null;
   channels: RemoteChannel[]; mirrors: Map<string, ScreenMirror>; wake?: () => void;
+  /** Its chat channels' recent events, for this window's tab and this computer's phones. */
+  chats: ChatReplayBuffer;
   /** The size each of its channels' tiles has in this computer's window, asked for while the tile is shown. */
   fits: Map<string, { runId: string; cols: number; rows: number }>;
 }
@@ -55,6 +63,8 @@ export class LinkedComputers implements RemoteRelay {
   private discovering: Promise<void> | null = null;
   /** The HTTPS addresses of the person's online computers on the tailnet (`tailscalePeers`); none until set. */
   peers: () => Promise<string[]> = async () => [];
+  /** Linked computers' chat events, for their tabs in the desktop window (only while a tab is open). */
+  chatEvents: (event: LinkedChatEvent) => void = () => {};
   constructor(
     private root: string,
     private self: () => { id: string; name: string },
@@ -162,9 +172,9 @@ export class LinkedComputers implements RemoteRelay {
 
   async input(id: string, sessionId: string, runId: string, data: string) { await this.request(this.linked(id), 'api/input', { method: 'POST', body: JSON.stringify({ sessionId, runId, data }) }); }
   /** Adds a channel on that computer, in its own workspace. A Trace before 1.11.9 there answers 404. */
-  async add(id: string, engine: ChannelEngine) {
+  async add(id: string, engine: ChannelEngine, chat = false) {
     const link = this.linked(id);
-    try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine }), signal: AbortSignal.timeout(30000) }); }
+    try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chat ? { chat } : {}) }), signal: AbortSignal.timeout(30000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
   }
   /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */
@@ -197,6 +207,14 @@ export class LinkedComputers implements RemoteRelay {
     try { return ((await (await this.request(link, `api/transcript?sessionId=${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(20000) })).json()) as { transcript?: ChannelTranscript }).transcript ?? null; }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to read its conversations from here.`); throw error; }
   }
+  /** A chat request (send, answer, interrupt, Round Table) for a chat channel there. A Trace there before chat routes answers 404. */
+  async chat(id: string, request: ChatRequest) {
+    const link = this.linked(id);
+    try { await this.request(link, 'api/chat', { method: 'POST', body: JSON.stringify(request), signal: AbortSignal.timeout(120000) }); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to use its chat channels from here.`); throw error; }
+  }
+  /** A chat channel's recent events there, as this computer received them over the link. */
+  chatHistory(id: string, sessionId: string): ChatReplay { this.linked(id); return this.connections.get(id)?.chats.take(sessionId) ?? { sessionId, runId: null, events: [] }; }
   async control(id: string, sessionId: string, control: ChannelControl) { await this.request(this.linked(id), 'api/control', { method: 'POST', body: JSON.stringify({ sessionId, control }), signal: AbortSignal.timeout(60000) }); }
   /** A phone key from a linked computer for one of this computer's phones, so the phone can reach it directly. */
   async phoneKey(id: string, name: string, relayKey: string) {
@@ -236,6 +254,7 @@ export class LinkedComputers implements RemoteRelay {
     this.watching.add(id); this.watchActive();
     const connection = this.connections.get(id); if (!connection) return;
     for (const [sessionId, mirror] of connection.mirrors) mirror.snapshot((screen) => this.emit({ type: 'replay', id, sessionId, runId: mirror.runId, ...screen }));
+    for (const sessionId of connection.chats.sessionIds()) this.chatEvents({ type: 'chat-replay', id, replay: connection.chats.take(sessionId) });
   }
 
   /** The desktop left a linked computer's tab. */
@@ -269,6 +288,15 @@ export class LinkedComputers implements RemoteRelay {
     if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
     return this.transcript(connection.link.id, sessionId);
   }
+  async relayChat(request: ChatRequest) {
+    const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === request.sessionId));
+    if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
+    await this.chat(connection.link.id, request);
+  }
+  relayChatReplay(sessionId: string): ChatReplay | null {
+    const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
+    return connection ? connection.chats.take(sessionId) : null;
+  }
   async write(sessionId: string, runId: string, data: string) {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
     if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
@@ -292,7 +320,7 @@ export class LinkedComputers implements RemoteRelay {
   }
 
   private connect(link: Link) {
-    const connection: Connection = { link, controller: null, stopped: false, connected: false, error: null, channels: [], mirrors: new Map(), fits: new Map() };
+    const connection: Connection = { link, controller: null, stopped: false, connected: false, error: null, channels: [], mirrors: new Map(), fits: new Map(), chats: new ChatReplayBuffer() };
     this.connections.set(link.id, connection);
     void (async () => {
       let delay = 2000;
@@ -335,7 +363,7 @@ export class LinkedComputers implements RemoteRelay {
   /** Clears what this computer showed of a computer that went away; its channels come back with the connection. */
   private drop(connection: Connection) {
     connection.connected = false; connection.channels = [];
-    for (const mirror of connection.mirrors.values()) mirror.dispose(); connection.mirrors.clear();
+    for (const mirror of connection.mirrors.values()) mirror.dispose(); connection.mirrors.clear(); connection.chats.clear();
   }
   /**
    * The other computer removed this one's key. The dead link is dropped, so the row offers a code box instead of a link
@@ -357,7 +385,19 @@ export class LinkedComputers implements RemoteRelay {
             connection.channels = z.array(z.unknown()).max(64).parse(data).flatMap((item) => { const channel = channelSchema.safeParse(item); return channel.success ? [{ ...channel.data }] : []; });
       const current = new Map(connection.channels.map((channel) => [channel.sessionId, channel.runId]));
       for (const [sessionId, mirror] of connection.mirrors) if (current.get(sessionId) !== mirror.runId) { mirror.dispose(); connection.mirrors.delete(sessionId); }
+      for (const sessionId of connection.chats.sessionIds()) if (!current.has(sessionId)) connection.chats.forget(sessionId);
       this.notify(); this.sink.changed(); return;
+    }
+    if (type === 'chat') {
+      const envelope = chatEnvelopeSchema.parse(data) as ChatEnvelope; connection.chats.record(envelope);
+      if (this.watching.has(id)) this.chatEvents({ type: 'chat', id, envelope });
+      this.sink.chat?.(envelope); return;
+    }
+    if (type === 'chat-replay') {
+      const replay = chatReplaySchema.parse(data); connection.chats.forget(replay.sessionId);
+      for (const event of replay.events) connection.chats.record({ sessionId: replay.sessionId, runId: replay.runId, event: event as ChatEvent });
+      if (this.watching.has(id)) this.chatEvents({ type: 'chat-replay', id, replay: connection.chats.take(replay.sessionId) });
+      return;
     }
     const event = data as { sessionId: string; runId: string; data?: string; cols?: number; rows?: number };
     if (typeof event.sessionId !== 'string' || typeof event.runId !== 'string') return;

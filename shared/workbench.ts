@@ -6,14 +6,12 @@ export interface CodexModelCatalog { models: CodexModel[]; checkedAt: string; so
 export interface HostHealthReport { previousShutdown: 'clean' | 'unclean' | 'unknown'; events: { time: string; event: string; reason: string | null; exitCode: number | null }[] }
 export interface NativeConversation { key: string; id: string; engine: 'claude' | 'codex'; profileId?: string; directory: string | null; title: string; modifiedAt: string }
 export interface NativeResume { conversation: NativeConversation; directory: string }
-export interface Annotation { id: string; snapshotId: string; x: number; y: number; text: string; createdAt: string }
-export interface PreparedRequest { directory: string; prompt: string }
 export interface Experiment { id: string; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string; createdAt: string }
 export interface Trial { id: string; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: 'successful' | 'partial' | 'failed'; evidence: string; createdAt: string }
 export interface ExperimentsData { experiments: Experiment[]; trials: Trial[] }
 export interface BackupRecord { id: string; createdAt: string; appVersion: string; files: number; bytes: number; includesLogs: boolean }
 export interface BackupResult { record: BackupRecord; restoredPath?: string; restartRequired?: boolean }
-/** `sentAt` and `baseline` (the project's changed files then) are set when the task is sent to its channel. */
+/** `sentAt` and `baseline` (the project's changed files then) are set when the task is sent to its channel. `designRef` linked a task to an annotation in the removed Design workspace; older saved tasks may still carry it. */
 export interface Task { designRef?: { snapshotId: string; annotationId: string }; id: string; title: string; details?: string; directory: string; sessionId: string | null; scope: string[]; status: 'queued' | 'active' | 'review' | 'done'; notes: string; verificationId: string | null; createdAt: string; sentAt?: string; baseline?: Record<string, string> }
 export interface TaskSent { task: Task; prompt: string }
 export interface TaskWarning { taskIds: string[]; text: string }
@@ -34,13 +32,9 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | { action: 'host-health' }
  | { action: 'diagnose'; engine: 'claude' | 'codex'; directory: string | null; profileId?: string }
  | { action: 'native-list' } | { action: 'native-resume'; key: string; directory?: string }
- | { action: 'preview-open'; url: string } | { action: 'preview-close' }
- | { action: 'preview-capture'; title: string; notes: string; designId?: string; projectDirectory: string | null }
- | { action: 'annotation-list'; snapshotId: string } | { action: 'annotation-add'; snapshotId: string; x: number; y: number; text: string }
- | { action: 'design-feedback'; snapshotId: string }
  | { action: 'experiment-list' } | { action: 'experiment-save'; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string }
  | { action: 'trial-add'; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: Trial['outcome']; evidence: string }
  | { action: 'backup-list' } | { action: 'backup-create'; includeLogs: boolean } | { action: 'backup-export'; id: string } | { action: 'backup-restore'; id: string } | { action: 'backup-import' }
  | { action: 'task-list' } | { action: 'task-save'; id?: string; title: string; details?: string; directory: string; sessionId: string | null; scope: string[]; status: Task['status']; notes: string; verificationId: string | null } | { action: 'task-audit' } | { action: 'task-watch' } | { action: 'task-send'; id: string } | { action: 'task-remove'; id: string } | { action: 'task-status'; id: string; status: Task['status'] }
  | { action: 'verification-list' } | { action: 'verification-save'; id?: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number } | { action: 'verification-run'; id: string } | { action: 'verification-cancel' };
-export type WorkbenchResponse = import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | Annotation[] | Annotation | PreparedRequest | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationData | VerificationProfile | VerificationResult | import('./design').DesignPreview | null;
+export type WorkbenchResponse = import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationData | VerificationProfile | VerificationResult | null;
