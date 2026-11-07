@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Send, Square, X } from 'lucide-react';
+import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
@@ -36,10 +36,13 @@ export interface RemoteChatProps {
   follow?: (sessionId: string) => () => void;
   keyOf?: (sessionId: string) => string;
   className?: string;
+  /** Opens a Round Table on this chat (the phone, when it may start agents); the error message, or null. */
+  openTable?: () => Promise<string | null>;
 }
 
 const same = (id: string) => id;
-export function RemoteChat({ sessionId, runId, engine, running, send, follow, keyOf = same, className = '' }: RemoteChatProps) {
+export function RemoteChat({ sessionId, runId, engine, running, send, follow, keyOf = same, className = '', openTable }: RemoteChatProps) {
+  const [opening, setOpening] = useState(false);
   const chat = useChatStore((state) => state.threads[keyOf(sessionId)] ?? EMPTY);
   const table = chat.table ?? null;
   const partner = useChatStore((state) => table ? state.threads[keyOf(table.partner.sessionId)] ?? EMPTY : EMPTY);
@@ -88,6 +91,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
       {error && <p className="chat-notice error" role="alert">{error}</p>}
       <div className="chat-input-row">
         <button type="button" className="chat-icon" aria-label="Attach images or take a photo" disabled={!live} onClick={() => file.current?.click()}><ImagePlus size={18} /></button>
+        {openTable && !table && live && <button type="button" className="chat-icon" aria-label={`Round Table: add ${engine === 'claude' ? 'Codex' : 'Claude'}`} title={opening ? 'Adding the other agent…' : `Round Table: bring ${engine === 'claude' ? 'Codex' : 'Claude Code'} into this conversation`} disabled={opening} onClick={() => { setOpening(true); setError(''); void openTable().then((failure) => { setOpening(false); if (failure) setError(failure); }); }}><Users size={18} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea rows={1} value={text} disabled={!live} placeholder={!live ? 'Not running' : table ? `Message ${agent} and ${AGENT[table.partner.engine]}` : `Message ${agent}`} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} />
         {busy && !text.trim()

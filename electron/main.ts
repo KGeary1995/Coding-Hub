@@ -310,7 +310,7 @@ function channelTranscript(sessionId: string): ChannelTranscript {
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine, chat = false): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}) }); }
+function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
 /**
  * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
  * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
@@ -542,7 +542,7 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
-    add: (engine, chat) => addChannel(engine, chat),
+    add: (engine, chat, like) => addChannel(engine, chat, like),
     chat: (request) => manager.chatRemote(request),
     // Claude Code and Codex take an image from this computer's clipboard when they get their image key (Alt+V on
     // Windows, Ctrl+V on a Mac), so the pasted image is put there first, as a paste here would.

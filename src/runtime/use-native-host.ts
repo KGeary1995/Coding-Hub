@@ -74,7 +74,7 @@ export function useNativeHost() {
     // A phone resumed a conversation from its History: a channel for it here, as Session history's Resume makes.
     const unsubscribeResume = host.onRemoteResume((request) => { const error = remoteResume(request); host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) }); });
     const unsubscribeControl = host.onRemoteControl((request) => {
-      void ('add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true)) : remoteControl(request.sessionId, request.control))
+      void ('add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
     });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
@@ -165,11 +165,15 @@ export function remoteResume(request: RemoteResumeRequest): string | undefined {
   return undefined;
 }
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
-export function remoteAdd(engine: ChannelEngine, chat = false): string | undefined {
+export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
   if (before >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels.`;
   // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
   if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
+  // In the folder another channel works in (a Round Table's partner), whatever the workspace root is now.
+  const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
+  if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);
+    if (added && added.id !== source.id) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === added.id ? { ...session, binding: cwd ? { mode: 'independent', cwd } : { ...source.binding } } : session) })); }
   return useWorkspaceStore.getState().sessions.length > before ? undefined : 'The channel could not be added.';
 }
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {

@@ -197,6 +197,11 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.locator('.phone-chat .chat-permission').getByRole('button', { name: 'Allow', exact: true }).click();
     await phone.locator('.phone-chat').filter({ hasText: 'Wrote notes.txt.' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-chat.png') });
+    // A Round Table from the phone: Codex joins this chat as a chat channel in the same folder, started, and seated.
+    await phone.getByRole('button', { name: 'Round Table: add Codex', exact: true }).click();
+    await phone.locator('.phone-chat .table-bar').filter({ hasText: 'Claude drives' }).waitFor({ timeout: 90000 });
+    await phone.locator('#channel-list, .phone-chat').first().waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-table.png') });
     await phone.getByRole('button', { name: 'Stop CH3', exact: true }).click();
     await phone.getByRole('button', { name: 'Start CH3', exact: true }).waitFor();
     await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();

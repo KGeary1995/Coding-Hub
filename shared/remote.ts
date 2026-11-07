@@ -36,7 +36,7 @@ export type RemoteDeviceKind = 'phone' | 'computer';
 export type ChannelControl = 'start' | 'stop' | 'restart' | 'close';
 /** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
 /** `chat` asks for a chat channel (Claude Code or Codex) rather than a terminal one. */
-export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true };
+export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true; like?: string };
 export interface TailscaleState {
   /** The tailscale CLI was found. */
   installed: boolean;

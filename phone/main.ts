@@ -149,6 +149,29 @@ function channelControls(channel: RemoteChannel): Node[] {
     ? [h('button', { className: 'quiet', type: 'button', onclick: press('restart'), aria: { label: `Restart CH${channel.channel}` } }, 'Restart'), h('button', { className: 'quiet stop', type: 'button', onclick: press('stop'), aria: { label: `Stop CH${channel.channel}` } }, 'Stop')]
     : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')];
 }
+/** Waits until `find` returns something from the channel list as the computer updates it; null after `ms`. */
+async function channelWhere<T>(find: () => T | undefined | null, ms: number): Promise<T | null> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 300))) { const found = find(); if (found) return found; }
+  return null;
+}
+/**
+ * Round Table from the phone: the other agent as a chat channel in the same folder on this computer, started, then
+ * seated at this chat's table (this chat's agent drives first, two rounds), as the desktop's people button does.
+ */
+async function openTableHere(channel: RemoteChannel): Promise<string | null> {
+  if (channel.engine === 'shell' || !channel.runId) return 'This chat is not running.';
+  const other = channel.engine === 'claude' ? 'codex' : 'claude'; const before = new Set(channels.map((item) => item.sessionId));
+  try {
+    await addChannel(other, true, channel.sessionId);
+    const added = await channelWhere(() => channels.find((item) => !before.has(item.sessionId) && item.engine === other && item.chat), 15000);
+    if (!added) return 'The other agent’s channel did not appear. Check the computer.';
+    await control(added.sessionId, 'start');
+    const partner = await channelWhere(() => { const item = channels.find((candidate) => candidate.sessionId === added.sessionId); return item?.running && item.runId ? item : null; }, 60000);
+    if (!partner?.runId) return `${other === 'codex' ? 'Codex' : 'Claude Code'} did not start. Check its channel.`;
+    await chat({ action: 'table-open', sessionId: channel.sessionId, runId: channel.runId, partner: { sessionId: partner.sessionId, runId: partner.runId }, driver: channel.engine, rounds: 2 });
+    return null;
+  } catch (e) { return (e as Error).message; }
+}
 /** A short message in the page's live region (the phone has no toast). */
 function alertText(text: string) { const line = document.getElementById('phone-alert'); if (line) { line.textContent = text; setTimeout(() => { if (line.textContent === text) line.textContent = ''; }, 6000); } }
 
@@ -340,6 +363,7 @@ function showChannel(sessionId: string) {
     const container = h('main', { className: 'chat-host' });
     app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), ...channelControls(channel)), container);
     unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
+      ...(me?.canRun && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
       follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
     renderChannel(); listen(sessionId);
     return;

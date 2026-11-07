@@ -33,7 +33,8 @@ export interface RemoteHost {
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
   control?(sessionId: string, control: ChannelControl): Promise<void>;
   /** Adds a channel to this computer's workspace (a linked computer's + Channel); `chat` makes it a chat channel. */
-  add?(engine: ChannelEngine, chat?: boolean): Promise<void>;
+  /** `like`: a channel on this computer whose folder the new one works in (a Round Table's partner). */
+  add?(engine: ChannelEngine, chat?: boolean, like?: string): Promise<void>;
   /** A chat request (ChatRequest, validated again there) for a run on this computer, as if its window sent it. */
   chat?(request: ChatRequest): void;
   /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
@@ -124,7 +125,7 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
-const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal channel cannot be a chat.');
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal channel cannot be a chat.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
@@ -766,7 +767,8 @@ export class RemoteServer {
       const now = this.current(device.id); if (!now) return this.send(response, 401, { error: kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.' });
       if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
-      try { await this.host.add(parsed.data.engine, parsed.data.chat === true); }
+      if (parsed.data.like && !this.local(parsed.data.like)) return this.send(response, 400, { error: 'Unknown channel.' });
+      try { await this.host.add(parsed.data.engine, parsed.data.chat === true, parsed.data.like); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
       return this.send(response, 200, { ok: true });
     }
