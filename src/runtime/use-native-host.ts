@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
-import type { ChannelControl } from '../../shared/remote';
+import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
 import type { ChannelEngine } from '../../shared/types';
 import { MAX_CHANNELS } from '../../shared/schemas';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
@@ -71,6 +71,8 @@ export function useNativeHost() {
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
     // A clicked desktop notification opens what it is about.
     const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView('usage'); });
+    // A phone resumed a conversation from its History: a channel for it here, as Session history's Resume makes.
+    const unsubscribeResume = host.onRemoteResume((request) => { const error = remoteResume(request); host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) }); });
     const unsubscribeControl = host.onRemoteControl((request) => {
       void ('add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
@@ -103,7 +105,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -146,6 +148,22 @@ export async function stopSession(id: string): Promise<boolean> {
  * Carries out a linked computer's request to start, stop, restart or close one of this computer's channels, the same
  * way the buttons on its tile would. Returns why it could not, for the other computer to show.
  */
+/**
+ * A phone's Resume: a channel that continues the conversation in its own folder, as Session history's Resume does (the
+ * computer already checked the conversation exists). The desktop's view is left as it is: the person is elsewhere.
+ */
+export function remoteResume(request: RemoteResumeRequest): string | undefined {
+  const state = useWorkspaceStore.getState();
+  if (state.sessions.length >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels. Close one there first.`;
+  const session = createSession(request.engine, { mode: 'independent', cwd: request.directory });
+  session.config = request.engine === 'claude'
+    ? { engine: 'claude', resumeId: request.id, ...(request.profileId ? { accountProfileId: request.profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
+    : { engine: 'codex', resumeId: request.id, model: '', reasoningEffort: null };
+  session.title = request.title || (request.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed');
+  const sessions = [...state.sessions, session];
+  useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid' });
+  return undefined;
+}
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
 export function remoteAdd(engine: ChannelEngine, chat = false): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;

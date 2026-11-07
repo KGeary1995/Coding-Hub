@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { PlanLimits } from '../shared/plan-limits';
+import type { RemoteHistoryItem, RemoteMemory, RemoteTask, RemoteUsage } from '../shared/remote';
 import { api } from './api';
 
 /**
@@ -8,12 +8,6 @@ import { api } from './api';
  * routes (remote-server.ts); acting (moving a task, resuming a conversation) needs Can start and stop agents, which the
  * computer checks and the screen says.
  */
-
-// The routes' shapes (shared/remote.ts once merged).
-export interface RemoteUsage { day: string; tokens: { claude: number; codex: number }; cost: number | null; complete: boolean; limits: PlanLimits[]; budget: { tokens: number | null; dollars: number | null; warnAt: number } | null }
-export interface RemoteTask { id: string; title: string; status: 'todo' | 'working' | 'review' | 'done'; sessionId: string | null; channel: number | null; files: string[]; updatedAt: string }
-export interface RemoteHistoryItem { key: string; engine: 'claude' | 'codex'; title: string; folder: string; modified: string }
-export interface RemoteMemory { project: string; name: string; notes: { id: string; title: string; author: 'claude' | 'codex' | 'human'; createdAt: string; content: string }[] }
 
 const compact = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(2)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
 const when = (iso: string) => { const date = new Date(iso); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };

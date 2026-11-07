@@ -201,6 +201,25 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.getByRole('button', { name: 'Start CH3', exact: true }).waitFor();
     await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
 
+    // The phone's other tabs: today's usage, the task board, conversation history and memory, from this computer.
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('.tabbar').waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'Usage' }).click();
+    await phone.locator('.phone-card').filter({ hasText: 'Σ Today' }).filter({ hasText: 'tok' }).waitFor();
+    await phone.locator('.phone-card').filter({ hasText: 'Plan limits' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-usage.png') });
+    await phone.locator('.tabbar').getByRole('button', { name: 'Tasks' }).click();
+    await phone.getByText('No tasks. Give a channel a task on the computer', { exact: false }).waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'History' }).click();
+    await phone.locator('.screen-host').filter({ hasNotText: 'Loading' }).waitFor();
+    assert.equal(await phone.locator('.screen-host .error').count(), 0, 'history loads without an error');
+    await phone.locator('.tabbar').getByRole('button', { name: 'More' }).click();
+    await phone.getByRole('textbox', { name: 'Title' }).fill('From the phone'); await phone.getByRole('textbox', { name: 'Note' }).fill('Checked the build.');
+    await phone.getByRole('button', { name: 'Save handoff', exact: true }).click();
+    await phone.locator('.note').filter({ hasText: 'From the phone' }).waitFor();
+    await phone.locator('.tabbar').getByRole('button', { name: 'Channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    // The removal below is found from inside a channel, as before.
+    await phone.locator('#channel-list button').filter({ hasText: 'CH1' }).first().click(); await phone.getByRole('button', { name: 'Back to channels' }).waitFor();
+
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');
     await card.getByRole('button', { name: 'Remove Phone', exact: true }).click();
@@ -209,7 +228,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });
