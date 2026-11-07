@@ -1,23 +1,49 @@
-// Trace desktop icon: the phone icon's three bars (phone/public/icon-512.png) on a rounded dark tile.
-const fs=require('fs'),zlib=require('zlib');
-const BG=[0x0b,0x10,0x10],BARS=[[136,196,245,[0xe9,0xcf,0x58]],[226,286,154,[0x5c,0xd0,0xea]],[317,377,208,[0x87,0x96,0x92]]],BOTTOM=385;
-const crcT=[...Array(256)].map((_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0;});
-const crc=b=>{let c=~0;for(const x of b)c=crcT[(c^x)&255]^(c>>>8);return (~c)>>>0;};
-const chunk=(t,d)=>{const l=Buffer.alloc(4);l.writeUInt32BE(d.length);const td=Buffer.concat([Buffer.from(t),d]);const c=Buffer.alloc(4);c.writeUInt32BE(crc(td));return Buffer.concat([l,td,c]);};
-function render(S){
-  // Design space 512: tile inset 12 with radius 105 (the old icon's proportions); bars scaled into the tile.
-  const M=12,R=105,k=(512-2*M)/512,tx=v=>M+v*k; const ss=S<=64?8:4; const u=512/S;
-  const raw=Buffer.alloc(S*(S*4+1));
-  for(let y=0;y<S;y++){raw[y*(S*4+1)]=0;for(let x=0;x<S;x++){let a=0,r=0,g=0,b=0;
-    for(let j=0;j<ss;j++)for(let i=0;i<ss;i++){const px=(x+(i+.5)/ss)*u,py=(y+(j+.5)/ss)*u;
-      const cx=Math.min(Math.max(px,M+R),512-M-R),cy=Math.min(Math.max(py,M+R),512-M-R);if((px-cx)**2+(py-cy)**2>R*R)continue;
-      let c=BG;for(const [x0,x1,top,col] of BARS)if(px>=tx(x0)&&px<tx(x1)&&py>=tx(top)&&py<tx(BOTTOM))c=col;a++;r+=c[0];g+=c[1];b+=c[2];}
-    const o=y*(S*4+1)+1+x*4;if(a){raw[o]=Math.round(r/a);raw[o+1]=Math.round(g/a);raw[o+2]=Math.round(b/a);}raw[o+3]=Math.round(255*a/(ss*ss));}}
-  const ih=Buffer.alloc(13);ih.writeUInt32BE(S,0);ih.writeUInt32BE(S,4);ih[8]=8;ih[9]=6;
-  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ih),chunk('IDAT',zlib.deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);}
-const out=process.argv[2];fs.writeFileSync(out+'/icon.png',render(1024));
-const sizes=[16,20,24,32,40,48,64,128,256],pngs=sizes.map(render);
-const head=Buffer.alloc(6);head.writeUInt16LE(1,2);head.writeUInt16LE(sizes.length,4);let off=6+16*sizes.length;
-const dir=Buffer.concat(sizes.map((s,i)=>{const e=Buffer.alloc(16);e[0]=s>=256?0:s;e[1]=s>=256?0:s;e.writeUInt16LE(1,4);e.writeUInt16LE(32,6);e.writeUInt32LE(pngs[i].length,8);e.writeUInt32LE(off,12);off+=pngs[i].length;return e;}));
-fs.writeFileSync(out+'/icon.ico',Buffer.concat([head,dir,...pngs]));
-for(const s of [16,32,48]) fs.writeFileSync(out+`/preview-${s}.png`,pngs[sizes.indexOf(s)]);
+// Trace's icon (Flight Deck Lite, docs/design/trace/DECISIONS.md): the reticle from the top bar, Codex cyan, with
+// Claude's amber at its centre, on dark slate with a faint grid. Renders it with Electron and writes:
+//   assets/icon.png (1024, macOS), assets/icon.ico (256…16, Windows; PNG entries),
+//   phone/public/icon-512.png, icon-192.png, apple-touch-icon.png (square and opaque: the phone masks them itself).
+// Run from the repository: electron scripts/make-icon.cjs --disable-gpu
+const { app, BrowserWindow } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.join(__dirname, '..'); const assets = path.join(root, 'assets'); const phone = path.join(root, 'phone', 'public');
+/** `simple`: for 16-32 px, thicker lines and no inner ring or grid, so it stays a clear target at that size. */
+/** `square`: no rounded corners (phone icons, which the phone masks to its own shape). */
+function svg(size, simple, square = false) {
+  const stroke = simple ? 92 : 46;
+  const grid = simple ? '' : Array.from({ length: 15 }, (_, i) => `<path d="M${(i + 1) * 64} 0V1024M0 ${(i + 1) * 64}H1024"/>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024">
+  <defs><clipPath id="r"><rect width="1024" height="1024" rx="${square ? 0 : simple ? 200 : 228}"/></clipPath></defs>
+  <g clip-path="url(#r)">
+    <rect width="1024" height="1024" fill="#0a0e12"/>
+    <g stroke="#5fe1ff" stroke-opacity=".07" stroke-width="3">${grid}</g>
+    <g fill="none" stroke="#5fe1ff" stroke-width="${stroke}" stroke-linecap="square">
+      <circle cx="512" cy="512" r="${simple ? 290 : 300}"/>
+      ${simple ? '' : `<circle cx="512" cy="512" r="150"/>`}
+      <path d="M512 ${simple ? 96 : 120}V${simple ? 300 : 330}M512 ${simple ? 724 : 694}V${simple ? 928 : 904}M${simple ? 96 : 120} 512H${simple ? 300 : 330}M${simple ? 724 : 694} 512H${simple ? 928 : 904}"/>
+    </g>
+    <circle cx="512" cy="512" r="${simple ? 96 : 62}" fill="#ffb547"/>
+  </g>
+</svg>`;
+}
+
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ show: false, width: 1024, height: 1024, useContentSize: true, transparent: true, frame: false });
+  const render = async (size, simple, square = false) => {
+    win.setContentSize(size, size);
+    await win.loadURL('data:text/html,' + encodeURIComponent(`<html><body style="margin:0;background:transparent">${svg(size, simple, square)}</body></html>`));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return (await win.webContents.capturePage({ x: 0, y: 0, width: size, height: size })).resize({ width: size, height: size }).toPNG();
+  };
+  fs.writeFileSync(path.join(assets, 'icon.png'), await render(1024, false));
+  for (const [name, size] of [['icon-512.png', 512], ['icon-192.png', 192], ['apple-touch-icon.png', 180]]) fs.writeFileSync(path.join(phone, name), await render(size, false, true));
+  // The .ico: PNG-compressed entries (Windows Vista and later), 256 down to 16.
+  const sizes = [256, 128, 64, 48, 32, 24, 16]; const images = [];
+  for (const size of sizes) images.push(await render(size, size <= 32));
+  const header = Buffer.alloc(6); header.writeUInt16LE(0, 0); header.writeUInt16LE(1, 2); header.writeUInt16LE(sizes.length, 4);
+  const entries = []; let offset = 6 + 16 * sizes.length;
+  sizes.forEach((size, i) => { const e = Buffer.alloc(16); e.writeUInt8(size >= 256 ? 0 : size, 0); e.writeUInt8(size >= 256 ? 0 : size, 1); e.writeUInt8(0, 2); e.writeUInt8(0, 3); e.writeUInt16LE(1, 4); e.writeUInt16LE(32, 6); e.writeUInt32LE(images[i].length, 8); e.writeUInt32LE(offset, 12); offset += images[i].length; entries.push(e); });
+  fs.writeFileSync(path.join(assets, 'icon.ico'), Buffer.concat([header, ...entries, ...images]));
+  app.quit();
+});

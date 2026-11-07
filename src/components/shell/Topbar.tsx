@@ -1,3 +1,4 @@
+import { startRoundTable } from '../../runtime/round-table';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { CircleHelp, Columns2, Grid2X2, Monitor, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
 import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
@@ -44,12 +45,12 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const insight = INSIGHT_VIEWS.find((item) => item.view === activeView) ?? (MORE_TOOLS.some((item) => item.view === activeView) ? INSIGHT_VIEWS.find((item) => item.view === 'tools') : undefined);
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
-  const busyNote = sessions.length >= 4 ? `Channel ${sessions.length + 1} of ${MAX_CHANNELS}. Each runs its own CLI and uses more memory.` : undefined;
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   const channelMenu: MenuItem[] = other
-    ? (['claude', 'codex', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', shell: 'Terminal' }[engine], detail: `On ${other.name}`, onSelect: () => void addLinkedChannel(other.id, engine) }))
-    : [{ label: 'Claude Code', detail: busyNote, onSelect: () => addSession('claude') }, { label: 'Claude chat', detail: busyNote ?? 'Claude as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('claude') }, { label: 'Codex chat', detail: busyNote ?? 'Codex as a conversation, with images in the thread', onSelect: () => useWorkspaceStore.getState().addChatSession('codex') }, { label: 'Codex CLI', detail: busyNote, onSelect: () => addSession('codex') }, { label: 'Terminal', detail: busyNote ?? 'Your shell (zsh, bash or PowerShell) in the project folder', onSelect: () => addSession('shell') }];
+    ? (['claude', 'codex', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', shell: 'Terminal' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
+    : [{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Claude chat', onSelect: () => useWorkspaceStore.getState().addChatSession('claude') }, { label: 'Codex chat', onSelect: () => useWorkspaceStore.getState().addChatSession('codex') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }, { label: 'Terminal', onSelect: () => addSession('shell') },
+      ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(useWorkspaceStore.getState().sessions.at(-1)?.id ?? '', error, true); }) }] : [])];
   return <header className="tr-topbar">
     <Wordmark />
     {project
