@@ -16,7 +16,8 @@ import { LiveCoach } from './services/coaching/live';
 import { HandoffImport } from './services/design/handoff';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import { REMOTE_PORT, type ChannelControl, type ChannelTranscript } from '../shared/remote';
+import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteResumeRequest } from '../shared/remote';
+import type { NativeResume } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
@@ -57,7 +58,7 @@ import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
-import { AutoMemory } from './services/hub/auto-memory';
+import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -170,6 +171,15 @@ function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
+}
+/** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
+function channelProjects(): { project: string; directory: string }[] {
+  const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd])); const found = new Map<string, string>();
+  for (const session of saved?.sessions ?? []) {
+    const cwd = running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null); if (!cwd) continue;
+    try { const project = projectMemoryKey(cwd); if (!found.has(project)) found.set(project, cwd); } catch { /* An unreadable folder has no notes to show. */ }
+  }
+  return [...found].map(([project, directory]) => ({ project, directory }));
 }
 /**
  * A desktop notification, unless they are turned off in Settings. A channel's alert is shown only while Trace is not in
@@ -301,13 +311,22 @@ function channelTranscript(sessionId: string): ChannelTranscript {
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
 function addChannel(engine: ChannelEngine, chat = false): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}) }); }
-function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true }): Promise<void> {
+/**
+ * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
+ * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
+ */
+async function resumeConversation(key: string): Promise<void> {
+  const { conversation, directory } = await nativeSessions.execute({ action: 'native-resume', key }) as NativeResume;
+  const label = workflows?.labels().find((item) => item.key === conversation.key)?.name;
+  return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || (conversation.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed') }, IPC_CHANNELS.remoteResume);
+}
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | Omit<RemoteResumeRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { pendingControls.delete(requestId); reject(new HubError('REMOTE_CONTROL_TIMEOUT', 'This computer did not finish in time. Check the channel there.')); }, 45000);
     pendingControls.set(requestId, { resolve, reject, timer });
-    if (!sendToRenderer(IPC_CHANNELS.remoteControl, { requestId, ...request })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
+    if (!sendToRenderer(channel, { requestId, ...request })) { clearTimeout(timer); pendingControls.delete(requestId); reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window on this computer is not available.')); }
   });
 }
 /**
@@ -547,6 +566,20 @@ else app.whenReady().then(() => {
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
+    // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
+    // asks for a fresh read in the background, at most every five minutes like Usage (PlanLimitsService.refresh).
+    usage: () => {
+      void planLimits.refresh().catch(() => {});
+      let budget: { dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number } | null = null; try { budget = hub?.preferences() ?? null; } catch { /* Unreadable preferences: no budget shown. */ }
+      return { today: dayUsage.totals(), limits: planLimits.current(), budget };
+    },
+    tasks: () => tasks.list(),
+    taskStatus: async (id, status) => { await tasks.execute({ action: 'task-status', id, status }); },
+    history: async () => { const labels = workflows?.labels() ?? []; return (await nativeSessions.list()).map((item) => { const label = labels.find((entry) => entry.key === item.key)?.name; return label ? { ...item, label } : item; }); },
+    resume: (key) => resumeConversation(key),
+    memoryProjects: () => channelProjects(),
+    memoryNotes: (project) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); return hub.memory.list(project); },
+    writeMemory: (project, title, content) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); hub.execute({ action: 'memory-write', project, title, content, author: 'human' }); },
   // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
   }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;

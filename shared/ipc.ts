@@ -1,4 +1,4 @@
-import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest } from './remote';
+import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
@@ -108,6 +108,8 @@ export interface CodingHubHost {
   onChatEvent(listener: (envelope: ChatEnvelope) => void): () => void;
   /** A linked computer asks this window to start, stop or restart a channel, or add one; answer with finishRemoteControl. */
   onRemoteControl(listener: (request: RemoteControlRequest) => void): () => void;
+  /** A phone allowed to start agents resumes a CLI conversation here in a new channel; answer with finishRemoteControl. */
+  onRemoteResume(listener: (request: RemoteResumeRequest) => void): () => void;
   finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
   /** The local path of a file dropped on the page, or '' when it has none. */
   pathForFile(file: File): string;
@@ -164,4 +166,5 @@ export const IPC_CHANNELS = {
   chatEvent: 'coding-hub:chat-event',
   remoteControl: 'coding-hub:remote-control',
   finishRemoteControl: 'coding-hub:finish-remote-control',
+  remoteResume: 'coding-hub:remote-resume',
 } as const;

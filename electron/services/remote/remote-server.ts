@@ -18,6 +18,10 @@ import { phoneFile } from './phone-files';
 import { ScreenMirror } from './screen-mirror';
 import { acceptKey, frame, FrameReader } from './websocket';
 import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } from './web-push';
+import type { DayUsage, HubPreferences, MemoryNote } from '../../../shared/hub';
+import type { PlanLimits } from '../../../shared/plan-limits';
+import type { NativeConversation, Task } from '../../../shared/workbench';
+import { FROM_PHONE, remoteHistory, remoteMemory, remoteTasks, remoteUsage } from './phone-data';
 
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 /** A channel's live coaching as phones and linked computers see it: only while it has something to say. */
@@ -49,6 +53,20 @@ export interface RemoteHost {
   transcript?(sessionId: string): ChannelTranscript;
   /** This computer's own screen-sharing server (macOS Screen Sharing on loopback), for a phone's Screen; null when there is none. */
   screenTarget?(): { host: string; port: number } | null;
+  /** Today's usage, the plan limits last read, and the daily budgets (null when Settings cannot be read). */
+  usage?(): { today: DayUsage; limits: PlanLimits[]; budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null };
+  /** The task board, and moving a card on it (as dragging it on the desktop does). */
+  tasks?(): Task[];
+  taskStatus?(id: string, status: Task['status']): Promise<void>;
+  /** Session history's CLI conversations, newest first, each with the name the person gave it there. */
+  history?(): Promise<(NativeConversation & { label?: string })[]>;
+  /** Resumes one in a new channel here, through the window, as Session history's Resume does. */
+  resume?(key: string): Promise<void>;
+  /** The memory project of each of this computer's channels (by its folder), each once, and that folder. */
+  memoryProjects?(): { project: string; directory: string }[];
+  memoryNotes?(project: string): MemoryNote[];
+  /** A handoff the person wrote on a phone, as the desktop's Memory saves one. */
+  writeMemory?(project: string, title: string, content: string): void;
 }
 /** One-time tickets a phone opens its screen with: a browser's WebSocket cannot send the Authorization header. */
 const SCREEN_TICKET_MS = 30000; const MAX_SCREENS = 2;
@@ -110,6 +128,10 @@ const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat:
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
+const taskStatusSchema = z.object({ id: z.uuid(), status: z.enum(['todo', 'working', 'review', 'done']) }).strict();
+const resumeSchema = z.object({ key: z.string().min(1).max(200) }).strict();
+/** The same limits as the desktop's Memory (memory-write); a project must be one of this computer's channels'. */
+const handoffSchema = z.object({ project: z.string().min(1).max(80), title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000) }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict();
 /** A pasted image (PNG or JPEG, base64), at most 15 MB. */
 const IMAGE_LIMIT = 15 * 1024 * 1024;
@@ -768,6 +790,58 @@ export class RemoteServer {
       if (!this.host.control) return this.send(response, 409, { error: 'This computer cannot start or stop channels right now.' });
       try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }
+      return this.send(response, 200, { ok: true });
+    }
+    // Usage, tasks, CLI history and memory cover this computer only; a phone asks each linked computer directly for its own.
+    const unpaired = kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.';
+    if (request.method === 'GET' && url.pathname === '/api/usage') {
+      if (!this.host.usage) return this.send(response, 409, { error: 'This computer cannot show its usage right now.' });
+      const { today, limits, budget } = this.host.usage(); return this.send(response, 200, remoteUsage(today, limits, budget));
+    }
+    if (request.method === 'GET' && url.pathname === '/api/tasks') {
+      if (!this.host.tasks) return this.send(response, 409, { error: 'This computer cannot show its tasks right now.' });
+      return this.send(response, 200, remoteTasks(this.host.tasks(), this.host.sessions().map((session) => session.id)));
+    }
+    if (request.method === 'POST' && url.pathname === '/api/task-status') {
+      // Reading the board is open to every paired device; moving a card takes the same permission as starting agents.
+      if (!this.me(device).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      const parsed = taskStatusSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid task status.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: unpaired });
+      if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      if (!this.host.tasks || !this.host.taskStatus) return this.send(response, 409, { error: 'This computer cannot change its tasks right now.' });
+      if (!this.host.tasks().some((task) => task.id === parsed.data.id)) return this.send(response, 400, { error: 'Unknown task.' });
+      try { await this.host.taskStatus(parsed.data.id, FROM_PHONE[parsed.data.status]); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The task could not be moved.' }); }
+      return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/history') {
+      if (!this.host.history) return this.send(response, 409, { error: 'This computer cannot show its CLI history right now.' });
+      try { return this.send(response, 200, remoteHistory(await this.host.history())); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The CLI history could not be read.' }); }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/history-resume') {
+      if (!this.me(device).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      const parsed = resumeSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Unknown conversation.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: unpaired });
+      if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      if (!this.host.resume) return this.send(response, 409, { error: 'This computer cannot resume conversations right now.' });
+      try { await this.host.resume(parsed.data.key); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The conversation could not be resumed.' }); }
+      return this.send(response, 200, { ok: true });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/memory') {
+      if (!this.host.memoryProjects || !this.host.memoryNotes) return this.send(response, 409, { error: 'This computer cannot show its memory right now.' });
+      try { return this.send(response, 200, this.host.memoryProjects().map((project) => remoteMemory(project, this.host.memoryNotes!(project.project)))); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Memory could not be read.' }); }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/memory') {
+      // A handoff is notes for the agents, not running one, so any paired device may write it.
+      const parsed = handoffSchema.safeParse(await this.body(request, 256 * 1024)); if (!parsed.success) return this.send(response, 400, { error: 'A handoff needs a title (up to 200 characters) and notes (up to 60,000).' });
+      if (!this.current(device.id)) return this.send(response, 401, { error: unpaired });
+      if (!this.host.memoryProjects || !this.host.writeMemory) return this.send(response, 409, { error: 'This computer cannot save handoffs right now.' });
+      if (!this.host.memoryProjects().some((project) => project.project === parsed.data.project)) return this.send(response, 400, { error: 'Unknown project.' });
+      try { this.host.writeMemory(parsed.data.project, parsed.data.title, parsed.data.content); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The handoff could not be saved.' }); }
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/coaching-review') {
