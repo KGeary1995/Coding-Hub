@@ -22,7 +22,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
 /** `canRun`: the phone may start, stop, restart and add channels (off unless turned on for it); always true for a computer. */
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind; canRun: boolean }
 /** What GET /api/me (and the stream's `me` event) tells a phone or computer about its own key. */
-export interface RemoteMe { id: string; name: string; kind: RemoteDeviceKind; canRun: boolean }
+/** `computer`: this computer's sync identity, so a phone can tell its channels from those passed on by linked computers. */
+export interface RemoteMe { id: string; name: string; kind: RemoteDeviceKind; canRun: boolean; computer: string | null }
 /**
  * A chat channel's recent events (GET /api/chat-history, and the stream's `chat-replay` event): its current run's last
  * 300 events or 2 MB, streamed text folded into its finished message. `runId` is null when nothing was kept.

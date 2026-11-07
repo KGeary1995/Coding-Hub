@@ -308,7 +308,7 @@ export class RemoteServer {
     const payload = `event: me\ndata: ${eventJSON(this.me(device))}\n\n`; for (const stream of this.streams) if (stream.device === id) this.write(stream, payload);
     return this.status();
   }
-  private me(device: Device): RemoteMe { const kind = device.kind ?? 'phone'; return { id: device.id, name: device.name, kind, canRun: kind === 'computer' || device.canRun === true }; }
+  private me(device: Device): RemoteMe { const kind = device.kind ?? 'phone'; return { id: device.id, name: device.name, kind, canRun: kind === 'computer' || device.canRun === true, computer: this.identity?.id ?? null }; }
   /** The device as stored now: a request whose body took a while is judged on the latest permission, or refused if removed. */
   private current(id: string) { return this.devices().find((item) => item.id === id) ?? null; }
   status(): RemoteStatus {

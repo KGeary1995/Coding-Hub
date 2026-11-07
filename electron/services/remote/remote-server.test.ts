@@ -442,7 +442,7 @@ describe('phone permissions and chat channels', () => {
     const phone = server.status().devices[0]; expect(phone).toMatchObject({ kind: 'phone', canRun: false });
     // Records from before this setting have no canRun and load as not allowed.
     expect(JSON.parse(fs.readFileSync(path.join(root, 'remote-devices.json'), 'utf8'))[0]).not.toHaveProperty('canRun');
-    expect((await get(server, token, '/api/me')).body).toEqual({ id: phone.id, name: 'Test phone', kind: 'phone', canRun: false });
+    expect((await get(server, token, '/api/me')).body).toMatchObject({ id: phone.id, name: 'Test phone', kind: 'phone', canRun: false });
     for (const [pathname, body] of [['/api/control', { sessionId: 's1', control: 'stop' }], ['/api/channel-add', { engine: 'claude', chat: true }], ['/api/chat', { action: 'table-open', sessionId: 's1', runId: RUN, partner: { sessionId: 's2', runId: RUN }, driver: 'claude', rounds: 1 }]] as const) {
       const response = await post(server, token, pathname, body);
       expect(response.status, pathname).toBe(403); expect((await response.json() as { error: string }).error).toMatch(/Can start and stop agents/);
@@ -453,7 +453,7 @@ describe('phone permissions and chat channels', () => {
   it('lets an allowed phone start, stop and add channels (chat or terminal), and takes that back at once', async () => {
     const { server, controls, adds } = await chatRemote(); const token = await paired(server); const id = server.status().devices[0].id;
     const seen = await stream(server, token, '', 2, () => { server.setCanRun(id, true); });
-    expect(seen[1]).toEqual({ type: 'me', data: { id, name: 'Test phone', kind: 'phone', canRun: true } });
+    expect(seen[1]).toMatchObject({ type: 'me', data: { id, name: 'Test phone', kind: 'phone', canRun: true } });
     expect(server.status().devices[0].canRun).toBe(true); expect((await get(server, token, '/api/me')).body.canRun).toBe(true);
     expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'restart' })).status).toBe(200);
     expect((await post(server, token, '/api/channel-add', { engine: 'codex', chat: true })).status).toBe(200);

@@ -1,118 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
-import { ArrowLeftRight, ChevronRight, ImagePlus, Send, Square, Users, X } from 'lucide-react';
-import type { ChatBlock, ChatImage, RoundTableState } from '../../../shared/chat';
+import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
+import type { ChatImage } from '../../../shared/chat';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
-import { chatAnswered, chatFailed, chatSent, useChatStore, type ChatItem, type ChatThread, type ToolResult } from '../../state/chat-store';
+import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/chat-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { openRoundTable, tableRequest } from '../../runtime/round-table';
-import { Markdown } from './Markdown';
-
-const EMPTY: ChatThread = { runId: null, items: [], results: {}, busy: false, model: null };
-const SUPPORTED = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-/** Claude accepts images up to about 5 MB; larger ones (and other formats) are redrawn as JPEG, at most 2000 px. */
-const MAX_IMAGE_BYTES = 4.5 * 1024 * 1024;
-
-function readImage(file: Blob): Promise<ChatImage> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('The image could not be read.'));
-    reader.onload = () => {
-      const url = String(reader.result); const data = url.slice(url.indexOf(',') + 1);
-      if (SUPPORTED.includes(file.type) && data.length * 0.75 <= MAX_IMAGE_BYTES) { resolve({ mediaType: file.type as ChatImage['mediaType'], data }); return; }
-      const image = new Image();
-      image.onerror = () => reject(new Error('That file is not an image Trace can send.'));
-      image.onload = () => {
-        const scale = Math.min(1, 2000 / Math.max(image.width, image.height)); const canvas = document.createElement('canvas');
-        canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
-        canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const jpeg = canvas.toDataURL('image/jpeg', 0.85); resolve({ mediaType: 'image/jpeg', data: jpeg.slice(jpeg.indexOf(',') + 1) });
-      };
-      image.src = url;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-/** One line saying what a tool call does: the command, the file, the search, the address. */
-function toolSummary(name: string, input: Record<string, unknown>) {
-  const value = (key: string) => typeof input[key] === 'string' ? input[key] as string : '';
-  const short = (path: string) => path.split(/[\\/]/).slice(-3).join('/');
-  if (name === 'Bash') return value('command');
-  if (['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) return short(value('file_path') || value('notebook_path'));
-  if (name === 'Grep') return `${value('pattern')}${value('path') ? ` in ${short(value('path'))}` : ''}`;
-  if (name === 'Glob') return value('pattern');
-  if (name === 'WebFetch') return value('url');
-  if (name === 'WebSearch') return value('query');
-  if (name === 'Task' || name === 'Agent') return value('description');
-  if (name === 'TodoWrite') return 'updates the task list';
-  return Object.values(input).find((item): item is string => typeof item === 'string')?.slice(0, 120) ?? '';
-}
-
-export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' }>; result?: ToolResult }) {
-  const summary = toolSummary(block.name, block.input);
-  const edit = block.name === 'Edit' && typeof block.input.old_string === 'string' ? block.input : null;
-  return <details className={`chat-tool ${result?.isError ? 'error' : ''} ${result ? 'done' : 'running'}`}>
-    <summary><ChevronRight size={13} className="chat-chevron" aria-hidden="true" /><strong>{block.name}</strong><span className="chat-tool-summary" title={summary}>{summary}</span><span className="chat-tool-state">{!result ? 'running…' : result.isError ? 'failed' : 'done'}</span></summary>
-    {edit && <div className="chat-diff"><pre className="removed">{String(edit.old_string)}</pre><pre className="added">{String(edit.new_string ?? '')}</pre></div>}
-    {!edit && block.name !== 'Bash' && <pre className="chat-tool-input">{JSON.stringify(block.input, null, 2).slice(0, 4000)}</pre>}
-    {result && (result.text || result.image) && <pre className="chat-tool-output">{result.text || '(an image)'}</pre>}
-  </details>;
-}
-
-function Permission({ item, agent, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; answer: (allow: boolean, allowEdits?: boolean) => void }) {
-  const summary = toolSummary(item.toolName, item.input);
-  return <div className={`chat-permission ${item.answer ?? 'open'}`} role={item.answer ? undefined : 'alert'}>
-    <p><strong>{agent} wants to use {item.toolName}</strong>{item.description && item.description !== summary ? ` · ${item.description}` : ''}</p>
-    {summary && <pre>{summary}</pre>}
-    {item.answer ? <p className="chat-permission-answer">{item.answer === 'allowed' ? 'Allowed' : item.answer === 'denied' ? 'Denied' : 'No longer waiting'}</p>
-      : <div className="chat-permission-actions">
-        <button className="button primary" onClick={() => answer(true)}>Allow</button>
-        {item.canAllowEdits && (agent === 'Codex'
-          ? <button className="button secondary" title="Allow this kind of action without asking for the rest of this session" onClick={() => answer(true, true)}>Allow for this session</button>
-          : <button className="button secondary" title="Let Claude edit files without asking for the rest of this run" onClick={() => answer(true, true)}>Allow edits this run</button>)}
-        <button className="button secondary" onClick={() => answer(false)}>Deny</button>
-      </div>}
-  </div>;
-}
-
-const AGENT = { claude: 'Claude', codex: 'Codex' } as const;
-const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the other agent up', answering: 'Both answering', discussing: 'Discussing', idle: 'Your turn' };
-
-/** One message, approval or notice in a thread; `author` labels it in a Round Table. */
-function Item({ item, results, agent, author, answer, view }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void }) {
-  if (item.kind === 'user') return <div className="chat-message user">
-    {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
-    {item.text && <p className="chat-user-text">{item.text}</p>}
-  </div>;
-  if (item.kind === 'assistant') return <div className={`chat-message assistant ${author ? `table-${author}` : ''}`}>
-    {author && <p className="chat-author">{agent}</p>}
-    {item.blocks.map((block, index) => block.type === 'text' ? <Markdown key={index} text={block.text} />
-      : block.type === 'thinking' ? <details key={index} className="chat-thinking"><summary>Thinking</summary><p>{block.text}</p></details>
-        : <ToolCard key={block.id} block={block} result={results[block.id]} />)}
-    {item.streaming && <div className="chat-streaming"><Markdown text={item.streaming} /></div>}
-  </div>;
-  if (item.kind === 'permission') return <Permission item={item} agent={agent} answer={answer(item.id)} />;
-  return <p className={`chat-notice ${item.error ? 'error' : ''}`}>{author ? `${agent}: ` : ''}{item.text}</p>;
-}
-
-/** The controls of a Round Table: who drives, how many rounds, where it is, stop and close. */
-function TableBar({ lead, table, busy, onError }: { lead: Session; table: RoundTableState; busy: boolean; onError: (message: string) => void }) {
-  const leadEngine = lead.config.engine === 'codex' ? 'codex' : 'claude';
-  const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
-  const run = (request: Parameters<typeof tableRequest>[1]) => void tableRequest(lead.id, request).then((error) => { if (error) onError(error); });
-  const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
-  return <div className="table-bar" role="group" aria-label="Round Table">
-    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
-    <strong>Round Table</strong>
-    <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span>
-    <button className="quiet-button" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
-    <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-    <span className="table-status" aria-live="polite">{status}</span>
-    {busy && <button className="quiet-button" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
-    <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table (${AGENT[table.partner.engine]} stays as its own chat)`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
-  </div>;
-}
+import { AGENT, EMPTY, Item, readImage, TableBar } from './ChatParts';
 
 /**
  * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
@@ -178,7 +72,7 @@ export function ChatView({ session }: { session: Session }) {
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
-    {table && <TableBar lead={session} table={table} busy={busy} onError={setError} />}
+    {table && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); })} />}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}

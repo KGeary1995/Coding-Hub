@@ -12,8 +12,16 @@ const PORT = 47831;
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-remote-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
-  const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
+  const terminalFixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
+  // Claude's stand-in is the structured (chat) fixture when started as a chat channel, else the terminal one.
+  const chatFixture = await fs.readFile(path.join(__dirname, 'fixtures/claude-stream-fixture.cjs'), 'utf8');
+  const claudeFixture = `if (process.argv.includes('--input-format')) {
+${chatFixture}
+} else {
+${terminalFixture}
+}`;
   for (const engine of ['claude', 'codex']) {
+    const fixture = engine === 'claude' ? claudeFixture : terminalFixture;
     if (process.platform === 'win32') {
       const packageRoot = path.join(bin, 'node_modules', ...(engine === 'claude' ? '@anthropic-ai/claude-code' : '@openai/codex').split('/'));
       await fs.mkdir(packageRoot, { recursive: true }); await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { [engine]: 'fixture.cjs' } }));
@@ -167,6 +175,32 @@ else if (args.startsWith('serve --bg --https=443')) {
       await fs.rm(path.join(bin, 'tailscale'));
     }
 
+    // A phone may not start agents until the computer allows it (Settings → Phone access); then it can add and start a
+    // channel. A Claude chat's conversation, its approval and the reply work from the phone, and show on the desktop.
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    assert.equal(await phone.locator('#add-channel').isVisible(), false, 'no + Channel on a phone that may not start agents');
+    await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
+    await card.getByRole('checkbox', { name: 'Can start and stop agents' }).check();
+    await phone.locator('#add-channel').waitFor({ state: 'visible' });
+    await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude chat', exact: true }).click();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).click();
+    await phone.getByRole('button', { name: 'Start CH3', exact: true }).click();
+    const box = phone.getByRole('textbox', { name: 'Message to Claude', exact: true });
+    await phone.waitForFunction(() => { const area = document.querySelector('.phone-chat textarea'); return area && !area.disabled; });
+    await box.fill('hello from the phone'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('.phone-chat').filter({ hasText: 'You said: hello from the phone' }).waitFor();
+    await phone.locator('.phone-chat .chat-user-text').filter({ hasText: 'hello from the phone' }).waitFor();
+    await openView(page, 'Workspace');
+    await page.locator('[data-chat-session]').filter({ hasText: 'hello from the phone' }).filter({ hasText: 'You said: hello from the phone' }).waitFor();
+    await box.fill('please write a note'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    await phone.locator('.phone-chat .chat-permission').getByRole('button', { name: 'Allow', exact: true }).click();
+    await phone.locator('.phone-chat').filter({ hasText: 'Wrote notes.txt.' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-chat.png') });
+    await phone.getByRole('button', { name: 'Stop CH3', exact: true }).click();
+    await phone.getByRole('button', { name: 'Start CH3', exact: true }).waitFor();
+    await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
+
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');
     await card.getByRole('button', { name: 'Remove Phone', exact: true }).click();
@@ -175,7 +209,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });
