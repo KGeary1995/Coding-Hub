@@ -220,3 +220,16 @@
 .chat-message.assistant.table-claude, .chat-message.assistant.table-codex { padding-left: 10px; border-left: 2px solid; }
 .chat-message.assistant.table-claude { border-color: var(--tr-ch-claude); } .table-claude .chat-author { color: var(--tr-ch-claude); }
 .chat-message.assistant.table-codex { border-color: var(--tr-ch-codex); } .table-codex .chat-author { color: var(--tr-ch-codex); }
+
+/* Flight Deck Lite: corner brackets mark the focused channel (in its engine's colour) and one that needs you or failed;
+   a soft glow only on a channel waiting for you. The brackets themselves are drawn in tokens.css. */
+.session-tile.tr-tile.claude { --bracket: var(--tr-ch-claude); }
+.session-tile.tr-tile.codex { --bracket: var(--tr-ch-codex); }
+.session-tile.tr-tile.shell { --bracket: var(--tr-ch-shell); }
+.session-tile.tr-tile.state-waiting { --bracket: var(--tr-st-waiting); box-shadow: var(--tr-glow-waiting); }
+.session-tile.tr-tile.state-failed { --bracket: var(--tr-st-failed); }
+.tr-tile .tr-tile-name { text-transform: uppercase; letter-spacing: .04em; font-size: 14px; }
+/* Flight Deck Lite: Round Table seats are hexagons, the person in lavender. */
+.table-seats { gap: 3px; } .table-seats i { width: 13px; height: 15px; margin-left: 0; border: 0; border-radius: 0; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.table-seats i:first-child { margin-left: 0; } .seat-you { background: var(--tr-you); }
+.table-bar { text-transform: uppercase; letter-spacing: .06em; } .table-bar select, .table-status { text-transform: none; }

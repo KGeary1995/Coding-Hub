@@ -1,35 +1,43 @@
-/* Trace design tokens (docs/design/trace). Dark is the only theme specified so far;
-   a light theme can override these variables. */
+/* Trace design tokens: "Flight Deck Lite" (Mission Control with a little of Flight Deck; docs/design/trace).
+   Dark slate, a faint cyan grid, square frames with corner brackets on what matters, Claude amber and Codex cyan.
+   Dark is the only theme so far; a light theme can override these variables. */
 :root {
   /* surfaces */
-  --tr-bg: #0b1010;            /* app background */
-  --tr-term: #070a0a;          /* terminal, diff, chart wells — text sits on this, solid only */
-  --tr-panel: #0d1312;         /* side panels (file list, delivery, setup nav) */
-  --tr-surface: #131a19;       /* top bar, status bar, tile headers, menus */
-  --tr-hover: #18211f;         /* hover fill */
-  --tr-raised: #1f2a28;        /* active tab, selected row */
-  --tr-control-on: #2a3835;    /* selected segment */
+  --tr-bg: #0a0e12;            /* app background, under the grid */
+  --tr-term: #080b0e;          /* terminal, diff, chart wells — text sits on this, solid only */
+  --tr-panel: #0b1217;         /* side panels (file list, delivery, setup nav) */
+  --tr-surface: #0d151b;       /* top bar, status bar, tile headers, menus */
+  --tr-hover: #13212a;         /* hover fill */
+  --tr-raised: #182a35;        /* active tab, selected row */
+  --tr-control-on: #1d3340;    /* selected segment */
 
   /* lines */
-  --tr-line-faint: #1a2422;    /* row dividers, graticule */
-  --tr-line: #22302d;          /* dividers */
-  --tr-line-control: #2a3835;  /* control borders */
-  --tr-line-strong: #3b4d49;   /* overlay borders, limit rail */
-  --tr-tile-border: #1f2b29;
+  --tr-line-faint: #15252e;    /* row dividers, graticule */
+  --tr-line: #1d3340;          /* dividers */
+  --tr-line-control: #2a4a5a;  /* control borders */
+  --tr-line-strong: #3d6274;   /* overlay borders, limit rail, focused tile */
+  --tr-tile-border: #1d3340;
 
   /* text */
-  --tr-fg-strong: #eef4f1;
-  --tr-fg: #d8e3df;
-  --tr-fg-muted: #b6c4c0;
-  --tr-fg-dim: #879692;
-  --tr-fg-faint: #7b8c87;      /* ≥11px mono labels only; lighter than the handoff's #6f807b so it reaches 4.5:1 on surface and hover */
-  --tr-fg-off: #4f625d;        /* idle trace, drag handle, ctx bar fill */
-  --tr-on-light: #0b1010;      /* text on solid chips / primary buttons */
+  --tr-fg-strong: #f0f6fa;
+  --tr-fg: #dce7ee;
+  --tr-fg-muted: #c4d3dc;
+  --tr-fg-dim: #9fb4c0;
+  --tr-fg-faint: #8aa0ad;      /* ≥11px mono labels only; ≥4.5:1 on surface and hover */
+  --tr-fg-off: #3a5263;        /* idle trace, drag handle, ctx bar fill */
+  --tr-on-light: #0a0e12;      /* text on solid chips / primary buttons */
 
-  /* engines (channel colours) */
-  --tr-ch-claude: oklch(0.87 0.14 95);
-  --tr-ch-codex: oklch(0.80 0.11 215);
-  --tr-ch-shell: oklch(0.84 0.03 165);  /* Terminal channels: a plain shell, kept quieter than the agents */
+  /* engines (channel colours) and the person, in a Round Table */
+  --tr-ch-claude: #ffb547;
+  --tr-ch-codex: #5fe1ff;
+  --tr-ch-shell: #a9c6bd;      /* Terminal channels: a plain shell, kept quieter than the agents */
+  --tr-you: #d0c4ff;
+
+  /* Flight Deck intensity (35 of 100): how strong the grid, corner brackets and glows are. */
+  --tr-grid: rgba(95,225,255,.04);
+  --tr-bracket-alpha: .55;
+  --tr-glow-waiting: 0 0 19px rgba(255,95,207,.14);
+  --tr-glow-dot: 0 0 5px currentColor;
 
   /* accounts: whose Claude account a channel runs on (a profile, or the default sign-in), clear of the engine and state colours */
   --tr-account-0: oklch(0.74 0.14 300);
@@ -38,23 +46,23 @@
   --tr-account-3: oklch(0.78 0.12 10);
 
   /* states — "working" uses the engine colour */
-  --tr-st-idle: #879692;
-  --tr-st-starting: #d8e3df;
-  --tr-st-waiting: oklch(0.78 0.14 330);
-  --tr-st-finished: #d8e3df;
-  --tr-st-failed: oklch(0.68 0.19 25);
-  --tr-st-limit: oklch(0.80 0.15 60);
-  --tr-on-waiting: #120b10;
+  --tr-st-idle: #9fb4c0;
+  --tr-st-starting: #dce7ee;
+  --tr-st-waiting: #ff5fcf;
+  --tr-st-finished: #dce7ee;
+  --tr-st-failed: #ff6b6b;
+  --tr-st-limit: #ff8a3d;
+  --tr-on-waiting: #1a0715;
 
   /* diff / success */
-  --tr-add: oklch(0.82 0.13 155);
-  --tr-del: oklch(0.72 0.16 25);
-  --tr-add-bg: oklch(0.82 0.13 155 / .13);
-  --tr-del-bg: oklch(0.72 0.16 25 / .15);
-  --tr-stop-fg: oklch(0.82 0.11 25);
+  --tr-add: #7fe89c;
+  --tr-del: #ff8c8c;
+  --tr-add-bg: rgba(127,232,156,.12);
+  --tr-del-bg: rgba(255,140,140,.14);
+  --tr-stop-fg: #ffa3a3;
 
-  /* type */
-  --tr-font-ui: "IBM Plex Sans Condensed", system-ui, sans-serif;
+  /* type: Chakra Petch for the interface (wide, technical), IBM Plex Mono for terminals and every number */
+  --tr-font-ui: "Chakra Petch", "IBM Plex Sans Condensed", system-ui, sans-serif;
   --tr-font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --tr-t-display: 600 40px/44px var(--tr-font-ui);
   --tr-t-title: 600 28px/32px var(--tr-font-ui);
@@ -70,8 +78,8 @@
   --tr-s-1: 4px; --tr-s-2: 8px; --tr-s-3: 12px; --tr-s-4: 16px;
   --tr-s-6: 24px; --tr-s-8: 32px; --tr-s-12: 48px; --tr-s-16: 64px;
 
-  /* radii */
-  --tr-r-chip: 2px; --tr-r-control: 3px; --tr-r-panel: 4px; --tr-r-overlay: 6px;
+  /* radii: square, as on an instrument panel */
+  --tr-r-chip: 0; --tr-r-control: 0; --tr-r-panel: 0; --tr-r-overlay: 2px;
 
   /* elevation — tone + line; only overlays cast shadow */
   --tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6);
@@ -92,7 +100,13 @@
   --tr-focus: 2px solid var(--tr-fg-strong);
 }
 
-body { background: var(--tr-bg); color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
+/* The faint grid behind everything; panels and tiles are solid over it, so text never sits on the lines. */
+body { background-color: var(--tr-bg); background-image: linear-gradient(var(--tr-grid) 1px, transparent 1px), linear-gradient(90deg, var(--tr-grid) 1px, transparent 1px); background-size: 32px 32px; color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
+/* Corner brackets: drawn on the element's ::after by `.tr-brackets`, in --bracket (defaults to the line colour). */
+.tr-brackets::after, .session-tile.tr-tile.selected::after, .session-tile.tr-tile.state-waiting::after, .session-tile.tr-tile.state-failed::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
+  background: linear-gradient(var(--c), var(--c)) left top / 14px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 14px, linear-gradient(var(--c), var(--c)) right top / 14px 2px, linear-gradient(var(--c), var(--c)) right top / 2px 14px,
+    linear-gradient(var(--c), var(--c)) left bottom / 14px 2px, linear-gradient(var(--c), var(--c)) left bottom / 2px 14px, linear-gradient(var(--c), var(--c)) right bottom / 14px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 14px;
+  background-repeat: no-repeat; }
 :focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
 .tnum { font-variant-numeric: tabular-nums; }
 
