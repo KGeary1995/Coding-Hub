@@ -36,6 +36,7 @@ export const savedWorkspaceSchema = z.object({
     binding: z.discriminatedUnion('mode', [z.object({ mode: z.literal('workspace') }).strict(), z.object({ mode: z.literal('independent'), cwd: directory }).strict()]),
     budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
     preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
+    roundTable: z.object({ partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5) }).strict().optional(),
     createdAt: z.string().datetime(),
   }).strict()).min(1).max(MAX_CHANNELS),
   tiles: z.array(z.object({

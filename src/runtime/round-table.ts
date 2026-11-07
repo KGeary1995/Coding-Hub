@@ -41,3 +41,34 @@ export async function tableRequest(leadId: string, request: TableRequest): Promi
   const result = await window.codingHub.chat({ ...request, sessionId: lead.id, runId: lead.runId }).catch(() => null);
   return result?.ok ? null : result?.error.message ?? 'Trace could not reach the Round Table.';
 }
+
+/** The leading channel remembers its table (partner, driver, rounds) whenever the table changes. */
+export function rememberTable(leadId: string, table: RoundTableState) {
+  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds };
+  useWorkspaceStore.setState((state) => {
+    const lead = state.sessions.find((session) => session.id === leadId);
+    if (!lead || (lead.roundTable && lead.roundTable.partner === saved.partner && lead.roundTable.driver === saved.driver && lead.roundTable.rounds === saved.rounds)) return {};
+    return { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session) };
+  });
+}
+/** Closing the table (the person's choice, not Trace quitting) forgets it, so it is not opened again. */
+export function forgetTable(leadId: string) {
+  useWorkspaceStore.setState((state) => state.sessions.some((session) => session.id === leadId && session.roundTable) ? { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: undefined } : session) } : {});
+}
+/** Pairs of runs already seated again, so a table that fails to open is not tried over and over. */
+const reopened = new Set<string>();
+/**
+ * After a restart (or after both chats were stopped and started again), a leading chat and its saved partner that both
+ * run again are seated at the table again, with the same driver and rounds. Both conversations resumed, so the partner
+ * is not briefed again.
+ */
+export function restoreTables() {
+  const { sessions } = useWorkspaceStore.getState();
+  for (const lead of sessions) {
+    if (!lead.roundTable || lead.status !== 'running' || !lead.runId || tableOf(lead.id)) continue;
+    const partner = sessions.find((session) => session.id === lead.roundTable!.partner);
+    if (!partner || partner.status !== 'running' || !partner.runId) continue;
+    const pair = `${lead.runId}:${partner.runId}`; if (reopened.has(pair)) continue; reopened.add(pair);
+    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds }).catch(() => {});
+  }
+}

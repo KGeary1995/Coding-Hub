@@ -39,7 +39,10 @@ export type WorkspaceBinding =
   | { mode: 'workspace' }
   | { mode: 'independent'; cwd: string };
 
+/** A Round Table this chat channel leads, kept with the workspace so it is opened again when both chats run after a restart. */
+export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number }
 export interface Session {
+  roundTable?: SavedRoundTable;
   budget?: import('./productivity').SessionBudget;
   preparedRequest?: import('./productivity').PreparedSessionRequest;
   id: string;
@@ -129,7 +132,7 @@ export interface LocalExtension {
 export interface SavedWorkspace {
   version: 1;
   rootDirectory: string | null;
-  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt' | 'budget' | 'preparedRequest'>[];
+  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt' | 'budget' | 'preparedRequest' | 'roundTable'>[];
   tiles: GridTile[];
   layoutMode: 'columns' | 'rows' | 'grid';
   focusedSessionId: string | null;

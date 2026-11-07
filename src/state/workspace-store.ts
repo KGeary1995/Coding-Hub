@@ -177,7 +177,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorkspace {
   return {
     version: 1, rootDirectory: state.rootDirectory,
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}) })),
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && state.sessions.some((item) => item.id === roundTable.partner) ? { roundTable } : {}) })),
     tiles: state.tiles, layoutMode: state.layoutMode, focusedSessionId: state.focusedSessionId,
   };
 }
