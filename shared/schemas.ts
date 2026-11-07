@@ -37,12 +37,12 @@ export const savedWorkspaceSchema = z.object({
     budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
     preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
     createdAt: z.string().datetime(),
-  }).strict()).min(2).max(MAX_CHANNELS),
+  }).strict()).min(1).max(MAX_CHANNELS),
   tiles: z.array(z.object({
     sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),
     w: z.number().int().min(3).max(12), h: z.number().int().min(10).max(1000),
     minW: z.number().int().min(3).max(12), minH: z.number().int().min(10).max(1000),
-  }).strict()).min(2).max(MAX_CHANNELS),
+  }).strict()).min(1).max(MAX_CHANNELS),
   layoutMode: z.enum(['columns', 'rows', 'grid']), focusedSessionId: identifier.nullable(),
 }).strict().superRefine((workspace, context) => {
   const ids = new Set(workspace.sessions.map((session) => session.id));

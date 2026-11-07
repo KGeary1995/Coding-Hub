@@ -106,6 +106,8 @@ describe('multi-session workspace transitions', () => {
     expect(useWorkspaceStore.getState().sessions).toHaveLength(1);
     useWorkspaceStore.getState().removeSession(useWorkspaceStore.getState().sessions[0].id);
     expect(useWorkspaceStore.getState().sessions).toHaveLength(1);
+    /** A one-channel workspace must still save, or every save (and the update that waits on it) fails. */
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
   });
 
   it('rearranges horizontally and vertically without changing working directories or config', () => {
