@@ -8,6 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
 import './phone.css';
 import { mountChat, receiveChat, receiveReplay } from './chat';
+import { mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
@@ -51,6 +52,39 @@ let me: RemoteMe | null = null;
 /** Removes the chat view shown for a chat channel, when there is one. */
 let unmountChat: (() => void) | null = null;
 const closeChat = () => { unmountChat?.(); unmountChat = null; };
+/** Removes the React screen shown under a tab (Usage, Tasks, History, More), when there is one. */
+let unmountScreen: (() => void) | null = null;
+const closeScreen = () => { unmountScreen?.(); unmountScreen = null; };
+
+/** The phone's sections, along the bottom as on the redesign: each a stroke icon and a word. */
+type Tab = 'channels' | 'usage' | 'tasks' | 'history' | 'more';
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'channels', label: 'Channels', icon: '<rect x="3" y="4" width="18" height="16"/><path d="M7 9l3 3-3 3M12 15h5"/>' },
+  { id: 'usage', label: 'Usage', icon: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>' },
+  { id: 'tasks', label: 'Tasks', icon: '<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>' },
+  { id: 'history', label: 'History', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
+  { id: 'more', label: 'More', icon: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>' },
+];
+function tabBar(active: Tab) {
+  return h('nav', { className: 'tabbar', aria: { label: 'Sections' } }, ...TABS.map((tab) => {
+    const button = h('button', { type: 'button', className: tab.id === active ? 'active' : '', aria: { current: tab.id === active ? 'page' : 'false' }, onclick: () => { if (tab.id === 'channels') showList(); else showTab(tab.id); } });
+    // Fixed markup: the icon is ours, not data.
+    button.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${tab.icon}</svg>`;
+    button.append(h('span', {}, tab.label));
+    return button;
+  }));
+}
+/** Usage, Tasks, History or More: a screen of this computer's state (phone/screens.tsx) above the tabs. */
+function showTab(tab: Exclude<Tab, 'channels'>) {
+  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  const label = TABS.find((item) => item.id === tab)!.label;
+  const screen = h('div', { className: 'screen-host' });
+  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), screen);
+  if (tab === 'more') main.append(h('h2', { className: 'section-title' }, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen'));
+  app.replaceChildren(header(), main, tabBar(tab));
+  unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
+  listen(null);
+}
 /** The chat shown, as it was when it was drawn: it is drawn again when that chat starts, stops or restarts. */
 let shownChat: string | null = null;
 
@@ -130,12 +164,12 @@ function addMenu() {
 }
 
 function showList() {
-  leaveChannel(); disposeTerminal(); closeChat(); current = null; run = null; shownChat = null;
+  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
   app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
-  app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }));
+  app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
 
@@ -148,7 +182,7 @@ let viewer: RFB | null = null;
  * it, not to Trace. A locked Mac shows black here and takes no keys: macOS shows its lock screen only to Apple's viewer.
  */
 async function showScreen() {
-  closeChat();
+  closeChat(); closeScreen();
   leaveChannel(); disposeTerminal(); current = null; run = null; viewer?.disconnect(); viewer = null;
   const status = h('p', { className: 'dim', aria: { live: 'polite' } }, 'Connecting…');
   const user = h('input', { autocomplete: 'username', autocapitalize: 'none', placeholder: 'Mac user name', aria: { label: 'User name' } });
