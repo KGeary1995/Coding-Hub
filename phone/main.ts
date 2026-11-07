@@ -1,3 +1,6 @@
+import '@fontsource/chakra-petch/400.css';
+import '@fontsource/chakra-petch/600.css';
+import '@fontsource/chakra-petch/700.css';
 import '@fontsource/ibm-plex-sans-condensed/400.css';
 import '@fontsource/ibm-plex-sans-condensed/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
@@ -46,9 +49,15 @@ let opening: string | null = null;
 const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
 const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
 
+/** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
+function mark(big = false) {
+  const element = h('span', { className: `mark ${big ? 'big' : ''}` });
+  element.innerHTML = '<svg width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="13" cy="13" r="10"/><circle cx="13" cy="13" r="5"/><path d="M13 1v5M13 20v5M1 13h5M20 13h5"/><circle cx="13" cy="13" r="1.2" fill="currentColor"/></svg><span>TRACE</span>';
+  return element;
+}
 function header(back?: () => void, title?: Node, ...tools: Node[]) {
   return h('header', { className: 'bar' },
-    back ? h('button', { className: 'icon', onclick: back, aria: { label: 'Back to channels' } }, '‹') : h('span', { className: 'mark' }, h('i'), h('i'), h('i'), ' trace'),
+    back ? h('button', { className: 'icon', onclick: back, aria: { label: 'Back to channels' } }, '‹') : mark(),
     title ?? h('span'), ...tools,
     h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, linkText()));
 }
@@ -61,7 +70,7 @@ function showPair(error = '') {
   const nameInput = h('input', { id: 'name', value: name, maxLength: 60 });
   const message = h('p', { className: 'error', aria: { role: 'alert' } }, error);
   const form = h('form', { className: 'pair' },
-    h('span', { className: 'mark big' }, h('i'), h('i'), h('i'), ' trace'),
+    mark(true),
     h('h1', {}, 'Pair this phone'),
     h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
     h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),

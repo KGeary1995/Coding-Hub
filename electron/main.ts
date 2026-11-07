@@ -568,7 +568,10 @@ else app.whenReady().then(() => {
     const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
       { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
-    phone.setRelay(linked); linked.peers = () => tailscalePeers(runTailscale); linked.start();
+    // A smoke test (an unpackaged run on its own remote port) must never find or link the owner's real computers on
+    // the tailnet: it would leave links to a throwaway copy on them. CODING_HUB_TEST_TAILNET=1 opts a test back in.
+    const isolatedTest = !app.isPackaged && Boolean(process.env.CODING_HUB_TEST_REMOTE_PORT) && process.env.CODING_HUB_TEST_TAILNET !== '1';
+    phone.setRelay(linked); linked.peers = () => isolatedTest ? Promise.resolve([]) : tailscalePeers(runTailscale); linked.start();
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
@@ -589,7 +592,7 @@ else app.whenReady().then(() => {
     phone.tailscale = !next.host && next.error && phone.tailscale.host ? { ...next, host: phone.tailscale.host } : next;
     if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; }
     // The person's other computers on the tailnet are found and linked with each check (a minute apart).
-    if (phone.autoLink && phone.tailscale.running) void linked?.autoLink().catch(() => {});
+    if (phone.autoLink && phone.tailscale.running && !(!app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT && process.env.CODING_HUB_TEST_TAILNET !== '1')) void linked?.autoLink().catch(() => {});
   };
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   // Every minute, and every ten seconds while the tailnet name is not known yet.

@@ -69,6 +69,7 @@ const PORT = 47831;
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await tile.getByRole('button', { name: 'Start session', exact: true }).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'running' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();
     // Tapping the terminal opens the message box; the terminal itself takes no typing (a phone keyboard garbles it).
@@ -86,6 +87,7 @@ const PORT = 47831;
     await (await tileControl(tile, 'Stop')).click();
     await (await tileControl(tile, 'Restart')).click();
     await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-channel.png') });
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), '', 'a delivered message leaves the field');

@@ -117,3 +117,20 @@ main.screen { flex: 1; min-height: 0; display: flex; flex-direction: column; gap
 .coach p { margin: 0 0 4px; }
 .coach pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); margin: 4px 0 0; }
 .coach-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Flight Deck Lite on the phone (docs/design/trace/DECISIONS.md): the reticle mark, tracked uppercase labels,
+   a coloured edge per engine, and corner brackets with a soft glow on a channel that needs you. */
+.mark { align-items: center; gap: 8px; font: 700 16px/1 var(--tr-font-ui); letter-spacing: .18em; }
+.mark svg { color: var(--tr-ch-codex); } .mark i { display: none; }
+.mark.big { font-size: 20px; }
+h1, .bar .title, .channel .name { letter-spacing: .04em; }
+h1 { text-transform: uppercase; }
+.channel { position: relative; border-left: 3px solid var(--tr-line-control); background: var(--tr-surface); }
+.channel:has(.chip[data-engine="claude"]) { border-left-color: var(--tr-ch-claude); }
+.channel:has(.chip[data-engine="codex"]) { border-left-color: var(--tr-ch-codex); }
+.channel:has(.chip[data-engine="shell"]) { border-left-color: var(--tr-ch-shell); }
+.channel .tag, .channel .name small { text-transform: uppercase; letter-spacing: .06em; }
+.channel.waiting { --bracket: var(--tr-st-waiting); border-color: var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 7%, var(--tr-surface)); box-shadow: var(--tr-glow-waiting); }
+.channel.waiting::after { content: ""; position: absolute; inset: -1px; pointer-events: none; --c: color-mix(in srgb, var(--bracket) calc(var(--tr-bracket-alpha) * 100%), transparent);
+  background: linear-gradient(var(--c), var(--c)) left top / 12px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 12px, linear-gradient(var(--c), var(--c)) right bottom / 12px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 12px; background-repeat: no-repeat; }
+button.primary { background: var(--tr-ch-codex); color: var(--tr-on-light); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
