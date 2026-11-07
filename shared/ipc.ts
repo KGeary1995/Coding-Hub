@@ -58,6 +58,7 @@ export type SessionEvent =
 export interface CodingHubHost {
   workbench(request: WorkbenchRequest): Promise<HostResult<WorkbenchResponse>>;
   coaching(request: CoachingRequest): Promise<HostResult<CoachingResponse>>;
+  /** Claude Design handoff import into a project; unused by the window until the planned Claude tab. */
   designs(request: DesignRequest): Promise<HostResult<DesignResponse>>;
   projects(request: ProjectRequest): Promise<HostResult<ProjectResponse>>;
   accounts(request: AccountRequest): Promise<HostResult<AccountResponse>>;

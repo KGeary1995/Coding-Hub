@@ -12,7 +12,6 @@ export const INSIGHT_VIEWS: { view: NavigationView; label: string }[] = [
 ];
 /** Rarely used tools, listed on the More tools page instead of in the menus. */
 export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
-  { view: 'design', label: 'Design workspace', detail: 'Design previews and versions, live preview of a local app, annotations and screenshot comparison.' },
   { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
   { view: 'tasks', label: 'Tasks', detail: 'Give each agent a job and its files; Trace sends it, follows it and warns about clashes.' },
   { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },

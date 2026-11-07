@@ -59,7 +59,7 @@ Getting around:
 | Menu | What's in it |
 |---|---|
 | Tabs | **Workspace** (the channels), **Changes** (Git review), **Projects** |
-| **Insight** | Usage, Session history, Files, and **More tools** (Design workspace, AI coaching, Task coordination, Verification profiles) |
+| **Insight** | Usage, Session history, Files, and **More tools** (AI coaching, Task coordination, Verification profiles) |
 | **Agent setup** | Accounts & connections, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings, Workflow center |
 
 ## Use Trace from your phone

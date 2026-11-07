@@ -35,7 +35,7 @@ export class CoachingService {
       return request.action === 'live' ? this.live.list() : request.action === 'live-clear' ? this.live.clear() : request.action === 'live-set' ? this.live.setEnabled(request.enabled) : this.live.ask(request.id);
     }
     if (request.action === 'prepare') {
-      this.ensure(); if (this.evict(100) >= 100) throw new HubError('COACHING_LIMIT', 'All 100 prepared coaching and design-feedback folders are used by session tiles. Remove some of those tiles, then retry.');
+      this.ensure(); if (this.evict(100) >= 100) throw new HubError('COACHING_LIMIT', 'All 100 prepared coaching folders are used by session tiles. Remove some of those tiles, then retry.');
       const directory = path.join(this.root, randomUUID()); fs.mkdirSync(directory, { mode: 0o700 });
       try {
         fs.writeFileSync(path.join(directory, 'COACHING_REPORT.md'), request.report, { mode: 0o600, flag: 'wx' });

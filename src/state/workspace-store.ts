@@ -3,7 +3,7 @@ import type { ChannelEngine, CLIEngineConfig, GridTile, Session, WorkspaceBindin
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
-export type NavigationView = 'computer' | 'workspace' | 'design' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
+export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
@@ -56,7 +56,6 @@ interface WorkspaceState {
   activeView: NavigationView;
   helpTopicId: string;
   workflowTab: 'recovery' | 'search' | 'templates' | 'support';
-  designSnapshotId: string | null;
   recoverySessionId: string | null;
   /** The linked computer whose channels the 'computer' view shows. */
   computerId: string | null;
@@ -110,7 +109,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  workflowTab: 'recovery', designSnapshotId: null, recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
+  workflowTab: 'recovery', recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
   engines: [],
   discovering: false,
   discoveryError: null,

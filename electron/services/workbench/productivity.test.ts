@@ -11,7 +11,6 @@ import { ClaudeProfiles } from '../cli/claude-profiles';
 import { Verification } from './verification';
 import { RulesService } from '../hub/rules';
 import { WorkspaceStorage } from '../storage/workspace-storage';
-import { difference } from './visual-diff';
 import { budgetAlerts, recoveryAdvice, redactDiagnostic } from '../../../shared/productivity';
 import type { SavedWorkspace } from '../../../shared/types';
 const roots:string[]=[];
@@ -54,21 +53,18 @@ describe('durable workflow records and bounded search',()=>{
    expect(item.workspace.sessions[1].config.resumeId).toBeUndefined();expect(item.workspace.sessions[0].preparedRequest).toBeUndefined();const applied=await service.execute({action:'flow-template-apply',id:item.id,directory:target,applyRules:false,applyChecks:true}) as SavedWorkspace;expect(applied.rootDirectory).toBe(target);expect(applied.sessions[0].id).not.toBe(original.sessions[0].id);expect(applied.sessions[0].budget?.tokens).toBe(100);expect(new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>false).templates()).toHaveLength(1);
   }finally{storage.close();}
  });
- it('searches files, memory, rules and annotations while skipping credential paths and symlink escapes',async()=>{
+ it('searches files, memory and rules (not the removed design annotations) while skipping credential paths and symlink escapes',async()=>{
   const data=root();const project=root();const outside=root();fs.writeFileSync(path.join(project,'source.ts'),'needle source');fs.writeFileSync(path.join(project,'.env'),'needle secret');fs.writeFileSync(path.join(outside,'escape.ts'),'needle escaped');if(process.platform!=='win32')fs.symlinkSync(outside,path.join(project,'linked'));
   fs.mkdirSync(path.join(data,'memory','demo'),{recursive:true});fs.writeFileSync(path.join(data,'memory','demo','note.json'),JSON.stringify({title:'Note',project:'demo',content:'needle handoff'}));fs.writeFileSync(path.join(data,'design-annotations.json'),JSON.stringify([{snapshotId:randomUUID(),text:'needle annotation'}]));const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const current=rules.read([]);rules.save('needle rules',current.revision,[]);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),new Verification(data,async()=>false),rules,storage,async()=>false);const result=await service.execute({action:'flow-search',query:'needle',directory:project,includeOutput:false}) as any;
-  expect(result.hits.map((hit:any)=>hit.kind).sort()).toEqual(['annotation','file','memory','rules']);expect(JSON.stringify(result)).not.toContain('needle secret');expect(JSON.stringify(result)).not.toContain('needle escaped');
+  expect(result.hits.map((hit:any)=>hit.kind).sort()).toEqual(['file','memory','rules']);expect(JSON.stringify(result)).not.toContain('needle secret');expect(JSON.stringify(result)).not.toContain('needle escaped');
   }finally{storage.close();}
  });
 });
-describe('usage targets and screenshot evidence',()=>{
+describe('usage targets and release evidence',()=>{
  it('does not invent cost or double count cached Codex input and reasoning',()=>{
   const usage:any={engine:'codex',input:100,output:25,cached:20,cacheWrite:0,reasoning:10,cost:null,context:{used:850,limit:1000}};
   // New tokens: 80 input outside the cache + 25 output = 105 (Codex's input already includes the 20 cached).
   expect(budgetAlerts({tokens:106,costUSD:1,contextPercent:85},usage)).toEqual(['Context usage reached 85%']);expect(budgetAlerts({tokens:105,costUSD:1,contextPercent:90},usage)).toHaveLength(1);expect(budgetAlerts({tokens:1,costUSD:1,contextPercent:1},undefined)).toEqual([]);
- });
- it('measures changed pixels and refuses mismatched bitmap dimensions',()=>{
-  const original=Buffer.from([0,0,0,255,0,0,0,255]);const edited=Buffer.from([0,0,0,255,100,0,0,255]);expect(difference(original,edited,2,1,20).changedPixels).toBe(1);expect(difference(original,edited,2,1,120).changedPixels).toBe(0);expect(()=>difference(original,edited,3,1,20)).toThrow('dimensions');
  });
  it('redacts Windows paths before JSON encoding and blocks signed builds without credentials',()=>{
   const home='C:\\Users\\private'; const project=home+'\\project'; const report=redactDiagnostic({message:project+'\\file.ts',other:home+'\\.codex'},home,project);
