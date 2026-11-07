@@ -180,7 +180,10 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
     assert.equal(await phone.locator('#add-channel').isVisible(), false, 'no + Channel on a phone that may not start agents');
     await openView(page, 'Settings'); await card.scrollIntoViewIfNeeded();
-    await card.getByRole('checkbox', { name: 'Can start and stop agents' }).check();
+    // The box follows the computer's answer (it is checked once the permission is saved), so wait for it rather than check().
+    const allow = card.getByRole('checkbox', { name: 'Can start and stop agents' }); await allow.click();
+    for (let i = 0; i < 100 && !(await allow.isChecked()); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok(await allow.isChecked(), 'the phone is allowed to start agents');
     await phone.locator('#add-channel').waitFor({ state: 'visible' });
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude chat', exact: true }).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();
