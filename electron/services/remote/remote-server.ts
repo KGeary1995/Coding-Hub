@@ -6,7 +6,10 @@ import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
 import type { AccountLabel } from '../../../shared/accounts';
-import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type ChatReplay, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteMe, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import type { ChatEnvelope, ChatRequest } from '../../../shared/chat';
+import { chatRequestSchema } from '../../../shared/schemas';
+import { ChatReplayBuffer } from './chat-replay';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
 import { HubError } from '../cli/engine-adapter';
@@ -25,8 +28,10 @@ export interface RemoteHost {
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
   control?(sessionId: string, control: ChannelControl): Promise<void>;
-  /** Adds a channel to this computer's workspace (a linked computer's + Channel). */
-  add?(engine: ChannelEngine): Promise<void>;
+  /** Adds a channel to this computer's workspace (a linked computer's + Channel); `chat` makes it a chat channel. */
+  add?(engine: ChannelEngine, chat?: boolean): Promise<void>;
+  /** A chat request (ChatRequest, validated again there) for a run on this computer, as if its window sent it. */
+  chat?(request: ChatRequest): void;
   /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
   pasteImage?(reference: RunReference, image: Buffer): Promise<void>;
   /** Live coaching on a channel's last prompt, and its AI review on request (see LiveCoach). */
@@ -64,6 +69,10 @@ export interface RemoteRelay {
   size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
   /** A linked computer's channel's conversation, for a phone of this computer. */
   relayTranscript?(sessionId: string): Promise<ChannelTranscript>;
+  /** A chat request from a phone of this computer for a chat on a linked computer. */
+  relayChat?(request: ChatRequest): Promise<void>;
+  /** A linked computer's chat's recent events, as this computer received them; null when none of them runs it. */
+  relayChatReplay?(sessionId: string): ChatReplay | null;
 }
 /**
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
@@ -76,7 +85,9 @@ const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), t
   /** Absent on phones paired before computers could link. */
   kind: z.enum(['phone', 'computer']).optional(), machineId: z.uuid().optional(),
   /** A phone key a linked computer asked for on behalf of its phone (`<computer id>:<its key>`): asking again replaces it. */
-  relayKey: z.string().max(36 + 1 + 100).optional() }).strict();
+  relayKey: z.string().max(36 + 1 + 100).optional(),
+  /** A phone the person let start, stop, restart and add channels; absent (off) on every phone until then. */
+  canRun: z.boolean().optional() }).strict();
 const devicesSchema = z.array(deviceSchema).max(20);
 const vapidSchema = z.object({ publicKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/), privateKey: z.string().min(40).max(400) }).strict();
 /** What a browser's `PushSubscription.toJSON()` gives (`expirationTime` is usually null and is not needed to send). */
@@ -95,7 +106,10 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
-const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']) }).strict();
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal channel cannot be a chat.');
+/** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
+const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
+const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict();
 /** A pasted image (PNG or JPEG, base64), at most 15 MB. */
 const IMAGE_LIMIT = 15 * 1024 * 1024;
@@ -113,15 +127,18 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
  * The phone remote. It listens only on this computer (127.0.0.1); a phone reaches it through `tailscale serve`, which
  * adds HTTPS and admits only devices on the person's tailnet. On top of that every request needs a device key, given
  * once to a phone that presents a short-lived pairing code shown on this computer. Only key hashes are stored, and a
- * key can be revoked at any time. A phone can read channel output and type into running CLIs; it cannot start, stop
- * or reconfigure anything. Another of the person's computers, linked with a code made for computers, can also start,
- * stop and restart channels; phones see linked computers' channels through this one (RemoteRelay).
+ * key can be revoked at any time. A phone can read channel output, type into running CLIs and use chat channels; it
+ * starts, stops, restarts or adds channels only once the person allows that for it (`canRun`, off by default). Another
+ * of the person's computers, linked with a code made for computers, can always do those; phones see linked computers'
+ * channels through this one (RemoteRelay).
  */
 export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
   private screenTickets = new Map<string, { device: string; expires: number }>(); private screens = new Set<Duplex>();
   private replay = new Map<string, ScreenMirror>();
+  /** Chat channels' recent events, kept whether or not phone access is on, so a phone opening a chat sees its thread. */
+  private chats = new ChatReplayBuffer();
   private attention = new Map<string, { runId: string; message: string }>();
   /** Why a channel's last run stopped with an error, until it starts again; linked computers alert on it. */
   private failures = new Map<string, string>();
@@ -283,11 +300,22 @@ export class RemoteServer {
     if (!device.kind || device.kind === 'phone') void this.relay?.revokePhone?.(id).catch(() => {});
     return this.status();
   }
+  /** Lets a phone start, stop, restart and add channels, or takes that away; its open streams hear at once (`me`). */
+  setCanRun(id: string, canRun: boolean) {
+    const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
+    if (device.kind === 'computer') throw new HubError('REMOTE_COMPUTER', 'A linked computer can always start and stop channels. Remove it under Other computers to stop that.');
+    if (canRun) device.canRun = true; else delete device.canRun; this.saveDevices(devices);
+    const payload = `event: me\ndata: ${eventJSON(this.me(device))}\n\n`; for (const stream of this.streams) if (stream.device === id) this.write(stream, payload);
+    return this.status();
+  }
+  private me(device: Device): RemoteMe { const kind = device.kind ?? 'phone'; return { id: device.id, name: device.name, kind, canRun: kind === 'computer' || device.canRun === true }; }
+  /** The device as stored now: a request whose body took a while is judged on the latest permission, or refused if removed. */
+  private current(id: string) { return this.devices().find((item) => item.id === id) ?? null; }
   status(): RemoteStatus {
     const base = this.tailscale.serving && this.tailscale.host ? `https://${this.tailscale.host}/` : null;
     const pairing = this.pairing && this.pairing.expires > Date.now() ? { code: this.pairing.code, url: (base ?? `http://127.0.0.1:${this.port}/`) + PAIRING_PREFIX + this.pairing.code, expiresAt: new Date(this.pairing.expires).toISOString(), kind: this.pairing.kind } : null;
     return { enabled: this.enabled, listening: Boolean(this.server), port: this.port, url: base, error: this.error, tailscale: this.tailscale, pairing, serveProblem: this.tailscale.serving ? null : this.serveProblem, autoLink: this.autoLink,
-      devices: this.devices().map(({ id, name, createdAt, lastSeen, push, kind }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push), kind: kind ?? 'phone' })) };
+      devices: this.devices().map(({ id, name, createdAt, lastSeen, push, kind, canRun }): RemoteDevice => ({ id, name, createdAt, lastSeen, notifications: Boolean(push), kind: kind ?? 'phone', canRun: kind === 'computer' || canRun === true })) };
   }
 
   /** Every session event passes through here: output is kept for replay and sent to phones watching that channel. */
@@ -310,6 +338,25 @@ export class RemoteServer {
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic && this.server) void this.alert(event.sessionId, 'failed', `${this.channelLabel(event.sessionId)} stopped with an error`, event.diagnostic.split('\n')[0].slice(0, 160)).catch(() => {});
     if (event.type === 'answered' || event.type === 'exit') { this.attention.delete(event.sessionId); this.broadcastChannels(); }
   }
+  /**
+   * Every chat event the owning window gets: kept for replay, and sent to phones following that channel and to linked
+   * computers (which pass it on to their own phones and tabs).
+   */
+  onChat(envelope: ChatEnvelope) {
+    this.chats.record(envelope);
+    const payload = `event: chat\ndata: ${eventJSON(envelope)}\n\n`;
+    for (const stream of this.streams) if (stream.sessionId === envelope.sessionId || stream.all) this.write(stream, payload);
+  }
+  /** A chat event from a channel on a linked computer, for this computer's phones following it. */
+  relayChat(envelope: ChatEnvelope) {
+    const payload = `event: chat\ndata: ${eventJSON(envelope)}\n\n`;
+    for (const stream of this.streams) if (stream.kind === 'phone' && stream.sessionId === envelope.sessionId) this.write(stream, payload);
+  }
+  /** A chat's recent events, here or (for phones) on the linked computer that runs it. */
+  private chatReplay(sessionId: string, kind: RemoteDeviceKind): ChatReplay | null {
+    if (this.local(sessionId)) return this.chats.take(sessionId);
+    return kind === 'phone' ? this.relay?.relayChatReplay?.(sessionId) ?? null : null;
+  }
   private output(sessionId: string, runId: string, data: string) {
     const mirror = this.replay.get(sessionId); if (mirror?.runId === runId) mirror.write(data);
     const payload = `event: output\ndata: ${eventJSON({ sessionId, runId, data })}\n\n`;
@@ -330,6 +377,7 @@ export class RemoteServer {
     // Channels that left the workspace keep no screen or prompt here, whether or not a phone is connected.
     const current = new Set(this.host.sessions().map((session) => session.id));
     for (const id of [...this.replay.keys()]) if (!current.has(id)) this.forget(id);
+    for (const id of this.chats.sessionIds()) if (!current.has(id)) this.chats.forget(id);
     for (const id of [...this.attention.keys()]) if (!current.has(id)) this.attention.delete(id);
     for (const key of [...this.alerted.keys()]) if (!current.has(key.slice(0, key.lastIndexOf(':')))) this.alerted.delete(key);
     if (this.channelsTimer || !this.streams.size) return;
@@ -551,6 +599,29 @@ export class RemoteServer {
     const device = this.device(request); if (!device) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
     const kind: RemoteDeviceKind = device.kind ?? 'phone';
     if (request.method === 'GET' && url.pathname === '/api/channels') return this.send(response, 200, this.channels(kind));
+    if (request.method === 'GET' && url.pathname === '/api/me') return this.send(response, 200, this.me(device));
+    if (request.method === 'GET' && url.pathname === '/api/chat-history') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      const replay = sessionId ? this.chatReplay(sessionId, kind) : null;
+      return replay ? this.send(response, 200, replay) : this.send(response, 400, { error: 'Unknown channel.' });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/chat') {
+      const parsed = chatRequestSchema.safeParse(await this.body(request, CHAT_BODY)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid chat request. Images must be PNG, JPEG, GIF or WebP, at most 10 per message.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
+      const chat = parsed.data; const local = this.local(chat.sessionId);
+      // Seating a partner joins a second running agent to the conversation: that takes the same permission as starting one.
+      if (chat.action === 'table-open' && !this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      if (chat.action === 'table-open' && local && !this.local(chat.partner.sessionId)) return this.send(response, 400, { error: 'Unknown channel.' });
+      try {
+        if (local) { if (!this.host.chat) return this.send(response, 409, { error: 'This computer cannot take chat messages from here right now.' }); this.host.chat(chat); }
+        else if (kind === 'phone' && this.relay?.relayChat) {
+          if (chat.action === 'table-open') return this.send(response, 403, { error: 'Open a Round Table on another computer’s channel from that computer.' });
+          await this.relay.relayChat(chat);
+        }
+        else return this.send(response, 400, { error: 'Unknown channel.' });
+      } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The chat request could not be delivered.' }); }
+      return this.send(response, 200, { ok: true });
+    }
     if (request.method === 'GET' && url.pathname === '/api/stream') {
       const sessionId = url.searchParams.get('sessionId'); const all = url.searchParams.get('all') === '1';
       if (all && kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can follow every channel.' });
@@ -564,6 +635,9 @@ export class RemoteServer {
         if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
       this.write(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
+      // A chat's recent thread, ahead of its live events (written now, before any screen replay holds the stream back).
+      for (const replay of all ? this.chats.sessionIds().filter((id) => this.local(id)).map((id) => this.chats.take(id)) : sessionId ? [this.chatReplay(sessionId, kind)] : [])
+        if (replay?.runId) this.write(stream, `event: chat-replay\ndata: ${eventJSON(replay)}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
       const screens: { sessionId: string; take: (callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void) => boolean }[] = all
         ? [...this.replay].map(([id, mirror]) => ({ sessionId: id, take: (callback) => { mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; } }))
@@ -665,11 +739,12 @@ export class RemoteServer {
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/channel-add') {
-      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can add channels.' });
+      if (!this.me(device).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       const parsed = addSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid channel.' });
-      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.' });
+      if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
-      try { await this.host.add(parsed.data.engine); }
+      try { await this.host.add(parsed.data.engine, parsed.data.chat === true); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
       return this.send(response, 200, { ok: true });
     }
@@ -686,9 +761,10 @@ export class RemoteServer {
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/control') {
-      if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can start or stop channels.' });
+      if (!this.me(device).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       const parsed = controlSchema.safeParse(await this.body(request)); if (!parsed.success || !this.local(parsed.data.sessionId)) return this.send(response, 400, { error: 'Unknown channel.' });
-      if (!this.devices().some((item) => item.id === device.id)) return this.send(response, 401, { error: 'This computer is no longer linked.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.' });
+      if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       if (!this.host.control) return this.send(response, 409, { error: 'This computer cannot start or stop channels right now.' });
       try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }

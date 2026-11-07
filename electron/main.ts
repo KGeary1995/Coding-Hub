@@ -42,7 +42,7 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, suppo
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
-import { finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
+import { chatRequestSchema, finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
@@ -141,6 +141,8 @@ const manager = new PtyManager((owner, event) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
+  // Phones and linked computers following the channel get it too.
+  try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, chatHistory: (config) => { if (!config.resumeId) return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
@@ -218,7 +220,9 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']) }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
+  z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
@@ -274,7 +278,9 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
-  if (request.action === 'linked-add') { await linked.add(request.id, request.engine); return null; }
+  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && request.engine !== 'shell'); return null; }
+  if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
+  if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
   if (request.action === 'linked-update') return linked.update(request.id);
   if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
@@ -297,9 +303,9 @@ function channelTranscript(sessionId: string): ChannelTranscript {
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
-/** A linked computer adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine): Promise<void> { return askWindow({ add: engine }); }
-function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine }): Promise<void> {
+/** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
+function addChannel(engine: ChannelEngine, chat = false): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}) }); }
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true }): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
@@ -531,7 +537,8 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
-    add: (engine) => addChannel(engine),
+    add: (engine, chat) => addChannel(engine, chat),
+    chat: (request) => manager.chatRemote(request),
     // Claude Code and Codex take an image from this computer's clipboard when they get their image key (Alt+V on
     // Windows, Ctrl+V on a Mac), so the pasted image is put there first, as a paste here would.
     pasteImage: async (reference, data) => {
@@ -567,7 +574,8 @@ else app.whenReady().then(() => {
     // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
     const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
     linked = new LinkedComputers(storageRoot, () => devices.machine, () => devices.advertised(), (event) => { if (event.type === 'computers') linkedAlerts.update(event.computers); sendToRenderer(IPC_CHANNELS.linkedEvent, event); },
-      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged() }, fetch, () => powerMonitor.getSystemIdleTime());
+      { output: (sessionId, runId, data) => phone.relayOutput(sessionId, runId, data), resize: (sessionId, runId, cols, rows) => phone.relayResize(sessionId, runId, cols, rows), changed: () => phone.relayChanged(), chat: (envelope) => phone.relayChat(envelope) }, fetch, () => powerMonitor.getSystemIdleTime());
+    linked.chatEvents = (event) => sendToRenderer(IPC_CHANNELS.linkedChatEvent, event);
     // A smoke test (an unpackaged run on its own remote port) must never find or link the owner's real computers on
     // the tailnet: it would leave links to a throwaway copy on them. CODING_HUB_TEST_TAILNET=1 opts a test back in.
     const isolatedTest = !app.isPackaged && Boolean(process.env.CODING_HUB_TEST_REMOTE_PORT) && process.env.CODING_HUB_TEST_TAILNET !== '1';
@@ -605,11 +613,13 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-open-tailscale') }).strict(),
       z.object({ action: z.literal('remote-test-alert'), id: z.uuid() }).strict(),
       z.object({ action: z.literal('remote-auto-link'), enabled: z.boolean() }).strict(),
+      z.object({ action: z.literal('remote-can-run'), id: z.uuid(), canRun: z.boolean() }).strict(),
     ]).parse(payload);
     if (request.action === 'remote-auto-link') phone.setAutoLink(request.enabled);
     if (request.action === 'remote-enable') { await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
+    if (request.action === 'remote-can-run') return phone.setCanRun(request.id, request.canRun);
     if (request.action === 'remote-test-alert') return phone.testAlert(request.id);
     if (request.action === 'remote-open-tailscale') { if (phone.serveLink) await shell.openExternal(phone.serveLink); return phone.status(); }
     if (request.action === 'remote-serve') {

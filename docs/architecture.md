@@ -88,7 +88,7 @@ shared/  typed contracts and pure logic used by both sides
    4. memory (`AutoMemory.prepare`): Claude gets `--append-system-prompt` (recent notes) and `--mcp-config`. **`--mcp-config` takes a list, so it must stay last.** Codex gets `developer_instructions` (merged after the user's own) and `mcp_servers.coding-hub-memory.*`. A project that installed its own `coding-hub-memory` is used instead; stale program paths are repaired, and a different memory key is reported.
 5. **Spawn:**
    - Terminal channels use node-pty. Output is batched (16 ms / 32 KB) with flow control: pause above 1 MB unacknowledged, resume below 256 KB.
-   - Chat channels use plain pipes and a JSON protocol, so raw writes and phone input are refused.
+   - Chat channels use plain pipes and a JSON protocol, so raw writes and raw phone typing are refused; phones and linked computers send chat requests instead (`PtyManager.chatRemote`), and every chat event also goes to the remote's streams (`RemoteServer.onChat`, with a bounded per-channel replay).
    - `shell` channels skip every agent feature and aren't recorded.
 6. **While it runs:**
    - Output goes to `logs/<runId>.log`, the renderer and the phone.

@@ -3,7 +3,7 @@ import type { AlertTarget, CodingHubHost, SessionEvent } from '../shared/ipc';
 import type { AccountEvent } from '../shared/accounts';
 import type { UpdateStatus } from '../shared/updates';
 import type { UsageRecord } from '../shared/hub';
-import type { LinkedComputerEvent, RemoteControlRequest } from '../shared/remote';
+import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest } from '../shared/remote';
 import type { ChatEnvelope } from '../shared/chat';
 import type { ScreenEvent } from '../shared/screen';
 import type { LiveTip } from '../shared/coaching';
@@ -74,6 +74,11 @@ const host: CodingHubHost = {
     const receive = (_event: Electron.IpcRendererEvent, value: LinkedComputerEvent) => listener(value);
     ipcRenderer.on('coding-hub:linked-event', receive);
     return () => ipcRenderer.removeListener('coding-hub:linked-event', receive);
+  },
+  onLinkedChatEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: LinkedChatEvent) => listener(value);
+    ipcRenderer.on('coding-hub:linked-chat-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:linked-chat-event', receive);
   },
   screen: (request) => ipcRenderer.invoke('coding-hub:screen', request),
   onScreenEvent: (listener) => {
