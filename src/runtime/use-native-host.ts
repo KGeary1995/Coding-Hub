@@ -66,7 +66,7 @@ export function useNativeHost() {
     // A clicked desktop notification opens what it is about.
     const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView('usage'); });
     const unsubscribeControl = host.onRemoteControl((request) => {
-      void ('add' in request ? Promise.resolve(remoteAdd(request.add)) : remoteControl(request.sessionId, request.control))
+      void ('add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
     });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
@@ -141,10 +141,11 @@ export async function stopSession(id: string): Promise<boolean> {
  * way the buttons on its tile would. Returns why it could not, for the other computer to show.
  */
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
-export function remoteAdd(engine: ChannelEngine): string | undefined {
+export function remoteAdd(engine: ChannelEngine, chat = false): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
   if (before >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels.`;
-  useWorkspaceStore.getState().addSession(engine);
+  // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
+  if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
   return useWorkspaceStore.getState().sessions.length > before ? undefined : 'The channel could not be added.';
 }
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {

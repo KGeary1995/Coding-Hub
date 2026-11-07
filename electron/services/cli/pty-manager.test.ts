@@ -320,7 +320,7 @@ describe('Chat channels', () => {
     manager.chatRemote({ action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'please write a file', images: [] });
     await until(() => kinds().includes('permission'));
     // What the phone caused goes to the window that owns the run.
-    expect(chats[0]).toEqual({ owner: 3, envelope: { sessionId: 'chat-remote', runId: session.runId, event: { type: 'user', text: 'please write a file', images: 0 } } });
+    expect(chats[0]).toEqual({ owner: 3, envelope: { sessionId: 'chat-remote', runId: session.runId, event: { type: 'user', text: 'please write a file', images: 0, remote: true } } });
     expect(chats.every((chat) => chat.owner === 3)).toBe(true);
     const permission = chats.find((chat) => chat.envelope.event.type === 'permission')!.envelope.event as { requestId: string };
     manager.chatRemote({ action: 'answer', sessionId: session.sessionId, runId: session.runId, requestId: permission.requestId, allow: true });

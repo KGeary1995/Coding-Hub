@@ -273,20 +273,21 @@ export class PtyManager {
   }
 
   /** The window's messages, approvals and interruptions for a chat run. */
-  chat(owner: number, payload: unknown) { this.chatRequest(payload, (reference) => this.ownedRun(owner, reference)); }
+  chat(owner: number, payload: unknown) { this.chatRequest(payload, false, (reference) => this.ownedRun(owner, reference)); }
   /**
    * The same from a paired phone or linked computer: the run is reached by its reference rather than through a window,
    * and what it causes goes to the owning window as if sent there. Whether the device may open a Round Table is the
    * remote server's check.
    */
   chatRemote(payload: unknown) {
-    this.chatRequest(payload, (reference) => {
+    this.chatRequest(payload, true, (reference) => {
       const run = this.runs.get(reference.sessionId);
       if (!run || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
       return run;
     });
   }
-  private chatRequest(payload: unknown, find: (reference: { sessionId: string; runId: string }) => ManagedRun) {
+  /** `remote`: from a phone or linked computer, so the person's message is marked for the window to add (it did not send it). */
+  private chatRequest(payload: unknown, remote: boolean, find: (reference: { sessionId: string; runId: string }) => ManagedRun) {
     const parsed = chatRequestSchema.safeParse(payload);
     if (!parsed.success) throw new HubError('INVALID_CHAT', 'Invalid chat request.');
     const run = find(parsed.data); const owner = run.owner;
@@ -296,7 +297,7 @@ export class PtyManager {
     if (request.action === 'send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
       run.chat.send(request.text, request.images);
-      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length } }); } catch { this.dependencies.onEventError?.(); }
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else if (request.action === 'interrupt') run.chat.interrupt();
@@ -308,7 +309,7 @@ export class PtyManager {
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
       this.tables.send(request.runId, request.text, request.images);
-      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length } }); } catch { this.dependencies.onEventError?.(); }
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'table-driver') this.tables.setDriver(request.runId, request.driver);
     else if (request.action === 'table-rounds') this.tables.setRounds(request.runId, request.rounds);

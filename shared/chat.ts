@@ -28,7 +28,7 @@ export type ChatEvent =
   /** Something Claude reported that is worth a line in the thread (a refused tool, an API retry). */
   | { type: 'notice'; text: string }
   /** The person's message as the agent received it (the window shows it already; it is kept in the run's history). */
-  | { type: 'user'; text: string; images: number }
+  | { type: 'user'; text: string; images: number; remote?: true }
   /** A resumed conversation's earlier messages and tool results, sent once as it starts. */
   | { type: 'history'; messages: ChatHistoryMessage[]; results: Record<string, { text: string; isError: boolean; image: boolean }> }
   /** The Round Table this chat leads changed (sent on the leading channel); null when it ended. */

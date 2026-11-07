@@ -75,8 +75,8 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
       case 'permission': return { ...current, items: [...items, { kind: 'permission', order: ++counter, id: event.requestId, toolName: event.toolName, description: event.description, input: event.input, canAllowEdits: event.canAllowEdits, answer: null }] };
       case 'permission-done': return { ...current, items: items.map((item) => item.kind === 'permission' && item.id === event.requestId && !item.answer ? { ...item, answer: 'closed' } : item) };
       case 'notice': return { ...current, items: [...items, { kind: 'notice', order: ++counter, id: nextId(), text: event.text, error: false }] };
-      // The window adds the person's message itself when it is sent.
-      case 'user': return current;
+      // The window adds the person's message itself when it is sent; one sent from a phone or another computer is added here.
+      case 'user': return event.remote ? { ...current, busy: true, items: [...items, { kind: 'user', order: ++counter, id: nextId(), text: event.text, images: [], at: new Date().toISOString() }] } : current;
       case 'history': {
         // A resumed conversation's earlier messages, unless this window still shows the conversation itself.
         if (items.some((item) => item.kind === 'user' || item.kind === 'assistant') || !event.messages.length) return current;
