@@ -241,7 +241,7 @@
 .tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px 24px; }
 .tr-plan-account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; }
 .tr-plan-window { display: grid; grid-template-columns: 9em 1fr 3em auto; align-items: center; gap: 10px; padding: 3px 0; font-size: 13px; }
-.tr-plan-bar { height: 6px; border-radius: 3px; background: var(--tr-line); overflow: hidden; }
+.tr-plan-bar { height: 6px; border-radius: var(--tr-r-control); background: var(--tr-line); overflow: hidden; }
 .tr-plan-bar i { display: block; height: 100%; background: var(--tr-add); }
 .tr-plan-window.warning .tr-plan-bar i { background: var(--tr-st-limit); }
 .tr-plan-window.critical .tr-plan-bar i { background: var(--tr-st-failed); }

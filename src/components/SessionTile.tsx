@@ -111,6 +111,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
+          {/* Flight Deck Lite: a thin crosshair marks the focused channel (shown by CSS on .selected). */}
+          <svg className="tr-focus-reticle" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M8 0v3.5M8 12.5V16M0 8h3.5M12.5 8H16" /></svg>
           <span className="tr-ch-badge" style={{ background: `var(--tr-ch-${engine})` }} title={engineName}>CH{channel}</span>
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
