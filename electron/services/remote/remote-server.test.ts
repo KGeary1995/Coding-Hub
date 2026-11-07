@@ -530,3 +530,98 @@ describe('phone permissions and chat channels', () => {
     expect((await get(server, token, '/api/chat-history?sessionId=s1')).body.events).toEqual([{ type: 'user', text: 'hello', images: 2 }, done.event]);
   });
 });
+
+describe('usage, tasks, history and memory for phones', () => {
+  const TASK = '0f8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d'; const OTHER = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+  async function phoneRemote() {
+    const { server } = await remote(); const host = (server as unknown as { host: RemoteHost }).host;
+    const moved: { id: string; status: string }[] = []; const resumed: string[] = []; const written: { project: string; title: string; content: string }[] = [];
+    let tasks: NonNullable<ReturnType<NonNullable<RemoteHost['tasks']>>> = [
+      { id: TASK, title: 'Fix login', directory: 'C:\\Users\\me\\secret\\app', sessionId: 's2', scope: ['src/**'], status: 'active', notes: '', verificationId: null, createdAt: '2026-11-01T10:00:00.000Z', sentAt: '2026-11-02T10:00:00.000Z' },
+      { id: OTHER, title: 'Docs', directory: '/home/me/secret/app', sessionId: 'gone', scope: ['**'], status: 'queued', notes: '', verificationId: null, createdAt: '2026-11-03T10:00:00.000Z' },
+    ];
+    Object.assign(host, {
+      usage: () => ({ today: { day: '2026-11-07', claude: 1200, codex: 300, cost: 1.5, complete: true }, limits: [{ engine: 'claude', account: 'Default', windows: [{ label: 'Session', usedPercent: 40, resets: null }], plan: null, checkedAt: '2026-11-07T10:00:00.000Z', error: null }], budget: { dailyTokens: 50000, dailyCost: null, limitWarning: 70 } }),
+      tasks: () => tasks,
+      taskStatus: async (id, status) => { moved.push({ id, status }); tasks = tasks.map((task) => task.id === id ? { ...task, status } : task); },
+      history: async () => Array.from({ length: 120 }, (_, index) => ({ key: `claude:default:${index}`, id: String(index), engine: index % 2 ? 'codex' : 'claude', directory: index === 0 ? null : index % 2 ? `C:\\Users\\me\\private\\proj${index}\\` : `/Users/me/private/proj${index}`, title: `Claude · proj${index} · 1234`, modifiedAt: new Date(Date.UTC(2026, 10, 7) - index * 60000).toISOString(), ...(index === 0 ? { label: 'Named' } : {}) })),
+      resume: async (key) => { resumed.push(key); },
+      memoryProjects: () => [{ project: 'app-0123456789', directory: 'C:\\Users\\me\\private\\app' }],
+      memoryNotes: (project) => Array.from({ length: 35 }, (_, index) => ({ project, author: 'claude', id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Note ${index}`, content: 'x'.repeat(index === 34 ? 25000 : 10), createdAt: new Date(Date.UTC(2026, 10, 1) + index * 60000).toISOString() })),
+      writeMemory: (project, title, content) => { written.push({ project, title, content }); },
+    } satisfies Partial<RemoteHost>);
+    await server.setEnabled(true);
+    return { server, moved, resumed, written };
+  }
+  type Reply = { status: number; body: any };
+  const get = async (server: RemoteServer, token: string, pathname: string): Promise<Reply> => { const response = await fetch(base(server) + pathname, { headers: { Authorization: `Bearer ${token}` } }); return { status: response.status, body: await response.json() }; };
+  const post = async (server: RemoteServer, token: string, pathname: string, body: unknown): Promise<Reply> => { const response = await fetch(base(server) + pathname, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() }; };
+
+  it('needs a device key for every one of them', async () => {
+    const { server } = await phoneRemote();
+    for (const pathname of ['/api/usage', '/api/tasks', '/api/history', '/api/memory']) expect((await get(server, 'x'.repeat(43), pathname)).status).toBe(401);
+    for (const pathname of ['/api/task-status', '/api/history-resume', '/api/memory']) expect((await post(server, 'x'.repeat(43), pathname, {})).status).toBe(401);
+  });
+
+  it('gives any paired phone today\'s usage, plan limits and the daily budget', async () => {
+    const { server } = await phoneRemote(); const token = await paired(server);
+    expect(await get(server, token, '/api/usage')).toEqual({ status: 200, body: { day: '2026-11-07', tokens: { claude: 1200, codex: 300 }, cost: 1.5, complete: true, limits: [expect.objectContaining({ engine: 'claude', account: 'Default' })], budget: { tokens: 50000, dollars: null, warnAt: 0.7 } } });
+  });
+
+  it('lists tasks under the board\'s four columns with no folder paths, and moves them only for phones allowed to run agents', async () => {
+    const { server, moved } = await phoneRemote(); const token = await paired(server);
+    const { status, body } = await get(server, token, '/api/tasks');
+    expect(status).toBe(200);
+    expect(body).toEqual([
+      { id: OTHER, title: 'Docs', status: 'todo', sessionId: 'gone', channel: null, files: ['**'], updatedAt: '2026-11-03T10:00:00.000Z' },
+      { id: TASK, title: 'Fix login', status: 'working', sessionId: 's2', channel: 2, files: ['src/**'], updatedAt: '2026-11-02T10:00:00.000Z' },
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/secret/);
+    const refused = await post(server, token, '/api/task-status', { id: TASK, status: 'review' });
+    expect(refused.status).toBe(403); expect(refused.body.error).toMatch(/Can start and stop agents/); expect(moved).toEqual([]);
+    server.setCanRun(server.status().devices[0].id, true);
+    expect(await post(server, token, '/api/task-status', { id: TASK, status: 'review' })).toEqual({ status: 200, body: { ok: true } });
+    expect(await post(server, token, '/api/task-status', { id: OTHER, status: 'working' })).toEqual({ status: 200, body: { ok: true } });
+    expect(moved).toEqual([{ id: TASK, status: 'review' }, { id: OTHER, status: 'active' }]);
+    // The phone uses the column names, never the stored ones.
+    expect((await post(server, token, '/api/task-status', { id: TASK, status: 'queued' })).status).toBe(400);
+    expect(await post(server, token, '/api/task-status', { id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', status: 'done' })).toEqual({ status: 400, body: { error: 'Unknown task.' } });
+  });
+
+  it('lists the newest 100 CLI conversations with only their folder\'s name, and resumes one only for phones allowed to run agents', async () => {
+    const { server, resumed } = await phoneRemote(); const token = await paired(server);
+    const { status, body } = await get(server, token, '/api/history');
+    expect(status).toBe(200); expect(body).toHaveLength(100);
+    expect(body[0]).toEqual({ key: 'claude:default:0', engine: 'claude', title: 'Named', folder: '', modified: '2026-11-07T00:00:00.000Z' });
+    expect(body[1]).toEqual({ key: 'claude:default:1', engine: 'codex', title: 'Claude · proj1 · 1234', folder: 'proj1', modified: '2026-11-06T23:59:00.000Z' });
+    expect(body[2].folder).toBe('proj2');
+    for (const item of body) expect(item.folder).toMatch(/^[^\\/]*$/);
+    expect(JSON.stringify(body)).not.toMatch(/private|Users/);
+    const refused = await post(server, token, '/api/history-resume', { key: 'claude:default:3' });
+    expect(refused.status).toBe(403); expect(refused.body.error).toMatch(/Can start and stop agents/); expect(resumed).toEqual([]);
+    server.setCanRun(server.status().devices[0].id, true);
+    expect(await post(server, token, '/api/history-resume', { key: 'claude:default:3' })).toEqual({ status: 200, body: { ok: true } });
+    expect(resumed).toEqual(['claude:default:3']);
+    expect((await post(server, token, '/api/history-resume', { key: '' })).status).toBe(400);
+    // The computer says why it could not (an unknown key, a closed window), and the phone shows that.
+    (server as unknown as { host: RemoteHost }).host.resume = async () => { throw new HubError('NATIVE_SESSION', 'The CLI conversation is no longer available. Refresh the list.'); };
+    expect(await post(server, token, '/api/history-resume', { key: 'claude:default:999' })).toEqual({ status: 409, body: { error: 'The CLI conversation is no longer available. Refresh the list.' } });
+  });
+
+  it('shows the newest 30 handoffs of each channel\'s project, capped, and lets any paired phone write one to those projects only', async () => {
+    const { server, written } = await phoneRemote(); const token = await paired(server);
+    const { status, body } = await get(server, token, '/api/memory');
+    expect(status).toBe(200); expect(body).toHaveLength(1);
+    expect(body[0].project).toBe('app-0123456789'); expect(body[0].name).toBe('app'); expect(body[0].notes).toHaveLength(30);
+    expect(body[0].notes[0]).toMatchObject({ title: 'Note 34', author: 'claude' }); expect(body[0].notes[0].content).toHaveLength(20000);
+    expect(Object.keys(body[0].notes[0]).sort()).toEqual(['author', 'content', 'createdAt', 'id', 'title']);
+    expect(JSON.stringify(body)).not.toMatch(/private/);
+    // canRun is off: a handoff is notes, not running an agent.
+    expect(await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'From my phone', content: 'Check the login fix.' })).toEqual({ status: 200, body: { ok: true } });
+    expect(written).toEqual([{ project: 'app-0123456789', title: 'From my phone', content: 'Check the login fix.' }]);
+    expect(await post(server, token, '/api/memory', { project: 'other-0123456789', title: 'x', content: 'y' })).toEqual({ status: 400, body: { error: 'Unknown project.' } });
+    expect((await post(server, token, '/api/memory', { project: 'app-0123456789', title: '', content: 'y' })).status).toBe(400);
+    expect((await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'x', content: 'y', author: 'claude' })).status).toBe(400);
+    expect(written).toHaveLength(1);
+  });
+});
