@@ -30,7 +30,7 @@ import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
 /** What "tok" counts, and the cache traffic it leaves out. */
-const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads${usage.cacheWrite ? `, ${usage.cacheWrite.toLocaleString()} cache writes` : ''}.`;
+const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
 /** One channel: header, scope strip, a detail row on hover or keyboard focus, notices and the terminal (docs/design/trace, sheet 08). */

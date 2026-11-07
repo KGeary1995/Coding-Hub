@@ -20,10 +20,11 @@ describe('isolated local Claude profiles', () => {
     expect(fs.readFileSync(path.join(root, 'claude-profiles/profiles.json'), 'utf8')).not.toContain('private-default');
     if (process.platform !== 'win32') expect(fs.statSync(store.directory(work.id)).mode & 0o777).toBe(0o700);
   });
-  it('preserves the default environment but removes authentication overrides from named sessions without mutating the host', () => {
+  it('keeps the default sign-in folder but drops inherited keys, and isolates named sessions, without mutating the host', () => {
     const { store } = fixture(); const profile = store.create('Work');
     const base = { PATH: '/bin', TOOL_FLAG: 'keep', CLAUDE_CONFIG_DIR: '/legacy', ANTHROPIC_API_KEY: 'secret', anthropic_auth_token: 'secret', CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR: '9', CLAUDE_CODE_USE_BEDROCK: '1' };
-    expect(store.environment(base)).toEqual(base);
+    // An exported key or token would quietly pick the account; the chosen folder and provider stay.
+    expect(store.environment(base)).toEqual({ PATH: '/bin', TOOL_FLAG: 'keep', CLAUDE_CONFIG_DIR: '/legacy', CLAUDE_CODE_USE_BEDROCK: '1' });
     const isolated = store.environment(base, profile.id);
     expect(isolated).toEqual({ PATH: '/bin', TOOL_FLAG: 'keep', CLAUDE_CONFIG_DIR: store.directory(profile.id) });
     expect(base.ANTHROPIC_API_KEY).toBe('secret');

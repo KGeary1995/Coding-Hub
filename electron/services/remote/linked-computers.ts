@@ -50,6 +50,8 @@ export class LinkedComputers implements RemoteRelay {
   private activeTimer: ReturnType<typeof setInterval> | null = null;
   /** Computers that answered on the tailnet, by sync identity: listed even when the Drive folders differ. */
   private found = new Map<string, AdvertisedComputer>();
+  /** Computers that removed this computer's key, kept listed (with a code box) until linked again. */
+  private removed = new Map<string, { name: string; url: string }>();
   private discovering: Promise<void> | null = null;
   /** The HTTPS addresses of the person's online computers on the tailnet (`tailscalePeers`); none until set. */
   peers: () => Promise<string[]> = async () => [];
@@ -71,9 +73,10 @@ export class LinkedComputers implements RemoteRelay {
   status(): LinkedComputer[] {
     const self = this.self().id; const links = new Map(this.links().map((link) => [link.id, link]));
     const found = new Map([...this.found.values(), ...this.advertised()].filter((item) => item.id !== self).map((item) => [item.id, item]));
-    return [...new Set([...found.keys(), ...links.keys()])].map((id): LinkedComputer => {
-      const link = links.get(id); const advertised = found.get(id); const connection = this.connections.get(id);
-      return { id, name: advertised?.name ?? link!.name, url: linkableAddress(advertised?.url ?? null) ?? link?.url ?? null, linked: Boolean(link), connected: Boolean(connection?.connected), error: connection?.error ?? null, channels: connection?.connected ? this.tagged(connection) : [] };
+    return [...new Set([...found.keys(), ...links.keys(), ...this.removed.keys()])].map((id): LinkedComputer => {
+      const link = links.get(id); const advertised = found.get(id); const connection = this.connections.get(id); const removed = link ? undefined : this.removed.get(id);
+      const name = advertised?.name ?? link?.name ?? removed!.name;
+      return { id, name, url: linkableAddress(advertised?.url ?? null) ?? link?.url ?? removed?.url ?? null, linked: Boolean(link), connected: Boolean(connection?.connected), error: connection?.error ?? (removed ? `Removed on ${name}. Enter a code from ${name} to link again.` : null), channels: connection?.connected ? this.tagged(connection) : [] };
     }).sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -95,7 +98,7 @@ export class LinkedComputers implements RemoteRelay {
       throw new HubError('LINK_PHONE_CODE', 'That is a phone pairing code. On the other computer, use Settings → Other computers → Show link code.');
     }
     if (body.computer?.id && body.computer.id !== id) throw new HubError('LINK_MISMATCH', 'That address answered as a different computer. Sync now on both computers and try again.');
-    this.declined(id, false); this.keep({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
+    this.declined(id, false); this.removed.delete(id); this.keep({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
     return this.status();
   }
   private keep(link: Link) {
@@ -321,7 +324,7 @@ export class LinkedComputers implements RemoteRelay {
           if (connection.stopped) return;
           connection.error = error instanceof HubError ? error.message : `${link.name} could not be reached.`;
           // A removed key will not start working again by itself.
-          if (error instanceof HubError && error.code === 'LINK_REVOKED') { this.drop(connection); this.notify(); this.sink.changed(); return; }
+          if (error instanceof HubError && error.code === 'LINK_REVOKED') { this.forget(connection); return; }
         }
         this.drop(connection); this.notify(); this.sink.changed();
         await new Promise<void>((resolve) => { const timer = setTimeout(resolve, delay); connection.wake = () => { clearTimeout(timer); resolve(); }; });
@@ -333,6 +336,16 @@ export class LinkedComputers implements RemoteRelay {
   private drop(connection: Connection) {
     connection.connected = false; connection.channels = [];
     for (const mirror of connection.mirrors.values()) mirror.dispose(); connection.mirrors.clear();
+  }
+  /**
+   * The other computer removed this one's key. The dead link is dropped, so the row offers a code box instead of a link
+   * that fails on every start, and the computer is not linked again automatically: the removal there was on purpose.
+   */
+  private forget(connection: Connection) {
+    const { link } = connection; this.disconnect(connection); this.connections.delete(link.id);
+    save(this.root, FILE, this.links().filter((item) => item.id !== link.id)); this.declined(link.id, true);
+    this.removed.set(link.id, { name: link.name, url: link.url });
+    this.notify(); this.sink.changed();
   }
   private disconnect(connection: Connection) { connection.stopped = true; connection.controller?.abort(); connection.wake?.(); this.drop(connection); }
 

@@ -5,11 +5,22 @@ import type { DriveStatus, HubPreferences, MemoryConflict, MemoryNote } from '..
 import { MemoryService, noteSchema } from './memory';
 import { HubError } from '../cli/engine-adapter';
 
+/**
+ * Why a Drive folder cannot be used, or null when it can. A Windows path such as `G:\My Drive` is not a full path on a
+ * Mac, and sync used to stop there without saying so.
+ */
+export function driveFolderProblem(directory: string, isAbsolute: (value: string) => boolean = path.isAbsolute): string | null {
+  if (!directory.trim()) return 'No Google Drive folder is selected. Choose the folder Google Drive for desktop keeps on this computer.';
+  if (!isAbsolute(directory)) return `${directory} is not a full folder path on this computer. Choose the folder Google Drive for desktop keeps here.`;
+  try { if (fs.statSync(directory).isDirectory()) return null; } catch { /* Below. */ }
+  return `${directory} was not found. Start Google Drive for desktop, or choose the folder it keeps on this computer.`;
+}
+
 /** Google Drive for desktop owns authentication and cloud transport. Only curated notes sync. */
 export class DriveMirror {
   private syncing = false;
   constructor(private local: MemoryService, private preferences: () => HubPreferences) {}
-  status(): DriveStatus { const p = this.preferences(); let connected = false; try { connected = path.isAbsolute(p.driveDirectory) && fs.statSync(p.driveDirectory).isDirectory(); } catch { /* Drive offline or not mounted. */ } return { connected, clientConfigured: !!p.driveDirectory, persistent: true, folderId: p.folderId }; }
+  status(): DriveStatus { const p = this.preferences(); const problem = driveFolderProblem(p.driveDirectory); return { connected: !problem, clientConfigured: !!p.driveDirectory, persistent: true, folderId: p.folderId, problem }; }
   private mirror(): MemoryService {
     if (!this.status().connected) throw new HubError('DRIVE_OFFLINE', 'Drive folder is unavailable. Local handoffs remain available.');
     const mirror = new MemoryService(path.join(fs.realpathSync(this.preferences().driveDirectory), 'AI-Coding-Hub-Memory'));
@@ -43,7 +54,8 @@ export class DriveMirror {
   }
   sync(project: string) {
     if (this.syncing) throw new HubError('DRIVE_BUSY', 'A memory sync is already in progress.');
-    if (!this.status().connected) throw new HubError('DRIVE_OFFLINE', 'The Drive folder is unavailable. Start Google Drive for desktop or choose its local folder. Local handoffs remain available.');
+    const problem = this.status().problem;
+    if (problem) throw new HubError('DRIVE_OFFLINE', `${problem} Local handoffs remain available.`);
     this.syncing = true;
     try {
       const root = fs.realpathSync(this.preferences().driveDirectory);

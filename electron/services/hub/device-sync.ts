@@ -9,6 +9,7 @@ import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { templateSchema } from '../workbench/workflows';
 import { preferencesSchema } from './preferences';
+import { driveFolderProblem } from './drive';
 import type { RulesService } from './rules';
 
 /**
@@ -94,7 +95,9 @@ export class DeviceSync {
   }
   private state(): State { return load(this.root, 'device-sync.json', stateSchema.nullable(), null) ?? structuredClone(EMPTY); }
   private folder() {
-    const preferences = this.preferences(); if (!preferences.syncDevices || !path.isAbsolute(preferences.driveDirectory)) return null;
+    const preferences = this.preferences(); if (!preferences.syncDevices) return null;
+    // Say why instead of skipping sync quietly (a Windows path on a Mac never syncs).
+    const problem = driveFolderProblem(preferences.driveDirectory); if (problem) throw new HubError('DRIVE_FOLDER', problem);
     if (this.identityError) throw new HubError('SYNC_IDENTITY', this.identityError);
     let drive: string; try { drive = fs.realpathSync(preferences.driveDirectory); if (!fs.statSync(drive).isDirectory()) return null; } catch { return null; }
     const folder = path.join(drive, SYNC_FOLDER);
@@ -237,8 +240,8 @@ export class DeviceSync {
   status(): DeviceSyncStatus {
     let preferences: HubPreferences; try { preferences = this.preferences(); } catch (error) { preferences = { ...DEFAULT_PREFERENCES, syncDevices: false }; this.error ??= (error as Error).message; }
     let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
-    let connected = false; try { connected = Boolean(preferences.syncDevices) && path.isAbsolute(preferences.driveDirectory) && fs.statSync(preferences.driveDirectory).isDirectory(); } catch { /* Offline. */ }
+    const problem = preferences.syncDevices ? driveFolderProblem(preferences.driveDirectory) : null; const connected = Boolean(preferences.syncDevices) && !problem;
     const conflicts = (['settings', 'rules'] as const).flatMap((document) => { const held = state.pending[document]; return held ? [{ document, from: held.machine.name, at: held.updatedAt }] : []; });
-    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: this.error ?? (preferences.syncDevices ? this.identityError : null), computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
+    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: problem ?? this.error ?? (preferences.syncDevices ? this.identityError : null), computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
   }
 }

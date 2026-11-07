@@ -46,13 +46,52 @@ export function withoutAgentSession(env: Record<string, string>): Record<string,
   return Object.fromEntries(Object.entries(env).filter(([key]) => !AGENT_SESSION.test(key)));
 }
 
-export function hostEnvironment(): Record<string, string> {
+const REGISTRY_PATHS = ['HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'HKCU\\Environment'];
+/** Reads one `Path` value with reg.exe; null when it is missing or reg.exe fails. */
+function readRegistryPath(key: string): string | null {
+  try {
+    const output = execFileSync('reg.exe', ['query', key, '/v', 'Path'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    return /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(output)?.[1]?.trim() || null;
+  } catch { return null; }
+}
+
+/**
+ * Windows' current PATH, machine folders then the person's, as a new terminal would get it. Trace's own PATH is fixed
+ * when it starts, so without this a CLI or tool installed while Trace runs (Node.js, winget, an npm with its own prefix,
+ * a folder added in System Properties) is not found until Trace restarts. `%NAME%` references are expanded from `env`.
+ */
+export function windowsRegistryPath(env: Record<string, string>, read: (key: string) => string | null = readRegistryPath): string[] {
+  const lookup = new Map(Object.entries(env).map(([key, value]) => [key.toUpperCase(), value]));
+  return REGISTRY_PATHS.flatMap((key) => (read(key) ?? '').split(';'))
+    .map((folder) => folder.trim().replace(/%([^%]+)%/g, (whole, name: string) => lookup.get(name.toUpperCase()) ?? whole)).filter(Boolean);
+}
+
+/** Adds each folder once (Windows compares paths without case), keeping the first copy's position. */
+export function mergePath(folders: string[], windows = process.platform === 'win32'): string[] {
+  const seen = new Set<string>(); const result: string[] = [];
+  for (const folder of folders) {
+    if (!folder) continue;
+    const key = windows ? folder.replace(/^"|"$/g, '').replace(/[\\/]+$/, '').toLowerCase() : folder;
+    if (!seen.has(key)) { seen.add(key); result.push(folder); }
+  }
+  return result;
+}
+
+/** The registry is read at most every few seconds; a burst of launches shares one read. */
+let registryCache: { at: number; folders: string[] } | null = null;
+function currentRegistryPath(env: Record<string, string>) {
+  if (registryCache && Date.now() - registryCache.at < 5000) return registryCache.folders;
+  registryCache = { at: Date.now(), folders: windowsRegistryPath(env) };
+  return registryCache.folders;
+}
+
+export function hostEnvironment(registry: (env: Record<string, string>) => string[] = currentRegistryPath): Record<string, string> {
   const env = withoutAgentSession(Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)));
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   const extra = process.platform === 'win32'
-    ? [path.join(os.homedir(), '.local', 'bin'), ...(env.APPDATA ? [path.join(env.APPDATA, 'npm')] : [])]
+    ? [...registry(env), path.join(os.homedir(), '.local', 'bin'), ...(env.APPDATA ? [path.join(env.APPDATA, 'npm')] : [])]
     : [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.npm-global', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
-  env[pathKey] = [...(env[pathKey] ?? '').split(path.delimiter), ...extra].filter(Boolean).join(path.delimiter);
+  env[pathKey] = mergePath([...(env[pathKey] ?? '').split(path.delimiter), ...extra]).join(path.delimiter);
   return env;
 }
 

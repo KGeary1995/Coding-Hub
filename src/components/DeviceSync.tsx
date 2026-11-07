@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { MonitorSmartphone, RefreshCw } from 'lucide-react';
-import type { DeviceSyncStatus, SyncedDocument } from '../../shared/hub';
+import type { DeviceSyncStatus, SyncedComputer, SyncedDocument } from '../../shared/hub';
+import type { LinkedComputer } from '../../shared/remote';
+import { useLinkedStore } from '../state/linked-store';
 import { hubCall } from '../state/hub-store';
 import { refreshSynced } from '../runtime/use-native-host';
 
@@ -8,8 +10,19 @@ const DOCUMENT_LABEL: Record<SyncedDocument, string> = { settings: 'Settings', r
 const when = (iso: string) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** Status of the sync between computers: which computers share the Drive folder, the last sync, and conflicts to settle. */
+/**
+ * Computers this one reaches over Tailscale (or has linked) that have never written to this sync folder: most often the
+ * two use different Drive folders, which otherwise only shows as "None seen yet". Checked only after a sync has run.
+ */
+export function outsideSyncFolder(linked: LinkedComputer[], status: Pick<DeviceSyncStatus, 'enabled' | 'connected' | 'lastSync' | 'machine'> & { computers: SyncedComputer[] }): LinkedComputer[] {
+  if (!status.enabled || !status.connected || !status.lastSync) return [];
+  const synced = new Set(status.computers.map((item) => item.id));
+  return linked.filter((item) => item.id !== status.machine.id && !synced.has(item.id) && (item.linked || item.url !== null));
+}
+
 export function DeviceSyncCard() {
   const [status, setStatus] = useState<DeviceSyncStatus | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const linked = useLinkedStore((state) => state.computers);
   const run = async (request: Parameters<typeof hubCall>[0]) => {
     setBusy(true); setError('');
     try { setStatus(await hubCall<DeviceSyncStatus>(request)); await refreshSynced(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -20,6 +33,7 @@ export function DeviceSyncCard() {
     load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
   }, []);
   if (!status) return error ? <p role="alert" className="error-message">{error}</p> : null;
+  const outside = outsideSyncFolder(linked, status);
   return <article className="storage-card device-sync" aria-labelledby="device-sync-title">
     <header><h2 id="device-sync-title"><MonitorSmartphone size={16} aria-hidden="true" />Sync between computers</h2>
       <span className={`storage-status ${status.enabled && status.connected ? 'saved' : ''}`}>{!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable'}</span></header>
@@ -37,6 +51,7 @@ export function DeviceSyncCard() {
           <button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-resolve', document: conflict.document, keep: 'remote' })}>Use {conflict.from}’s</button>
         </div>
       </div>)}
+      {outside.length > 0 && <p role="alert" className="error-message">{outside.map((item) => item.name).join(', ')} {outside.length === 1 ? 'is' : 'are'} on your tailnet but not in this sync folder. Check that sync is on there and that both computers use the same Google Drive folder.</p>}
       {status.error && <p role="alert" className="error-message">{status.error}</p>}
       <div className="hub-toolbar"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
     </>}

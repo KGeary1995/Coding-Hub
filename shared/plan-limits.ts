@@ -13,6 +13,8 @@ export interface PlanLimits {
   engine: 'claude' | 'codex';
   /** "Default" for the CLI's own login, or a Claude account profile's name. */
   account: string;
+  /** Who the default login is (its email, or the profile signed in to the same account), so the wrong account shows. */
+  signedInAs?: string | null;
   windows: LimitWindow[];
   /** The plan the CLI reports, when it does (Codex). */
   plan: string | null;

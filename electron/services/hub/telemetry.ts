@@ -32,8 +32,18 @@ function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: str
   const u = event.info.total_token_usage; if (!reported(u.input_tokens) || !reported(u.output_tokens)) return null; const last = event.info.last_token_usage; const limit = number(event.info.model_context_window);
   return { key: 'cumulative', model: fallbackModel, input: number(u.input_tokens), output: number(u.output_tokens), cached: number(u.cached_input_tokens), cacheWrite: number(u.cache_write_input_tokens), reasoning: typeof u.reasoning_output_tokens === 'number' ? number(u.reasoning_output_tokens) : null, context: limit > 0 && last ? { used: number(last.input_tokens) + number(last.output_tokens), limit } : null };
 }
+/** A model ID without case, surrounding spaces or a trailing release date (`claude-x-20261101` is `claude-x`). */
+const baseModel = (model: string) => model.trim().toLowerCase().replace(/-\d{8}$/, '');
+/**
+ * The rate for a model: an exact match first, else the rate whose ID is the same model without its release date or
+ * case, so a rate entered as `claude-opus-5-5` also prices runs the CLI logged as a dated ID. Context-size variants such
+ * as `[1m]` are not merged, since they can be priced differently.
+ */
+export function rateFor(model: string, rates: PriceRate[]): PriceRate | undefined {
+  return rates.find((r) => r.model === model) ?? rates.find((r) => baseModel(r.model) === baseModel(model));
+}
 export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null {
-  const rate = rates.find((r) => r.model === usage.model); if (!rate) return null;
+  const rate = rateFor(usage.model, rates); if (!rate) return null;
   const input = usage.engine === 'codex' ? Math.max(0, usage.input - usage.cached) : usage.input;
   return (input * rate.input + usage.output * rate.output + usage.cached * rate.cacheRead + usage.cacheWrite * rate.cacheWrite) / 1000000;
 }
