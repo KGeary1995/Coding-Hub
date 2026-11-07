@@ -16,6 +16,7 @@ import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream } from '../chat/codex-stream';
+import { RoundTables } from '../chat/round-table';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
 
@@ -255,9 +256,13 @@ export class PtyManager {
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
       if (run.finished && event.type !== 'permission-done') return;
+      // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
+      if (event.type === 'permission') { const declined = this.tables.observe({ sessionId, runId, event }); if (declined) { emit({ type: 'notice', text: declined }); return; } }
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
+      // After the window has it, so a reply that ends a round reaches the window before the next round starts.
+      if (event.type !== 'permission') try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
     };
     const stream: ChatStream = codex ? new CodexStream(write, emit, codex) : new ClaudeStream(write, emit);
     run.chat = stream;
@@ -281,8 +286,29 @@ export class PtyManager {
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
-    else run.chat.interrupt();
+    else if (request.action === 'interrupt') run.chat.interrupt();
+    else if (request.action === 'table-open') { this.ownedRun(owner, request.partner); this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds); }
+    else if (request.action === 'table-send') {
+      if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
+      this.tables.send(request.runId, request.text, request.images);
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length } }); } catch { this.dependencies.onEventError?.(); }
+    }
+    else if (request.action === 'table-driver') this.tables.setDriver(request.runId, request.driver);
+    else if (request.action === 'table-rounds') this.tables.setRounds(request.runId, request.rounds);
+    else if (request.action === 'table-stop') this.tables.stop(request.runId);
+    else this.tables.close(request.runId);
   }
+
+  /** Round Tables, coordinated here so they run whichever window, phone or computer is watching. */
+  private readonly tables = new RoundTables({
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner } : null; },
+    send: (runId, text, images) => this.chatRun(runId)?.chat?.send(text, images),
+    setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
+    answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
+    interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),
+    emit: (owner, envelope) => { try { this.dependencies.onChat?.(owner, envelope); } catch { this.dependencies.onEventError?.(); } },
+  });
+  private chatRun(runId: string) { const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId); return run && run.chat && !run.finished ? run : null; }
 
   private flush(run: ManagedRun) {
     if (run.flushTimer) clearTimeout(run.flushTimer);
@@ -358,6 +384,7 @@ export class PtyManager {
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
     run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();
+    if (run.chat) try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ }
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
     // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.

@@ -68,4 +68,10 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-stop') }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-close') }).strict(),
 ]);

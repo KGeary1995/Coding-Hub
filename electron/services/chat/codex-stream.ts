@@ -26,7 +26,10 @@ export class CodexStream implements ChatStream {
   private failed: string | null = null;
   /** Stop was pressed before Codex named the turn; it is interrupted as soon as it has an id. */
   private interruptWanted = false;
+  private readOnly = false; private sandboxChanged = false;
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) {}
+  /** Applies from the next turn: Codex takes its sandbox with each turn. Back to editing is Codex's own default, workspace-write. */
+  setReadOnly(readOnly: boolean) { if (readOnly !== this.readOnly) { this.readOnly = readOnly; this.sandboxChanged = true; } }
 
   start() {
     this.request('initialize', { clientInfo: { name: 'trace', title: 'Trace', version: '1' }, capabilities: null }, () => {
@@ -50,7 +53,9 @@ export class CodexStream implements ChatStream {
     const go = () => {
       const input = [...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` })), ...(message ? [{ type: 'text', text: message, text_elements: [] }] : [])];
       this.turnId = null; this.interruptWanted = false;
-      this.request('turn/start', { threadId: this.threadId, input }, (response) => {
+      // The sandbox carries over to later turns, so it is sent whenever it was changed (read-only for a reviewer).
+      const sandbox = this.sandboxChanged ? { sandboxPolicy: this.readOnly ? { type: 'readOnly' } : { type: 'workspaceWrite' } } : {}; this.sandboxChanged = false;
+      this.request('turn/start', { threadId: this.threadId, input, ...sandbox }, (response) => {
         const turn = record(record(response.result).turn);
         if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not accept the message.' });
         else if (text(turn.id)) this.started(text(turn.id));

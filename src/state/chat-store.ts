@@ -1,14 +1,16 @@
 import { create } from 'zustand';
-import type { ChatBlock, ChatEnvelope, ChatImage } from '../../shared/chat';
+import type { ChatBlock, ChatEnvelope, ChatImage, RoundTableState } from '../../shared/chat';
 
-/** What a chat channel's thread holds, in order. Tool results are kept by tool call and shown on its card. */
+/** What a chat channel's thread holds, in order. `order` is when an item was added, counted across every thread, so a
+ * Round Table can merge two agents' threads in time. Tool results are kept by tool call and shown on its card. */
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; images: string[]; at: string }
-  | { kind: 'assistant'; id: string; blocks: ChatBlock[]; streaming: string }
-  | { kind: 'permission'; id: string; toolName: string; description: string; input: Record<string, unknown>; canAllowEdits: boolean; answer: 'allowed' | 'denied' | 'closed' | null }
-  | { kind: 'notice'; id: string; text: string; error: boolean };
+  | { kind: 'user'; id: string; order?: number; text: string; images: string[]; at: string }
+  | { kind: 'assistant'; id: string; order?: number; blocks: ChatBlock[]; streaming: string }
+  | { kind: 'permission'; id: string; order?: number; toolName: string; description: string; input: Record<string, unknown>; canAllowEdits: boolean; answer: 'allowed' | 'denied' | 'closed' | null }
+  | { kind: 'notice'; id: string; order?: number; text: string; error: boolean };
 export interface ToolResult { text: string; isError: boolean; image: boolean }
-export interface ChatThread { runId: string | null; items: ChatItem[]; results: Record<string, ToolResult>; busy: boolean; model: string | null }
+/** `table`: the Round Table this chat leads, if any. */
+export interface ChatThread { runId: string | null; items: ChatItem[]; results: Record<string, ToolResult>; busy: boolean; model: string | null; table?: RoundTableState | null }
 
 const EMPTY: ChatThread = { runId: null, items: [], results: {}, busy: false, model: null };
 export const useChatStore = create<{ threads: Record<string, ChatThread> }>(() => ({ threads: {} }));
@@ -24,8 +26,8 @@ let counter = 0; const nextId = () => `chat-${++counter}`;
  */
 export function chatStarted(sessionId: string, runId: string, resumed: boolean) {
   update(sessionId, (current) => resumed && current.items.length
-    ? { ...current, runId, busy: false, items: [...current.items, { kind: 'notice', id: nextId(), text: 'Restarted. Claude continues this conversation.', error: false }] }
-    : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', id: nextId(), text: 'Resumed a saved conversation. Earlier messages are in Claude’s history; new ones appear here.', error: false }] : [] });
+    ? { ...current, runId, busy: false, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text: 'Restarted. Claude continues this conversation.', error: false }] }
+    : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', order: ++counter, id: nextId(), text: 'Resumed a saved conversation. Earlier messages are in Claude’s history; new ones appear here.', error: false }] : [] });
 }
 export function chatEnded(sessionId: string) { update(sessionId, (current) => ({ ...current, busy: false, items: current.items.map((item) => item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' } : item) })); }
 /** Frees the conversations (with their images) of channels no longer in the workspace. */
@@ -37,12 +39,12 @@ export function forgetChatsExcept(sessionIds: Iterable<string>) {
 
 /** The person's message, shown at once; images as data URLs for the thread. */
 export function chatSent(sessionId: string, text: string, images: ChatImage[]) {
-  update(sessionId, (current) => ({ ...current, busy: true, items: [...current.items, { kind: 'user', id: nextId(), text, images: images.map((image) => `data:${image.mediaType};base64,${image.data}`), at: new Date().toISOString() }] }));
+  update(sessionId, (current) => ({ ...current, busy: true, items: [...current.items, { kind: 'user', order: ++counter, id: nextId(), text, images: images.map((image) => `data:${image.mediaType};base64,${image.data}`), at: new Date().toISOString() }] }));
 }
 export function chatAnswered(sessionId: string, requestId: string, allow: boolean) {
   update(sessionId, (current) => ({ ...current, items: current.items.map((item) => item.kind === 'permission' && item.id === requestId ? { ...item, answer: allow ? 'allowed' : 'denied' } : item) }));
 }
-export function chatFailed(sessionId: string, text: string) { update(sessionId, (current) => ({ ...current, busy: false, items: [...current.items, { kind: 'notice', id: nextId(), text, error: true }] })); }
+export function chatFailed(sessionId: string, text: string) { update(sessionId, (current) => ({ ...current, busy: false, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text, error: true }] })); }
 
 /** Claude's side of the conversation, from the host. */
 export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
@@ -52,10 +54,11 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
     const assistant = (id: string) => {
       const index = items.findIndex((item) => item.kind === 'assistant' && item.id === id);
       if (index >= 0) return index;
-      items.push({ kind: 'assistant', id, blocks: [], streaming: '' }); return items.length - 1;
+      items.push({ kind: 'assistant', order: ++counter, id, blocks: [], streaming: '' }); return items.length - 1;
     };
     switch (event.type) {
       case 'ready': return { ...current, model: event.model };
+      case 'table': return { ...current, table: event.table };
       case 'delta': { const index = assistant(event.messageId); const item = items[index] as Extract<ChatItem, { kind: 'assistant' }>; items[index] = { ...item, streaming: item.streaming + event.text }; return { ...current, items, busy: true };
       }
       case 'assistant': {
@@ -69,24 +72,24 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
         return { ...current, items };
       }
       case 'tool-result': return { ...current, results: { ...current.results, [event.toolUseId]: { text: event.text, isError: event.isError, image: event.image } } };
-      case 'permission': return { ...current, items: [...items, { kind: 'permission', id: event.requestId, toolName: event.toolName, description: event.description, input: event.input, canAllowEdits: event.canAllowEdits, answer: null }] };
+      case 'permission': return { ...current, items: [...items, { kind: 'permission', order: ++counter, id: event.requestId, toolName: event.toolName, description: event.description, input: event.input, canAllowEdits: event.canAllowEdits, answer: null }] };
       case 'permission-done': return { ...current, items: items.map((item) => item.kind === 'permission' && item.id === event.requestId && !item.answer ? { ...item, answer: 'closed' } : item) };
-      case 'notice': return { ...current, items: [...items, { kind: 'notice', id: nextId(), text: event.text, error: false }] };
+      case 'notice': return { ...current, items: [...items, { kind: 'notice', order: ++counter, id: nextId(), text: event.text, error: false }] };
       // The window adds the person's message itself when it is sent.
       case 'user': return current;
       case 'history': {
         // A resumed conversation's earlier messages, unless this window still shows the conversation itself.
         if (items.some((item) => item.kind === 'user' || item.kind === 'assistant') || !event.messages.length) return current;
         const earlier: ChatItem[] = event.messages.map((message) => message.role === 'user'
-          ? { kind: 'user', id: nextId(), text: message.images ? `${message.text}${message.text ? '\n' : ''}[${message.images} image${message.images === 1 ? '' : 's'}]` : message.text, images: [], at: '' }
-          : { kind: 'assistant', id: nextId(), blocks: message.blocks, streaming: '' });
-        return { ...current, results: { ...event.results, ...current.results }, items: [...earlier, { kind: 'notice', id: nextId(), text: 'Resumed. The messages above are from the saved conversation.', error: false }] };
+          ? { kind: 'user', order: ++counter, id: nextId(), text: message.images ? `${message.text}${message.text ? '\n' : ''}[${message.images} image${message.images === 1 ? '' : 's'}]` : message.text, images: [], at: '' }
+          : { kind: 'assistant', order: ++counter, id: nextId(), blocks: message.blocks, streaming: '' });
+        return { ...current, results: { ...event.results, ...current.results }, items: [...earlier, { kind: 'notice', order: ++counter, id: nextId(), text: 'Resumed. The messages above are from the saved conversation.', error: false }] };
       }
       case 'done': {
         // Streamed text that never got its final message (an interruption) stays as it was.
         // An approval still open when its reply ended no longer belongs to anything.
         const settled = items.map((item) => item.kind === 'assistant' && item.streaming ? { ...item, blocks: [...item.blocks, { type: 'text' as const, text: item.streaming }], streaming: '' } : item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' as const } : item);
-        return { ...current, busy: false, items: event.isError && event.error ? [...settled, { kind: 'notice', id: nextId(), text: event.error, error: true }] : settled };
+        return { ...current, busy: false, items: event.isError && event.error ? [...settled, { kind: 'notice', order: ++counter, id: nextId(), text: event.error, error: true }] : settled };
       }
     }
   });
