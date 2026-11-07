@@ -14,12 +14,23 @@ const shorten = (value: string) => value.length > TOOL_RESULT_LIMIT ? value.slic
  * `control_response` saying allow (with the input unchanged) or deny.
  */
 /** What a chat run needs from the CLI's protocol, whichever CLI it is. */
-export interface ChatStream { start(): void; send(message: string, images: ChatImage[]): void; answer(requestId: string, allow: boolean, allowEdits?: boolean): boolean; interrupt(): void; close(): void; push(data: string): void }
+export interface ChatStream {
+  start(): void; send(message: string, images: ChatImage[]): void; answer(requestId: string, allow: boolean, allowEdits?: boolean): boolean; interrupt(): void; close(): void; push(data: string): void;
+  /** A Round Table's reviewer reads but does not edit: Claude's plan mode, Codex's read-only sandbox. */
+  setReadOnly(readOnly: boolean): void;
+}
 
 export class ClaudeStream implements ChatStream {
   private buffer = '';
   private pending = new Map<string, { input: Record<string, unknown>; suggestions: unknown[] }>();
+  /** The permission mode the person's settings started Claude in (from its init message), restored when it may edit again. */
+  private ownMode = 'default'; private readOnly = false;
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void) {}
+
+  setReadOnly(readOnly: boolean) {
+    if (readOnly === this.readOnly) return; this.readOnly = readOnly;
+    this.control({ subtype: 'set_permission_mode', mode: readOnly ? 'plan' : this.ownMode });
+  }
 
   /** Says hello; Claude then sends approval requests here instead of refusing them. */
   start() { this.control({ subtype: 'initialize', hooks: null }); }
@@ -62,7 +73,7 @@ export class ClaudeStream implements ChatStream {
 
   private read(message: Record<string, unknown>) {
     const type = message.type;
-    if (type === 'system' && message.subtype === 'init') { this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
+    if (type === 'system' && message.subtype === 'init') { if (text(message.permissionMode) && text(message.permissionMode) !== 'plan') this.ownMode = text(message.permissionMode); this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
     if (type === 'system' && message.subtype === 'permission_denied') { this.emit({ type: 'notice', text: text(message.message) || `${text(message.tool_name)} was not allowed.` }); return; }
     if (type === 'system' && message.subtype === 'api_retry') { this.emit({ type: 'notice', text: 'Claude’s API was busy; retrying.' }); return; }
     if (type === 'stream_event') {

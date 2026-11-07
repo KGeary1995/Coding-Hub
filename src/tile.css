@@ -204,3 +204,19 @@
 .task-strip-state { color: var(--tr-fg-strong); font-weight: 600; white-space: nowrap; }
 .task-strip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .task-strip .error-message { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Round Table: the person, Claude Code and Codex in one thread. Each agent's messages carry its engine colour down the left. */
+.table-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/18px var(--tr-font-ui); }
+.table-bar strong { color: var(--tr-fg-strong); font-weight: 600; }
+.table-seats { display: inline-flex; } .table-seats i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--tr-surface); margin-left: -4px; }
+.table-seats i:first-child { margin-left: 0; } .seat-you { background: var(--tr-fg-muted); } .seat-claude { background: var(--tr-ch-claude); } .seat-codex { background: var(--tr-ch-codex); }
+.table-roles { color: var(--tr-fg-muted); }
+.table-rounds { display: inline-flex; align-items: center; gap: 6px; color: var(--tr-fg-muted); }
+.table-rounds select { height: 26px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: 3px; background: var(--tr-term); color: var(--tr-fg); font: 400 13px var(--tr-font-mono); }
+.table-status { margin-left: auto; color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); }
+.table-bar .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
+.table-seated { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg-muted); font: 400 13px/18px var(--tr-font-ui); }
+.chat-author { margin: 0; font: 600 11px/14px var(--tr-font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.chat-message.assistant.table-claude, .chat-message.assistant.table-codex { padding-left: 10px; border-left: 2px solid; }
+.chat-message.assistant.table-claude { border-color: var(--tr-ch-claude); } .table-claude .chat-author { color: var(--tr-ch-claude); }
+.chat-message.assistant.table-codex { border-color: var(--tr-ch-codex); } .table-codex .chat-author { color: var(--tr-ch-codex); }
