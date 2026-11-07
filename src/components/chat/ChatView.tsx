@@ -5,6 +5,8 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
 import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/chat-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
+import { useHubStore } from '../../state/hub-store';
+import { channelToday } from '../../state/channel-state';
 import { forgetTable, openRoundTable, tableRequest } from '../../runtime/round-table';
 import { AGENT, EMPTY, Item, readImage, TableBar } from './ChatParts';
 
@@ -26,6 +28,9 @@ export function ChatView({ session }: { session: Session }) {
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
   const busy = chat.busy || (table !== null && partnerThread.busy);
+  const leadTokens = useHubStore((state) => channelToday(session.id, state.usage).tokens);
+  const partnerTokens = useHubStore((state) => table ? channelToday(table.partner.sessionId, state.usage).tokens : 0);
+  const tableTokens = table ? { lead: leadTokens, partner: partnerTokens } : undefined;
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState('');
   const [viewing, setViewing] = useState<string | null>(null); const [opening, setOpening] = useState(false);
   const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const input = useRef<HTMLTextAreaElement>(null); const file = useRef<HTMLInputElement>(null);
@@ -72,7 +77,7 @@ export function ChatView({ session }: { session: Session }) {
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
-    {table && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => { if (request.action === 'table-close') forgetTable(session.id); void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
+ {table && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} onRequest={(request) => { if (request.action === 'table-close') forgetTable(session.id); void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}

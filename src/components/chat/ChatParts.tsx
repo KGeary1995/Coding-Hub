@@ -97,7 +97,9 @@ export function Item({ item, results, agent, author, answer, view }: { item: Cha
 
 /** The controls of a Round Table: who drives, how many rounds, where it is, stop and close. */
 export type TableAction = { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
-export function TableBar({ leadEngine, table, busy, onRequest }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void }) {
+const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
+/** `tokens`: each agent's new tokens today, when the caller has them (the desktop does). */
+export function TableBar({ leadEngine, table, busy, onRequest, tokens }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; tokens?: { lead: number; partner: number } }) {
   const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
   const run = onRequest;
   const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
@@ -105,6 +107,7 @@ export function TableBar({ leadEngine, table, busy, onRequest }: { leadEngine: '
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
     <strong>Round Table</strong>
     <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span>
+    {tokens && <span className="table-tokens tnum" title="New tokens today in each agent's channel"><b className={`seat-text-${leadEngine}`}>{AGENT[leadEngine]} {short(tokens.lead)}</b> · <b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]} {short(tokens.partner)}</b></span>}
     <button className="quiet-button" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
     <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
     <span className="table-status" aria-live="polite">{status}</span>

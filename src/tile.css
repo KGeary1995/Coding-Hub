@@ -250,3 +250,5 @@
 .linked-chat { height: 100%; }
 .remote-chat .phone-image { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--tr-scrim); }
 .remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
+.table-tokens { color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); text-transform: none; } .table-tokens b { font-weight: 500; }
+.seat-text-claude { color: var(--tr-ch-claude); } .seat-text-codex { color: var(--tr-ch-codex); }
