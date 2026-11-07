@@ -3,6 +3,7 @@ import type { ChannelControl } from '../../shared/remote';
 import type { ChannelEngine } from '../../shared/types';
 import { MAX_CHANNELS } from '../../shared/schemas';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
+import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
@@ -62,6 +63,8 @@ export function useNativeHost() {
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
+    // Another computer's chat channels: their events, into this window's chat store, kept apart by computer.
+    const unsubscribeLinkedChat = host.onLinkedChatEvent((event) => { const keyOf = linkedChatKey(event.id); if (event.type === 'chat') receiveChat(event.envelope, keyOf); else receiveReplay(event.replay, keyOf); });
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
     // A clicked desktop notification opens what it is about.
     const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView('usage'); });
@@ -97,7 +100,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }

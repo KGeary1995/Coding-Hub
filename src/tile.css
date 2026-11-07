@@ -245,3 +245,8 @@
 .tr-scope-limit::after { display: none; }
 .tr-focus-reticle { display: none; flex: none; color: var(--bracket, var(--tr-fg-dim)); opacity: .8; }
 .session-tile.tr-tile.selected .tr-focus-reticle { display: block; }
+/* A chat on another computer (its tab here, or the phone): the same thread; an enlarged image covers the view. */
+.remote-chat { flex: 1; min-height: 0; }
+.linked-chat { height: 100%; }
+.remote-chat .phone-image { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--tr-scrim); }
+.remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
