@@ -79,13 +79,15 @@ export const AGENT = { claude: 'Claude', codex: 'Codex' } as const;
 const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the other agent up', answering: 'Both answering', discussing: 'Discussing', idle: 'Your turn' };
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
-export function Item({ item, results, agent, author, answer, view }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void }) {
-  if (item.kind === 'user') return <div className="chat-message user">
+/** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say YOU. */
+export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: 'driver' | 'reviewer' }) {
+  if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
+    {author && <p className="chat-author"><i className="seat-hex seat-you" aria-hidden="true" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
     {item.text && <p className="chat-user-text">{item.text}</p>}
   </div>;
   if (item.kind === 'assistant') return <div className={`chat-message assistant ${author ? `table-${author}` : ''}`}>
-    {author && <p className="chat-author">{agent}</p>}
+    {author && <p className="chat-author"><i className={`seat-hex seat-${author}`} aria-hidden="true" />{agent}{role ? ` · ${role === 'driver' ? 'Driver' : 'Review'}` : ''}</p>}
     {item.blocks.map((block, index) => block.type === 'text' ? <Markdown key={index} text={block.text} />
       : block.type === 'thinking' ? <details key={index} className="chat-thinking"><summary>Thinking</summary><p>{block.text}</p></details>
         : <ToolCard key={block.id} block={block} result={results[block.id]} />)}

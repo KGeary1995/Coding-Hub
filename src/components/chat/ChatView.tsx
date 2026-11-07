@@ -82,8 +82,8 @@ export function ChatView({ session }: { session: Session }) {
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
       {items.map(({ item, from }) => from === 'lead'
-        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} answer={answerFor(session)} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} answer={answerFor(partnerSession)} view={setViewing} />)}
+        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
+        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answerFor(partnerSession)} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
     <div className="chat-composer">

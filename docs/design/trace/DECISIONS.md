@@ -64,4 +64,6 @@ The owner chose direction **11 · Flight Deck Lite** from the redesign canvas (M
 | Emphasis | Frame colour only | **Corner brackets** on the focused channel (its engine colour) and on one that needs you or failed; a soft glow only on a channel waiting for you. "No glow" no longer holds for that one state |
 | Intensity | — | `--tr-grid`, `--tr-bracket-alpha`, `--tr-glow-*` in `src/tokens.css` carry the canvas's intensity 35; change them together |
 
-Still to come in this direction: segmented gauges for context and plan limits, hexagonal Round Table seats, the reticle focus marker on tiles, and the phone app rebuilt on the same components.
+Tile anatomy (1.16.1): the header reads `⌖ CH1 CLAUDE CODE <name> <MODEL> <ACCOUNT> … START ○ IDLE`, the channel number and engine as text in the engine's colour, account and action outlined. The old scope strip under the header is gone; the tile's footer carries the segmented CTX gauge, its share, the tokens today and a small output trace with its rate. Round Table messages carry a hexagon seat and `CLAUDE · DRIVER` / `CODEX · REVIEW` / `YOU`.
+
+Every screen (1.16.1): `src/flight-deck.css`, loaded last, gives the shared pieces the direction's form: uppercase tracked page titles, mono section labels, outlined uppercase buttons, cyan for whatever is active (tabs, open menus, segments, the default choice), uppercase status bar, and the idle channel readout. `scripts/design-tour.cjs` screenshots every view for checking a change page by page. The app icon is the reticle (`scripts/make-icon.cjs`).
