@@ -45,6 +45,8 @@ export function attachCopy(terminal: Terminal, element: HTMLElement) {
     const rows = selectedRows(terminal); if (!rows?.length) return;
     event.preventDefault(); event.stopPropagation();
     event.clipboardData.setData('text/plain', unwrapCopied(rows, terminal.cols));
+    // As in Windows Terminal, so the next Ctrl+C reaches the CLI as an interrupt.
+    if (WINDOWS) terminal.clearSelection();
   }, true);
   let touched = 0; const touch = () => { touched = Date.now(); };
   element.addEventListener('mouseup', touch, true); element.addEventListener('keydown', touch, true);
@@ -125,6 +127,9 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   // The CLI's terminal title says what it is working on (Claude Code's task summary).
   terminal.onTitleChange((title) => setTerminalTitle(session.id, title));
   terminal.attachCustomKeyEventHandler((event) => {
+    // On Windows, xterm turns Ctrl+C into ^C even with text selected, which interrupts the CLI instead of copying.
+    // With a selection, let the browser copy (as Windows Terminal does); without one, ^C goes to the CLI as before.
+    if (WINDOWS && event.type === 'keydown' && event.code === 'KeyC' && event.ctrlKey && !event.altKey && !event.metaKey && terminal.hasSelection()) return false;
     if (event.type !== 'keydown' || event.code !== 'KeyV' || event.shiftKey) return true;
     // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing in either CLI (Claude Code 2.1.311 ignores it;
     // Codex 0.164 pastes only text). Let the browser paste instead, as Windows Terminal does; the listener below
