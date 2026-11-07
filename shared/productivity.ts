@@ -4,12 +4,11 @@ import type { VerificationProfile } from './workbench';
 export interface SessionBudget { tokens: number | null; costUSD: number | null; contextPercent: number }
 export interface PreparedSessionRequest { prompt: string; label: string }
 export interface ConversationLabel { key: string; name: string; pinned: boolean }
-export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules' | 'annotation'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules' | 'design'; snapshotId?: string; noteId?: string }
+export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules'; noteId?: string }
 export interface SearchResults { hits: SearchHit[]; limited: boolean }
 export interface ProjectTemplate { id: string; name: string; description: string; workspace: SavedWorkspace; rules: string; checks: Pick<VerificationProfile, 'name' | 'steps' | 'timeoutSeconds'>[]; createdAt: string }
 export interface DeliveryStatus { directory: string; branch: string | null; head: string | null; revision: string; renames: Record<string,string>; staged: string[]; unstaged: string[]; remotes: string[] }
 export interface DeliveryResult { output: string; url: string | null }
-export interface VisualDifference { content: string; width: number; height: number; changedPixels: number; totalPixels: number }
 export type WorkflowRequest =
  | { action: 'flow-conversations' } | { action: 'flow-conversation-save'; key: string; name: string; pinned: boolean }
  | { action: 'flow-failures' }
@@ -23,12 +22,9 @@ export type WorkflowRequest =
  | { action: 'flow-git-push'; directory: string; revision: string; remote: string }
  | { action: 'flow-git-pr'; directory: string; revision: string; title: string; body: string; base: string; draft: boolean }
  | { action: 'flow-open-pr'; url: string }
- | { action: 'flow-preview-size'; width: number; height: number }
- | { action: 'flow-design-diff'; before: string; after: string; threshold: number }
- | { action: 'flow-design-task'; snapshotId: string; annotationId: string; directory: string; scope: string[] }
  | { action: 'flow-release-status' }
  | { action: 'flow-support-export'; engine: 'claude' | 'codex'; directory: string | null; profileId?: string };
-export type WorkflowResponse = ConversationLabel[] | ConversationLabel | (SessionHistoryRun & { diagnostic: string })[] | SearchResults | ProjectTemplate[] | ProjectTemplate | SavedWorkspace | DeliveryStatus | DeliveryResult | VisualDifference | { exported: boolean } | { state: string; publisher: string | null } | import('./workbench').Task | null;
+export type WorkflowResponse = ConversationLabel[] | ConversationLabel | (SessionHistoryRun & { diagnostic: string })[] | SearchResults | ProjectTemplate[] | ProjectTemplate | SavedWorkspace | DeliveryStatus | DeliveryResult | { exported: boolean } | { state: string; publisher: string | null } | import('./workbench').Task | null;
 export function budgetAlerts(budget: SessionBudget | undefined, usage: UsageRecord | undefined): string[] {
   if (!budget || !usage) return [];
   const tokens = newTokens(usage);

@@ -3,12 +3,11 @@ const WorkflowCenter = lazy(() => import('./WorkflowCenter').then((module) => ({
 import { useWorkspaceStore } from '../state/workspace-store';
 // Screens load when first opened, keeping the window's start-up bundle to the workspace itself. Once the window has
 // settled they are fetched in the background (preloadScreens), so opening one is still instant.
-const screens = [() => import('./TasksPanel'), () => import('./VerificationPanel'), () => import('./CoachingPanel'), () => import('./DesignPanel'), () => import('./ProjectsPanel'), () => import('./AccountsPanel'), () => import('./RulesPanel'), () => import('./HelpPanel'), () => import('./HubPanels'), () => import('./screens/UsageScreen'), () => import('./WorkflowCenter')];
+const screens = [() => import('./TasksPanel'), () => import('./VerificationPanel'), () => import('./CoachingPanel'),() => import('./ProjectsPanel'), () => import('./AccountsPanel'), () => import('./RulesPanel'), () => import('./HelpPanel'), () => import('./HubPanels'), () => import('./screens/UsageScreen'), () => import('./WorkflowCenter')];
 export function preloadScreens() { for (const load of screens) void load().catch(() => {}); }
 const TasksPanel = lazy(() => import('./TasksPanel').then((module) => ({ default: module.TasksPanel })));
 const VerificationPanel = lazy(() => import('./VerificationPanel').then((module) => ({ default: module.VerificationPanel })));
 const CoachingPanel = lazy(() => import('./CoachingPanel').then((module) => ({ default: module.CoachingPanel })));
-const DesignPanel = lazy(() => import('./DesignPanel').then((module) => ({ default: module.DesignPanel })));
 const ProjectsPanel = lazy(() => import('./ProjectsPanel').then((module) => ({ default: module.ProjectsPanel })));
 const AccountsPanel = lazy(() => import('./AccountsPanel').then((module) => ({ default: module.AccountsPanel })));
 const RulesPanel = lazy(() => import('./RulesPanel').then((module) => ({ default: module.RulesPanel })));
@@ -34,7 +33,6 @@ function Panel() {
   if (view === 'tasks') return <TasksPanel />;
   if (view === 'verification') return <VerificationPanel />;
   if (view === 'coaching') return <CoachingPanel />;
-  if (view === 'design') return <DesignPanel />;
   if (view === 'projects') return <ProjectsPanel />;
   if (view === 'accounts') return <AccountsPanel />;
   if (view === 'connectors') return <ConfigurationPanel />;

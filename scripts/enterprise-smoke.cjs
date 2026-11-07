@@ -2,7 +2,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const http = require('node:http');
 const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
@@ -27,9 +26,6 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
   let app; const errors = [];
-  const server = http.createServer((_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<h1>Live design</h1><script>window.live=true;fetch("https://example.invalid/").catch(()=>window.blocked=true)</script>'); });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const url = 'http://127.0.0.1:' + server.address().port;
   const native = async (page, method, request) => { const result = await page.evaluate(({ method, request }) => window.codingHub[method](request), { method, request }); assert.equal(result.ok, true, result.error?.message); return result.value; };
   const wb = (page, request) => native(page, 'workbench', request);
   async function launch() {
@@ -89,24 +85,14 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await wb(page, { action: 'trial-add', experimentId: experiment.id, variant: 'A', runId: original.runId, minutes: 5, rework: 1, outcome: 'partial', evidence: 'Fixture measured run' });
     await wb(page, { action: 'trial-add', experimentId: experiment.id, variant: 'B', runId: resumed.runId, minutes: 3, rework: 0, outcome: 'successful', evidence: 'Passing fixture verification' });
     assert.equal((await wb(page, { action: 'experiment-list' })).trials.length, 2);
-    const previewEvent = app.waitForEvent('window'); await wb(page, { action: 'preview-open', url }); const previewWindow = await previewEvent;
-    await previewWindow.waitForFunction(() => window.live && window.blocked); assert.equal(await previewWindow.evaluate(() => typeof window.codingHub), 'undefined'); assert.equal(await previewWindow.evaluate(() => typeof window.require), 'undefined');
-    const capture = await wb(page, { action: 'preview-capture', title: 'Live dashboard', notes: 'Local dev preview', projectDirectory: project }); assert.equal(capture.snapshot.kind, 'image'); assert.ok(capture.content.length > 100);
-    await wb(page, { action: 'annotation-add', snapshotId: capture.snapshot.id, x: 40, y: 25, text: 'Improve spacing' });
-    const feedback = await wb(page, { action: 'design-feedback', snapshotId: capture.snapshot.id }); assert.ok((await fs.readFile(path.join(feedback.directory, 'DESIGN_FEEDBACK.md'), 'utf8')).includes('Improve spacing'));
-    // The feedback folder is registered with the current shared rules (empty rules need no instruction file).
+    const feedback = await native(page, 'coaching', { action: 'prepare', report: 'Improve spacing' }); assert.ok((await fs.readFile(path.join(feedback.directory, 'COACHING_REPORT.md'), 'utf8')).includes('Improve spacing'));
+    // The prepared coaching folder is registered with the current shared rules (empty rules need no instruction file).
     const feedbackRules = await page.evaluate((directory) => window.codingHub.hub({ action: 'rules-read', directories: [directory] }), feedback.directory);
     assert.equal(feedbackRules.ok, true); assert.equal(feedbackRules.value.targets[0].applied, true); assert.ok(feedbackRules.value.directories.includes(feedbackRules.value.targets[0].directory));
-    await wb(page, { action: 'preview-close' });
-    await openView(page, 'Design workspace');
-    await page.getByRole('button', { name: 'Live dashboard version 1', exact: true }).click();
-    await page.getByText('Live preview, annotations, and agent feedback', { exact: true }).click();
-    await page.getByRole('button', { name: 'Prepare Codex design feedback', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
-    assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Preparing design feedback must not launch a provider');
     await openView(page, 'Session history');
     await page.getByRole('button', { name: 'View native CLI conversations', exact: true }).click();
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
-    await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(3).waitFor();
+    await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Tasks', 'Verification profiles', 'AI coaching', 'Settings']) {
       await openView(page, name); await page.waitForTimeout(150);
@@ -120,16 +106,12 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await app.close(); app = null; page = await launch();
     assert.equal((await wb(page, { action: 'runtime' })).storagePath, restored.restoredPath);
     const workspace = (await native(page, 'loadWorkspace')).workspace;
-    const restoredReview = workspace.sessions.find((session) => session.title === 'Codex · design review');
-    assert.ok(restoredReview.binding.cwd.startsWith(restored.restoredPath + path.sep));
     assert.equal(workspace.sessions.find((session) => session.title === 'Codex · resumed').config.resumeId, conversation.id);
     assert.equal((await wb(page, { action: 'experiment-list' })).trials.length, 2);
     assert.equal((await wb(page, { action: 'task-list' })).length, 2);
     assert.equal((await wb(page, { action: 'verification-list' })).results[0].passed, true);
-    assert.equal((await wb(page, { action: 'annotation-list', snapshotId: capture.snapshot.id })).length, 1);
-    assert.equal((await native(page, 'designs', { action: 'list' })).length, 1);
     assert.equal(errors.length, 0, errors.join('\n'));
-    console.log('PASS: native diagnostics and redaction, approval requests from both CLIs, real Claude/Codex resume and delta-only token accounting, duplicate resume guard, approved npm verification, task overlap audit and completion evidence, measured A/B trials, isolated live preview and blocked remote requests, screenshot capture, annotations and feedback, local backup restore across app restart, and new navigation. Fixture CLIs; no provider request or Windows installation measured.');
+    console.log('PASS: native diagnostics and redaction, approval requests from both CLIs, real Claude/Codex resume and delta-only token accounting, duplicate resume guard, approved npm verification, task overlap audit and completion evidence, measured A/B trials, a prepared coaching folder registered with shared rules, local backup restore across app restart, and new navigation. Fixture CLIs; no provider request or Windows installation measured.');
   } catch (error) {
     // Show what each CLI printed and which events arrived (the fixture reports APPROVAL:requested, hook-failed or
     // unsupported), so a CI failure says where an approval request or usage report stopped.
@@ -138,5 +120,5 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
       if (window) console.error('Session events at failure:\n' + await window.evaluate(() => (window.events ?? []).slice(-60).map((event) => `${String(event.runId).slice(0, 8)} ${event.type}${event.type === 'data' ? ' ' + JSON.stringify(event.data.slice(-200)) : event.message ? ' ' + JSON.stringify(event.message) : ''}`).join('\n')));
     } catch { /* The window may already be gone. */ }
     throw error;
-  } finally { if (app) await app.close(); await new Promise((resolve) => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { if (app) await app.close(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

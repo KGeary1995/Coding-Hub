@@ -23,8 +23,7 @@ All eight productivity improvements are included with progressive disclosure. On
 | Session recovery | Workflow center → Recovery: failure history, exact-directory/profile diagnostics, setup guidance, and explicit retry |
 | Persistent conversations | Session settings and native history: names, pinned references, retained native IDs, and unsent prepared requests |
 | Git delivery | Changes → Git delivery: reviewed staging, unstaging, commit, non-force push, and draft/regular PR creation through local gh |
-| Unified search | Workflow center → Search, or Ctrl/Cmd+Shift+F: files, notes, rules, annotations, and optional recorded output |
-| Design iteration | Design workspace: mobile/tablet/desktop live viewports, screenshot pixel differences, and tasks linked to annotations |
+| Unified search | Workflow center → Search, or Ctrl/Cmd+Shift+F: files, notes, rules, and optional recorded output |
 | Usage budgets | Session settings → Session name & budget alerts: per-run token/cost targets and context warnings |
 | Project templates | Workflow center → Templates: layouts, raw engine parameters, budgets, optional rules and verification profiles |
 | Release reliability | Workflow center → Support: redacted diagnostic export, Windows signature inspection, and a certificate-required signed build/upgrade workflow |
@@ -48,23 +47,20 @@ This release adds all eight workflow improvements. See [the usage guide](workflo
 | Connection diagnostics | Accounts & connections: installation, login, configuration, directory, and native terminal checks |
 | Version and installation clarity | Settings: renderer/host versions, executable, source/installed edition, and active data folder |
 | Native conversation resume | Session history → View native CLI conversations: default accounts and named Claude profiles |
-| Live design review | Design workspace: approve a local dev server, capture screenshots, pin annotations, prepare agent feedback |
 | Coaching experiments | AI coaching: compare A/B prompt wording, measured CLI tokens, time, rework, and outcome evidence |
 | Backup and restore | Settings: verified local backups, export/import, separate restored data copy, explicit restart |
 | Tasks | Tasks: give a channel a job and its files, send it, follow its status and changed files, warn about clashes |
 | Repository verification | Verification profiles: saved argument-based npm/pnpm/yarn/Python/Cargo/Go/.NET checks and recorded results |
 
-Conversation resume uses the installed CLI's advertised resume support and recorded conversation ID. Resumed-run telemetry counts newly reported usage rather than previous conversation totals. Login and terminal diagnostics leave actual provider/model completion unverified until you send a task. Live previews execute browser JavaScript in a separate sandboxed window restricted to one loopback origin; static archive previews continue to block scripts. Backups exclude CLI credentials and external repositories. Task scopes help coordinate work; they do not enforce permissions or identify who edited a file.
+Conversation resume uses the installed CLI's advertised resume support and recorded conversation ID. Resumed-run telemetry counts newly reported usage rather than previous conversation totals. Login and terminal diagnostics leave actual provider/model completion unverified until you send a task. Backups exclude CLI credentials and external repositories. Task scopes help coordinate work; they do not enforce permissions or identify who edited a file.
 
-## Design workspace and AI coaching (v1.5.0)
-
-**Design workspace** keeps previous design previews locally. Enter a title, import self-contained UTF-8 HTML (up to 1 MiB) or a PNG/JPEG/WebP screenshot (up to 8 MiB), then use **Save next version** for later iterations. Versions are immutable copies; editing or deleting the original source does not replace an older preview. Search the archive, compare a version with its predecessor, and switch between desktop/tablet/mobile preview widths. **Show sessions** keeps your existing coding terminals beside the previews. The archive supports 200 versions under `~/.coding-hub/designs`. HTML previews have an isolated origin and block scripts, forms, navigation, and external assets/network access. Archive HTML is static; use the new approved live preview window for JavaScript applications. To work with Claude Design, use the **Claude Design** section (see below), or import exported HTML or screenshots.
+## AI coaching (v1.5.0)
 
 **AI coaching** shows local usage trends, token totals, configured-price estimates, and heuristic suggestions. Add curated prompt examples and record successful/partial/failed outcomes; no full session logs are mined automatically. Select up to five examples and review the complete coaching report. Nothing is sent to a model by opening this screen or preparing a report.
 
 **Live coaching** (on by default; **Coach my prompts as I send them** on the AI coaching screen) checks each prompt you send in a Claude Code or Codex channel, terminal or chat, as soon as the CLI writes it to its transcript. The checks run on this computer: a thin first prompt, a problem with no error text, a task with no way to tell it worked, "better" with no meaning, several asks at once, or a very long prompt. Slash commands and short replies get none. Up to two tips appear in a strip under that channel, and every prompt is listed, newest first, under **Live coaching** on the AI coaching screen, where **Save as example** adds it to your examples. **Ask AI** (on the strip or the list) sends that one prompt, and the end of the agent's reply before it, to Claude Haiku through Claude Code (`claude -p --model haiku`, no tools, no MCP servers) on that channel's Claude account (the default account for Codex channels), and to Codex (`codex exec` in a read-only sandbox, low reasoning) only when Claude Code is not installed: a Claude review takes a few hundred tokens, a Codex one about 24,000. Its usage counts in **Σ today** and on the Usage screen: the review's session is kept, in `~/.coding-hub/coaching`, which Session history does not list. Another computer's channels are coached on that computer; their tips show on its tab here and on the phone, and **Ask AI** there has that computer's CLI review the prompt. It takes a few seconds and uses a little of your plan; it returns advice and a rewrite with `[placeholders]` for details only you know. Coached prompts are kept on this computer only (`coaching/live-tips.json`), for 30 days and at most 500; the screen lists the newest 50, sums up the last 7 days (how many prompts had each kind of tip, and the change that would help most), and **Clear coached prompts** forgets them. The switch is `coaching/live.json`. Trace's own coaching channels are not coached.
 
-For deeper agent advice, explicitly approve the reviewed report and choose **Prepare Claude coaching** or **Prepare Codex coaching**. This creates an idle session in a separate local report directory, with your shared rules applied. Choose its account/model, start it, finish any CLI trust/setup prompts, then click **Send coaching request**. The agent is asked to analyze the selected examples, suggest meaning-preserving rewrites, and propose measurable experiments. Advice appears in the interactive terminal and ordinary local session history. Provider CLI configuration/tools/approvals still apply; the prompt asks for analysis without commands, edits, or unrelated file access. This optional step uses provider inference and is not offline AI. Local heuristic findings are not labeled as AI advice, and token use alone does not establish outcome quality. Prompt examples and prepared reports remain under `~/.coding-hub/coaching`, outside curated Drive memory. The 100 most recent prepared reports (coaching and design feedback) are kept; when another is prepared, the oldest folder not used by a session tile is deleted. Prompt examples are capped at 100. Prepared requests now persist with the workspace. After restarting, start the idle tile, handle CLI prompts, and explicitly send the retained request.
+For deeper agent advice, explicitly approve the reviewed report and choose **Prepare Claude coaching** or **Prepare Codex coaching**. This creates an idle session in a separate local report directory, with your shared rules applied. Choose its account/model, start it, finish any CLI trust/setup prompts, then click **Send coaching request**. The agent is asked to analyze the selected examples, suggest meaning-preserving rewrites, and propose measurable experiments. Advice appears in the interactive terminal and ordinary local session history. Provider CLI configuration/tools/approvals still apply; the prompt asks for analysis without commands, edits, or unrelated file access. This optional step uses provider inference and is not offline AI. Local heuristic findings are not labeled as AI advice, and token use alone does not establish outcome quality. Prompt examples and prepared reports remain under `~/.coding-hub/coaching`, outside curated Drive memory. The 100 most recent prepared coaching reports are kept; when another is prepared, the oldest folder not used by a session tile is deleted. Prompt examples are capped at 100. Prepared requests now persist with the workspace. After restarting, start the idle tile, handle CLI prompts, and explicitly send the retained request.
 
 The setup guide dismisses automatically after a shared or independent project folder is configured, and can be dismissed manually. Completion is remembered in the desktop profile.
 
@@ -121,7 +117,7 @@ Trace replaces the sidebar with a top bar and a status bar:
 - **Top bar:**
   - the project switcher;
   - the **Workspace**, **Changes** and **Projects** tabs;
-  - the **Insight** menu: Usage, Session history, Files and **More tools** (Design workspace, AI coaching, Tasks and Verification profiles);
+  - the **Insight** menu: Usage, Session history, Files and **More tools** (AI coaching, Tasks and Verification profiles);
   - the layout controls (Workspace only) and the command field (**Ctrl+Shift+P**);
   - Help, and the **Agent setup** menu: Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins, Settings and Workflow center;
   - **+ Channel** to add a channel (up to eight): Claude Code, Claude chat, Codex chat, Codex CLI, or Terminal.
@@ -232,16 +228,6 @@ Every Claude Code and Codex session started in Trace gets shared project memory 
 - **When the session ends** Trace writes a summary note: the files that changed during the session (from `git status`), commits made, and the agent's last message. Sessions that changed nothing and produced no reply are skipped. Agents can still write fuller handoffs with **write_handoff**.
 - **Project keys are automatic.** Clones and worktrees of the same Git remote share one key on every computer (for example `app-1a2b3c4d5e`); unrelated folders with the same name stay separate. **Shared memory** shows the key for the selected project.
 - Applies only to sessions started in Trace. For CLIs run from other terminals, or for teammates who clone the repository, use the project installation below. When a project already has `coding-hub-memory` installed, sessions use that server instead of adding a second copy. If that entry points at a program that no longer exists (for example after an update moved the app), Trace updates its paths to the current install and says so. If it uses a different memory key from the folder's automatic key, Trace warns, because those sessions read and write the other key's notes.
-
-## Claude Design
-
-Claude Design runs on claude.ai; Claude Code connects it to a project. **Design workspace → Claude Design** opens a Claude Code tile in the current project for each action. Start the tile, finish any sign-in or trust prompts, then press the tile's send button.
-
-- **Bring a design into code** sends `/design import`, which pulls a Claude Design project into the working directory.
-- **Sync design system** sends `/design-sync`, so Claude Design builds with the project's real components.
-- **Import handoff bundle (.zip)** or **Import handoff folder** takes a bundle downloaded with Claude Design's *Send to local coding agent*. It is copied into `design-handoff/<name>/` in the project (never overwriting an earlier import), its main HTML or screenshot is saved in the design archive with local stylesheets inlined, and a Claude tile is prepared with a request to build it. ZIP64 and encrypted archives are not supported; extract them and import the folder.
-
-These commands need Claude Code signed in with a claude.ai Pro, Max, Team or Enterprise account (not an API key); the first use opens the browser to authorize Claude Design. Trace does not call Claude Design itself.
 
 ## Shared Google Drive memory
 
@@ -373,7 +359,7 @@ All runtime data is outside the source folder, normally `C:\Users\<you>\.coding-
 | `updates.json` | Automatic update-check preference |
 | `shared-rules.json` | Canonical shared rules and registered project directories |
 | `memory/<project>/<note-id>.json` | Curated handoffs |
-| `designs/`, `design-annotations.json` | Immutable design versions and review comments |
+| `designs/`, `design-annotations.json` | Left by the Design workspace, which was removed. Trace no longer reads or writes them; backups still include them, and nothing deletes them |
 | `coaching/`, `experiments.json` | Curated examples, prepared reports, A/B trial evidence |
 | `tasks.json`, `verification.json` | Task scopes, command profiles, recorded check results |
 | `backups/`, `restores/` | Verified backups and separate restored data copies |
