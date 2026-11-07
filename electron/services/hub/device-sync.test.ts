@@ -39,7 +39,15 @@ describe('device sync', () => {
     a.preferences = { ...a.preferences, syncDevices: false }; a.sync.sync();
     expect(fs.existsSync(path.join(drive, SYNC_FOLDER))).toBe(false);
     a.preferences = { ...a.preferences, syncDevices: true, driveDirectory: path.join(drive, 'missing') };
-    expect(a.sync.sync()).toMatchObject({ enabled: true, connected: false, lastSync: null });
+    expect(a.sync.sync()).toMatchObject({ enabled: true, connected: false, lastSync: null, error: expect.stringContaining('was not found') });
+  });
+
+  it('says why a Drive folder from another kind of computer cannot be used, instead of skipping sync quietly', () => {
+    const a = computer(temporary(), 'mac');
+    a.preferences = { ...a.preferences, driveDirectory: process.platform === 'win32' ? 'My Drive\\Coding Hub' : 'G:\\My Drive\\Coding Hub' };
+    expect(a.sync.sync()).toMatchObject({ connected: false, error: expect.stringContaining('is not a full folder path on this computer') });
+    a.preferences = { ...a.preferences, driveDirectory: '' };
+    expect(a.sync.status()).toMatchObject({ connected: false, error: expect.stringContaining('No Google Drive folder is selected') });
   });
 
   it('carries settings and rules to a new computer, and later changes either way', () => {

@@ -89,6 +89,6 @@ export function logRecords(logs: LogUsage): UsageRecord[] {
   return Object.entries(logs.days).flatMap(([day, engines]) => (['claude', 'codex'] as const).flatMap((engine) => {
     const used = engines[engine]; if (!used) return [];
     const [year, month, date] = day.split('-').map(Number);
-    return [{ runId: `log:${day}:${engine}`, sessionId: '', engine, model: '', cwd: '', timestamp: new Date(year, month - 1, date, 12).toISOString(), input: engine === 'codex' ? used.input + used.cached : used.input, output: used.output, cached: used.cached, cacheWrite: used.cacheWrite, reasoning: null, context: null, cost: used.cost, days: { [day]: { tokens: used.input + used.output, cost: used.cost } }, source: 'cli-logs' as const }];
+    return [{ runId: `log:${day}:${engine}`, sessionId: '', engine, model: '', cwd: '', timestamp: new Date(year, month - 1, date, 12).toISOString(), input: engine === 'codex' ? used.input + used.cached : used.input, output: used.output, cached: used.cached, cacheWrite: used.cacheWrite, reasoning: null, context: null, cost: used.cost, days: { [day]: { tokens: used.input + (engine === 'claude' ? used.cacheWrite : 0) + used.output, cost: used.cost } }, source: 'cli-logs' as const }];
   }));
 }

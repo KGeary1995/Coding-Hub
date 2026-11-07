@@ -1,5 +1,20 @@
 ## What's new
 
+1.15.4 fixes several problems with accounts, usage, sync, linked computers and shared memory:
+
+- **Default channels use your own Claude login.** When Trace was started from a terminal with an API key or login token exported (for example a work token), Default channels and the usage card quietly used that account. Trace now drops inherited keys and tokens for the default sign-in, as it already did for named profiles. A `CLAUDE_CONFIG_DIR` you set is still respected. The usage card names the account Default is signed in as.
+- **Usage checks no longer start a dozen CLIs at once.** Checking plan limits ran every Claude profile's check at the same time, which slowed the computer and could make checks time out. They now run two at a time.
+- **New programs work without restarting Trace (Windows).** A CLI or tool installed while Trace was open (Node.js, winget, an npm with its own folder, a PATH change in System Properties) wasn't found until Trace restarted. New channels now pick up Windows' current PATH.
+- **Token counts include what Claude writes to its cache.** Claude reports input it caches apart from other input, and Trace left it out, so a turn that sent 40,766 new tokens could show 766. Counts, today's total, Usage and budgets now include it. Cache re-reads are still not counted. Session token limits are reached sooner than before.
+- **Prices match dated model names.** A rate entered for `claude-opus-5-5` now also prices runs logged as `claude-opus-5-5-20261101`, and case no longer matters. Context-size variants such as `[1m]` still need their own row.
+- **Sync says why a Drive folder can't be used.** A Mac started with the Windows folder `G:\My Drive\Coding Hub` and never synced, without saying so. On a Mac there's now no default folder, and Memory and **Settings → Sync between computers** say when the folder isn't chosen, isn't a full path on this computer, or is missing. **Sync between computers** also warns when a computer on your tailnet never appears in this sync folder, which usually means the two use different Drive folders.
+- **A removed link offers a code.** When another computer removed this one, Trace showed an error but kept the dead link, and you had to **Unlink** before you could enter a code. The link is now dropped, the row says "Removed on <name>", and the code box is right there. Trace doesn't link it again on its own, since the removal there was on purpose.
+- **Shared memory problems are easier to spot and fix.**
+  - When a project's own memory entry uses a different key or notes folder from Trace's automatic memory, **Memory** shows it and offers **Use automatic key**. That only changes Trace's own entry, and only when you click.
+  - An entry Trace didn't install, which turns automatic memory tools off for that folder, is now explained.
+  - Installing memory into a subfolder of a repository is refused, because CLIs only read project settings from the top folder.
+  - Shortly after Trace starts, memory entries left pointing at a program that no longer exists are fixed in every folder you've run agents in, so CLIs started from other terminals work again.
+
 1.15.3 fixes saving with a single channel, copying on Windows, and Changes outside Git:
 
 - **One channel saves again.** With only one channel open, Trace showed "Too small: expected array to have >=2 items" and couldn't save your channels or install updates. Since 1.15.0 you can close channels down to one, but the save still required two. It now accepts one. To install this update from 1.15.0 to 1.15.2 with one channel open, open a second channel first (**+ Channel**); you can close it afterwards.

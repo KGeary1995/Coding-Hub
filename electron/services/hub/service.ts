@@ -5,7 +5,7 @@ import { DEFAULT_PREFERENCES, type HubPreferences, type HubRequest, type HubResp
 import { ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService, projectSchema } from './memory';
 import { DriveMirror } from './drive';
-import { projectMemoryKey } from './auto-memory';
+import { memoryEntries, projectConfigRoot, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { HubError } from '../cli/engine-adapter';
 import { repriced, type TelemetryService } from './telemetry';
 import { RulesService } from './rules';
@@ -25,6 +25,8 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('drive-resolve'), project: projectSchema, id, localHash: z.string().regex(/^[a-f0-9]{64}$/), remoteHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ action: z.literal('memory-list'), project: projectSchema }).strict(),
   z.object({ action: z.literal('memory-key'), directory: dir }).strict(),
+  z.object({ action: z.literal('memory-entries'), directory: dir }).strict(),
+  z.object({ action: z.literal('memory-use-auto-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
   z.object({ action: z.literal('memory-install'), project: projectSchema.optional(), directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
@@ -52,7 +54,8 @@ export class HubService {
     this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } try { this.devices.sync(); } catch { /* Reported in Settings; the next tick retries. */ } }, 30000);
   }
   preferences(): HubPreferences {
-    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, prices: [] };
+    // The default Drive folder is a Windows drive letter; elsewhere the person chooses the folder (it differs per account).
+    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: process.platform === 'win32' ? DEFAULT_PREFERENCES.driveDirectory : '', prices: [] };
     const result = preferencesSchema.safeParse(cfg.data); if (!result.success) throw new HubError('PREFERENCES_INVALID', 'Saved preferences are invalid. Existing file was preserved.'); return result.data;
   }
   execute(input: unknown): HubResponse {
@@ -67,7 +70,14 @@ export class HubService {
       case 'memory-key': return projectMemoryKey(request.directory);
       case 'memory-write': { this.projects.add(request.project); const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); try { this.drive.sync(request.project); } catch { /* Offline notes sync on next retry. */ } return note; }
       // Without a key, use the automatic one so sessions started in Trace and from other terminals share notes.
-      case 'memory-install': this.memory.install(request.directory, request.project ?? projectMemoryKey(request.directory), path.join(__dirname, 'memory-server.js'), process.execPath); return null;
+      case 'memory-entries': return memoryEntries(request.directory, this.memory.root);
+      case 'memory-use-auto-key': return useAutomaticKey(request.directory, this.memory.root, path.join(__dirname, 'memory-server.js'), process.execPath);
+      case 'memory-install': {
+        // Sessions read a project's MCP files from the repository's top folder; an entry in a subfolder is never used.
+        const root = projectConfigRoot(request.directory);
+        if (path.resolve(request.directory) !== root) throw new HubError('MEMORY_ROOT', `Install memory in the repository's top folder, ${root}. CLIs read project MCP settings from there.`);
+        this.memory.install(request.directory, request.project ?? projectMemoryKey(request.directory), path.join(__dirname, 'memory-server.js'), process.execPath); return null;
+      }
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
       case 'usage': {

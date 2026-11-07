@@ -9,7 +9,7 @@ export function PlanLimitsCard() {
       <button className="tr-ghost-button" onClick={() => void refreshPlanLimits(true)} disabled={loading}><RefreshCw size={13} className={loading ? 'spin' : ''} />Check now</button></header>
     {!limits.length && <p className="tr-usage-meta">{loading ? 'Checking…' : 'No Claude Code or Codex found to check.'}</p>}
     <div className="tr-plan-accounts">{limits.map((item) => <div key={`${item.engine}-${item.account}`} className="tr-plan-account">
-      <h3><i className="tr-engine-square" style={{ background: `var(--tr-ch-${item.engine})` }} aria-hidden="true" />{item.engine === 'claude' ? 'Claude' : 'Codex'}{item.account !== 'Default' ? ` · ${item.account}` : ''}{item.plan ? <span className="tr-usage-meta"> {item.plan}</span> : null}</h3>
+      <h3><i className="tr-engine-square" style={{ background: `var(--tr-ch-${item.engine})` }} aria-hidden="true" />{item.engine === 'claude' ? 'Claude' : 'Codex'}{item.account !== 'Default' ? ` · ${item.account}` : item.signedInAs ? ` · ${item.signedInAs}` : ''}{item.plan ? <span className="tr-usage-meta"> {item.plan}</span> : null}</h3>
       {item.error ? <p className="tr-usage-meta">{item.error}</p> : item.windows.map((window) => <div key={window.label} className={`tr-plan-window ${limitLevel(window.usedPercent)}`}>
         <span className="tr-plan-label">{window.label}</span>
         <span className="tr-plan-bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={window.usedPercent} aria-label={`${window.label} used`}><i style={{ width: `${Math.min(100, window.usedPercent)}%` }} /></span>

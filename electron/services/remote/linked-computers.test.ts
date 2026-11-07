@@ -150,6 +150,23 @@ describe('linked computers', () => {
     expect(await works(kept)).toBe(false); expect(pc.server.status().devices).toEqual([]);
   });
 
+  it('drops a link the other computer removed, offers a code instead, and does not link it again by itself', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const root = temporary();
+    const make = () => new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    const link = make(); cleanup.push(() => link.stop());
+    await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
+    pc.server.revoke(pc.server.status().devices.find((device) => device.kind === 'computer')!.id);
+    for (let i = 0; i < 400 && link.status()[0].linked; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(link.status()).toEqual([expect.objectContaining({ id: PC, linked: false, connected: false, error: 'Removed on Obsidian-Halo. Enter a code from Obsidian-Halo to link again.' })]);
+    // After a restart the dead key is gone, not retried: the computer is just not linked, and is not auto-linked.
+    const restarted = make(); cleanup.push(() => restarted.stop()); restarted.start();
+    expect(restarted.status()).toEqual([expect.objectContaining({ id: PC, linked: false })]);
+    expect(fs.readFileSync(path.join(root, 'linked-computers-declined.json'), 'utf8')).toContain(PC);
+    // A new code links it again straight from that row.
+    await restarted.link(PC, pc.server.pair('computer').pairing!.code);
+    expect(restarted.status()).toEqual([expect.objectContaining({ id: PC, linked: true, error: null })]);
+  });
+
   it('lets the phone app from the other computer call this one directly, and no other site', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const token = await phoneToken(pc.server);
     pc.server.allowedOrigins = () => ['https://macbook.tail1234.ts.net'];
