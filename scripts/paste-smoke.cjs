@@ -65,6 +65,12 @@ const hex = (text) => Buffer.from(text).toString('hex');
     assert.deepEqual(await after(mark, 'TTY'), ['TTY ' + hex('\x1bv')], 'Alt+V still reaches the CLI unchanged');
     setClipboard('text'); mark = (await received()).length; await page.keyboard.press('Control+V');
     assert.deepEqual(await after(mark, 'TTY'), ['TTY ' + hex('pasted text')], 'Ctrl+V with text pastes the text, not ^V');
+    // Ctrl+C with text selected copies it and sends nothing; with nothing selected (the copy clears it) it is ^C.
+    setClipboard('text'); await tile.locator('.xterm-rows').getByText('PASTE SMOKE READY').dblclick({ force: true }); mark = (await received()).length; await page.keyboard.press('Control+C');
+    assert.deepEqual(await after(mark, 'TTY'), [], 'Ctrl+C with a selection does not interrupt the CLI');
+    assert.match(execFileSync('powershell.exe', ['-NoProfile', '-STA', '-Command', 'Get-Clipboard -Raw'], { encoding: 'utf8' }), /PASTE|SMOKE|READY/, 'Ctrl+C with a selection copies it');
+    mark = (await received()).length; await page.keyboard.press('Control+C');
+    assert.deepEqual(await after(mark, 'TTY'), ['TTY 03'], 'Ctrl+C without a selection still reaches the CLI as ^C');
 
     // The menu item's name includes its description ("Claude chat Claude as a conversation, …").
     await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: /^Claude chat/ }).click();
@@ -77,6 +83,6 @@ const hex = (text) => Buffer.from(text).toString('hex');
     const sent = (await after(mark, 'CHAT', 2000)).map((line) => JSON.parse(line.slice(5))).find((message) => message.type === 'user');
     assert.ok(sent, 'The chat message reached the CLI');
     assert.deepEqual(sent.message.content.map((part) => part.type), ['image', 'text']); assert.equal(sent.message.content[0].source.media_type, 'image/png');
-    console.log('PASS: Windows paste: Ctrl+V image sends Alt+V and shows Attached, Alt+V unchanged, Ctrl+V text pastes text, chat sends the pasted image.');
+    console.log('PASS: Windows paste: Ctrl+C with a selection copies and without one sends ^C, Ctrl+V image sends Alt+V and shows Attached, Alt+V unchanged, Ctrl+V text pastes text, chat sends the pasted image.');
   } finally { await app?.close().catch(() => {}); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => {}); }
 })().catch((error) => { console.error(error); process.exit(1); });

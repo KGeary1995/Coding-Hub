@@ -36,7 +36,7 @@ export function GitDeliveryPanel({ directory, onChanged }: { directory: string; 
   return <aside className="delivery-panel tr-delivery" aria-label="Git delivery">
     <header><h2>Delivery</h2><button className="tr-ghost-button" disabled={busy} onClick={() => void refresh().catch((e) => setError((e as Error).message))}><RefreshCw size={13} />Refresh delivery state</button></header>
     {error && <p role="alert" className="error-message">{error}</p>}
-    {!state ? <p className="tr-step-meta">Reading the repository…</p> : <ol className="tr-steps">
+    {!state ? !error && <p className="tr-step-meta">Reading the repository…</p> : <ol className="tr-steps">
       <Step index={1} title="Stage" meta={`${state.staged.length} of ${files.length} ${files.length === 1 ? 'file' : 'files'} staged`} done={files.length > 0 && !state.unstaged.length}>
         {files.length > 0 && <div className="delivery-file-list">{files.map((file) => <label key={file}><input type="checkbox" checked={paths.includes(file)} onChange={(e) => setPaths(e.target.checked ? [...paths, file] : paths.filter((item) => item !== file))} /><code>{file}</code><small>{state.staged.includes(file) ? 'staged' : ''}{state.staged.includes(file) && state.unstaged.includes(file) ? ' + ' : ''}{state.unstaged.includes(file) ? 'working' : ''}</small></label>)}</div>}
         <div className="tr-step-actions"><button className="button primary" disabled={busy || !paths.length || paths.some((file) => !state.unstaged.includes(file))} onClick={() => void execute('stage')}>Review and stage selected</button><button className="button secondary" disabled={busy || !paths.length || paths.some((file) => !state.staged.includes(file))} onClick={() => void execute('unstage')}>Unstage</button></div>

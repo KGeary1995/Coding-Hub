@@ -39,7 +39,10 @@ export class Delivery {
   });
  }
  async inspect(input: string): Promise<DeliveryStatus> {
-  const cwd = directory(input); const root = directory((await this.command(cwd, 'git', [...noHookGitOptions(), 'rev-parse','--show-toplevel'])).toString().trim());
+  const cwd = directory(input);
+  // Outside a Git repository this is the first command to fail; say that rather than suggest authentication or hooks.
+  const top = await this.command(cwd, 'git', [...noHookGitOptions(), 'rev-parse','--show-toplevel']).catch((error) => { if (error instanceof HubError && error.message.endsWith('not found on PATH.')) throw error; throw new HubError('NOT_A_REPOSITORY', 'This folder is not a Git repository, so there is nothing to stage or push. Choose a project that uses Git with Change project.'); });
+  const root = directory(top.toString().trim());
   // The review only reads: the repository's own config must not run programs (fsmonitor, filters) before the person
   // has confirmed anything. The confirmed commit and push below run the repository's hooks as usual.
   const safe = await readOnlyGitOptions(root);

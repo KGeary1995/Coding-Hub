@@ -1,8 +1,10 @@
 ## What's new
 
-1.15.3 fixes saving with a single channel:
+1.15.3 fixes saving with a single channel, copying on Windows, and Changes outside Git:
 
 - **One channel saves again.** With only one channel open, Trace showed "Too small: expected array to have >=2 items" and couldn't save your channels or install updates. Since 1.15.0 you can close channels down to one, but the save still required two. It now accepts one. To install this update from 1.15.0 to 1.15.2 with one channel open, open a second channel first (**+ Channel**); you can close it afterwards.
+- **Ctrl+C copies on Windows.** In a channel on this computer, Ctrl+C with text selected sent the CLI an interrupt instead of copying, while channels from your other computers copied. It now copies and clears the selection, as Windows Terminal does; with nothing selected, Ctrl+C still interrupts. Claude Code's full-screen view copies as you finish dragging, as before.
+- **Changes outside Git says so.** For a folder that isn't a Git repository, **Delivery** showed "The command failed or timed out" and stayed on "Reading the repository…". It now says the folder isn't a Git repository.
 
 1.15.2 shows every screen of a Windows computer (update the Windows computer):
 
