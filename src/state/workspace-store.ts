@@ -129,6 +129,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
     if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
     if (event.type === 'error') return { ...session, error: event.message };
+    if (event.type === 'conversation') return session.config.engine === 'claude' && !session.config.chat && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
     return session;
   }) })),
   setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null } : session) })),

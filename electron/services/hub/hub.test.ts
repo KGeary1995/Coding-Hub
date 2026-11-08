@@ -113,6 +113,34 @@ describe('structured telemetry', () => {
       expect(published.at(-1)).toMatchObject({ output: 10, incomplete: true });
     } finally { fs.chmodSync(file, 0o600); telemetry.close(); vi.useRealTimers(); }
   });
+  it('follows a /clear or /resume inside the terminal to the conversation Claude Code writes now', async () => {
+    vi.useFakeTimers(); const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true });
+    const followed = { ...run, runId: randomUUID() }; const resumed = randomUUID(); const cleared = randomUUID();
+    const reply = (id: string, output: number) => JSON.stringify({ type: 'assistant', message: { id, model: 'm', usage: { input_tokens: 1, output_tokens: output } } }) + '\n';
+    const published: UsageRecord[] = []; const switched: string[] = [];
+    const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], (usage) => published.push(usage), () => {}, home, path.join(root, 'codex'));
+    telemetry.onConversation = (seen, id) => { expect(seen.runId).toBe(followed.runId); switched.push(id); };
+    try {
+      fs.writeFileSync(path.join(dir, followed.runId + '.jsonl'), reply('first', 10));
+      // An existing conversation (/resume): what it and its subagents held before belongs to the runs that wrote it.
+      fs.writeFileSync(path.join(dir, resumed + '.jsonl'), reply('old', 1000)); fs.mkdirSync(path.join(dir, resumed, 'subagents'), { recursive: true }); fs.writeFileSync(path.join(dir, resumed, 'subagents', 'agent-1.jsonl'), reply('old-sub', 500));
+      telemetry.start(followed, { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } });
+      fs.appendFileSync(path.join(dir, followed.runId + '.jsonl'), reply('before-switch', 5));
+      telemetry.follow(followed.runId, followed.runId); expect(switched).toEqual([]);
+      telemetry.follow(followed.runId, resumed); expect(switched).toEqual([resumed]);
+      expect(telemetry.transcript(followed.runId)).toBe(path.join(dir, resumed + '.jsonl')); expect(telemetry.isConversationActive('claude', resumed)).toBe(true); expect(telemetry.isConversationActive('claude', followed.runId)).toBe(false);
+      fs.appendFileSync(path.join(dir, resumed + '.jsonl'), reply('resumed-new', 20)); fs.appendFileSync(path.join(dir, resumed, 'subagents', 'agent-1.jsonl'), reply('sub-new', 3));
+      vi.advanceTimersByTime(750);
+      expect(published.at(-1)).toMatchObject({ output: 38, conversationId: resumed });
+      // A new conversation (/clear) is reported once Claude Code has written it, and counts from its start.
+      telemetry.follow(followed.runId, cleared); expect(switched).toEqual([resumed]); expect(telemetry.transcript(followed.runId)).toBeNull();
+      vi.advanceTimersByTime(750); expect(switched).toEqual([resumed]);
+      fs.writeFileSync(path.join(dir, cleared + '.jsonl'), reply('cleared-new', 100));
+      vi.advanceTimersByTime(750);
+      expect(switched).toEqual([resumed, cleared]); expect(published.at(-1)).toMatchObject({ output: 138, conversationId: cleared });
+      await telemetry.end(followed.runId); telemetry.follow(followed.runId, randomUUID()); expect(switched).toHaveLength(2);
+    } finally { telemetry.close(); vi.useRealTimers(); }
+  });
   it('passes each new line of a run\'s own transcript to live coaching, not its subagents\' lines', async () => {
     const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(path.join(dir, run.runId, 'subagents'), { recursive: true });
     const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); const lines: unknown[] = [];
