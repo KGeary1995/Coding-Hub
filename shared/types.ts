@@ -1,6 +1,12 @@
 /** These contracts describe local CLI configuration, never direct API requests. */
 export type CLIEngine = 'claude' | 'codex';
 export type ReasoningEffort = string;
+/**
+ * What an agent may do without asking (absent: DEFAULT_PERMISSIONS, edits). ask: the CLI's own settings. edits: Claude's acceptEdits;
+ * Codex asks only when it needs to (on-request) and writes in the workspace. full: no prompts at all (Claude's
+ * bypassPermissions; Codex never asks, full access).
+ */
+export type PermissionLevel = 'ask' | 'edits' | 'full';
 
 export interface ClaudeCLIEngineConfig {
   engine: 'claude';
@@ -9,6 +15,9 @@ export interface ClaudeCLIEngineConfig {
   chat?: boolean;
   /** Absent selects the existing host CLI login; named profiles are host-owned IDs. */
   accountProfileId?: string;
+  permissions?: PermissionLevel;
+  /** Claude in Chrome (`--chrome`): the browser extension's tools, acting in the person's own Chrome with its sign-ins. */
+  chrome?: boolean;
   model: string;
   thinking: { budget_tokens: number | null };
   tokenLimits: {
@@ -22,6 +31,7 @@ export interface CodexCLIEngineConfig {
   resumeId?: string;
   /** A chat channel: Codex's app server, drawn by Trace as a conversation (with images) instead of a terminal. */
   chat?: boolean;
+  permissions?: PermissionLevel;
   model: string;
   reasoningEffort: ReasoningEffort | null;
 }

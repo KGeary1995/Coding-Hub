@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { TOOL_RESULT_LIMIT, type ChatBlock, type ChatEvent, type ChatImage } from '../../../shared/chat';
+import type { PermissionLevel } from '../../../shared/types';
+import { CLAUDE_MODE } from '../cli/engine-adapter';
 
 /** The flags that run Claude Code in structured mode, answering its permission prompts here (see ClaudeStream). */
 export const CHAT_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio'];
@@ -18,18 +20,34 @@ export interface ChatStream {
   start(): void; send(message: string, images: ChatImage[]): void; answer(requestId: string, allow: boolean, allowEdits?: boolean): boolean; interrupt(): void; close(): void; push(data: string): void;
   /** A Round Table's reviewer reads but does not edit: Claude's plan mode, Codex's read-only sandbox. */
   setReadOnly(readOnly: boolean): void;
+  /** What the agent may do without asking, from its next action (Claude) or next turn (Codex). */
+  setPermissions(level: PermissionLevel): void;
 }
 
 export class ClaudeStream implements ChatStream {
   private buffer = '';
   private pending = new Map<string, { input: Record<string, unknown>; suggestions: unknown[] }>();
-  /** The permission mode the person's settings started Claude in (from its init message), restored when it may edit again. */
+  /** The permission mode the person's settings started Claude in (from its init message): the mode for `ask`. */
   private ownMode = 'default'; private readOnly = false;
-  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void) {}
+  /** The model this chat runs, from its init message: whose context window counts. */
+  private model = '';
+  /**
+   * Mode changes sent, with the level in effect before each and their order, so Claude refusing one puts that level
+   * back, but only if nothing was sent after it (a later change, already accepted or not, stands).
+   */
+  private modeRequests = new Map<string, { previous: PermissionLevel; seq: number }>(); private modeSeq = 0;
+  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private level: PermissionLevel = 'ask', private readonly launchLevel: PermissionLevel = level) {}
+  private mode() { return this.level === 'ask' ? this.ownMode : CLAUDE_MODE[this.level]; }
+  private setMode(mode: string, previous: PermissionLevel = this.level) { const id = randomUUID(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
 
+  /** A Round Table reviewer's plan mode wins over the channel's permissions until it drives again. */
   setReadOnly(readOnly: boolean) {
     if (readOnly === this.readOnly) return; this.readOnly = readOnly;
-    this.control({ subtype: 'set_permission_mode', mode: readOnly ? 'plan' : this.ownMode });
+    this.setMode(readOnly ? 'plan' : this.mode());
+  }
+  setPermissions(level: PermissionLevel) {
+    if (level === this.level) return; const previous = this.level; this.level = level;
+    if (!this.readOnly) this.setMode(this.mode(), previous);
   }
 
   /** Says hello; Claude then sends approval requests here instead of refusing them. */
@@ -73,7 +91,18 @@ export class ClaudeStream implements ChatStream {
 
   private read(message: Record<string, unknown>) {
     const type = message.type;
-    if (type === 'system' && message.subtype === 'init') { if (text(message.permissionMode) && text(message.permissionMode) !== 'plan') this.ownMode = text(message.permissionMode); this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
+    if (type === 'control_response') {
+      const response = message.response as { subtype?: string; request_id?: unknown; error?: unknown } | undefined; const id = text(response?.request_id);
+      const sent = this.modeRequests.get(id); if (!sent) return; this.modeRequests.delete(id);
+      if (response?.subtype !== 'error') return;
+      this.emit({ type: 'notice', text: `Claude did not change its permissions: ${text(response.error) || 'it refused'}.` });
+      // Only a refused change of level (not a reviewer's plan mode) is undone, and only if it was the last one sent:
+      // a later change, whether its answer came already or not, is what the person chose since.
+      if (sent.seq === this.modeSeq && sent.previous !== this.level) { this.level = sent.previous; this.emit({ type: 'permissions', level: sent.previous }); }
+      return;
+    }
+    // Started with the person's own settings (no mode flag): that mode is what Ask returns to.
+    if (type === 'system' && message.subtype === 'init') { this.model = text(message.model); if (this.launchLevel === 'ask' && text(message.permissionMode) && text(message.permissionMode) !== 'plan') this.ownMode = text(message.permissionMode); this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
     if (type === 'system' && message.subtype === 'permission_denied') { this.emit({ type: 'notice', text: text(message.message) || `${text(message.tool_name)} was not allowed.` }); return; }
     if (type === 'system' && message.subtype === 'api_retry') { this.emit({ type: 'notice', text: 'Claude’s API was busy; retrying.' }); return; }
     if (type === 'stream_event') {
@@ -125,6 +154,10 @@ export class ClaudeStream implements ChatStream {
       return;
     }
     if (type === 'result') {
+      // The context window of the model this chat runs (its init message named it); subagents' models are not it.
+      const usage = message.modelUsage && typeof message.modelUsage === 'object' ? message.modelUsage as Record<string, { contextWindow?: unknown }> : {};
+      const own = usage[this.model] ?? (Object.keys(usage).length === 1 ? Object.values(usage)[0] : undefined);
+      if (own && typeof own.contextWindow === 'number' && own.contextWindow > 0) this.emit({ type: 'context-window', size: own.contextWindow });
       const isError = message.is_error === true || (typeof message.subtype === 'string' && message.subtype.startsWith('error'));
       this.emit({ type: 'done', isError, error: isError ? (text(message.result) || (Array.isArray(message.errors) ? (message.errors as unknown[]).map(text).join(' ') : '') || 'The reply ended with an error.') : null });
     }

@@ -6,16 +6,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { CLIEngine, CLIEngineConfig } from '../../../shared/types';
+import type { CLIEngine, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
-import { buildLaunch, HubError } from './engine-adapter';
+import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
 import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
-import { CodexStream } from '../chat/codex-stream';
+import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { RoundTables } from '../chat/round-table';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
@@ -96,7 +96,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
       abandonLaunch?: (session: AgentRunningSession) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
       /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
@@ -197,7 +197,7 @@ export class PtyManager {
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
       const baseEnvironment = this.environment();
-      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession;
+      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
       const chat = request.config.engine !== 'shell' && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
@@ -209,7 +209,7 @@ export class PtyManager {
         const profileEnvironment = this.dependencies.profileEnvironment;
         if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
         const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
-        const engine = await this.discover(request.config.engine, discoveryEnvironment);
+        const engine = await this.discover(request.config.engine, discoveryEnvironment); level = launchedLevel(request.config, engine.info);
         if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
         // A Codex chat is the app server; its model, reasoning and resumed thread go in its protocol, not on the command line.
         const codexChat = chat && request.config.engine === 'codex';
@@ -231,7 +231,7 @@ export class PtyManager {
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run); prepared = null;
-      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } : null);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } : null, level);
       else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-8192);
@@ -261,11 +261,13 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess, codex: { cwd: string; model: string; reasoningEffort: string | null; resumeId?: string } | null) {
+  private attachChat(run: ManagedRun, child: ChatProcess, codex: CodexThreadOptions | null, permissions: PermissionLevel) {
     const { sessionId, runId } = run.session;
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
       if (run.finished && event.type !== 'permission-done') return;
+      // The window size goes with the run's usage (and from there to every view), not into the conversation.
+      if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size); } catch { this.dependencies.onEventError?.(); } return; }
       // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
       if (event.type === 'permission') { const declined = this.tables.observe({ sessionId, runId, event }); if (declined) { emit({ type: 'notice', text: declined }); return; } }
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
@@ -274,7 +276,7 @@ export class PtyManager {
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
     };
-    const stream: ChatStream = codex ? new CodexStream(write, emit, codex) : new ClaudeStream(write, emit);
+    const stream: ChatStream = codex ? new CodexStream(write, emit, codex) : new ClaudeStream(write, emit, permissions);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
@@ -311,6 +313,11 @@ export class PtyManager {
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else if (request.action === 'interrupt') run.chat.interrupt();
+    else if (request.action === 'permissions') {
+      // Only on the computer itself: a phone or linked computer must not be able to give an agent full access.
+      if (remote) throw new HubError('PERMISSIONS_LOCAL', 'Change an agent’s permissions on the computer it runs on.');
+      run.chat.setPermissions(request.level);
+    }
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');

@@ -33,7 +33,8 @@ export async function openRoundTable(leadId: string): Promise<string | null> {
   const engine = lead.config.engine === 'claude' ? 'codex' as const : 'claude' as const;
   // The same folder the leading chat runs in, whatever the workspace root is now.
   const partner = createSession(engine, { mode: 'independent', cwd: lead.runningCwd });
-  if (partner.config.engine !== 'shell') partner.config = { ...partner.config, chat: true };
+  // A chat like the lead, with the same permissions (one table, one setting).
+  if (partner.config.engine !== 'shell') partner.config = { ...partner.config, chat: true, ...(lead.config.permissions ? { permissions: lead.config.permissions } : {}) };
   useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, partner].map((session) => session.id === leadId ? { ...session, roundTable: { partner: partner.id, driver: lead.config.engine as 'claude' | 'codex', rounds: DEFAULT_ROUNDS } } : session) }));
   opening.add(leadId);
   try {

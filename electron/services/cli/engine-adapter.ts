@@ -1,5 +1,6 @@
-import type { CLIEngineConfig } from '../../../shared/types';
+import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
 import type { EngineInfo } from '../../../shared/ipc';
+import { permissionLevel } from '../../../shared/schemas';
 
 export class HubError extends Error {
   constructor(public code: string, message: string) { super(message); }
@@ -34,11 +35,38 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
       if (config.tokenLimits.maxOutputTokens !== null && config.thinking.budget_tokens >= config.tokenLimits.maxOutputTokens) throw new HubError('INVALID_TOKEN_LIMITS', 'The thinking budget must be smaller than maximum output tokens.');
       env.MAX_THINKING_TOKENS = String(config.thinking.budget_tokens);
     }
+    if (config.chrome) {
+      if (!engine.supportsChrome) throw new HubError('UNSUPPORTED_CHROME', 'This Claude Code version does not advertise --chrome. Turn off Claude in Chrome for this channel, or update Claude Code.');
+      args.push('--chrome');
+    }
     if (config.tokenLimits.maxOutputTokens !== null) {
       if (config.tokenLimits.maxOutputTokens < 1) throw new HubError('INVALID_OUTPUT_LIMIT', 'Maximum output tokens must be positive.');
       env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(config.tokenLimits.maxOutputTokens);
     }
   }
+  args.push(...permissionArgs(config, engine));
   if (config.resumeId) { if (!engine.supportsResume) throw new HubError('RESUME_UNAVAILABLE', 'This CLI does not advertise conversation resume. Update it before resuming.'); if (config.engine === 'claude') args.push('--resume', config.resumeId); else args.unshift('resume', config.resumeId); }
   return { args, env };
+}
+
+/** The level a run actually starts at: the default falls back to the CLI's own settings where the CLI lacks the flags. */
+export function launchedLevel(config: CLIEngineConfig, engine: EngineInfo): PermissionLevel {
+  return config.permissions === undefined && !engine.supportsPermissions ? 'ask' : permissionLevel(config);
+}
+/** Claude's modes per level; `ask` keeps the person's own settings. Codex chats take theirs in the app-server protocol. */
+export const CLAUDE_MODE = { edits: 'acceptEdits', full: 'bypassPermissions' } as const;
+/**
+ * The launch flags for a channel's permission level. A Claude chat may also be switched to full access while it runs,
+ * which Claude allows only when started with --allow-dangerously-skip-permissions (that flag alone changes nothing).
+ */
+function permissionArgs(config: CLIEngineConfig, engine: EngineInfo): string[] {
+  const level = permissionLevel(config); const chat = config.chat === true;
+  if (level === 'ask' && !(chat && config.engine === 'claude')) return [];
+  if (!engine.supportsPermissions) {
+    // The default on a CLI too old for these flags: its own settings, as before; only a level the person chose is refused.
+    if (level === 'ask' || config.permissions === undefined) return [];
+    throw new HubError('UNSUPPORTED_PERMISSIONS', 'This CLI version does not advertise permission flags. Set Permissions to Ask, or update the CLI.');
+  }
+  if (config.engine === 'claude') return [...(chat || level === 'full' ? ['--allow-dangerously-skip-permissions'] : []), ...(level === 'ask' ? [] : ['--permission-mode', CLAUDE_MODE[level]])];
+  return level === 'edits' ? ['--ask-for-approval', 'on-request', '--sandbox', 'workspace-write'] : ['--ask-for-approval', 'never', '--sandbox', 'danger-full-access'];
 }

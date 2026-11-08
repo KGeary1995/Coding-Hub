@@ -16,6 +16,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   coaching?: { id: string; tips: string[]; review: { advice: string; rewrite: string } | null };
   /** A chat channel: its events arrive on the stream as `chat` (with a `chat-replay` first) and it is answered through /api/chat. */
   chat?: true;
+  /** A Round Table: this chat leads one, and `table` is the other agent at it (from 1.16.3). */
+  table?: 'claude' | 'codex';
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
   account?: AccountLabel }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */

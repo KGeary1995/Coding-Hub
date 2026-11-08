@@ -9,6 +9,9 @@ import { useHubStore } from '../../state/hub-store';
 import { channelToday } from '../../state/channel-state';
 import { forgetTable, openRoundTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
 import { startSession } from '../../runtime/use-native-host';
+import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
+import type { PermissionLevel } from '../../../shared/types';
+import { permissionLevel } from '../../../shared/schemas';
 import { AGENT, EMPTY, Item, readImage, seatState, TableBar } from './ChatParts';
 
 /**
@@ -30,6 +33,7 @@ export function ChatView({ session }: { session: Session }) {
   const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id)?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
   const engine = session.config.engine === 'codex' ? 'codex' as const : 'claude' as const;
+  const permissions: PermissionLevel = session.config.engine !== 'shell' ? permissionLevel(session.config) : 'ask';
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
   const busy = chat.busy || (table !== null && partnerThread.busy);
@@ -61,13 +65,15 @@ export function ChatView({ session }: { session: Session }) {
     catch (e) { setError((e as Error).message); }
   };
   const send = async () => {
-    // At a table a message may be written while the agents work: both stop, and it goes to both.
+    // At a table a message may be written while the agents work: it goes to both once they finish their turn.
     if (!running || seatedAt || (chat.busy && !table) || (!text.trim() && !images.length) || !window.codingHub) return;
     const message = text.trim(); const attached = images;
     chatSent(session.id, message, attached); setText(''); setImages([]); pinned.current = true;
-    if (table) { const failure = await tableRequest(session.id, { action: 'table-send', text: message, images: attached }); if (failure) chatFailed(session.id, failure); return; }
+    // A message that was not taken goes back in the box (unless something new was written meanwhile), so nothing is lost.
+    const restore = () => { setText((current) => current || message); setImages((current) => current.length ? current : attached); };
+    if (table) { const failure = await tableRequest(session.id, { action: 'table-send', text: message, images: attached }); if (failure) { chatFailed(session.id, failure); restore(); } return; }
     const result = await window.codingHub.chat({ action: 'send', sessionId: session.id, runId: session.runId!, text: message, images: attached }).catch(() => null);
-    if (!result?.ok) chatFailed(session.id, result?.error.message ?? 'The message could not be delivered.');
+    if (!result?.ok) { chatFailed(session.id, result?.error.message ?? 'The message could not be delivered.'); restore(); }
   };
   const answerFor = (target: Session | null) => (requestId: string) => async (allow: boolean, allowEdits?: boolean) => {
     if (!target?.runId || !window.codingHub) return;
@@ -115,6 +121,9 @@ export function ChatView({ session }: { session: Session }) {
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         {!table && !seatedAt && !partnerSession && <button className="chat-icon" aria-label={`Round Table: add ${other}`} title={channels >= MAX_CHANNELS ? TABLE_FULL : `Round Table: bring ${other} into this conversation, in this channel`} disabled={!running || opening || channels >= MAX_CHANNELS} onClick={() => void openTable()}><Users size={16} /></button>}
+        {!seatedAt && session.config.engine !== 'shell' && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${table ? ` The same for ${AGENT[table.partner.engine]} at this table; the reviewer stays read-only.` : ''}`} value={permissions} onChange={(event) => void setPermissions(session.id, event.target.value as PermissionLevel).then((failure) => setError(failure ?? ''))}>
+          {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
+        </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea ref={input} rows={1} value={text} disabled={!running || Boolean(seatedAt)} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} onPaste={onPaste} />
         {busy && !text.trim()

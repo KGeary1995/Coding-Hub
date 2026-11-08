@@ -59,6 +59,8 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
     switch (event.type) {
       case 'ready': return { ...current, model: event.model };
       case 'table': return { ...current, table: event.table };
+      // The channel's setting, not the thread (handled where chat events arrive).
+      case 'permissions': case 'context-window': return current;
       case 'delta': { const index = assistant(event.messageId); const item = items[index] as Extract<ChatItem, { kind: 'assistant' }>; items[index] = { ...item, streaming: item.streaming + event.text }; return { ...current, items, busy: true };
       }
       case 'assistant': {

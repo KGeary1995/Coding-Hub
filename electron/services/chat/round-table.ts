@@ -17,6 +17,8 @@ const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex' };
 const RELAY_LIMIT = 12_000;
 /** Messages kept per chat run, so a newcomer gets the recent ones word for word. */
 const RECENT = 8;
+/** Images in one message (chatRequestSchema). */
+const MAX_IMAGES = 10;
 /** Tools a reviewer never gets to use: file edits, and leaving Claude's plan mode. */
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
 /** An answer saying the agent agrees and has nothing to add. */
@@ -72,7 +74,7 @@ export class RoundTables {
   private brief(table: Table, seat: Seat) {
     const other = NAME[this.other(table, seat).engine];
     const role = seat.engine === table.driver
-      ? `You are the driver: you make the file changes.`
+      ? `You are the driver: you make the file changes. Carry out what the person asked without asking again whether to proceed; ask only about choices that are theirs to make, or before anything that publishes, deletes or cannot be undone.`
       : `You are the reviewer: read files and check the driver's work, but do not edit files (Trace keeps you read-only).`;
     return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE.`;
   }
@@ -96,10 +98,18 @@ export class RoundTables {
     return this.state(table);
   }
 
-  /** The person's message: to both agents. If they are still busy, both stop first and it follows. */
+  /**
+   * The person's message: to both agents. If either is still busy, their work is not stopped (Stop does that): the
+   * message waits until both finish their turn and goes next, in place of further discussion rounds. Several waiting
+   * messages go together.
+   */
   send(leadRunId: string, text: string, images: ChatImage[]) {
     const table = this.leading(leadRunId);
-    if (table.lead.busy || table.partner.busy) { table.queued = { text, images }; for (const seat of [table.lead, table.partner]) if (seat.busy) this.host.interrupt(seat.runId); return; }
+    if (table.lead.busy || table.partner.busy) {
+      // Waiting messages go as one, and a message carries at most ten images: refused rather than dropped.
+      if (table.queued && table.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${table.queued.images.length} images and a message carries at most ${MAX_IMAGES}. Send this one after the agents finish.`);
+      table.queued = table.queued ? { text: [table.queued.text, text].filter(Boolean).join('\n\n'), images: [...table.queued.images, ...images] } : { text, images }; return;
+    }
     this.ask(table, text, images);
   }
   private ask(table: Table, text: string, images: ChatImage[]) {

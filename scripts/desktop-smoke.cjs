@@ -381,6 +381,19 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     assert.equal(saved.value.workspace.sessions[1].config.model, 'fixture-model');
     assert.deepEqual(saved.value.workspace.sessions[1].binding, { mode: 'independent', cwd: projects[1] });
     assert.equal(saved.value.workspace.sessions.some((item) => 'pid' in item || 'runId' in item), false);
+    // A Round Table's partner runs inside its lead's tile and has none of its own; the host saves and loads that workspace.
+    {
+      const original = saved.value.workspace; const [lead, partner] = original.sessions;
+      const table = { ...original, sessions: [{ ...lead, roundTable: { partner: partner.id, driver: 'claude', rounds: 2 } }, { ...partner, config: { ...partner.config, chat: true } }], tiles: [{ sessionId: lead.id, x: 0, y: 0, w: 12, h: 12, minW: 3, minH: 10 }], focusedSessionId: null };
+      const savedTable = await restored.evaluate((workspace) => window.codingHub.saveWorkspace(workspace), table);
+      assert.equal(savedTable.ok, true, savedTable.error?.message);
+      const loadedTable = await restored.evaluate(() => window.codingHub.loadWorkspace());
+      assert.equal(loadedTable.ok, true); assert.equal(loadedTable.value.workspace.sessions[0].roundTable.partner, partner.id); assert.equal(loadedTable.value.workspace.tiles.length, 1);
+      // A channel without a tile that is nobody's partner is still refused.
+      const orphan = await restored.evaluate((workspace) => window.codingHub.saveWorkspace(workspace), { ...table, sessions: [lead, partner] });
+      assert.equal(orphan.ok, false);
+      assert.equal((await restored.evaluate((workspace) => window.codingHub.saveWorkspace(workspace), original)).ok, true);
+    }
     const restoredRules = await restored.evaluate((directories) => window.codingHub.hub({ action: 'rules-read', directories }), projects);
     assert.equal(restoredRules.ok, true); assert.equal(restoredRules.value.content, 'Run relevant tests. Preserve public APIs. Save a handoff.'); assert.equal(restoredRules.value.targets.every((t) => t.applied), true);
     const restoredNotes = await restored.evaluate((project) => window.codingHub.hub({ action: 'memory-list', project }), memoryKey);

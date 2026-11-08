@@ -1,5 +1,16 @@
 ## What's new
 
+1.16.3 fixes saving with a Round Table, lets agents work without asking for every edit, and fills the context gauge for Claude (update every computer and reload the phone app):
+
+- **Saving works with a Round Table.** With a Round Table open, Trace showed "Each session must have exactly one grid tile" and "Storage needs attention", and saved nothing: the second agent has no tile of its own, and the save still expected one. It now saves, and tables saved by 1.16.0 and 1.16.1 still load.
+- **Permissions for every channel.** Each Claude and Codex channel has **Permissions**: **Ask** (the CLI's own settings), **Allow edits** (edits files without asking; Codex also runs commands in the project) or **Full access** (never asks; shown in orange). The default is now **Allow edits**, including for channels you already have. A chat changes it from beside the message box, even mid-conversation; a terminal channel takes it from its settings when it starts. At a Round Table it applies to both agents, and the reviewer still stays read-only. Phones and other computers can't change it.
+- **Writing to a Round Table no longer stops the agents.** A message sent while they work waits until both finish their turn, then goes next. Several messages go together. **Stop** still stops them. The driver also no longer asks whether to go ahead with what you already asked for.
+- **The context gauge fills for Claude.** Claude Code channels now show how much of the context window is in use, from the window size Claude itself reports (1M for current models). Chats and Round Tables get it with each reply. Terminal channels get it through a status line Trace adds, which shows nothing; if you have a status line of your own, Trace leaves it alone and that channel shows only the token count.
+- **A Round Table is labelled and counted as one.** Its channel says **Round Table**, and its token count includes both agents. On the phone it's listed as a Round Table, and a chat or Round Table opened from an alert now shows its conversation instead of an empty terminal.
+- **Claude in Chrome.** A Claude channel's settings have **Claude in Chrome**, which starts Claude with the Claude in Chrome extension so it can use your Chrome and its sign-ins. The extension must be installed and connected.
+- **One logo everywhere.** The app icon, the logo in the top bar and the phone's logo are the same mark: one bold cyan ring with crosshairs and an amber centre.
+- **Token counts when Trace is opened from Claude.** When Trace was opened from inside a Claude Code session, its Claude Code terminals saved no transcript, so they showed no tokens. Trace now starts them without that session's setting.
+
 1.16.2 keeps Claude Code channels on the conversation you're actually in, and puts a Round Table in one tile (update every computer):
 
 - **Channels follow /clear and /resume.** When you start a new conversation (`/clear`) or switch to another (`/resume`) inside a Claude Code channel, Trace now follows it. **Conversation**, restarts and usage all use the conversation you're in. Before, they stayed on the one the channel first opened, so a restart could take you back days. Needs Claude Code 2.1.319 or later. Codex channels don't follow yet.

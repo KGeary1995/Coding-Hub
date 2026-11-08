@@ -94,7 +94,7 @@ const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const
 /** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
 function mark(big = false) {
   const element = h('span', { className: `mark ${big ? 'big' : ''}` });
-  element.innerHTML = '<svg width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="13" cy="13" r="10"/><circle cx="13" cy="13" r="5"/><path d="M13 1v5M13 20v5M1 13h5M20 13h5"/><circle cx="13" cy="13" r="1.2" fill="currentColor"/></svg><span>TRACE</span>';
+  element.innerHTML = '<svg width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square" aria-hidden="true"><circle cx="13" cy="13" r="7.4"/><path d="M13 2.4v5.2M13 18.4v5.2M2.4 13h5.2M18.4 13h5.2"/><circle cx="13" cy="13" r="2.4" fill="#ffb547" stroke="none"/></svg><span>TRACE</span>';
   return element;
 }
 function header(back?: () => void, title?: Node, ...tools: Node[]) {
@@ -279,7 +279,8 @@ function renderList() {
     h('button', { className: `channel ${state(channel)}`, dataset: tone(channel), onclick: () => showChannel(channel.sessionId) },
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
       h('span', { className: 'name' }, channel.title, account(channel), (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
-      h('span', { className: 'tag' }, channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
+      // A Round Table is two agents in one channel, not a single chat.
+      h('span', { className: 'tag' }, channel.table ? `Round Table · ${word[state(channel)]}` : channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
@@ -356,7 +357,8 @@ function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
-  closeChat();
+  // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
+  closeChat(); shownChat = null;
   // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
   if (channel?.chat && channel.engine !== 'shell') {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
@@ -615,7 +617,10 @@ function onEvent(event: StreamEvent) {
     channels = event.data; renderList(); renderChannel();
     // A chat shown here that started, stopped or restarted is drawn again for its new run.
     const shown = channels.find((item) => item.sessionId === current);
-    if (shown?.chat && shownChat && shownChat !== `${shown.sessionId}:${shown.runId}:${shown.running}`) showChannel(shown.sessionId);
+    // Drawn again when the chat starts, stops or restarts, and when the channel turns out to be a chat (or not) after it
+    // was opened as the other kind: opened from an alert before the list arrived, it was drawn as a terminal and stayed one.
+    const wanted = shown?.chat && shown.engine !== 'shell' ? `${shown.sessionId}:${shown.runId}:${shown.running}` : null;
+    if (shown && wanted !== shownChat) showChannel(shown.sessionId);
     // The list that arrives after an alert was tapped (on connecting, or just after) decides whether its channel opens.
     if (opening) { const id = opening; opening = null; if (channels.some((item) => item.sessionId === id)) showChannel(id); }
     return;

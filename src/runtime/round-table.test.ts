@@ -59,6 +59,13 @@ describe('Round Tables across restarts', () => {
     const saved = savedWorkspace();
     expect(saved.sessions[0].roundTable).toEqual({ partner: partner.id, driver: 'codex', rounds: 3 });
     expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true);
+    // As the app holds it once seated: the partner has no tile of its own, and that still saves.
+    useWorkspaceStore.getState().arrange('grid');
+    expect(savedWorkspace().tiles.map((tile) => tile.sessionId)).toEqual([lead.id]);
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
+    // A visible channel without a tile is still refused.
+    const unseated = savedWorkspace(); unseated.sessions = unseated.sessions.map(({ roundTable: _, ...session }) => session);
+    expect(savedWorkspaceSchema.safeParse(unseated).success).toBe(false);
     const chat = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal('window', { codingHub: { chat } });
     run(lead.id, RUN_A); restoreTables();

@@ -176,6 +176,10 @@ describe('structured telemetry', () => {
       // A second subagent, and more from the first, are picked up as they are written.
       fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), usage('sub-2', 10, 20)); fs.writeFileSync(path.join(subagents, 'agent-b2.jsonl'), usage('sub-3', 1, 2));
       vi.advanceTimersByTime(750); expect(published.at(-1)).toMatchObject({ input: 5111, output: 332 });
+      // The window size the running Claude reports (a chat reply, a terminal's status line) completes the context at once.
+      const count = published.length; telemetry.setContextWindow(run.runId, 1_000_000);
+      expect(published).toHaveLength(count + 1); expect(published.at(-1)?.context).toEqual({ used: 110, limit: 1_000_000 });
+      telemetry.setContextWindow(run.runId, 1_000_000); telemetry.setContextWindow(run.runId, 12); expect(published).toHaveLength(count + 1);
     } finally { telemetry.close(); vi.useRealTimers(); }
   });
   it('does not count a resumed conversation’s earlier subagent usage again, and counts a reply once across runs', async () => {

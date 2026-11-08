@@ -33,7 +33,8 @@ export async function openProjectFolder() {
 /** Four bars in the channel colours: two for Claude (CH1 yellow), two for Codex (CH2 cyan). */
 function Wordmark() {
   return <a className="tr-wordmark" href="#workspace" aria-label="Trace home" onClick={(event) => { event.preventDefault(); useWorkspaceStore.getState().setView('workspace'); }}>
-    <svg className="tr-wordmark-reticle" width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="13" cy="13" r="10" /><circle cx="13" cy="13" r="5" /><path d="M13 1v5M13 20v5M1 13h5M20 13h5" /><circle cx="13" cy="13" r="1.2" fill="currentColor" /></svg><span className="tr-wordmark-text">trace</span>
+    {/* The app icon's mark (scripts/make-icon.cjs) at 26 units: one ring, the crosshair outside it, the amber centre. */}
+    <svg className="tr-wordmark-reticle" width="20" height="20" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="square" aria-hidden="true"><circle cx="13" cy="13" r="7.4" /><path d="M13 2.4v5.2M13 18.4v5.2M2.4 13h5.2M18.4 13h5.2" /><circle cx="13" cy="13" r="2.4" fill="#ffb547" stroke="none" /></svg><span className="tr-wordmark-text">trace</span>
   </a>;
 }
 

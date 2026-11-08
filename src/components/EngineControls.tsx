@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
-import type { CLIEngineConfig } from '../../shared/types';
+import type { CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, withPermissions } from '../runtime/permissions';
 import { CodexModelPicker } from './CodexModelPicker';
-import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue } from '../../shared/schemas';
+import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue, permissionLevel } from '../../shared/schemas';
 
 // Claude Code aliases follow the current models; the listed IDs are current releases.
 const claudeModels = ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
@@ -18,8 +19,15 @@ function limitValue(value: string): number | null { return tokenValue(value) || 
 export function EngineControls({ id, config, directory = null, onChange }: { id: string; config: CLIEngineConfig; directory?: string | null; onChange: (config: CLIEngineConfig) => void }) {
   const { profiles, error } = useAccountStore();
   useEffect(() => { void refreshClaudeProfiles(); }, []);
+  const permissions = permissionLevel(config);
   return (
     <div className="engine-controls">
+      <label className="model-control">Permissions
+        <select aria-label={`${config.engine} permissions`} value={permissions} onChange={(event) => onChange(withPermissions(config, event.target.value as PermissionLevel))}>
+          {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
+        </select>
+        <small>{permissionHelp(config.engine, permissions)} {config.chat ? 'A running chat can also change this from its message box.' : 'Applies when the channel starts.'}</small>
+      </label>
       {config.engine === 'claude' && <label className="model-control">Model
         <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />
         <datalist id={`models-${id}`}>{claudeModels.map((model) => <option key={model} value={model} />)}</datalist>
@@ -34,6 +42,10 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
           <small>Create and connect named accounts in Accounts & connections. Stop this session before changing its account.</small>
           {error && <small role="alert">{error}</small>}
         </label>
+        <div className="model-control">
+          <label className="update-checkbox"><input type="checkbox" aria-label="Claude in Chrome" checked={config.chrome === true} onChange={(event) => { const { chrome: _old, ...rest } = config; onChange(event.target.checked ? { ...rest, chrome: true } : rest); }} />Claude in Chrome</label>
+          <small>Lets Claude use your Chrome, with your sign-ins, through the Claude in Chrome extension (it must be installed and connected). Applies when the channel starts; restart a running channel to use it.</small>
+        </div>
         <label>thinking.budget_tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
         <label>Max output tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: limitValue(event.target.value) } })} /></label>
         <label>Session token limit<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: limitValue(event.target.value) } })} /></label>

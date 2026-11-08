@@ -27,6 +27,10 @@ export interface EngineInfo {
   supportsAppendSystemPrompt?: boolean;
   supportsMcpConfig?: boolean;
   supportsSettings?: boolean;
+  /** Claude's --permission-mode and --allow-dangerously-skip-permissions; Codex's -a and -s. */
+  supportsPermissions?: boolean;
+  /** Claude's --chrome (Claude in Chrome). */
+  supportsChrome?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;

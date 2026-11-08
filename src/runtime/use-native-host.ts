@@ -11,6 +11,7 @@ import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
 import { startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 
 export async function refreshEngines() {
@@ -49,7 +50,10 @@ export function useNativeHost() {
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
     const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
-    const unsubscribeChat = host.onChatEvent((envelope) => { applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
+    const unsubscribeChat = host.onChatEvent((envelope) => {
+      // The agent refused a permission change: the control shows the level still in effect.
+      if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
+      applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
       // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).

@@ -340,6 +340,9 @@ describe('Chat channels', () => {
     expect(() => manager.chatRemote({ action: 'interrupt', sessionId: session.sessionId, runId: '00000000-0000-4000-8000-000000000000' })).toThrow(/stale/);
     expect(() => manager.chatRemote({ action: 'interrupt', sessionId: 'nope', runId: session.runId })).toThrow(/stale/);
     expect(() => manager.chatRemote({ action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'x', images: [], extra: true })).toThrow(/Invalid chat request/);
+    // Permissions change only on the computer itself: a phone must not be able to give an agent full access.
+    expect(() => manager.chatRemote({ action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'full' })).toThrow(/computer it runs on/);
+    expect(() => manager.chat(3, { action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'edits' })).not.toThrow();
   });
   it('runs a Round Table from a phone or linked computer: open, send, driver, rounds, stop and close', async () => {
     const processes: (FakePty & { onStderr: () => void })[] = []; const chats: { owner: number; envelope: ChatEnvelope }[] = [];

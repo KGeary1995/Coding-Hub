@@ -74,14 +74,30 @@ describe('Round Table', () => {
     expect(sent).toHaveLength(2);
   });
 
-  it('stops busy agents when the person writes again, then sends the new message to both', () => {
+  it('lets busy agents finish when the person writes again, then sends the new messages to both together', () => {
     const { tables, sent, interrupted, say, done } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 2);
     tables.send(CLAUDE, 'First', []); say(CLAUDE, 'Working'); done(CLAUDE);
-    tables.send(CLAUDE, 'Actually, second', []);
-    expect(interrupted).toEqual([CODEX]); expect(sent).toHaveLength(2);
-    done(CODEX);
-    expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Actually, second'], [CODEX, 'Actually, second']]);
+    tables.send(CLAUDE, 'Actually, second', []); tables.send(CLAUDE, 'And third', []);
+    expect(interrupted).toEqual([]); expect(sent).toHaveLength(2);
+    say(CODEX, 'Still working'); done(CODEX);
+    // The waiting messages go next, in place of a discussion round.
+    expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Actually, second\n\nAnd third'], [CODEX, 'Actually, second\n\nAnd third']]);
+  });
+
+  it('refuses a waiting message that would take the images past ten, instead of dropping them', () => {
+    const { tables } = setup(); const image = { mediaType: 'image/png' as const, data: 'AAAA' };
+    tables.open(1, CLAUDE, CODEX, 'claude', 2);
+    tables.send(CLAUDE, 'First', []); tables.send(CLAUDE, 'Six', Array(6).fill(image));
+    expect(() => tables.send(CLAUDE, 'Five more', Array(5).fill(image))).toThrow(/at most 10/);
+    expect(() => tables.send(CLAUDE, 'Four more', Array(4).fill(image))).not.toThrow();
+  });
+
+  it('still stops both agents on Stop', () => {
+    const { tables, interrupted } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 2);
+    tables.send(CLAUDE, 'First', []); tables.stop(CLAUDE);
+    expect(interrupted).toEqual([CLAUDE, CODEX]);
   });
 
   it('has the leading agent sum up a conversation already under way for the newcomer', () => {
