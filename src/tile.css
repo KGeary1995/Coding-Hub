@@ -252,3 +252,31 @@
 .remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
 .table-tokens { color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); text-transform: none; } .table-tokens b { font-weight: 500; }
 .seat-text-claude { color: var(--tr-ch-claude); } .seat-text-codex { color: var(--tr-ch-codex); }
+
+/* Flight Deck Lite tile anatomy (canvas direction 11): the channel number and engine in the engine's colour as text, an
+   outlined account and action, and a footer with the segmented context gauge, tokens and the output trace. */
+.tr-ch-badge { padding: 0; border-radius: 0; background: none; color: var(--ch); font: 700 13px/1 var(--tr-font-mono); letter-spacing: .04em; white-space: nowrap; }
+.tr-ch-engine { margin-left: 8px; font: 600 13px/1 var(--tr-font-ui); letter-spacing: .1em; text-transform: uppercase; }
+@container (max-width: 640px) { .tr-ch-engine { display: none; } }
+.tr-tile .tr-tile-name { font-weight: 600; color: var(--tr-fg-strong); }
+.tr-tile .tr-tile-model { text-transform: uppercase; letter-spacing: .04em; color: var(--tr-fg-dim); }
+.tr-profile-chip.account-profile-chip[data-account] { border: 1px solid var(--account); background: color-mix(in srgb, var(--account) 10%, transparent); color: var(--account); font: 500 11px/18px var(--tr-font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.tr-action.start, .claude .tr-action.start { border: 1px solid var(--tr-ch-codex); background: color-mix(in srgb, var(--tr-ch-codex) 12%, transparent); color: var(--tr-ch-codex); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
+.claude .tr-action.start { border-color: var(--tr-ch-claude); background: color-mix(in srgb, var(--tr-ch-claude) 12%, transparent); color: var(--tr-ch-claude); }
+.tr-tile-head .tr-tile-metric { display: none; }
+/* The footer: one row under the terminal. */
+.tr-scope.tr-tile-foot { flex: none; height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-top: 1px solid var(--tr-line); background: var(--tr-surface); font: 400 11px/1 var(--tr-font-mono); color: var(--tr-fg-dim); }
+.dense .tr-scope.tr-tile-foot { height: 26px; }
+.tr-tile-foot .tr-foot-label { text-transform: uppercase; letter-spacing: .08em; }
+.tr-tile-foot .tr-scope-limit { position: relative; inset: auto; flex: 0 1 180px; min-width: 60px; height: 8px; }
+.tr-tile-foot .tr-scope-limit i { height: 100%; }
+.tr-tile-foot .tr-foot-value { color: var(--tr-fg); font-weight: 400; white-space: nowrap; text-transform: uppercase; } .tr-tile-foot .tr-foot-value.hot { color: var(--tr-st-limit); }
+.tr-tile-foot .tr-scope-plot { position: static; flex: 1 1 80px; min-width: 40px; height: 18px; }
+.tr-tile-foot .tr-scope-rail { display: none; }
+.tr-tile-foot .tr-scope-rate { position: static; padding: 0; background: none; white-space: nowrap; text-transform: uppercase; }
+@container (max-width: 420px) { .tr-tile-foot .tr-scope-plot, .tr-tile-foot .tr-scope-rate { display: none; } }
+/* Round Table messages (canvas direction 11): a hexagon seat and the speaker's name, with their role. */
+.seat-hex { display: inline-block; width: 11px; height: 12px; margin-right: 6px; vertical-align: -1px; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.seat-hex.seat-claude { background: var(--tr-ch-claude); } .seat-hex.seat-codex { background: var(--tr-ch-codex); } .seat-hex.seat-you { background: var(--tr-you); }
+.chat-message.user.table-you { align-items: flex-end; } .table-you .chat-author { color: var(--tr-you); }
+.at-table .chat-message.assistant.table-claude, .at-table .chat-message.assistant.table-codex { border-left-width: 1px; }

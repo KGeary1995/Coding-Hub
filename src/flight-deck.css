@@ -1,0 +1,71 @@
+/* Flight Deck Lite across every screen (docs/design/trace/DECISIONS.md, canvas direction 11). Loaded last, so the shared
+   pieces each screen is built from (page headings, cards, buttons, the setup list, empty and idle states) take the
+   direction's form once, here, rather than screen by screen: tracked uppercase titles, mono section labels, square
+   outlined controls, and Codex cyan for what is active. */
+
+/* Page titles: uppercase and tracked, like the top bar. The eyebrow above them is a mono label. */
+.feature-panel-heading h1, .feature-panel > h1, .tr-setup-nav > h1, .tr-setup-nav > h2, .tr-empty h1, .panel-heading h1, .view-title, .changes-title h1 {
+  text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+}
+.feature-panel-heading .eyebrow, .eyebrow { font: 500 11px/1.4 var(--tr-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--tr-ch-codex); }
+.feature-panel-heading h1 svg { color: var(--tr-ch-codex); }
+
+/* Card and form section titles: small mono labels, as "PLAN LIMITS" and "// CHANNELS" in the direction. */
+.storage-card > h2, .storage-card > header > h2, .storage-card header h2, .hub-form > h2, .hub-form h2, .tool-card h2, .more-tools h2, .tr-empty h2, .tr-empty-columns h2, .tr-empty-columns h3 {
+  font: 600 12px/1.4 var(--tr-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--tr-fg-dim);
+}
+.storage-card, .hub-form { background: var(--tr-surface); border-color: var(--tr-line); }
+
+/* Buttons: square, outlined, uppercase and tracked; the main action stays solid cyan (workbench.css). */
+.button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+.button.secondary, .button:not(.primary):not(.danger) { border-color: var(--tr-line-control); background: transparent; color: var(--tr-fg); }
+.button.secondary:hover:not(:disabled), .button:not(.primary):not(.danger):hover:not(:disabled) { border-color: var(--tr-ch-codex); color: var(--tr-fg-strong); background: color-mix(in srgb, var(--tr-ch-codex) 8%, transparent); }
+
+/* An open menu in the top bar (Insight, Agent setup) is active like a tab: Codex cyan. */
+.tr-menu-button.active { background: var(--tr-ch-codex); color: var(--tr-on-light); }
+
+/* Agent setup's list: each place an uppercase name over its mono status, the current one marked in cyan. */
+.tr-setup-name { text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
+.tr-setup-nav button.active, .tr-setup-nav button[aria-current="page"] { box-shadow: inset 3px 0 0 var(--tr-ch-codex); }
+
+/* The status bar's words follow its uppercase labels. */
+.app-statusbar.tr-statusbar .storage-status { text-transform: uppercase; letter-spacing: .06em; }
+
+/* A channel before it starts: a compact instrument readout instead of a large welcome card. */
+.session-welcome { gap: 10px; }
+.session-welcome .welcome-eyebrow { font: 500 11px/1.4 var(--tr-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--tr-fg-dim); }
+.session-welcome .welcome-engine, .session-welcome h2, .session-welcome h3 { text-transform: uppercase; letter-spacing: .08em; font-size: 20px; }
+.session-welcome p { color: var(--tr-fg-dim); }
+.session-welcome .welcome-directory { font-family: var(--tr-font-mono); font-size: 12px; text-transform: none; }
+
+/* The start screen: its choices are outlined cards; the default one is marked in cyan, not filled white. */
+.tr-empty .tr-key { background: var(--tr-surface); border-color: var(--tr-line-control); }
+.tr-empty .tr-key.primary { border-color: var(--tr-ch-codex); background: color-mix(in srgb, var(--tr-ch-codex) 8%, var(--tr-surface)); color: var(--tr-fg-strong); box-shadow: inset 0 2px 0 var(--tr-ch-codex); }
+.tr-empty .tr-key.primary * { color: inherit; } .tr-empty .tr-key.primary .tr-key-meta, .tr-empty .tr-key.primary .tr-key-sub { color: var(--tr-fg-muted); }
+.tr-empty .tr-key strong, .tr-empty .tr-key h2, .tr-empty .tr-key-title { text-transform: uppercase; letter-spacing: .06em; }
+
+/* Empty states inside panels: a mono note. */
+.history-empty { font-family: var(--tr-font-mono); font-size: 13px; letter-spacing: .02em; }
+
+/* A Terminal channel's Start is in the shell's colour, like its CH badge. */
+.shell .tr-action.start { border-color: var(--tr-ch-shell); background: color-mix(in srgb, var(--tr-ch-shell) 12%, transparent); color: var(--tr-ch-shell); }
+
+/* Usage: the title like the other pages; the plan-limits heading and every stat label as mono labels; segments tracked. */
+.tr-usage-head h1 { text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+#plan-limits-title, .tr-kpi-label, .coaching-metrics article > span { font: 600 12px/1.4 var(--tr-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--tr-fg-dim); }
+.tr-seg > button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+.tr-seg > button.active, .tr-seg > button[aria-pressed="true"] { background: var(--tr-ch-codex); color: var(--tr-on-light); }
+/* The status bar is uppercase throughout, channel entries and plan limits included. */
+.app-statusbar.tr-statusbar .tr-sb-cell, .app-statusbar.tr-statusbar .tr-sb-text { text-transform: uppercase; letter-spacing: .06em; }
+/* Help's topic filters and chips read as the rest of the controls. */
+.help-filters button, .help-topics button.chip { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+
+/* The channel being worked in (keyboard focus inside it) gets the corner brackets and crosshair, not only a maximised one. */
+.session-tile.tr-tile:focus-within::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
+  background: linear-gradient(var(--c), var(--c)) left top / 14px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 14px, linear-gradient(var(--c), var(--c)) right top / 14px 2px, linear-gradient(var(--c), var(--c)) right top / 2px 14px,
+    linear-gradient(var(--c), var(--c)) left bottom / 14px 2px, linear-gradient(var(--c), var(--c)) left bottom / 2px 14px, linear-gradient(var(--c), var(--c)) right bottom / 14px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 14px;
+  background-repeat: no-repeat; }
+.session-tile.tr-tile:focus-within .tr-focus-reticle { display: block; }
+/* A tile's hover controls, tab groups and table headings follow the controls and labels everywhere else. */
+.tr-detail-button, [role="tablist"] > button, .workflow-tabs button, .tr-tabs-inline button { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; }
+.tr-table th, .usage-table th, table th { font: 600 11px/1.4 var(--tr-font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--tr-fg-dim); }

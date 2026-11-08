@@ -82,8 +82,8 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
       {!items.length && <p className="chat-empty">{live ? `Ask ${agent} anything. The conversation is the same one as on the computer.` : 'This chat is not running. Start it to write to it.'}</p>}
       {items.map(({ item, from }) => from === 'lead'
-        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} answer={answer('lead')} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partner.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} answer={answer('partner')} view={setViewing} />)}
+        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answer('lead')} view={setViewing} />
+        : <Item key={`partner-${item.id}`} item={item} results={partner.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answer('partner')} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>

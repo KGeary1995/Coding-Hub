@@ -72,3 +72,19 @@ export function restoreTables() {
     void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds }).catch(() => {});
   }
 }
+
+/**
+ * + Channel → Round Table: a Claude chat in the project, started, with Codex brought in beside it (openRoundTable).
+ * Claude drives first; the person can swap. The error message, or null.
+ */
+export async function startRoundTable(): Promise<string | null> {
+  const before = new Set(useWorkspaceStore.getState().sessions.map((session) => session.id));
+  if (before.size > MAX_CHANNELS - 2) return 'A Round Table adds two channels: close one first.';
+  useWorkspaceStore.getState().addChatSession('claude');
+  const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
+  if (!lead) return 'The Round Table could not be added.';
+  await startSession(lead.id);
+  const started = useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id);
+  if (started?.status !== 'running') return started?.error ?? 'Claude could not be started.';
+  return openRoundTable(lead.id);
+}
