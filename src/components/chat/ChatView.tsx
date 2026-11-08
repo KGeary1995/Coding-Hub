@@ -7,20 +7,25 @@ import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/ch
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore } from '../../state/hub-store';
 import { channelToday } from '../../state/channel-state';
-import { forgetTable, openRoundTable, tableRequest } from '../../runtime/round-table';
-import { AGENT, EMPTY, Item, readImage, TableBar } from './ChatParts';
+import { forgetTable, openRoundTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
+import { startSession } from '../../runtime/use-native-host';
+import { AGENT, EMPTY, Item, readImage, seatState, TableBar } from './ChatParts';
 
 /**
  * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
  * replies, tool calls as cards with their results, and approvals as buttons. The CLI runs in structured mode in the
  * channel's folder with the channel's account, rules, memory and tools, as a terminal channel does. A chat that leads a
- * Round Table shows both agents in one thread, each labelled, and sends the person's messages to both.
+ * Round Table shows both agents in one thread, each labelled, and sends the person's messages to both. Its partner has
+ * no tile: this one shows how it is doing, starts it again when it stopped, and can show its own conversation.
  */
 export function ChatView({ session }: { session: Session }) {
   const chat = useChatStore((state) => state.threads[session.id] ?? EMPTY);
   const table = chat.table ?? null;
-  const partnerThread = useChatStore((state) => table ? state.threads[table.partner.sessionId] ?? EMPTY : EMPTY);
-  const partnerSession = useWorkspaceStore((state) => table ? state.sessions.find((item) => item.id === table.partner.sessionId) ?? null : null);
+  /** The hidden partner, while the table is open or saved (after a restart, or while the partner is stopped). */
+  const partnerId = table?.partner.sessionId ?? session.roundTable?.partner ?? null;
+  const partnerThread = useChatStore((state) => partnerId ? state.threads[partnerId] ?? EMPTY : EMPTY);
+  const partnerSession = useWorkspaceStore((state) => partnerId ? state.sessions.find((item) => item.id === partnerId && item.id !== session.id) ?? null : null);
+  const [showPartner, setShowPartner] = useState(false);
   /** This chat sits at another channel's table: it is written to from there. */
   const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id)?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
@@ -42,11 +47,13 @@ export function ChatView({ session }: { session: Session }) {
 
   /** At a table, the partner's replies, approvals and notices join this thread in the order they came; Trace's prompts to it stay out. */
   const items = useMemo(() => {
+    // "Show Codex": the partner's own conversation, Trace's messages to it included.
+    if (showPartner && partnerSession) return partnerThread.items.map((item) => ({ item, from: 'partner' as const }));
     const own = chat.items.map((item) => ({ item, from: 'lead' as const }));
     if (!table) return own;
     return [...own, ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const }))]
       .sort((a, b) => (a.item.order ?? 0) - (b.item.order ?? 0));
-  }, [chat.items, partnerThread.items, table]);
+  }, [chat.items, partnerThread.items, table, showPartner, partnerSession]);
 
   const attach = async (files: Blob[]) => {
     setError('');
@@ -73,17 +80,33 @@ export function ChatView({ session }: { session: Session }) {
   const onPaste = (event: ClipboardEvent) => { const files = [...event.clipboardData.files].filter((item) => item.type.startsWith('image/')); if (files.length) { event.preventDefault(); void attach(files); } };
   const onDrop = (event: DragEvent) => { const files = [...event.dataTransfer.files]; if (files.some((item) => item.type.startsWith('image/'))) { event.preventDefault(); void attach(files); } };
   const other = AGENT[engine === 'claude' ? 'codex' : 'claude'];
+  const partnerEngine = table?.partner.engine ?? (partnerSession?.config.engine === 'codex' ? 'codex' : partnerSession?.config.engine === 'claude' ? 'claude' : engine === 'claude' ? 'codex' : 'claude');
+  const partnerState = partnerSession ? seatState(partnerSession, partnerThread.busy) : null;
+  const partnerLive = partnerSession?.status === 'running' || partnerSession?.status === 'starting';
+  /** An open table is closed through the host, whose `closed` event forgets it (as from a phone); a saved one is forgotten here. */
+  const closeTable = () => { setShowPartner(false); void (async () => { const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
   const workers = table ? [chat.busy ? agent : null, partnerThread.busy ? AGENT[table.partner.engine] : null].filter(Boolean) : [agent];
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
- {table && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} onRequest={(request) => { if (request.action === 'table-close') forgetTable(session.id); void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
+    {table && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
+      onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
+    {!table && partnerSession && <div className="table-bar" role="group" aria-label="Round Table">
+      <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${engine}`} /><i className={`seat-${partnerEngine}`} /></span>
+      <strong>Round Table</strong>
+      <span className="table-partner" title={partnerSession.error ?? undefined}><b className={`seat-text-${partnerEngine}`}>{AGENT[partnerEngine]}</b> {partnerState}</span>
+      <span className="table-status" aria-live="polite">{!running ? `${AGENT[partnerEngine]} starts with this channel` : partnerSession.status === 'running' ? 'Seating again…' : partnerLive ? '' : `Start ${AGENT[partnerEngine]} to talk to both again`}</span>
+      {running && !partnerLive && <button className="quiet-button" onClick={() => void startSession(partnerSession.id)}>Start {AGENT[partnerEngine]}</button>}
+      {partnerThread.items.length > 0 && <button className="quiet-button" aria-pressed={showPartner} onClick={() => setShowPartner(!showPartner)}>{showPartner ? 'Back to the table' : `Show ${AGENT[partnerEngine]}`}</button>}
+      <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[partnerEngine]}`} onClick={closeTable}><X size={13} /></button>
+    </div>}
+    {showPartner && partnerSession && <p className="table-seated" role="note">{AGENT[partnerEngine]}'s own conversation, with what Trace passed to it. Your messages still go to the Round Table.</p>}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answerFor(partnerSession)} view={setViewing} />)}
+        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[partnerEngine]} author={partnerEngine} role={table ? (table.driver === partnerEngine ? 'driver' : 'reviewer') : undefined} answer={answerFor(partnerSession)} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
     <div className="chat-composer">
@@ -91,7 +114,7 @@ export function ChatView({ session }: { session: Session }) {
       {error && <p className="chat-notice error" role="alert">{error}</p>}
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
-        {!table && !seatedAt && <button className="chat-icon" aria-label={`Round Table: add ${other}`} title={channels >= MAX_CHANNELS ? 'Close a channel first: a Round Table adds one' : `Round Table: bring ${other} into this conversation`} disabled={!running || opening || channels >= MAX_CHANNELS} onClick={() => void openTable()}><Users size={16} /></button>}
+        {!table && !seatedAt && !partnerSession && <button className="chat-icon" aria-label={`Round Table: add ${other}`} title={channels >= MAX_CHANNELS ? TABLE_FULL : `Round Table: bring ${other} into this conversation, in this channel`} disabled={!running || opening || channels >= MAX_CHANNELS} onClick={() => void openTable()}><Users size={16} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea ref={input} rows={1} value={text} disabled={!running || Boolean(seatedAt)} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} onPaste={onPaste} />
         {busy && !text.trim()

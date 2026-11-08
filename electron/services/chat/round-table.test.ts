@@ -109,6 +109,13 @@ describe('Round Table', () => {
     expect(() => tables.open(1, CODEX, CLAUDE, 'claude', 1)).toThrow('already');
     tables.ended(CODEX);
     expect(last().table).toBeNull(); expect(modes).toEqual({ [CLAUDE]: false, [CODEX]: false });
+    // A run that ended is not the person closing it: the window keeps the table to seat both again.
+    expect(last().closed).toBeUndefined();
     expect(() => tables.send(CLAUDE, 'x', [])).toThrow('no Round Table');
+  });
+  it('marks a table the person closed, so every window forgets it and stops its partner', () => {
+    const { tables, last } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 1); tables.close(CLAUDE);
+    expect(last()).toEqual({ type: 'table', table: null, closed: true });
   });
 });

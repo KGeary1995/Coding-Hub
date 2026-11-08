@@ -1,7 +1,7 @@
 import { startRoundTable } from '../../runtime/round-table';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { CircleHelp, Columns2, Grid2X2, Monitor, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
-import { useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
+import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
 import { MAX_CHANNELS } from '../../../shared/schemas';
@@ -50,7 +50,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const channelMenu: MenuItem[] = other
     ? (['claude', 'codex', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', shell: 'Terminal' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
     : [{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Claude chat', onSelect: () => useWorkspaceStore.getState().addChatSession('claude') }, { label: 'Codex chat', onSelect: () => useWorkspaceStore.getState().addChatSession('codex') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }, { label: 'Terminal', onSelect: () => addSession('shell') },
-      ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(useWorkspaceStore.getState().sessions.at(-1)?.id ?? '', error, true); }) }] : [])];
+      ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : [])];
   return <header className="tr-topbar">
     <Wordmark />
     {project
@@ -73,6 +73,6 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <CommandMenu />
     <button className="tr-icon" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal className="tr-narrow-icon" size={14} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
-    <MenuButton className="tr-new-channel" ariaLabel="New channel" disabled={other ? !other.connected || other.channels.length >= MAX_CHANNELS : sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={channelMenu} />
+    <MenuButton className="tr-new-channel" ariaLabel="New channel" title={!other && sessions.length >= MAX_CHANNELS ? channelsFullNote(sessions) ?? undefined : undefined} disabled={other ? !other.connected || other.channels.length >= MAX_CHANNELS : sessions.length >= MAX_CHANNELS} label={<>+<span className="tr-wide-label">Channel</span></>} items={channelMenu} />
   </header>;
 }

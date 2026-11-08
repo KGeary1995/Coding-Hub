@@ -130,17 +130,18 @@ export class RoundTables {
     table.phase = table.lead.busy || table.partner.busy ? table.phase : 'idle'; this.publish(table);
   }
 
-  close(leadRunId: string) {
+  /** `byPerson`: closed on request (not because a run ended), which the window takes as forgetting the table. */
+  close(leadRunId: string, byPerson = true) {
     const table = this.tables.get(leadRunId); if (!table) return;
     this.tables.delete(leadRunId);
     // Both may edit again, as ordinary chats.
     for (const seat of [table.lead, table.partner]) { try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
-    this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: null } });
+    this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}) } });
   }
-  /** A chat run ended: its table closes (the other agent stays as an ordinary chat). */
+  /** A chat run ended: its table closes for now (the window seats both again once both run). */
   ended(runId: string) {
     this.recent.delete(runId);
-    const table = this.tableOf(runId); if (table) this.close(table.lead.runId);
+    const table = this.tableOf(runId); if (table) this.close(table.lead.runId, false);
   }
 
   /**

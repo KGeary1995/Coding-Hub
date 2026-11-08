@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { focusTerminal } from '../runtime/terminals';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 interface DisplaySettings { scale: number; density: 'comfortable' | 'compact'; contrast: boolean }
 const defaults: DisplaySettings = { scale: 100, density: 'comfortable', contrast: false };
 function load(): DisplaySettings { try { const value = JSON.parse(localStorage.getItem('coding-hub-display') ?? 'null'); return value && [80, 90, 100, 110, 125].includes(value.scale) && ['comfortable', 'compact'].includes(value.density) && typeof value.contrast === 'boolean' ? value : defaults; } catch { return defaults; } }
@@ -11,7 +11,7 @@ export function useAccessibility() {
     const handler = (event: KeyboardEvent) => {
       // Top-row digits only: Alt+numpad digits are Windows character entry (Alt+0169).
       if (event.altKey && !event.ctrlKey && !event.metaKey && /^Digit[1-8]$/.test(event.code)) {
-        const state = useWorkspaceStore.getState(); const session = state.sessions[Number(event.code.slice(5)) - 1];
+        const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[Number(event.code.slice(5)) - 1];
         if (session) {
           event.preventDefault(); event.stopPropagation(); state.setView('workspace');
           // Only the isolated tile's terminal is mounted; isolate the requested one instead.

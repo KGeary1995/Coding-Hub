@@ -1,5 +1,6 @@
 import type { Session } from '../../shared/types';
 import { freshInput, localDay, newTokens, type UsageRecord } from '../../shared/hub';
+import { channelsOf, leadOf } from './workspace-store';
 
 /** What a session is doing, as the Trace design shows it (docs/design/trace/README.md). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
@@ -50,15 +51,20 @@ export function usageFor(session: Session, records: UsageRecord[]) {
 
 export interface ChannelAlert { sessionId: string; channel: number; state: 'waiting' | 'failed' | 'limit'; text: string }
 
-/** Channels that need the person: waiting first, then failed, then near a limit. Channel numbers follow tile order. */
+/**
+ * Channels that need the person: waiting first, then failed, then near a limit. Channel numbers follow tile order. A
+ * Round Table's hidden partner is reported under its lead's number and named, and `sessionId` stays the partner's (its
+ * approval is answered in the lead's tile, which jumpToChannel opens; Retry starts the partner).
+ */
 export function channelAlerts(sessions: Session[], records: UsageRecord[]): ChannelAlert[] {
   const order = { waiting: 0, failed: 1, limit: 2 } as const;
-  const alerts: ChannelAlert[] = [];
-  sessions.forEach((session, index) => {
+  const alerts: ChannelAlert[] = []; const tiles = channelsOf(sessions);
+  sessions.forEach((session) => {
     const usage = usageFor(session, records); const state = channelState(session, usage);
     if (state !== 'waiting' && state !== 'failed' && state !== 'limit') return;
-    const channel = index + 1;
-    const text = state === 'waiting' ? `CH${channel} needs approval` : state === 'failed' ? `CH${channel} failed` : `CH${channel} ${usage?.context && usage.context.limit > 0 ? `ctx ${Math.round(usage.context.used / usage.context.limit * 100)}%` : 'near budget'}`;
+    const lead = leadOf(sessions, session.id); const index = tiles.indexOf(lead ?? session); if (index < 0) return;
+    const channel = index + 1; const label = lead ? `CH${channel} ${session.config.engine === 'codex' ? 'Codex' : 'Claude'}` : `CH${channel}`;
+    const text = state === 'waiting' ? `${label} needs approval` : state === 'failed' ? `${label} failed` : `${label} ${usage?.context && usage.context.limit > 0 ? `ctx ${Math.round(usage.context.used / usage.context.limit * 100)}%` : 'near budget'}`;
     alerts.push({ sessionId: session.id, channel, state, text });
   });
   return alerts.sort((a, b) => order[a.state] - order[b.state] || a.channel - b.channel);

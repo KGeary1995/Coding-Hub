@@ -625,3 +625,20 @@ describe('usage, tasks, history and memory for phones', () => {
     expect(written).toHaveLength(1);
   });
 });
+
+describe('Round Tables on phones and linked computers', () => {
+  it('lists a table as its lead only, numbers the channels after it as tiles, and shows the partner\'s approval on the lead', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const host: RemoteHost = {
+      sessions: () => [{ id: 'lead', title: 'Claude chat', engine: 'claude', chat: true }, { id: 'seat', title: 'Codex', engine: 'codex', chat: true, seatedAt: 'lead' }, { id: 'term', title: 'Terminal', engine: 'shell' }],
+      running: () => [{ sessionId: 'lead', runId: 'r1', pid: 1, cwd: '/p', engine: 'claude' }, { sessionId: 'seat', runId: 'r2', pid: 2, cwd: '/p', engine: 'codex' }],
+      write: () => {},
+    };
+    const server = new RemoteServer(root, host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
+    for (const kind of ['phone', 'computer'] as const) expect(server.channels(kind).map((channel) => [channel.sessionId, channel.channel])).toEqual([['lead', 1], ['term', 2]]);
+    server.onSessionEvent({ type: 'attention', sessionId: 'seat', runId: 'r2', message: 'Approve Bash', at: new Date().toISOString() });
+    expect(server.channels()[0].attention).toBe('Codex: Approve Bash');
+    server.onSessionEvent({ type: 'answered', sessionId: 'seat', runId: 'r2', at: new Date().toISOString() });
+    expect(server.channels()[0].attention).toBeNull();
+  });
+});

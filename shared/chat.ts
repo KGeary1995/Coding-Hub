@@ -31,8 +31,12 @@ export type ChatEvent =
   | { type: 'user'; text: string; images: number; remote?: true }
   /** A resumed conversation's earlier messages and tool results, sent once as it starts. */
   | { type: 'history'; messages: ChatHistoryMessage[]; results: Record<string, { text: string; isError: boolean; image: boolean }> }
-  /** The Round Table this chat leads changed (sent on the leading channel); null when it ended. */
-  | { type: 'table'; table: RoundTableState | null };
+  /**
+   * The Round Table this chat leads changed (sent on the leading channel); null when it ended. `closed`: the person
+   * closed it (from any window, phone or computer), so the lead forgets it and its partner is stopped; without it, one
+   * of the runs ended and the table is seated again when both run.
+   */
+  | { type: 'table'; table: RoundTableState | null; closed?: true };
 export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent };
 
 /**

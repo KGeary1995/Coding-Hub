@@ -170,7 +170,9 @@ const manager = new PtyManager((owner, event) => {
 /** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
+  // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) if (session.roundTable && session.roundTable.partner !== session.id && saved!.sessions.some((item) => item.id === session.roundTable!.partner)) seats.set(session.roundTable.partner, session.id);
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
 /** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
@@ -194,7 +196,12 @@ function desktopAlert(alert: DesktopAlert, always = false) {
   notice.show();
 }
 /** This computer's channel, by number and name as its tile shows it, for alerts. */
-function channelLabel(sessionId: string) { const channels = workspaceChannels(); const index = channels.findIndex((channel) => channel.id === sessionId); return index >= 0 ? `CH${index + 1} · ${channels[index].title}` : 'A channel'; }
+function channelLabel(sessionId: string) {
+  const all = workspaceChannels(); const seat = all.find((channel) => channel.id === sessionId && channel.seatedAt);
+  // A Round Table's partner is named after the channel it sits in, with its agent.
+  const channels = all.filter((channel) => !channel.seatedAt); const index = channels.findIndex((channel) => channel.id === (seat?.seatedAt ?? sessionId));
+  return index >= 0 ? `CH${index + 1} · ${channels[index].title}${seat ? ` (${seat.engine === 'codex' ? 'Codex' : 'Claude'})` : ''}` : 'A channel';
+}
 function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
   try {
     const id = owner ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
