@@ -1,6 +1,7 @@
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
 import type { ChatBlock, ChatImage, RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
+import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
 
 /**
@@ -97,11 +98,21 @@ export function Item({ item, results, agent, author, answer, view, role }: { ite
   return <p className={`chat-notice ${item.error ? 'error' : ''}`}>{author ? `${agent}: ` : ''}{item.text}</p>;
 }
 
+/** How a Round Table's hidden partner is doing, in a few words for the table bar (it has no tile of its own). */
+export function seatState(partner: Pick<Session, 'status' | 'error'> & { attention?: Session['attention'] }, busy: boolean) {
+  if (partner.status === 'running') return partner.attention ? 'needs approval' : busy ? 'working' : 'running';
+  if (partner.status === 'starting') return 'starting';
+  return partner.status === 'error' || partner.error ? 'stopped with an error' : 'stopped';
+}
+
 /** The controls of a Round Table: who drives, how many rounds, where it is, stop and close. */
 export type TableAction = { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
-/** `tokens`: each agent's new tokens today, when the caller has them (the desktop does). */
-export function TableBar({ leadEngine, table, busy, onRequest, tokens }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; tokens?: { lead: number; partner: number } }) {
+/**
+ * `tokens`: each agent's new tokens today, when the caller has them (the desktop does). `partnerState` (seatState) and
+ * `onShow` come from the desktop, where the partner has no tile: how it is doing, and a switch to its own conversation.
+ */
+export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerState, showing = false, onShow }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; tokens?: { lead: number; partner: number }; partnerState?: string; showing?: boolean; onShow?: () => void }) {
   const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
   const run = onRequest;
   const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
@@ -109,12 +120,14 @@ export function TableBar({ leadEngine, table, busy, onRequest, tokens }: { leadE
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
     <strong>Round Table</strong>
     <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span>
+    {partnerState && <span className={`table-partner ${partnerState === 'needs approval' ? 'waiting' : ''}`} title={`${AGENT[table.partner.engine]} runs in the background in this channel`}><b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]}</b> {partnerState}</span>}
     {tokens && <span className="table-tokens tnum" title="New tokens today in each agent's channel"><b className={`seat-text-${leadEngine}`}>{AGENT[leadEngine]} {short(tokens.lead)}</b> · <b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]} {short(tokens.partner)}</b></span>}
     <button className="quiet-button" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
     <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
     <span className="table-status" aria-live="polite">{status}</span>
     {busy && <button className="quiet-button" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
-    <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table (${AGENT[table.partner.engine]} stays as its own chat)`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
+    {onShow && <button className="quiet-button" aria-pressed={showing} title={showing ? 'Back to the Round Table thread' : `${AGENT[table.partner.engine]}'s own conversation, with what Trace passed to it`} onClick={onShow}>{showing ? 'Back to the table' : `Show ${AGENT[table.partner.engine]}`}</button>}
+    <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[table.partner.engine]}`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
   </div>;
 }
 

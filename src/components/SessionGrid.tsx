@@ -1,10 +1,12 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { SessionTile } from './SessionTile';
 
 export function SessionGrid() {
-  const { sessions, tiles, setTiles, focusedSessionId, layoutMode } = useWorkspaceStore();
+  const { sessions: all, tiles, setTiles, focusedSessionId, layoutMode } = useWorkspaceStore();
+  // A Round Table's partner runs in the background: its lead's tile shows the table.
+  const sessions = useMemo(() => channelsOf(all), [all]);
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);

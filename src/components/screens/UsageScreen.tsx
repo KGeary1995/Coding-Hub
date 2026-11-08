@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { UsageRecord } from '../../../shared/hub';
 import { useHubStore, dollars } from '../../state/hub-store';
-import { useWorkspaceStore } from '../../state/workspace-store';
+import { channelNumber, useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState } from '../../state/channel-state';
 import { USAGE_WINDOWS, axisMax, lastContext, dailySeries, delta, inWindow, logRecords, median, usageTotals, type UsageWindow } from '../../state/usage-summary';
 import { refreshUsageDays, useDayUsage } from '../../state/day-usage-store';
@@ -98,10 +98,10 @@ export function UsageScreen() {
       <table className="usage-table tr-table">
         <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>
         <tbody>{[...current].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map((record) => {
-          const index = sessions.findIndex((session) => session.runId === record.runId); const session = sessions[index];
+          const session = sessions.find((item) => item.runId === record.runId); const number = session ? channelNumber(sessions, session.id) : 0;
           const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const context = lastContext(record);
           return <tr key={record.runId}>
-            <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{session ? `CH${index + 1}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
+            <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{number ? `CH${number}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
             <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}{record.machine && <span className="tr-cell-machine"> · {record.machine}</span>}</td>
             <td className="tr-cell-mono">{record.model}{record.incomplete && <span className="dim" title="Trace could not read all of this run's usage log, so its totals may be low."> · incomplete</span>}</td>
             <td className="tr-cell-mono">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>

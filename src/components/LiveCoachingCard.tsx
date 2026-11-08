@@ -12,7 +12,7 @@ function WeekSummary({ week }: { week: CoachingWeek }) {
   if (!week.prompts) return <p className="muted">No prompts coached in the last 7 days.</p>;
   return <div className="live-week"><h3>Last 7 days</h3><p>{week.prompts} {week.prompts === 1 ? 'prompt' : 'prompts'}, {week.coached} with tips{week.reviewed ? `, ${week.reviewed} reviewed by AI` : ''}.</p>{top.length > 0 && <ul>{top.map(([kind, count]) => <li key={kind}><strong>{count}</strong> ({Math.round(count / week.prompts * 100)}%) {KIND_TEXT[kind]}</li>)}</ul>}{top[0] && <p className="muted">The biggest gain: {top[0][0] === 'check' ? 'end task prompts with how you will check the result.' : top[0][0] === 'error' ? 'paste the error message when something fails.' : top[0][0] === 'thin' || top[0][0] === 'unnamed' ? 'open conversations with the goal, the place and what done looks like.' : top[0][0] === 'vague' ? 'say what you want improved, specifically.' : top[0][0] === 'many' ? 'split big asks, or say what comes first.' : 'lead with the request, then the background.'}</p>}</div>;
 }
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelNumber, useWorkspaceStore } from '../state/workspace-store';
 
 /**
  * The prompts live coaching saw in this window's channels, newest first, with their tips; each can be reviewed by
@@ -31,9 +31,9 @@ export function LiveCoachingCard({ save }: { save: (text: string, outcome: Promp
     {enabled && !tips.length && <p className="muted">No prompts yet. Send one in a channel and its tips appear here.</p>}
     {tips.length > 0 && <button className="quiet-button" onClick={() => void clearLiveCoaching().catch((e) => setError(e.message))}>Clear coached prompts</button>}
     <div className="live-feed">{tips.map((tip) => {
-      const index = sessions.findIndex((session) => session.id === tip.sessionId);
+      const number = channelNumber(sessions, tip.sessionId);
       return <article key={tip.id}>
-        <small className="muted">{index >= 0 ? `CH${index + 1}` : 'Closed channel'} · {tip.engine === 'claude' ? 'Claude Code' : 'Codex'} · {new Date(tip.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>
+        <small className="muted">{number ? `CH${number}` : 'Closed channel'} · {tip.engine === 'claude' ? 'Claude Code' : 'Codex'} · {new Date(tip.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>
         <blockquote>{tip.prompt.length > 400 ? tip.prompt.slice(0, 400) + '…' : tip.prompt}</blockquote>
         {tip.review ? <><p>{tip.review.advice}</p>{tip.review.rewrite.trim() !== tip.prompt.trim() && <details><summary>Suggested rewrite</summary><pre>{tip.review.rewrite}</pre></details>}</> : tip.tips.length ? <ul>{tip.tips.map((text) => <li key={text}>{text}</li>)}</ul> : <p className="muted">No local tips for this prompt.</p>}
         {errors[tip.id] && <p className="error-message">{errors[tip.id]}</p>}

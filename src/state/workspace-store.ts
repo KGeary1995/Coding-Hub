@@ -26,7 +26,37 @@ export function createSession(engine: ChannelEngine, binding: WorkspaceBinding =
   };
 }
 
-export function arrangeTiles(sessions: Session[], mode: LayoutMode): GridTile[] {
+/**
+ * Chat channels seated at another channel's Round Table (the lead's saved `roundTable.partner`). They run in the
+ * background with no tile, number or alert of their own: the lead's tile carries the table. Tables saved by 1.16
+ * name their partner the same way, so those partners are hidden on load too.
+ */
+export function seatedIds(sessions: Session[]) {
+  const ids = new Set<string>();
+  for (const session of sessions) if (session.roundTable && session.roundTable.partner !== session.id && sessions.some((item) => item.id === session.roundTable!.partner)) ids.add(session.roundTable.partner);
+  return ids;
+}
+/** The channels the person sees, in tile order: every session but seated partners (the same array when there are none). */
+export function channelsOf(sessions: Session[]) { const seated = seatedIds(sessions); return seated.size ? sessions.filter((session) => !seated.has(session.id)) : sessions; }
+/** The channel whose Round Table this session sits at, if it is a seated partner. */
+export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && session.roundTable?.partner === id) ?? null;
+/** A session's channel number as the person sees it (a Round Table's partner goes by its lead's), or 0 for none. */
+export const channelNumber = (sessions: Session[], id: string | null) => id ? channelsOf(sessions).findIndex((session) => session.id === (leadOf(sessions, id)?.id ?? id)) + 1 : 0;
+/** The hidden partner of a channel that leads a Round Table. */
+export const partnerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable ? sessions.find((session) => session.id === lead.roundTable!.partner && session.id !== id) ?? null : null; };
+/**
+ * Why no channel can be added: every session counts toward the eight, a hidden Round Table partner too (it is a running
+ * CLI), so the message says so when one is why the person sees fewer than eight tiles.
+ */
+export function channelsFullNote(sessions: Session[]) {
+  if (sessions.length < MAX_CHANNELS) return null;
+  return seatedIds(sessions).size
+    ? `This computer already runs ${MAX_CHANNELS} agents and terminals, the most Trace runs at once (a Round Table runs two agents in one channel). Close a channel first.`
+    : `This computer already has ${MAX_CHANNELS} channels. Close one there first.`;
+}
+
+export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
+  const sessions = channelsOf(all);
   // Columns wrap after four; the grid keeps two rows, so five to eight channels sit three or four across.
   const columns = mode === 'rows' ? 1 : mode === 'columns' ? Math.min(4, sessions.length) : sessions.length <= 2 ? sessions.length : Math.ceil(sessions.length / 2);
   const width = 12 / columns;
@@ -98,10 +128,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   persistenceError: null,
   logError: null,
   storageInfo: null,
-  hydrate: (workspace, storageInfo) => set({
-    ...(workspace ? { ...workspace, sessions: workspace.sessions.map((session) => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null })) } : {}),
-    storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null,
-  }),
+  hydrate: (workspace, storageInfo) => {
+    const sessions = workspace?.sessions.map((session): Session => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));
+    // A workspace from 1.16 gave a Round Table's partner its own tile: laid out again without it.
+    const seated = sessions ? seatedIds(sessions) : new Set<string>();
+    const tiles = workspace && sessions && workspace.tiles.some((tile) => seated.has(tile.sessionId)) ? arrangeTiles(sessions, workspace.layoutMode) : workspace?.tiles;
+    const focused = workspace?.focusedSessionId && seated.has(workspace.focusedSessionId) ? null : workspace?.focusedSessionId ?? null;
+    set({ ...(workspace && sessions && tiles ? { ...workspace, sessions, tiles, focusedSessionId: focused } : {}), storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null });
+  },
   rootDirectory: null,
   sessions: initialSessions,
   tiles: arrangeTiles(initialSessions, 'columns'),
@@ -152,12 +186,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),
   removeSession: (id) => set((state) => {
-    if (state.sessions.length <= 1 || state.sessions.some((session) => session.id === id && (session.status === 'running' || session.status === 'starting'))) return state;
-    const sessions = state.sessions.filter((session) => session.id !== id);
+    const live = (session: Session) => session.status === 'running' || session.status === 'starting';
+    if (channelsOf(state.sessions).length <= 1 && !leadOf(state.sessions, id) || state.sessions.some((session) => session.id === id && live(session))) return state;
+    // A lead takes its hidden partner along once that has stopped; a partner still running is kept, and shows as its own tile.
+    const partner = partnerOf(state.sessions, id); const gone = new Set([id, ...(partner && !live(partner) ? [partner.id] : [])]);
+    const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => session.roundTable && gone.has(session.roundTable.partner) ? { ...session, roundTable: undefined } : session);
     return {
       sessions,
       tiles: arrangeTiles(sessions, state.layoutMode),
-      focusedSessionId: state.focusedSessionId === id ? null : state.focusedSessionId,
+      focusedSessionId: state.focusedSessionId && gone.has(state.focusedSessionId) ? null : state.focusedSessionId,
     };
   }),
   updateConfig: (id, config) => set((state) => ({
