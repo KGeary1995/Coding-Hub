@@ -31,11 +31,14 @@ export class ClaudeStream implements ChatStream {
   private ownMode = 'default'; private readOnly = false;
   /** The model this chat runs, from its init message: whose context window counts. */
   private model = '';
-  /** Mode changes sent, with the level in effect before each, so Claude refusing one puts that level back. */
-  private modeRequests = new Map<string, PermissionLevel>();
+  /**
+   * Mode changes sent, with the level in effect before each and their order, so Claude refusing one puts that level
+   * back, but only if nothing was sent after it (a later change, already accepted or not, stands).
+   */
+  private modeRequests = new Map<string, { previous: PermissionLevel; seq: number }>(); private modeSeq = 0;
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private level: PermissionLevel = 'ask', private readonly launchLevel: PermissionLevel = level) {}
   private mode() { return this.level === 'ask' ? this.ownMode : CLAUDE_MODE[this.level]; }
-  private setMode(mode: string, previous: PermissionLevel = this.level) { const id = randomUUID(); this.modeRequests.set(id, previous); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
+  private setMode(mode: string, previous: PermissionLevel = this.level) { const id = randomUUID(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
 
   /** A Round Table reviewer's plan mode wins over the channel's permissions until it drives again. */
   setReadOnly(readOnly: boolean) {
@@ -90,11 +93,12 @@ export class ClaudeStream implements ChatStream {
     const type = message.type;
     if (type === 'control_response') {
       const response = message.response as { subtype?: string; request_id?: unknown; error?: unknown } | undefined; const id = text(response?.request_id);
-      const previous = this.modeRequests.get(id); if (previous === undefined) return; this.modeRequests.delete(id);
+      const sent = this.modeRequests.get(id); if (!sent) return; this.modeRequests.delete(id);
       if (response?.subtype !== 'error') return;
       this.emit({ type: 'notice', text: `Claude did not change its permissions: ${text(response.error) || 'it refused'}.` });
-      // Only a refused change of level (not a reviewer's plan mode) is undone, and only if no later change replaced it.
-      if (previous !== this.level && [...this.modeRequests.values()].length === 0) { this.level = previous; this.emit({ type: 'permissions', level: previous }); }
+      // Only a refused change of level (not a reviewer's plan mode) is undone, and only if it was the last one sent:
+      // a later change, whether its answer came already or not, is what the person chose since.
+      if (sent.seq === this.modeSeq && sent.previous !== this.level) { this.level = sent.previous; this.emit({ type: 'permissions', level: sent.previous }); }
       return;
     }
     // Started with the person's own settings (no mode flag): that mode is what Ask returns to.

@@ -38,7 +38,9 @@ export class CodexStream implements ChatStream {
    * returns to. A thread started at another level never saw them: Ask then means on-request in the workspace.
    */
   private own: { approvalPolicy: unknown; sandbox: unknown } = { approvalPolicy: 'on-request', sandbox: SANDBOX_POLICY.edits };
-  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) { this.level = options.permissions ?? 'ask'; }
+  /** The level Codex last accepted (at thread start, or with a turn): what a rejected change goes back to. */
+  private applied: PermissionLevel;
+  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) { this.level = options.permissions ?? 'ask'; this.applied = this.level; }
   /** Applies from the next turn: Codex takes its sandbox and approval policy with each turn. */
   setReadOnly(readOnly: boolean) { if (readOnly !== this.readOnly) { this.readOnly = readOnly; this.policyChanged = true; } }
   setPermissions(level: PermissionLevel) { if (level !== this.level) { this.level = level; this.policyChanged = true; } }
@@ -74,11 +76,19 @@ export class CodexStream implements ChatStream {
       this.turnId = null; this.interruptWanted = false;
       // The sandbox and approval policy carry over to later turns, so they are sent whenever they changed
       // (read-only for a Round Table reviewer, or the person's permission level).
-      const policy = this.policyChanged ? this.policy() : {}; this.policyChanged = false;
+      const sentLevel = this.policyChanged ? this.level : null; const policy = this.policyChanged ? this.policy() : {}; this.policyChanged = false;
       this.request('turn/start', { threadId: this.threadId, input, ...policy }, (response) => {
         const turn = record(record(response.result).turn);
-        if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not accept the message.' });
-        else if (text(turn.id)) this.started(text(turn.id));
+        if (response.error) {
+          if (sentLevel !== null) {
+            // The turn (and the policy with it) was refused: Codex is still on what it last accepted. The next turn sends
+            // the policy again, and a level changed for this turn goes back, unless the person chose another meanwhile.
+            this.policyChanged = true;
+            if (sentLevel !== this.applied && this.level === sentLevel) { this.level = this.applied; this.emit({ type: 'notice', text: `Codex did not take the new permissions: ${text(record(response.error).message) || 'it refused them'}.` }); this.emit({ type: 'permissions', level: this.applied }); }
+          }
+          this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not accept the message.' });
+        }
+        else { if (sentLevel !== null) this.applied = sentLevel; if (text(turn.id)) this.started(text(turn.id)); }
       });
     };
     if (this.failed) { this.emit({ type: 'done', isError: true, error: `${this.failed} Restart the channel to try again.` }); return; }

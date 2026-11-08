@@ -41,6 +41,19 @@ describe('Claude chat protocol', () => {
     // Asking for the level again sends it again (the stream is back at edits).
     stream.setPermissions('full'); expect(written).toHaveLength(2);
   });
+  it('does not let an older refused change undo a newer one, whichever answer comes first', () => {
+    for (const newerFirst of [true, false]) {
+      const events: ChatEvent[] = []; const written: Record<string, unknown>[] = [];
+      const stream = new ClaudeStream((line) => written.push(JSON.parse(line)), (event) => events.push(event), 'edits');
+      stream.setPermissions('full'); stream.setPermissions('ask');
+      const [older, newer] = written.map((line) => line.request_id);
+      const answer = (id: unknown, ok: boolean) => stream.push(JSON.stringify({ type: 'control_response', response: ok ? { subtype: 'success', request_id: id, response: {} } : { subtype: 'error', request_id: id, error: 'bypass_not_launched' } }) + '\n');
+      if (newerFirst) { answer(newer, true); answer(older, false); } else { answer(older, false); answer(newer, true); }
+      expect(events.filter((event) => event.type === 'permissions')).toEqual([]);
+      // Still at Ask: asking for Ask again sends nothing.
+      stream.setPermissions('ask'); expect(written).toHaveLength(2);
+    }
+  });
   it('reports the context window of the model the chat runs, not a subagent’s', () => {
     const events: ChatEvent[] = []; const stream = new ClaudeStream(() => {}, (event) => events.push(event));
     stream.push(JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-5-5', session_id: 's' }) + '\n');
