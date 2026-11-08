@@ -1,7 +1,7 @@
 import { channelNameNow } from '../state/channel-names';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
-import { useWorkspaceStore, type NavigationView } from '../state/workspace-store';
+import { channelsOf, useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
 import { refreshEngines, startSession, stopSession } from '../runtime/use-native-host';
 import { workbench } from '../runtime/workbench';
@@ -35,7 +35,9 @@ export function CommandMenu() {
   const field = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const { sessions, rootDirectory, setView, arrange } = useWorkspaceStore();
+  const { sessions: all, rootDirectory, setView, arrange } = useWorkspaceStore();
+  // Round Table partners start, stop and are answered with their lead's channel.
+  const sessions = useMemo(() => channelsOf(all), [all]);
   const usage = useHubStore((state) => state.usage);
   const { scope, text } = parseQuery(input, chosenScope);
   useEffect(() => {

@@ -2,7 +2,7 @@ import { useEffect, useState, type DragEvent } from 'react';
 import { ClipboardList, Send } from 'lucide-react';
 import type { Task, VerificationData } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
 import { loadTasks, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
 
@@ -21,9 +21,10 @@ export function TasksPanel() {
   const { tasks, watch, draftFor, error } = useTaskStore();
   const [form, setForm] = useState(EMPTY_FORM); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [note, setNote] = useState('');
   const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false });
-  const agents = sessions.filter((session) => session.config.engine !== 'shell');
+  // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
+  const agents = channelsOf(sessions).filter((session) => session.config.engine !== 'shell');
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
-  const channelLabel = (sessionId: string | null) => { const index = sessions.findIndex((session) => session.id === sessionId); return index >= 0 ? `CH${index + 1} · ${channelNameNow(sessions[index])}` : 'No channel'; };
+  const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   useEffect(() => { void loadTasks().then(() => refreshTaskWatch()); void workbench<VerificationData>({ action: 'verification-list' }).then(setChecks).catch(() => {}); }, []);
   // "Task" on a channel opens the form for it.
   useEffect(() => { if (!draftFor) return; setForm({ ...EMPTY_FORM, sessionId: draftFor, directory: folderOf(draftFor) }); setOpen(true); useTaskStore.setState({ draftFor: null }); }, [draftFor]);

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { channelNameNow } from '../../state/channel-names';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
-import { useWorkspaceStore } from '../../state/workspace-store';
+import { channelsOf, leadOf, partnerOf, useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../../state/hub-store';
 import { CHANNEL_STATES, channelAlerts, channelState, channelToday, todayTotals, usageFor } from '../../state/channel-state';
 import { focusTerminal } from '../../runtime/terminals';
@@ -15,6 +15,8 @@ export const compact = (value: number) => new Intl.NumberFormat('en', { notation
 /** Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–8 does). */
 export function jumpToChannel(id: string) {
   const state = useWorkspaceStore.getState();
+  // A Round Table's hidden partner is answered in its lead's tile.
+  id = leadOf(state.sessions, id)?.id ?? id;
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
   if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
   state.setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
@@ -72,13 +74,13 @@ export function StatusBar() {
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'no project';
   const jump = jumpToChannel;
   return <footer className="app-statusbar tr-statusbar">
-    {sessions.map((session, index) => {
+    {channelsOf(sessions).map((session, index) => {
       const record = usageFor(session, usage); const state = channelState(session, record); const meta = CHANNEL_STATES[state];
       const color = meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color;
       return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${channelNameNow(session)}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
         <i className="tr-engine-square" style={{ background: `var(--tr-ch-${session.config.engine})` }} aria-hidden="true" />CH{index + 1}
         <span style={{ color }}><span aria-hidden="true">{meta.glyph}</span> {meta.word.toLowerCase()}</span>
-        {(() => { const day = channelToday(session.id, usage); return day.tokens > 0 && <span className="tnum" title="New tokens in this channel today (input outside the cache, plus output), across restarts; cache reads not counted">{compact(day.tokens)} tok</span>; })()}
+        {(() => { const seat = partnerOf(sessions, session.id); const day = { tokens: channelToday(session.id, usage).tokens + (seat ? channelToday(seat.id, usage).tokens : 0) }; return day.tokens > 0 && <span className="tnum" title="New tokens in this channel today (input outside the cache, plus output), across restarts, with both agents of a Round Table; cache reads not counted">{compact(day.tokens)} tok</span>; })()}
       </button>;
     })}
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>

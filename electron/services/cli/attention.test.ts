@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { AttentionServer, OscNotifications, claudeAttentionSettings, cleanMessage, supportsHttpHooks, withLoopbackNoProxy } from './attention';
+import { AttentionServer, OscNotifications, claudeAttentionSettings, cleanMessage, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
 
 describe('OSC 9 notifications', () => {
   it('reads notifications ended by BEL or ST and ignores progress reports', () => {
@@ -48,6 +48,27 @@ describe('Claude attention endpoint', () => {
     const resolved = [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y/resolved', timeout: 5 }] }];
     expect(JSON.parse(claudeAttentionSettings('http://127.0.0.1:1/hook/x/y'))).toEqual({ hooks: { Notification: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y', timeout: 5 }] }], PostToolUse: resolved, Stop: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/hook/x/y/finished', timeout: 5 }] }] } });
   });
+  it('reports the conversation SessionStart names, only for a valid token and a well-formed id, with an empty reply', async () => {
+    const sessions: [string, string][] = []; const resolved: string[] = [];
+    const server = new AttentionServer(() => {}, (runId) => resolved.push(runId), (runId, id) => sessions.push([runId, id])); servers.push(server); await server.start();
+    const runId = randomUUID(); const url = server.register(runId)!; const id = randomUUID();
+    // The payload Claude Code 2.1.319 sent (other fields vary by source and are not relied on).
+    const reply = await post(url + '/session', { session_id: id.toUpperCase(), transcript_path: 'C:\\Users\\me\\.claude\\projects\\-p\\' + id + '.jsonl', cwd: 'C:\\p', hook_event_name: 'SessionStart', source: 'clear' });
+    expect(reply.status).toBe(204); expect(await reply.text()).toBe('');
+    expect((await post(url.replace(/[0-9a-f]{64}$/, '0'.repeat(64)) + '/session', { session_id: randomUUID() })).status).toBe(404);
+    for (const body of [{ session_id: '../../etc/passwd' }, { session_id: 42 }, { source: 'startup' }, 'not json', JSON.stringify({ session_id: randomUUID(), padding: 'x'.repeat(70 * 1024) })]) expect((await post(url + '/session', body)).status).toBe(204);
+    expect(sessions).toEqual([[runId, id]]); expect(resolved).toEqual([]);
+  });
+  it('adds a SessionStart command hook in exec form only when a curl is given', () => {
+    const url = 'http://127.0.0.1:1/hook/x/y';
+    expect(JSON.parse(claudeAttentionSettings(url)).hooks.SessionStart).toBeUndefined();
+    expect(JSON.parse(claudeAttentionSettings(url, 'C:\\Windows\\System32\\curl.exe')).hooks.SessionStart).toEqual([{ hooks: [{ type: 'command', command: 'C:\\Windows\\System32\\curl.exe', args: ['-s', '-m', '4', '-X', 'POST', '-H', 'Content-Type: application/json', '--data-binary', '@-', `${url}/session`], timeout: 5 }] }]);
+  });
+  it('uses the system curl by absolute path, or none', () => {
+    expect(systemCurl('win32', { SystemRoot: 'D:\\Win' }, (file) => file === 'D:\\Win\\System32\\curl.exe')).toBe('D:\\Win\\System32\\curl.exe');
+    expect(systemCurl('darwin', {}, (file) => file === '/usr/bin/curl')).toBe('/usr/bin/curl');
+    expect(systemCurl('linux', {}, () => false)).toBeNull();
+  });
   it('reports the end of a turn as finished', async () => {
     const resolved: [string, boolean][] = []; const server = new AttentionServer(() => {}, (runId, finished) => resolved.push([runId, finished])); servers.push(server); await server.start();
     const runId = randomUUID(); const url = server.register(runId)!;
@@ -67,6 +88,10 @@ describe('launch helpers', () => {
   it('enables Claude HTTP hooks only from 2.1.63', () => {
     expect(supportsHttpHooks('2.1.310 (Claude Code)')).toBe(true); expect(supportsHttpHooks('2.1.63')).toBe(true); expect(supportsHttpHooks('3.0.0')).toBe(true);
     expect(supportsHttpHooks('2.1.62')).toBe(false); expect(supportsHttpHooks('2.0.99')).toBe(false); expect(supportsHttpHooks(null)).toBe(false);
+  });
+  it('adds the SessionStart hook only from the Claude Code version it was checked on', () => {
+    expect(supportsSessionHook('2.1.319 (Claude Code)')).toBe(true); expect(supportsSessionHook('2.2.0')).toBe(true); expect(supportsSessionHook('3.0.0')).toBe(true);
+    expect(supportsSessionHook('2.1.318')).toBe(false); expect(supportsSessionHook('1.9.999')).toBe(false); expect(supportsSessionHook(null)).toBe(false);
   });
   it('adds loopback to NO_PROXY without dropping existing entries', () => {
     expect(withLoopbackNoProxy({ NO_PROXY: 'corp.example, localhost' })).toEqual({ NO_PROXY: 'corp.example,localhost,127.0.0.1', no_proxy: 'corp.example,localhost,127.0.0.1' });

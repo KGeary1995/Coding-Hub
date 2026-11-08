@@ -122,6 +122,16 @@ export class PtyManager {
     this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId, at: new Date().toISOString(), ...(finished ? { finished: true as const } : {}) });
   }
 
+  /**
+   * Tells the owning window a terminal run now writes to another conversation, so a restart resumes it and its history
+   * shows it. Chat channels learn their conversation from the CLI's own stream instead.
+   */
+  notifyConversation(runId: string, conversationId: string) {
+    const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
+    if (!run || run.finished || run.chat || run.session.engine !== 'claude') return;
+    this.send(run.owner, { type: 'conversation', sessionId: run.session.sessionId, runId, conversationId });
+  }
+
   /** Runs still going, for the phone remote. */
   running(): (RunningSession & { cols: number; rows: number; title?: string })[] { return [...this.runs.values()].filter((run) => !run.finished).map((run) => ({ ...run.session, cols: run.pty.cols, rows: run.pty.rows, ...(run.title ? { title: run.title } : {}) })); }
 

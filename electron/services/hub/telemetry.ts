@@ -32,6 +32,12 @@ function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: str
   const u = event.info.total_token_usage; if (!reported(u.input_tokens) || !reported(u.output_tokens)) return null; const last = event.info.last_token_usage; const limit = number(event.info.model_context_window);
   return { key: 'cumulative', model: fallbackModel, input: number(u.input_tokens), output: number(u.output_tokens), cached: number(u.cached_input_tokens), cacheWrite: number(u.cache_write_input_tokens), reasoning: typeof u.reasoning_output_tokens === 'number' ? number(u.reasoning_output_tokens) : null, context: limit > 0 && last ? { used: number(last.input_tokens) + number(last.output_tokens), limit } : null };
 }
+/** Sizes of a Claude conversation's subagent transcripts, `<conversation>/subagents/agent-*.jsonl`, by file name. */
+function subagentSizes(file: string) {
+  const sizes = new Map<string, number>(); const folder = path.join(path.dirname(file), path.basename(file, '.jsonl'), 'subagents');
+  try { for (const name of fs.readdirSync(folder)) if (/^agent-[\w-]+\.jsonl$/.test(name)) sizes.set(name, fs.statSync(path.join(folder, name)).size); } catch { /* No subagents. */ }
+  return sizes;
+}
 /** A model ID without case, surrounding spaces or a trailing release date (`claude-x-20261101` is `claude-x`). */
 const baseModel = (model: string) => model.trim().toLowerCase().replace(/-\d{8}$/, '');
 /**
@@ -60,25 +66,40 @@ interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHo
   /** Claude subagent transcripts read so far, by file name. */
   subagents?: Map<string, { offset: number; partial: Buffer }>; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
   /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
-  errors?: number; reported?: boolean }
+  errors?: number; reported?: boolean;
+  /** A conversation the run switched to whose transcript has not been found yet; the window is told once it is. */
+  following?: string }
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
   private baselines = new Map<string, { file: string; offset: number; usage: Snapshot | null; subagents?: Map<string, number> }>();
-  isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || Boolean(watch.file && path.basename(watch.file).includes(id)) || (engine === 'claude' ? watch.run.runId === id : watch.thread === id))); }
+  isConversationActive(engine: 'claude' | 'codex', id: string) { return [...this.watches.values()].some((watch) => !watch.stopped && watch.run.engine === engine && (watch.config.resumeId === id || Boolean(watch.file && path.basename(watch.file).includes(id)) || (engine === 'claude' ? !watch.config.resumeId && watch.run.runId === id : watch.thread === id))); }
   setResumeSource(runId: string, file: string, engine: 'claude' | 'codex', model: string) {
     const size = fs.statSync(file).size; let usage: Snapshot | null = null; let actualModel = model || 'CLI default';
     if (engine === 'codex') { const fd = fs.openSync(file, 'r'); try { const bytes = Buffer.alloc(Math.min(size, 262144)); fs.readSync(fd, bytes, 0, bytes.length, size - bytes.length); for (const line of bytes.toString().split('\n')) try { const event = JSON.parse(line); if (event.type === 'turn_context' && typeof event.payload?.model === 'string') actualModel = event.payload.model; usage = parseUsage(engine, event, actualModel) ?? usage; } catch {} } finally { fs.closeSync(fd); } }
     // A resumed Claude conversation's subagent transcripts were counted by the runs that wrote them; only what they gain now is this run's.
-    const subagents = new Map<string, number>(); const id = path.basename(file, '.jsonl');
-    if (engine === 'claude') try { const folder = path.join(path.dirname(file), id, 'subagents'); for (const name of fs.readdirSync(folder)) if (/^agent-[\w-]+\.jsonl$/.test(name)) subagents.set(name, fs.statSync(path.join(folder, name)).size); } catch { /* No subagents. */ }
-    this.baselines.set(runId, { file, offset: size, usage, subagents });
+    this.baselines.set(runId, { file, offset: size, usage, subagents: engine === 'claude' ? subagentSizes(file) : new Map() });
+  }
+  /**
+   * A Claude run moved to another conversation inside its terminal (`/clear`, `/resume`), so Claude Code writes there
+   * from now on. The old transcript is read to its end first. A transcript that already exists counts only what it gains
+   * from here (its earlier replies belong to the runs that wrote them); a new one counts from its start.
+   */
+  follow(runId: string, conversationId: string) {
+    const w = this.watches.get(runId); if (!w || w.stopped || w.run.engine !== 'claude') return;
+    if ((w.file ? path.basename(w.file, '.jsonl') : w.config.resumeId ?? w.run.runId) === conversationId) return;
+    this.poll(w);
+    w.config = { ...w.config, resumeId: conversationId }; w.file = null; w.offset = 0; w.partial = Buffer.alloc(0); w.subagents = undefined; w.following = conversationId;
+    try { const file = this.find(w); if (file) { const subagents = subagentSizes(file); w.file = file; w.offset = fs.statSync(file).size; if (subagents.size) w.subagents = new Map([...subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])); } } catch { /* Found by the next read. */ }
+    this.poll(w);
   }
   private assigned = new Set<string>(); private closed = false; private closing = false;
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
   onError: (run: AgentRunningSession, message: string) => void = () => {};
   /** Each new line of a run's own transcript (not a subagent's), for live coaching; never the lines before a resume. */
   onLine: (run: AgentRunningSession, config: CLIEngineConfig, raw: Json) => void = () => {};
+  /** A run's terminal switched conversation (see `follow`) and its transcript was found: resume and history go there now. */
+  onConversation: (run: AgentRunningSession, conversationId: string) => void = () => {};
   constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
     this.database.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE INDEX IF NOT EXISTS usage_event ON usage(event);');
@@ -135,6 +156,7 @@ export class TelemetryService {
     try {
       if (!w.file) { w.file = this.find(w); if (w.file) this.assigned.add(w.file); }
       if (!w.file) return;
+      if (w.following) { const id = w.following; w.following = undefined; try { this.onConversation(w.run, id); } catch { /* Telling the window never stops usage. */ } }
       const conversationId = path.basename(w.file).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
       if (conversationId) { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId); if (record) { const metadata = JSON.parse(String(record.value)); if (metadata.conversationId !== conversationId) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...metadata, conversationId }), w.run.runId); } }
 

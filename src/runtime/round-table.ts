@@ -1,37 +1,69 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ChatImage, RoundTableState } from '../../shared/chat';
-import { useWorkspaceStore } from '../state/workspace-store';
+import type { Session } from '../../shared/types';
+import { createSession, partnerOf, useWorkspaceStore } from '../state/workspace-store';
 import { useChatStore } from '../state/chat-store';
-import { startSession } from './use-native-host';
+import { settled, startSession, stopSession } from './use-native-host';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
 export const DEFAULT_ROUNDS = 2;
+/** The person sees one channel for a Round Table, but its partner is a second CLI process, so it counts toward the eight. */
+export const TABLE_FULL = `Close a channel first: a Round Table runs two agents in one channel, and Trace runs at most ${MAX_CHANNELS} agents and terminals at once.`;
 
 /** The Round Table a chat channel leads, if any. */
 export const tableOf = (sessionId: string): RoundTableState | null => useChatStore.getState().threads[sessionId]?.table ?? null;
 
+/** Leads whose partner is being added and started here, so restoreTables does not seat it a second time meanwhile. */
+const opening = new Set<string>();
+const live = (session: Session | null | undefined) => session?.status === 'running' || session?.status === 'starting';
+
 /**
- * Seats the other agent at a running chat channel's Round Table: a new chat channel of the other engine in the same
- * folder, started, then joined to this one. The channel it was opened from leads; its agent drives first.
+ * Seats the other agent at a running chat channel's Round Table: a chat of the other engine in the same folder, with no
+ * tile of its own (the lead saves it as its `roundTable.partner` at once, which hides it), started, then joined to this
+ * one. The channel it was opened from leads; its agent drives first. If it cannot be seated, it is stopped and removed.
  */
 export async function openRoundTable(leadId: string): Promise<string | null> {
   const workspace = useWorkspaceStore.getState(); const lead = workspace.sessions.find((session) => session.id === leadId);
   if (!lead || lead.config.engine === 'shell' || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
-  if (tableOf(leadId)) return null;
-  if (workspace.sessions.length >= MAX_CHANNELS) return `Close a channel first: a Round Table adds ${NAME[lead.config.engine === 'claude' ? 'codex' : 'claude']} as a channel, and eight is the most.`;
+  if (tableOf(leadId) || opening.has(leadId)) return null;
+  // A table saved earlier whose partner did not come back: replaced by a new one.
+  if (lead.roundTable) await retire(leadId);
+  if (useWorkspaceStore.getState().sessions.length >= MAX_CHANNELS) return TABLE_FULL;
   const engine = lead.config.engine === 'claude' ? 'codex' as const : 'claude' as const;
-  workspace.addSession(engine);
-  const partner = useWorkspaceStore.getState().sessions.at(-1);
-  if (!partner || partner.config.engine !== engine) return 'The channel could not be added.';
   // The same folder the leading chat runs in, whatever the workspace root is now.
-  useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === partner.id && session.config.engine !== 'shell' ? { ...session, binding: { mode: 'independent', cwd: lead.runningCwd! }, config: { ...session.config, chat: true } } : session) }));
-  await startSession(partner.id);
-  const started = useWorkspaceStore.getState().sessions.find((session) => session.id === partner.id);
-  if (!started || started.status !== 'running' || !started.runId) return started?.error ?? `${NAME[engine]} could not be started.`;
-  const result = await window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: started.id, runId: started.runId }, driver: lead.config.engine, rounds: DEFAULT_ROUNDS }).catch(() => null);
-  return result?.ok ? null : result?.error.message ?? 'The Round Table could not be opened.';
+  const partner = createSession(engine, { mode: 'independent', cwd: lead.runningCwd });
+  if (partner.config.engine !== 'shell') partner.config = { ...partner.config, chat: true };
+  useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, partner].map((session) => session.id === leadId ? { ...session, roundTable: { partner: partner.id, driver: lead.config.engine as 'claude' | 'codex', rounds: DEFAULT_ROUNDS } } : session) }));
+  opening.add(leadId);
+  try {
+    await startSession(partner.id);
+    const started = useWorkspaceStore.getState().sessions.find((session) => session.id === partner.id);
+    const now = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
+    if (!started || started.status !== 'running' || !started.runId) { const why = started?.error ?? `${NAME[engine]} could not be started.`; await retire(leadId); return why; }
+    if (!now?.runId || now.status !== 'running') { await retire(leadId); return 'This chat stopped before the Round Table opened.'; }
+    const result = await window.codingHub?.chat({ action: 'table-open', sessionId: leadId, runId: now.runId, partner: { sessionId: started.id, runId: started.runId }, driver: lead.config.engine, rounds: DEFAULT_ROUNDS }).catch(() => null);
+    if (result?.ok) return null;
+    await retire(leadId); return result?.error.message ?? 'The Round Table could not be opened.';
+  } finally { opening.delete(leadId); }
 }
+
+/**
+ * The lead forgets its table, and its hidden partner is stopped and removed. A partner that would not stop is kept,
+ * and as the table is forgotten it gets a tile of its own, so a running agent is never left out of sight.
+ */
+async function retire(leadId: string) {
+  if (retiring.has(leadId)) return; retiring.add(leadId);
+  try {
+    const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId);
+    if (partner && live(partner)) { await settled([partner.id], 'starting'); await stopSession(partner.id); await settled([partner.id]); }
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions
+      .filter((session) => session.id !== partner?.id || live(session))
+      .map((session) => session.id === leadId && session.roundTable ? { ...session, roundTable: undefined } : session) }));
+  } finally { retiring.delete(leadId); }
+}
+/** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */
+const retiring = new Set<string>();
 
 type TableRequest = { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 /** A request to the table a running chat channel leads; the error message, or null. */
@@ -51,10 +83,8 @@ export function rememberTable(leadId: string, table: RoundTableState) {
     return { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session) };
   });
 }
-/** Closing the table (the person's choice, not Trace quitting) forgets it, so it is not opened again. */
-export function forgetTable(leadId: string) {
-  useWorkspaceStore.setState((state) => state.sessions.some((session) => session.id === leadId && session.roundTable) ? { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: undefined } : session) } : {});
-}
+/** Closing the table (the person's choice, not Trace quitting) forgets it, so it is not opened again, and stops its partner. */
+export function forgetTable(leadId: string) { return retire(leadId); }
 /** Pairs of runs already seated again, so a table that fails to open is not tried over and over. */
 const reopened = new Set<string>();
 /**
@@ -65,7 +95,7 @@ const reopened = new Set<string>();
 export function restoreTables() {
   const { sessions } = useWorkspaceStore.getState();
   for (const lead of sessions) {
-    if (!lead.roundTable || lead.status !== 'running' || !lead.runId || tableOf(lead.id)) continue;
+    if (!lead.roundTable || lead.status !== 'running' || !lead.runId || tableOf(lead.id) || opening.has(lead.id)) continue;
     const partner = sessions.find((session) => session.id === lead.roundTable!.partner);
     if (!partner || partner.status !== 'running' || !partner.runId) continue;
     const pair = `${lead.runId}:${partner.runId}`; if (reopened.has(pair)) continue; reopened.add(pair);
@@ -74,12 +104,12 @@ export function restoreTables() {
 }
 
 /**
- * + Channel → Round Table: a Claude chat in the project, started, with Codex brought in beside it (openRoundTable).
- * Claude drives first; the person can swap. The error message, or null.
+ * + Channel → Round Table: a Claude chat in the project, started, with Codex seated at it in the background
+ * (openRoundTable), all in one tile. Claude drives first; the person can swap. The error message, or null.
  */
 export async function startRoundTable(): Promise<string | null> {
   const before = new Set(useWorkspaceStore.getState().sessions.map((session) => session.id));
-  if (before.size > MAX_CHANNELS - 2) return 'A Round Table adds two channels: close one first.';
+  if (before.size > MAX_CHANNELS - 2) return TABLE_FULL;
   useWorkspaceStore.getState().addChatSession('claude');
   const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!lead) return 'The Round Table could not be added.';

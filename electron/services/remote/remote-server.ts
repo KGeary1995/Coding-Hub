@@ -27,7 +27,8 @@ import { FROM_PHONE, remoteHistory, remoteMemory, remoteTasks, remoteUsage } fro
 /** A channel's live coaching as phones and linked computers see it: only while it has something to say. */
 const coached = (tip: import('../../../shared/coaching').LiveTip | null) => tip && (tip.tips.length || tip.review) ? { coaching: { id: tip.id, tips: tip.tips, review: tip.review } } : {};
 export interface RemoteHost {
-  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel }[];
+  /** `seatedAt`: a Round Table's partner, which has no channel of its own; the lead it sits with carries the table. */
+  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel; seatedAt?: string }[];
   running(): (RunningSession & { cols?: number; rows?: number; title?: string })[];
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
@@ -216,11 +217,17 @@ export class RemoteServer {
       // A newer alert replaces one still queued for the phone only for the same channel and kind (RFC 8030 topics, at
       // most 32 URL-safe characters), so a phone that was offline still hears about every channel.
       const topic = kind[0] + createHash('sha256').update(sessionId).digest('base64url').slice(0, 24);
-      const result = await this.sender(device.push!, { title, body, sessionId, tag: key }, { topic });
+      const result = await this.sender(device.push!, { title, body, sessionId: this.tileOf(sessionId), tag: key }, { topic });
       if (result === 'gone') this.setPush(device.id, undefined);
     }));
   }
-  private channelLabel(sessionId: string) { const channel = this.channels().find((item) => item.sessionId === sessionId); return channel ? `CH${channel.channel} · ${channel.title}` : 'A channel'; }
+  private channelLabel(sessionId: string) {
+    const seated = this.tileOf(sessionId) !== sessionId; const channel = this.channels().find((item) => item.sessionId === this.tileOf(sessionId));
+    const engine = seated ? this.host.sessions().find((session) => session.id === sessionId)?.engine : undefined;
+    return channel ? `CH${channel.channel} · ${channel.title}${engine ? ` (${engine === 'codex' ? 'Codex' : 'Claude'})` : ''}` : 'A channel';
+  }
+  /** The channel a session is shown as: a Round Table's partner goes by the lead it sits with. */
+  private tileOf(sessionId: string) { return this.host.sessions().find((session) => session.id === sessionId)?.seatedAt ?? sessionId; }
   /** A test alert to one phone, from Settings on the computer. */
   async testAlert(id: string) {
     const device = this.devices().find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
@@ -493,8 +500,12 @@ export class RemoteServer {
    */
   channels(kind: RemoteDeviceKind = 'phone'): RemoteChannel[] {
     const running = new Map(this.host.running().map((run) => [run.sessionId, run]));
-    const local = this.host.sessions().map((session, index): RemoteChannel => {
-      const run = running.get(session.id); const waiting = this.attention.get(session.id);
+    // A Round Table is one channel: its partner is left out, and an approval it waits for shows on the lead.
+    const sessions = this.host.sessions();
+    const local = sessions.filter((session) => !session.seatedAt).map((session, index): RemoteChannel => {
+      const run = running.get(session.id); const own = this.attention.get(session.id);
+      const seat = sessions.find((item) => item.seatedAt === session.id); const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
+      const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
       return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.account ? { account: session.account } : {}) };
     });

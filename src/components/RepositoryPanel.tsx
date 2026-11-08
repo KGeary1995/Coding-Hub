@@ -2,7 +2,7 @@ import { GitDeliveryPanel } from './GitDeliveryPanel';
 import { useEffect, useState } from 'react';
 import { Files, FolderOpen, GitCompareArrows, RefreshCw } from 'lucide-react';
 import type { RepositoryContext } from '../../shared/types';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { FileBrowser } from './FileBrowser';
 import { DiffViewer } from './DiffViewer';
 
@@ -17,7 +17,7 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
   const [connectionRevision, setConnectionRevision] = useState(0);
   const choices = [
     { id: 'workspace', name: 'Workspace root', directory: rootDirectory },
-    ...sessions.map((session, index) => ({ id: session.id, name: `Session ${index + 1} · ${session.title}`, directory: session.status === 'running' ? session.runningCwd : session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory })),
+    ...channelsOf(sessions).map((session, index) => ({ id: session.id, name: `Session ${index + 1} · ${session.title}`, directory: session.status === 'running' ? session.runningCwd : session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory })),
   ];
   const selected = choices.find((choice) => choice.id === selection) ?? choices[0];
   const directory = selected.directory;

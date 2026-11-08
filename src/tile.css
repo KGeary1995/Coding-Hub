@@ -252,6 +252,9 @@
 .remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
 .table-tokens { color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); text-transform: none; } .table-tokens b { font-weight: 500; }
 .seat-text-claude { color: var(--tr-ch-claude); } .seat-text-codex { color: var(--tr-ch-codex); }
+/* The hidden partner's state: it has no tile, so a request waiting on it shows here in the waiting colour. */
+.table-partner { color: var(--tr-fg-muted); font: 400 12px var(--tr-font-mono); text-transform: none; } .table-partner b { font-weight: 500; }
+.table-partner.waiting { color: var(--tr-st-waiting); }
 
 /* Flight Deck Lite tile anatomy (canvas direction 11): the channel number and engine in the engine's colour as text, an
    outlined account and action, and a footer with the segmented context gauge, tokens and the output trace. */

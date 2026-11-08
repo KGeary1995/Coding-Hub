@@ -85,6 +85,17 @@ describe('attention in the workspace store', () => {
     state.applyEvent({ type: 'exit', sessionId: id, runId: 'r1', exitCode: 0 });
     expect(useWorkspaceStore.getState().sessions[0].attention).toBeNull();
   });
+  it('saves the conversation a Claude terminal moved to, so a restart resumes it; never for another run or a chat', () => {
+    const state = useWorkspaceStore.getState(); const id = state.sessions[0].id; const moved = '11111111-2222-4333-8444-555555555555';
+    state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });
+    state.applyEvent({ type: 'conversation', sessionId: id, runId: 'other-run', conversationId: moved });
+    expect((useWorkspaceStore.getState().sessions[0].config as { resumeId?: string }).resumeId).toBeUndefined();
+    state.applyEvent({ type: 'conversation', sessionId: id, runId: 'r1', conversationId: moved });
+    expect(savedWorkspace().sessions[0].config).toMatchObject({ engine: 'claude', resumeId: moved });
+    useWorkspaceStore.setState((current) => ({ sessions: current.sessions.map((session, index) => index === 0 && session.config.engine === 'claude' ? { ...session, config: { ...session.config, chat: true, resumeId: 'chat-id' } } : session) }));
+    state.applyEvent({ type: 'conversation', sessionId: id, runId: 'r1', conversationId: moved });
+    expect(useWorkspaceStore.getState().sessions[0].config).toMatchObject({ resumeId: 'chat-id' });
+  });
   it('does not show a stopped channel as failed because of an input error from while it ran', () => {
     const state = useWorkspaceStore.getState(); const id = state.sessions[0].id;
     state.markStarting(id); state.applyEvent({ type: 'started', sessionId: id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' });

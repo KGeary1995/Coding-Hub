@@ -6,7 +6,7 @@ import { ArrowUpRight, Folder, FolderOpen, GripVertical, OctagonPause, AlertCirc
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { channelsOf, partnerOf, useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
@@ -18,7 +18,7 @@ import { workbench } from '../runtime/workbench';
 import type { ChannelTranscript } from '../../shared/remote';
 import { chatFailed, chatSent } from '../state/chat-store';
 import { PastedImages } from './PastedImages';
-import { startSession, stopSession } from '../runtime/use-native-host';
+import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, dollars } from '../state/hub-store';
 import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, channelToday, limitRatio, usageFor } from '../state/channel-state';
@@ -53,7 +53,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
   const alerts = budgetAlerts(session.budget, usage);
-  const { engines, rootDirectory, sessions, focusedSessionId, toggleFocus, removeSession, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore();
+  const { engines, rootDirectory, sessions, focusedSessionId, toggleFocus, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore();
   const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
   const engine = session.config.engine;
   const claude = engine === 'claude';
@@ -69,7 +69,9 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const channel = index + 1;
   const setupView = !cwd || /working directory|absolute.*directory/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
   const busy = session.status === 'running' || session.status === 'starting';
-  const state = channelState(session, usage); const meta = CHANNEL_STATES[state];
+  // A Round Table's hidden partner waiting on an approval holds this tile: its card is in this thread.
+  const partner = partnerOf(sessions, session.id);
+  const state = session.status === 'running' && partner?.status === 'running' && partner.attention ? 'waiting' as const : channelState(session, usage); const meta = CHANNEL_STATES[state];
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
   const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
@@ -83,7 +85,9 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
     try { return await stopSession(session.id); } finally { setStopping(false); }
   }
   async function close() {
-    if (session.status !== 'running' || await stop()) removeSession(session.id);
+    // A Round Table's hidden partner is stopped and closed with it.
+    setStopping(true);
+    try { await closeChannel(session.id); } finally { setStopping(false); }
   }
   const start = () => void startSession(session.id);
   const openLog = () => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); };
@@ -137,7 +141,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           {!shell && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
           <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
           <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
-          <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close session ${channel}`} disabled={sessions.length <= 1 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
+          <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close session ${channel}`} disabled={channelsOf(sessions).length <= 1 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>

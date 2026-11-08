@@ -52,7 +52,9 @@ export type SessionEvent =
   | ({ type: 'attention'; message: string; at: string } & RunReference)
   /** The person typed into the CLI from a paired phone; clears a waiting prompt raised before `at`. */
   /** `finished`: the agent's turn ended (Claude Code's Stop hook), not just a tool. */
-  | ({ type: 'answered'; at: string; finished?: true } & RunReference);
+  | ({ type: 'answered'; at: string; finished?: true } & RunReference)
+  /** A Claude terminal run moved to another conversation (`/clear`, `/resume` inside it): the channel resumes that one now. */
+  | ({ type: 'conversation'; conversationId: string } & RunReference);
 
 /** Launch known engines, never renderer-supplied executables or shell commands. */
 export interface CodingHubHost {

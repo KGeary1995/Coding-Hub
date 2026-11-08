@@ -36,7 +36,7 @@ import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } 
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
-import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, supportsHttpHooks, withLoopbackNoProxy } from './services/cli/attention';
+import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './services/cli/attention';
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { HostHealth } from './services/storage/host-health';
@@ -115,7 +115,8 @@ const modelCatalog = new ModelCatalog({ clientVersion: app.getVersion() });
 const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 // Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
-const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished));
+// SessionStart says which conversation a run is in: telemetry follows it there, then tells the window (see onConversation).
+const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished), (runId, conversationId) => hub?.telemetry?.follow(runId, conversationId));
 const manager = new PtyManager((owner, event) => {
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
@@ -148,7 +149,7 @@ const manager = new PtyManager((owner, event) => {
   // Let the agent say when it is waiting for the person. Older CLIs run without it.
   if (config.engine === 'claude' && info.supportsSettings && supportsHttpHooks(info.version)) {
     const url = attention.register(run.runId);
-    if (url) { launch.args.push('--settings', claudeAttentionSettings(url)); Object.assign(launch.env, withLoopbackNoProxy({ ...process.env, ...launch.env })); }
+    if (url) { launch.args.push('--settings', claudeAttentionSettings(url, supportsSessionHook(info.version) ? systemCurl() : null)); Object.assign(launch.env, withLoopbackNoProxy({ ...process.env, ...launch.env })); }
   }
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
@@ -169,7 +170,9 @@ const manager = new PtyManager((owner, event) => {
 /** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}),
+  // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) if (session.roundTable && session.roundTable.partner !== session.id && saved!.sessions.some((item) => item.id === session.roundTable!.partner)) seats.set(session.roundTable.partner, session.id);
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
 /** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
@@ -193,7 +196,12 @@ function desktopAlert(alert: DesktopAlert, always = false) {
   notice.show();
 }
 /** This computer's channel, by number and name as its tile shows it, for alerts. */
-function channelLabel(sessionId: string) { const channels = workspaceChannels(); const index = channels.findIndex((channel) => channel.id === sessionId); return index >= 0 ? `CH${index + 1} · ${channels[index].title}` : 'A channel'; }
+function channelLabel(sessionId: string) {
+  const all = workspaceChannels(); const seat = all.find((channel) => channel.id === sessionId && channel.seatedAt);
+  // A Round Table's partner is named after the channel it sits in, with its agent.
+  const channels = all.filter((channel) => !channel.seatedAt); const index = channels.findIndex((channel) => channel.id === (seat?.seatedAt ?? sessionId));
+  return index >= 0 ? `CH${index + 1} · ${channels[index].title}${seat ? ` (${seat.engine === 'codex' ? 'Codex' : 'Claude'})` : ''}` : 'A channel';
+}
 function sendToRenderer(channel: string, value: unknown, owner?: number): boolean {
   try {
     const id = owner ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
@@ -476,6 +484,7 @@ else app.whenReady().then(() => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
     hub.telemetry.onError = (_run, message) => { hostHealth?.record('telemetry-read-failed'); reportStorageError(message); };
+    hub.telemetry.onConversation = (run, conversationId) => manager.notifyConversation(run.runId, conversationId);
     // Once, two minutes after starting (it reads Claude Code's older transcripts): each older reply's day.
     const telemetry = hub.telemetry; setTimeout(() => { try { telemetry.backfillDays([process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), ...claudeProfiles.list().map((profile) => claudeProfiles.directory(profile.id))]); } catch { hostHealth?.record('usage-days-backfill-failed'); } }, 120000).unref();
   } catch { /* Live sessions remain available without optional storage integrations. */ }

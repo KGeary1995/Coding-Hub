@@ -61,6 +61,15 @@ describe('PTY lifecycle and IPC ownership', () => {
     await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_STORAGE' });
     expect(spawn).not.toHaveBeenCalled();
   });
+  it('tells the owner a Claude terminal run moved to another conversation, and nothing for Codex, unknown or ended runs', async () => {
+    const { manager, processes, events } = fixture();
+    const claude = await manager.start(7, { ...request('claude-one'), config: { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    const codex = await manager.start(7, request('codex-one')); const id = 'c4ea72c5-0000-4000-8000-000000000000';
+    manager.notifyConversation(claude.runId, id); manager.notifyConversation(codex.runId, id); manager.notifyConversation('missing', id);
+    expect(events.filter((event) => event.type === 'conversation')).toEqual([{ type: 'conversation', sessionId: 'claude-one', runId: claude.runId, conversationId: id }]);
+    processes[0].exit({ exitCode: 0 });
+    manager.notifyConversation(claude.runId, id); expect(events.filter((event) => event.type === 'conversation')).toHaveLength(1);
+  });
   it('retains a bounded ANSI-free failure diagnostic even when the CLI clears its alternate screen', async () => {
     const { manager, processes, events } = fixture(); const run = await manager.start(7, request());
     processes[0].data('\x1b[?1049hError: invalid model\x1b[?1049l'); processes[0].exit({ exitCode: 1 });
@@ -353,6 +362,7 @@ describe('Chat channels', () => {
     manager.chatRemote({ action: 'table-driver', ...lead, driver: 'codex' }); expect(table().envelope.event).toMatchObject({ table: { driver: 'codex' } });
     manager.chatRemote({ action: 'table-rounds', ...lead, rounds: 3 }); expect(table().envelope.event).toMatchObject({ table: { rounds: 3 } });
     manager.chatRemote({ action: 'table-stop', ...lead }); expect(table().envelope.event).toMatchObject({ table: { round: 3 } });
-    manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null });
+    // Closed by the person (here from a phone), so the window also stops the hidden partner.
+    manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null, closed: true });
   });
 });

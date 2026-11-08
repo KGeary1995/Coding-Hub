@@ -1,5 +1,10 @@
 ## What's new
 
+1.16.2 keeps Claude Code channels on the conversation you're actually in, and puts a Round Table in one tile (update every computer):
+
+- **Channels follow /clear and /resume.** When you start a new conversation (`/clear`) or switch to another (`/resume`) inside a Claude Code channel, Trace now follows it. **Conversation**, restarts and usage all use the conversation you're in. Before, they stayed on the one the channel first opened, so a restart could take you back days. Needs Claude Code 2.1.319 or later. Codex channels don't follow yet.
+- **A Round Table is one tile.** The second agent runs in the background instead of taking its own channel. The table bar shows its state, and **Show Codex** / **Show Claude** switches the tile to its side of the conversation. Its approval requests still appear in the tile. Closing the table stops it, and tables you already have become one tile when Trace starts. It still counts toward the eight channels, because it is a running agent.
+
 1.16.1 finishes the new look and makes the Round Table easy to find (update every computer and reload the phone app):
 
 - **Round Table from + Channel.** **+ Channel → Round Table** starts a Claude chat and seats Codex beside it, Claude driving first. Before, it was only reachable from the message box of a running chat channel. In the thread, each agent's messages carry its seat and whether it is driving or reviewing.

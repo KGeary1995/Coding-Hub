@@ -1,12 +1,11 @@
 import { useEffect } from 'react';
 import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
 import type { ChannelEngine } from '../../shared/types';
-import { MAX_CHANNELS } from '../../shared/schemas';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
-import { rememberTable, restoreTables } from './round-table';
+import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, partnerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
@@ -50,7 +49,9 @@ export function useNativeHost() {
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
     const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
-    const unsubscribeChat = host.onChatEvent((envelope) => { applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table); });
+    const unsubscribeChat = host.onChatEvent((envelope) => { applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
+      // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
+      if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
     const unsubscribeTables = useWorkspaceStore.subscribe(restoreTables);
     const stopTasks = startTaskAutomation();
@@ -131,9 +132,33 @@ export async function startSession(id: string) {
       focusTerminal(id);
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
+  // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
+  if (partner && lead?.status === 'running' && partner.status !== 'running' && partner.status !== 'starting') await startSession(partner.id);
 }
 
+/** Waits (up to `ms`) until none of these sessions is running, or only until they are past starting. */
+export async function settled(ids: (string | undefined)[], past: 'running' | 'starting' = 'running', ms = 5000) {
+  const busy = () => useWorkspaceStore.getState().sessions.some((session) => ids.includes(session.id) && (session.status === 'starting' || (past === 'running' && session.status === 'running')));
+  for (const end = Date.now() + ms; busy() && Date.now() < end;) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/** Stops a channel, and the hidden partner of a Round Table it leads with it (that has no Stop of its own). */
 export async function stopSession(id: string): Promise<boolean> {
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
+  const [own, seat] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true]);
+  return own && seat;
+}
+/** Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped. */
+export async function closeChannel(id: string): Promise<boolean> {
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
+  if (!(await stopSession(id))) return false;
+  // The exit events can arrive just after the stop requests return; a session still running is never removed.
+  await settled([id, partner?.id]);
+  useWorkspaceStore.getState().removeSession(id);
+  return !useWorkspaceStore.getState().sessions.some((session) => session.id === id);
+}
+async function stopRun(id: string): Promise<boolean> {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   if (!session?.runId || session.status !== 'running') return session?.status !== 'starting';
   if (!window.codingHub) return false;
@@ -154,7 +179,7 @@ export async function stopSession(id: string): Promise<boolean> {
  */
 export function remoteResume(request: RemoteResumeRequest): string | undefined {
   const state = useWorkspaceStore.getState();
-  if (state.sessions.length >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels. Close one there first.`;
+  const full = channelsFullNote(state.sessions); if (full) return full;
   const session = createSession(request.engine, { mode: 'independent', cwd: request.directory });
   session.config = request.engine === 'claude'
     ? { engine: 'claude', resumeId: request.id, ...(request.profileId ? { accountProfileId: request.profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
@@ -167,7 +192,7 @@ export function remoteResume(request: RemoteResumeRequest): string | undefined {
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
 export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
-  if (before >= MAX_CHANNELS) return `This computer already has ${MAX_CHANNELS} channels.`;
+  const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
   // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
   if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
   // In the folder another channel works in (a Round Table's partner), whatever the workspace root is now.
@@ -179,15 +204,16 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): s
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {
   const current = () => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const session = current(); if (!session) return 'That channel is no longer on this computer.';
-  if (control !== 'start' && session.status === 'running') {
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
+  if (control !== 'start' && (session.status === 'running' || partner?.status === 'running')) {
     if (!(await stopSession(id))) return current()?.error ?? 'The channel could not be stopped.';
-    // The exit event can arrive just after the stop request returns.
-    for (let i = 0; i < 50 && current()?.status === 'running'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    // The exit events (a Round Table's partner's too) can arrive just after the stop requests return.
+    await settled([id, partner?.id]);
   }
   if (control === 'stop') return undefined;
   if (control === 'close') {
     // The same rule as the X on its tile: a computer keeps at least one channel.
-    if (useWorkspaceStore.getState().sessions.length <= 1) return 'This is the only channel on this computer, so it was stopped but not closed.';
+    if (channelsOf(useWorkspaceStore.getState().sessions).length <= 1) return 'This is the only channel on this computer, so it was stopped but not closed.';
     useWorkspaceStore.getState().removeSession(id);
     return current() ? 'The channel could not be closed.' : undefined;
   }

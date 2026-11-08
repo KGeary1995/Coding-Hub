@@ -156,3 +156,14 @@ it('adds a Terminal channel that saves and restores like the agents', () => {
   useWorkspaceStore.getState().addSession('shell', shell.id);
   expect(useWorkspaceStore.getState().sessions.at(-1)?.config).toEqual({ engine: 'shell' });
 });
+
+it('closes a Round Table lead with its stopped partner, but never drops a partner still running', () => {
+  const [lead, partner] = useWorkspaceStore.getState().sessions; const shell = createSession('shell');
+  const seat = (status: 'exited' | 'running') => useWorkspaceStore.setState({ sessions: [{ ...lead, roundTable: { partner: partner.id, driver: 'claude', rounds: 2 } }, { ...partner, status }, shell] });
+  seat('exited'); useWorkspaceStore.getState().removeSession(lead.id);
+  expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([shell.id]);
+  // Still running: kept, with no lead to hide it, so it shows as its own tile again.
+  seat('running'); useWorkspaceStore.getState().removeSession(lead.id);
+  expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([partner.id, shell.id]);
+  expect(useWorkspaceStore.getState().tiles.map((tile) => tile.sessionId)).toEqual([partner.id, shell.id]);
+});
