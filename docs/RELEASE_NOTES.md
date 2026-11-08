@@ -1,5 +1,13 @@
 ## What's new
 
+1.16.1 finishes the new look and makes the Round Table easy to find (update every computer and reload the phone app):
+
+- **Round Table from + Channel.** **+ Channel → Round Table** starts a Claude chat and seats Codex beside it, Claude driving first. Before, it was only reachable from the message box of a running chat channel. In the thread, each agent's messages carry its seat and whether it is driving or reviewing.
+- **Flight Deck on every screen.** Page titles, section labels, buttons, Agent setup, Usage, Help, the start screen and the status bar now all follow the new design, not just the channels.
+- **Channels read like instruments.** The header shows the channel number with its agent; a footer shows the context gauge, today's tokens and output speed. The channel you're working in gets the corner brackets.
+- **New app icon.** Trace's icon on Windows, macOS and the phone is the new reticle.
+- **A shorter + Channel menu.** The descriptions under each choice are gone.
+
 1.16.0 brings a new look, the Round Table, and a much more capable phone app (update every computer and reload the phone app):
 
 - **A new look.** Trace has a new design, "Flight Deck": dark slate with a faint grid, Claude in amber and Codex in cyan, square frames, and the Chakra Petch typeface for the interface. Corner brackets mark the channel you are in and any channel that needs you, and only a channel waiting for you glows. Context shows as a segmented gauge. The phone app uses the same design.
