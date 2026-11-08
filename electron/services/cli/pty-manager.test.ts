@@ -362,6 +362,7 @@ describe('Chat channels', () => {
     manager.chatRemote({ action: 'table-driver', ...lead, driver: 'codex' }); expect(table().envelope.event).toMatchObject({ table: { driver: 'codex' } });
     manager.chatRemote({ action: 'table-rounds', ...lead, rounds: 3 }); expect(table().envelope.event).toMatchObject({ table: { rounds: 3 } });
     manager.chatRemote({ action: 'table-stop', ...lead }); expect(table().envelope.event).toMatchObject({ table: { round: 3 } });
-    manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null });
+    // Closed by the person (here from a phone), so the window also stops the hidden partner.
+    manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null, closed: true });
   });
 });
