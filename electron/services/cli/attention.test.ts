@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { AttentionServer, OscNotifications, claudeAttentionSettings, cleanMessage, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
+import path from 'node:path';
+import { AttentionServer, OscNotifications, claudeAttentionSettings, cleanMessage, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
 
 describe('OSC 9 notifications', () => {
   it('reads notifications ended by BEL or ST and ignores progress reports', () => {
@@ -34,6 +35,25 @@ describe('Claude attention endpoint', () => {
     expect((await post(url, { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' })).status).toBe(200);
     expect((await post(url, { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' })).status).toBe(200);
     expect(seen).toEqual([[runId, 'Claude needs your permission to use Bash']]);
+  });
+  it('takes the context window from a terminal’s status line and answers with nothing for it to show', async () => {
+    const windows: [string, number][] = [];
+    const server = new AttentionServer(() => {}, () => {}, () => {}, (runId, size) => windows.push([runId, size])); servers.push(server); await server.start();
+    const runId = randomUUID(); const url = server.register(runId)!;
+    const reply = await post(`${url}/status`, { model: { id: 'claude-haiku-5-5' }, context_window: { context_window_size: 1000000, used_percentage: 6 } });
+    expect(reply.status).toBe(204); expect(await reply.text()).toBe('');
+    await post(`${url}/status`, { context_window: { context_window_size: 'big' } }); await post(`${url}/status`, 'not json');
+    expect(windows).toEqual([[runId, 1000000]]);
+    const settings = JSON.parse(claudeAttentionSettings(url, 'C:\\Windows\\System32\\curl.exe', true));
+    expect(settings.statusLine).toEqual({ type: 'command', command: `"C:/Windows/System32/curl.exe" -s -m 2 -X POST --data-binary @- ${url}/status` });
+    expect(JSON.parse(claudeAttentionSettings(url, 'C:\\Windows\\System32\\curl.exe')).statusLine).toBeUndefined();
+  });
+  it('leaves the person’s own status line alone, and stays out when a settings file cannot be read', () => {
+    const files: Record<string, string> = {}; const read = (file: string) => { if (file in files) return files[file]; throw Object.assign(new Error('missing'), { code: 'ENOENT' }); };
+    expect(ownStatusLine('/home/.claude', '/p', read)).toBe(false);
+    files[path.join('/p', '.claude', 'settings.local.json')] = '{"statusLine":{"type":"command","command":"x"}}';
+    expect(ownStatusLine('/home/.claude', '/p', read)).toBe(true);
+    expect(ownStatusLine('/home/.claude', '/q', (file) => { if (file.endsWith(path.join('.claude', 'settings.json')) && file.startsWith(path.join('/home'))) return '{ broken'; return read(file); })).toBe(true);
   });
   it('rejects unknown runs, wrong tokens, other methods and oversized bodies', async () => {
     const { server, seen } = await setup(); const runId = randomUUID(); const url = server.register(runId)!;

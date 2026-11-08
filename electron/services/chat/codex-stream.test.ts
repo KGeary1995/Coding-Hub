@@ -3,13 +3,37 @@ import type { ChatEvent } from '../../../shared/chat';
 import { CodexStream } from './codex-stream';
 
 /** Codex's app server as seen in a probe of codex-cli 0.164: JSON-RPC lines, responses by id, server requests for approvals. */
-function codex(options = { cwd: '/p', model: '', reasoningEffort: null as string | null }) {
+function codex(options: import('./codex-stream').CodexThreadOptions = { cwd: '/p', model: '', reasoningEffort: null }) {
   const sent: Record<string, unknown>[] = []; const events: ChatEvent[] = [];
   const stream = new CodexStream((line) => sent.push(JSON.parse(line)), (event) => events.push(event), options);
   const reply = (id: number, result: unknown) => stream.push(JSON.stringify({ id, result }) + '\n');
   const notify = (method: string, params: unknown) => stream.push(JSON.stringify({ method, params }) + '\n');
   return { stream, sent, events, reply, notify };
 }
+
+describe('Codex chat permissions', () => {
+  it('starts a thread at the channel’s level and sends a changed level with the next turn only', () => {
+    const { stream, sent, reply } = codex({ cwd: '/p', model: '', reasoningEffort: null, permissions: 'full' });
+    stream.start(); reply(1, {});
+    expect(sent[2]).toMatchObject({ method: 'thread/start', params: { approvalPolicy: 'never', sandbox: 'danger-full-access' } });
+    reply(2, { thread: { id: 't' }, approvalPolicy: 'never', sandbox: { type: 'dangerFullAccess' } });
+    stream.send('one', []); expect((sent.at(-1)!.params as Record<string, unknown>).approvalPolicy).toBeUndefined();
+    stream.setPermissions('edits'); stream.send('two', []);
+    expect(sent.at(-1)).toMatchObject({ method: 'turn/start', params: { approvalPolicy: 'on-request', sandboxPolicy: { type: 'workspaceWrite' } } });
+    stream.send('three', []); expect((sent.at(-1)!.params as Record<string, unknown>).sandboxPolicy).toBeUndefined();
+  });
+  it('returns Ask to what Codex reported for the person’s settings, and keeps a reviewer read-only', () => {
+    const { stream, sent, reply } = codex();
+    stream.start(); reply(1, {});
+    expect(sent[2].params).not.toHaveProperty('approvalPolicy');
+    const own = { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false };
+    reply(2, { thread: { id: 't' }, approvalPolicy: 'untrusted', sandbox: own });
+    stream.setPermissions('full'); stream.setReadOnly(true); stream.send('review', []);
+    expect(sent.at(-1)).toMatchObject({ params: { approvalPolicy: 'never', sandboxPolicy: { type: 'readOnly' } } });
+    stream.setReadOnly(false); stream.setPermissions('ask'); stream.send('back', []);
+    expect(sent.at(-1)).toMatchObject({ params: { approvalPolicy: 'untrusted', sandboxPolicy: own } });
+  });
+});
 
 describe('Codex chat protocol', () => {
   it('answers every message with an error once the thread could not start, instead of leaving it waiting', () => {

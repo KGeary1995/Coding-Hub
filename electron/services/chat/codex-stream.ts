@@ -1,12 +1,17 @@
 import { TOOL_RESULT_LIMIT, type ChatEvent, type ChatImage } from '../../../shared/chat';
 import type { ChatStream } from './claude-stream';
+import type { PermissionLevel } from '../../../shared/types';
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 const shorten = (value: string) => value.length > TOOL_RESULT_LIMIT ? value.slice(0, TOOL_RESULT_LIMIT) + `\n… ${(value.length - TOOL_RESULT_LIMIT).toLocaleString('en-US')} more characters` : value;
 const record = (value: unknown) => (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
 
 /** How a Codex thread starts: the model and reasoning chosen for the channel, and a saved thread to resume. */
-export interface CodexThreadOptions { cwd: string; model: string; reasoningEffort: string | null; resumeId?: string }
+export interface CodexThreadOptions { cwd: string; model: string; reasoningEffort: string | null; resumeId?: string; permissions?: PermissionLevel }
+/** Codex's approval policy and sandbox per level (the app server's names); `ask` keeps what Codex started with. */
+const APPROVAL = { edits: 'on-request', full: 'never' } as const;
+const SANDBOX = { edits: 'workspace-write', full: 'danger-full-access' } as const;
+const SANDBOX_POLICY = { edits: { type: 'workspaceWrite' }, full: { type: 'dangerFullAccess' } } as const;
 
 /**
  * One chat run's conversation with Codex's app server (`codex app-server`, the protocol its IDE extension uses):
@@ -26,18 +31,32 @@ export class CodexStream implements ChatStream {
   private failed: string | null = null;
   /** Stop was pressed before Codex named the turn; it is interrupted as soon as it has an id. */
   private interruptWanted = false;
-  private readOnly = false; private sandboxChanged = false;
-  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) {}
-  /** Applies from the next turn: Codex takes its sandbox with each turn. Back to editing is Codex's own default, workspace-write. */
-  setReadOnly(readOnly: boolean) { if (readOnly !== this.readOnly) { this.readOnly = readOnly; this.sandboxChanged = true; } }
+  private readOnly = false; private policyChanged = false;
+  private level: PermissionLevel;
+  /**
+   * The approval policy and sandbox Codex reported for the person's own settings (a thread started at Ask), which Ask
+   * returns to. A thread started at another level never saw them: Ask then means on-request in the workspace.
+   */
+  private own: { approvalPolicy: unknown; sandbox: unknown } = { approvalPolicy: 'on-request', sandbox: SANDBOX_POLICY.edits };
+  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) { this.level = options.permissions ?? 'ask'; }
+  /** Applies from the next turn: Codex takes its sandbox and approval policy with each turn. */
+  setReadOnly(readOnly: boolean) { if (readOnly !== this.readOnly) { this.readOnly = readOnly; this.policyChanged = true; } }
+  setPermissions(level: PermissionLevel) { if (level !== this.level) { this.level = level; this.policyChanged = true; } }
+  private policy() {
+    const approvalPolicy = this.level === 'ask' ? this.own.approvalPolicy : APPROVAL[this.level];
+    const sandboxPolicy = this.readOnly ? { type: 'readOnly' } : this.level === 'ask' ? this.own.sandbox : SANDBOX_POLICY[this.level];
+    return { approvalPolicy, sandboxPolicy };
+  }
 
   start() {
     this.request('initialize', { clientInfo: { name: 'trace', title: 'Trace', version: '1' }, capabilities: null }, () => {
       this.line({ method: 'initialized' });
       const { cwd, model, reasoningEffort, resumeId } = this.options;
-      const settings = { cwd, ...(model ? { model } : {}), ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}) };
+      const level = this.level;
+      const settings = { cwd, ...(model ? { model } : {}), ...(reasoningEffort ? { config: { model_reasoning_effort: reasoningEffort } } : {}), ...(level !== 'ask' ? { approvalPolicy: APPROVAL[level], sandbox: SANDBOX[level] } : {}) };
       this.request(resumeId ? 'thread/resume' : 'thread/start', resumeId ? { threadId: resumeId, ...settings } : settings, (response) => {
         const result = record(response.result); const thread = record(result.thread);
+        if (level === 'ask' && result.approvalPolicy !== undefined && result.sandbox && typeof result.sandbox === 'object') this.own = { approvalPolicy: result.approvalPolicy, sandbox: result.sandbox };
         if (response.error || !text(thread.id)) {
           this.failed = text(record(response.error).message) || 'Codex could not start the conversation.'; this.emit({ type: 'done', isError: true, error: this.failed });
           // Anything already written fails too, so the window is not left "working" on it.
@@ -53,9 +72,10 @@ export class CodexStream implements ChatStream {
     const go = () => {
       const input = [...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` })), ...(message ? [{ type: 'text', text: message, text_elements: [] }] : [])];
       this.turnId = null; this.interruptWanted = false;
-      // The sandbox carries over to later turns, so it is sent whenever it was changed (read-only for a reviewer).
-      const sandbox = this.sandboxChanged ? { sandboxPolicy: this.readOnly ? { type: 'readOnly' } : { type: 'workspaceWrite' } } : {}; this.sandboxChanged = false;
-      this.request('turn/start', { threadId: this.threadId, input, ...sandbox }, (response) => {
+      // The sandbox and approval policy carry over to later turns, so they are sent whenever they changed
+      // (read-only for a Round Table reviewer, or the person's permission level).
+      const policy = this.policyChanged ? this.policy() : {}; this.policyChanged = false;
+      this.request('turn/start', { threadId: this.threadId, input, ...policy }, (response) => {
         const turn = record(record(response.result).turn);
         if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not accept the message.' });
         else if (text(turn.id)) this.started(text(turn.id));

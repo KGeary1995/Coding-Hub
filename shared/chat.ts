@@ -3,6 +3,7 @@
  * --output-format stream-json`) instead of its terminal screen, so Trace draws the conversation itself, with images.
  * These are the events the host turns Claude's messages into, and the requests the window sends back.
  */
+import type { PermissionLevel } from './types';
 export interface ChatImage { mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string }
 export type ChatBlock =
   | { type: 'text'; text: string }
@@ -27,6 +28,10 @@ export type ChatEvent =
   | { type: 'done'; isError: boolean; error: string | null }
   /** Something Claude reported that is worth a line in the thread (a refused tool, an API retry). */
   | { type: 'notice'; text: string }
+  /** The agent refused a permission change: the level still in effect, which the window shows again. */
+  | { type: 'permissions'; level: PermissionLevel }
+  /** The size of the context window Claude reported with a reply; the host keeps it with the run's usage (never sent on). */
+  | { type: 'context-window'; size: number }
   /** The person's message as the agent received it (the window shows it already; it is kept in the run's history). */
   | { type: 'user'; text: string; images: number; remote?: true }
   /** A resumed conversation's earlier messages and tool results, sent once as it starts. */
@@ -58,6 +63,8 @@ export type ChatRequest =
   | { action: 'send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
   | { action: 'answer'; sessionId: string; runId: string; requestId: string; allow: boolean; allowEdits?: boolean }
   | { action: 'interrupt'; sessionId: string; runId: string }
+  /** What the agent may do without asking, from now on (this computer's window only). */
+  | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
   | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }

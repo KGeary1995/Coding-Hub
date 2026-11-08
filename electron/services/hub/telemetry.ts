@@ -23,7 +23,8 @@ function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: str
     const u = raw.message.usage;
     if (!reported(u.input_tokens) || !reported(u.output_tokens)) return null;
     // The reply's whole prompt (new, cached and newly cached input) plus its output is what the next turn carries.
-    // Claude Code does not record its window size, so the limit stays 0 (unknown) and no percentage is derived.
+    // The transcript does not record the window size, so the limit stays 0 (unknown) here; runUsage adds the size the
+    // running Claude reported (setContextWindow), and without one no percentage is derived.
     const used = number(u.input_tokens) + number(u.cache_read_input_tokens) + number(u.cache_creation_input_tokens) + number(u.output_tokens);
     return { key: String(raw.message.id).slice(0, 200), model: String(raw.message.model ?? fallbackModel), input: number(u.input_tokens), output: number(u.output_tokens), cached: number(u.cache_read_input_tokens), cacheWrite: number(u.cache_creation_input_tokens), reasoning: typeof u.reasoning_tokens === 'number' ? number(u.reasoning_tokens) : null, context: used > 0 ? { used, limit: 0 } : null };
   }
@@ -94,6 +95,14 @@ export class TelemetryService {
     this.poll(w);
   }
   private assigned = new Set<string>(); private closed = false; private closing = false;
+  /** Context window sizes Claude reported for running runs (a chat's reply, a terminal's status line), by run. */
+  private windows = new Map<string, number>();
+  /** A run's context window as Claude reported it; its usage is published again so the bar fills at once. */
+  setContextWindow(runId: string, size: number) {
+    if (!Number.isInteger(size) || size < 1000 || size > 100_000_000 || this.windows.get(runId) === size || this.closed) return;
+    this.windows.set(runId, size);
+    const usage = this.runUsage(runId); if (usage) this.publish(usage);
+  }
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
   onError: (run: AgentRunningSession, message: string) => void = () => {};
   /** Each new line of a run's own transcript (not a subagent's), for live coaching; never the lines before a resume. */
@@ -217,6 +226,8 @@ export class TelemetryService {
       if (!snapshot.input && !snapshot.output && !snapshot.cached && !snapshot.cacheWrite && !snapshot.reasoning) continue;
       const event = { ...usage, ...snapshot }; const eventCost = usageCost(event, rates); if (eventCost === null) priced = false; else cost += eventCost;
       const day = days[snapshot.day ?? started] ??= { tokens: 0, cost: 0 }; day.tokens += newTokens(event); day.cost = eventCost === null || day.cost === null ? null : day.cost + eventCost; usage.model = snapshot.model; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += snapshot[key]; if (snapshot.reasoning !== null) usage.reasoning = (usage.reasoning ?? 0) + snapshot.reasoning; if (snapshot.context) usage.context = snapshot.context; }
+    // Claude's transcript has the tokens in context but not the window; a running Claude reports that elsewhere.
+    const window = this.windows.get(runId); if (usage.context && usage.context.limit === 0 && window) usage.context = { ...usage.context, limit: window };
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = rows.length; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }

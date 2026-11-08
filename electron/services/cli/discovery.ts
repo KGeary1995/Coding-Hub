@@ -33,7 +33,7 @@ export function adoptLoginShellPath(env: NodeJS.ProcessEnv = process.env, read: 
 }
 
 /** Variables Claude Code sets for the processes it starts, naming its own session, account and host app. */
-const AGENT_SESSION = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_.*|CLAUDE_CODE_(ENTRYPOINT|SESSION_ID|HOST_SESSION_ID|SESSION_ATTENDED|DESKTOP_APP_VERSION|TERMINAL_MCP_TOOLS|SDK_.*|OAUTH_.*|ACCOUNT_UUID|USER_EMAIL|EAGER_FLUSH|EMIT_STARTUP_TIMING|ENABLE_ASK_USER_QUESTION_TOOL|SIMPLE|DISABLE_CRON))$/;
+const AGENT_SESSION = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_.*|CLAUDE_CODE_(ENTRYPOINT|SESSION_ID|HOST_SESSION_ID|CHILD_SESSION|SESSION_ATTENDED|DESKTOP_APP_VERSION|TERMINAL_MCP_TOOLS|SDK_.*|OAUTH_.*|ACCOUNT_UUID|USER_EMAIL|EAGER_FLUSH|EMIT_STARTUP_TIMING|ENABLE_ASK_USER_QUESTION_TOOL|SIMPLE|DISABLE_CRON))$/;
 /**
  * Trace started from inside a Claude session (the desktop app or a terminal agent asked to open or update it) inherits
  * that session's variables. Passed on, they make every Claude Code channel act as part of that other session: it did
@@ -210,6 +210,8 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
     info.supportsAppendSystemPrompt = advertisesFlag(help, '--append-system-prompt');
     info.supportsMcpConfig = advertisesFlag(help, '--mcp-config');
     info.supportsSettings = advertisesFlag(help, '--settings');
+    info.supportsChrome = engine === 'claude' && advertisesFlag(help, '--chrome');
+    info.supportsPermissions =engine === 'claude' ? advertisesFlag(help, '--permission-mode') && advertisesFlag(help, '--allow-dangerously-skip-permissions') : advertisesFlag(help, '--ask-for-approval') && advertisesFlag(help, '--sandbox');
     info.authentication = await checkAuthentication(engine, executable, help, env);
     info.available = true;
     return { info, executable };

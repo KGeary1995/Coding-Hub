@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineInfo } from '../../../shared/ipc';
 import { startSessionSchema } from '../../../shared/schemas';
-import { buildLaunch } from './engine-adapter';
+import { buildLaunch, launchedLevel } from './engine-adapter';
 
 const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.296', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null });
 const claude = { engine: 'claude' as const, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } };
@@ -10,6 +10,26 @@ describe('engine-specific CLI launch policy', () => {
   it('inherits local defaults without adding authentication or permission overrides', () => {
     expect(buildLaunch(claude, info('claude'))).toEqual({ args: [], env: {} });
     expect(buildLaunch({ engine: 'codex', model: '', reasoningEffort: null }, info('codex'))).toEqual({ args: [], env: {} });
+  });
+  it('maps the channel’s permission level to each CLI’s flags, and refuses a level the CLI cannot take', () => {
+    const allowed = { supportsPermissions: true };
+    expect(buildLaunch({ ...claude, permissions: 'edits' }, { ...info('claude'), ...allowed }).args).toEqual(['--permission-mode', 'acceptEdits']);
+    expect(buildLaunch({ ...claude, permissions: 'full' }, { ...info('claude'), ...allowed }).args).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']);
+    // No setting is the default, Allow edits; a CLI without the flags keeps its own settings for it.
+    expect(buildLaunch(claude, { ...info('claude'), ...allowed }).args).toEqual(['--permission-mode', 'acceptEdits']);
+    expect(launchedLevel(claude, info('claude'))).toBe('ask'); expect(launchedLevel(claude, { ...info('claude'), ...allowed })).toBe('edits');
+    // A Claude chat may be switched to full access later, which Claude allows only with this flag (alone it changes nothing).
+    expect(buildLaunch({ ...claude, chat: true, permissions: 'ask' }, { ...info('claude'), ...allowed }).args).toEqual(['--allow-dangerously-skip-permissions']);
+    expect(buildLaunch({ ...claude, chat: true }, info('claude')).args).toEqual([]);
+    expect(buildLaunch({ engine: 'codex', model: '', reasoningEffort: null, permissions: 'edits' }, { ...info('codex'), ...allowed }).args).toEqual(['--ask-for-approval', 'on-request', '--sandbox', 'workspace-write']);
+    expect(buildLaunch({ engine: 'codex', model: '', reasoningEffort: null, permissions: 'full', resumeId: '6f9619ff-8b86-4011-b42d-00cf4fc964ff' }, { ...info('codex'), ...allowed, supportsResume: true }).args).toEqual(['resume', '6f9619ff-8b86-4011-b42d-00cf4fc964ff', '--ask-for-approval', 'never', '--sandbox', 'danger-full-access']);
+    expect(() => buildLaunch({ ...claude, permissions: 'full' }, info('claude'))).toThrow('permission flags');
+  });
+  it('turns on Claude in Chrome only when asked and only on a Claude Code that advertises --chrome', () => {
+    expect(buildLaunch({ ...claude, chrome: true }, { ...info('claude'), supportsChrome: true }).args).toEqual(['--chrome']);
+    expect(buildLaunch(claude, { ...info('claude'), supportsChrome: true }).args).toEqual([]);
+    expect(() => buildLaunch({ ...claude, chrome: true }, info('claude'))).toThrow('--chrome');
+    expect(startSessionSchema.safeParse({ sessionId: 's', cwd: '/p', cols: 80, rows: 24, config: { engine: 'codex', model: '', reasoningEffort: null, chrome: true } }).success).toBe(false);
   });
   it('passes Codex model and reasoning as separate arguments and disables the shared daemon when supported', () => {
     expect(buildLaunch({ engine: 'codex', model: 'gpt-5.3-codex', reasoningEffort: 'xhigh' }, { ...info('codex'), supportsNoDaemon: true }).args).toEqual(['--model', 'gpt-5.3-codex', '--config', 'model_reasoning_effort="xhigh"', '--no-daemon']);

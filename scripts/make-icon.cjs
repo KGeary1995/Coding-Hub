@@ -1,4 +1,5 @@
-// Trace's icon (Flight Deck Lite, docs/design/trace/DECISIONS.md): the reticle from the top bar, Codex cyan, with
+// Trace's icon (Flight Deck Lite, docs/design/trace/DECISIONS.md): the reticle from the top bar (Topbar.tsx and
+// phone/main.ts draw the same shapes at 26 units; change all three together), Codex cyan, with
 // Claude's amber at its centre, on dark slate with a faint grid. Renders it with Electron and writes:
 //   assets/icon.png (1024, macOS), assets/icon.ico (256…16, Windows; PNG entries),
 //   phone/public/icon-512.png, icon-192.png, apple-touch-icon.png (square and opaque: the phone masks them itself).
@@ -8,10 +9,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..'); const assets = path.join(root, 'assets'); const phone = path.join(root, 'phone', 'public');
-/** `simple`: for 16-32 px, thicker lines and no inner ring or grid, so it stays a clear target at that size. */
-/** `square`: no rounded corners (phone icons, which the phone masks to its own shape). */
+/**
+ * One mark at every size (1.16.3), the same as the top bar's and the phone's: one bold ring, the crosshair outside it
+ * and the amber centre. `simple`: for 16-32 px, no grid and smaller corners.
+ * `square`: no rounded corners (phone icons, which the phone masks to its own shape).
+ */
 function svg(size, simple, square = false) {
-  const stroke = simple ? 92 : 46;
+  const stroke = 92;
   const grid = simple ? '' : Array.from({ length: 15 }, (_, i) => `<path d="M${(i + 1) * 64} 0V1024M0 ${(i + 1) * 64}H1024"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024">
   <defs><clipPath id="r"><rect width="1024" height="1024" rx="${square ? 0 : simple ? 200 : 228}"/></clipPath></defs>
@@ -19,11 +23,10 @@ function svg(size, simple, square = false) {
     <rect width="1024" height="1024" fill="#0a0e12"/>
     <g stroke="#5fe1ff" stroke-opacity=".07" stroke-width="3">${grid}</g>
     <g fill="none" stroke="#5fe1ff" stroke-width="${stroke}" stroke-linecap="square">
-      <circle cx="512" cy="512" r="${simple ? 290 : 300}"/>
-      ${simple ? '' : `<circle cx="512" cy="512" r="150"/>`}
-      <path d="M512 ${simple ? 96 : 120}V${simple ? 300 : 330}M512 ${simple ? 724 : 694}V${simple ? 928 : 904}M${simple ? 96 : 120} 512H${simple ? 300 : 330}M${simple ? 724 : 694} 512H${simple ? 928 : 904}"/>
+      <circle cx="512" cy="512" r="290"/>
+      <path d="M512 96V300M512 724V928M96 512H300M724 512H928"/>
     </g>
-    <circle cx="512" cy="512" r="${simple ? 96 : 62}" fill="#ffb547"/>
+    <circle cx="512" cy="512" r="96" fill="#ffb547"/>
   </g>
 </svg>`;
 }

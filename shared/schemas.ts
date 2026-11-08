@@ -14,9 +14,14 @@ export function modelValue(value: string): string | null {
 }
 const model = z.string().max(MAX_MODEL_LENGTH).refine((value) => value === '' || MODEL_PATTERN.test(value), 'Use a model identifier, or leave blank for the CLI default.');
 const tokens = z.number().int().min(0).max(MAX_TOKEN_SETTING).nullable();
+export const permissionLevelSchema = z.enum(['ask', 'edits', 'full']);
+/** A channel with no permission setting: agents edit files without asking (the person's choice in 1.16.3). */
+export const DEFAULT_PERMISSIONS = 'edits' as const;
+export const permissionLevel = (config: { permissions?: 'ask' | 'edits' | 'full' }) => config.permissions ?? DEFAULT_PERMISSIONS;
+const permissions = permissionLevelSchema.optional();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
-  z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
-  z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
+  z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
+  z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
 /** Every channel type: the agents plus a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, z.object({ engine: z.literal('shell') }).strict()]);
@@ -48,7 +53,9 @@ export const savedWorkspaceSchema = z.object({
 }).strict().superRefine((workspace, context) => {
   const ids = new Set(workspace.sessions.map((session) => session.id));
   const tileIds = new Set(workspace.tiles.map((tile) => tile.sessionId));
-  if (ids.size !== workspace.sessions.length || tileIds.size !== workspace.tiles.length || ids.size !== tileIds.size || [...tileIds].some((id) => !ids.has(id))) context.addIssue({ code: 'custom', message: 'Each session must have exactly one grid tile.' });
+  /** A Round Table's partner runs inside its lead's tile, so it has none (1.16.0 and 1.16.1 saved one; hydrate drops it). */
+  const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable && session.roundTable.partner !== session.id && ids.has(session.roundTable.partner) ? [session.roundTable.partner] : []));
+  if (ids.size !== workspace.sessions.length || tileIds.size !== workspace.tiles.length || [...tileIds].some((id) => !ids.has(id)) || [...ids].some((id) => !seated.has(id) && !tileIds.has(id))) context.addIssue({ code: 'custom', message: 'Each channel must have exactly one grid tile.' });
   if (workspace.focusedSessionId && !ids.has(workspace.focusedSessionId)) context.addIssue({ code: 'custom', message: 'The focused session does not exist.' });
   for (const tile of workspace.tiles) if (tile.x + tile.w > 12 || tile.w < tile.minW || tile.h < tile.minH) context.addIssue({ code: 'custom', message: 'Invalid grid dimensions.' });
   workspace.tiles.forEach((tile, index) => {
@@ -69,6 +76,7 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
+  runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']) }).strict(),

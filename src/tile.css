@@ -173,6 +173,11 @@
 .chat-attachments li { position: relative; flex-shrink: 0; } .chat-attachments img { display: block; height: 56px; max-width: 110px; object-fit: cover; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); }
 .chat-attachments button { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
 .chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
+/* What the agent may do without asking; full access stands out, since nothing is asked then. */
+.chat-permissions { flex-shrink: 0; height: 38px; max-width: 120px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-muted); font: inherit; font-size: 12px; }
+.chat-permissions.edits { color: var(--tr-fg); }
+.chat-permissions.full { color: var(--tr-st-limit); border-color: var(--tr-st-limit); }
+@container (max-width: 420px) { .chat-permissions { max-width: 84px; } }
 .chat-input-row textarea { flex: 1; min-height: 38px; resize: none; padding: 9px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-strong); font: 400 14px/1.4 var(--tr-font-ui); }
 .chat-input-row textarea:focus { outline: none; border-color: var(--tr-ch-claude); }
 .chat-icon { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; padding: 0; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-muted); }

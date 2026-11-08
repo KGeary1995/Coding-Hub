@@ -50,7 +50,8 @@ export class AttentionServer {
   /** `onResolved` hears that the agent carried on (a tool finished or the turn ended), so a waiting prompt was answered. */
   /** `finished`: the turn ended (the Stop hook), so the agent is done with what it was asked. */
   /** `onSession` hears Claude Code's SessionStart: after `/clear` or `/resume` the run writes to that conversation instead. */
-  constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string, finished: boolean) => void = () => {}, private onSession: (runId: string, conversationId: string) => void = () => {}) {}
+  /** `onContextWindow` hears the window size from Trace's status line in a terminal run (see claudeAttentionSettings). */
+  constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string, finished: boolean) => void = () => {}, private onSession: (runId: string, conversationId: string) => void = () => {}, private onContextWindow: (runId: string, size: number) => void = () => {}) {}
 
   /** Starts listening on a random loopback port. Sessions started before it is ready run without attention hooks. */
   start() {
@@ -63,19 +64,21 @@ export class AttentionServer {
 
   private handle(request: http.IncomingMessage, response: http.ServerResponse) {
     const done = (status: number) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end('{}'); };
-    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})(\/resolved|\/finished|\/session)?$/.exec(request.url ?? '');
+    const match = /^\/hook\/([0-9a-f-]{36})\/([0-9a-f]{64})(\/resolved|\/finished|\/session|\/status)?$/.exec(request.url ?? '');
     const token = match && this.runs.get(match[1]);
     if (request.method !== 'POST' || !match || !token || !timingSafeEqual(token, Buffer.from(match[2], 'hex'))) { request.resume(); done(404); return; }
     // The path alone says the agent moved on; tool results can be large, so the body is never read.
-    if (match[3] && match[3] !== '/session') { request.resume(); done(200); this.onResolved(match[1], match[3] === '/finished'); return; }
+    if (match[3] && match[3] !== '/session' && match[3] !== '/status') { request.resume(); done(200); this.onResolved(match[1], match[3] === '/finished'); return; }
     let size = 0; const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= 64 * 1024) chunks.push(chunk); });
     request.on('end', () => {
       // SessionStart is a command hook (curl): an empty 204 keeps anything from being added to Claude's context.
-      if (match[3] === '/session') { response.writeHead(204); response.end(); } else done(200);
+      // The status line prints whatever comes back, so its answer is empty too (an empty status line).
+      if (match[3] === '/session' || match[3] === '/status') { response.writeHead(204); response.end(); } else done(200);
       if (size > 64 * 1024) return;
       try {
-        const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { notification_type?: unknown; message?: unknown; session_id?: unknown };
+        const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { notification_type?: unknown; message?: unknown; session_id?: unknown; context_window?: { context_window_size?: unknown } };
+        if (match[3] === '/status') { const window = input.context_window?.context_window_size; if (typeof window === 'number' && Number.isInteger(window) && window > 0) this.onContextWindow(match[1], window); return; }
         // Only `session_id` is relied on; `transcript_path` is not trusted as a path, the conversation is found by its id.
         if (match[3] === '/session') { if (typeof input.session_id === 'string' && UUID.test(input.session_id)) this.onSession(match[1], input.session_id.toLowerCase()); return; }
         if (typeof input.notification_type === 'string' && NEEDS_PERSON.has(input.notification_type)) this.onAttention(match[1], cleanMessage(typeof input.message === 'string' ? input.message : '') || 'Waiting for your approval');
@@ -100,11 +103,27 @@ export class AttentionServer {
  * is followed. Claude Code skips HTTP hooks on SessionStart, so it is a command hook in exec form (no shell, no quoting)
  * that posts the hook's input as is.
  */
-export function claudeAttentionSettings(url: string, curl: string | null = null) {
+export function claudeAttentionSettings(url: string, curl: string | null = null, statusLine = false) {
   const resolved = [{ hooks: [{ type: 'http', url: `${url}/resolved`, timeout: 5 }] }];
   const finished = [{ hooks: [{ type: 'http', url: `${url}/finished`, timeout: 5 }] }];
   const session = curl ? { SessionStart: [{ hooks: [{ type: 'command', command: curl, args: ['-s', '-m', '4', '-X', 'POST', '-H', 'Content-Type: application/json', '--data-binary', '@-', `${url}/session`], timeout: 5 }] }] } : {};
-  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: finished, ...session } });
+  // A terminal's status line receives the context window size; it posts that here and shows nothing (the answer is
+  // empty). Only when the person has no status line of their own, which this would replace (see ownStatusLine).
+  // A status line is one shell command; forward slashes and no quotes inside work in cmd and in Git Bash alike.
+  const status = statusLine && curl ? { statusLine: { type: 'command', command: `"${curl.replace(/\\/g, '/')}" -s -m 2 -X POST --data-binary @- ${url}/status` } } : {};
+  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: finished, ...session }, ...status });
+}
+
+/**
+ * Whether the person set a status line of their own (user or project settings), which Trace's must not replace. A
+ * file that cannot be read or parsed counts as having one, so Trace stays out of the way when unsure.
+ */
+export function ownStatusLine(claudeHome: string, cwd: string, read = (file: string) => fs.readFileSync(file, 'utf8')) {
+  for (const file of [path.join(claudeHome, 'settings.json'), path.join(claudeHome, 'settings.local.json'), path.join(cwd, '.claude', 'settings.json'), path.join(cwd, '.claude', 'settings.local.json')]) {
+    let text: string; try { text = read(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; return true; }
+    try { const settings = JSON.parse(text) as { statusLine?: unknown }; if (settings && typeof settings === 'object' && settings.statusLine) return true; } catch { return true; }
+  }
+  return false;
 }
 
 /** The system's own curl (an absolute path, so nothing earlier on PATH stands in for it), or null when there is none. */

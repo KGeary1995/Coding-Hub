@@ -48,7 +48,9 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const [conversation, setConversation] = useState(false);
   const [stopping, setStopping] = useState(false);
   const usage = useHubStore((s) => usageFor(session, s.usage));
-  const today = { tokens: useHubStore((s) => channelToday(session.id, s.usage).tokens) };
+  // A Round Table is one channel running two agents: its tokens are both agents', as in the status bar.
+  const seatId = useWorkspaceStore((s) => partnerOf(s.sessions, session.id)?.id ?? null);
+  const today = { tokens: useHubStore((s) => channelToday(session.id, s.usage).tokens + (seatId ? channelToday(seatId, s.usage).tokens : 0)) };
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
@@ -63,7 +65,7 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
   const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
+  const engineName = seatId ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
   const resumeId = session.config.engine === 'shell' ? undefined : session.config.resumeId;
   const model = session.config.engine === 'shell' ? '' : session.config.model;
   const channel = index + 1;
