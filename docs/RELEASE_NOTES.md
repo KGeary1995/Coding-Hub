@@ -1,5 +1,9 @@
 ## What's new
 
+1.16.4 gives Trace a new logo (update every computer and reload the phone app):
+
+- **New logo: the amber key.** The app icon, the logo in the top bar and the phone's logo are now an amber keycap with a bold T cut out of it, sitting on a darker amber edge. It replaces the cyan ring. The small icons in the Windows taskbar and title bar have their own drawing, with a heavier T, so the T stays clear at 16 and 32 pixels.
+
 1.16.3 fixes saving with a Round Table, lets agents work without asking for every edit, and fills the context gauge for Claude (update every computer and reload the phone app):
 
 - **Saving works with a Round Table.** With a Round Table open, Trace showed "Each session must have exactly one grid tile" and "Storage needs attention", and saved nothing: the second agent has no tile of its own, and the save still expected one. It now saves, and tables saved by 1.16.0 and 1.16.1 still load.
