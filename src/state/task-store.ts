@@ -21,7 +21,8 @@ export const useTaskStore = create<{ tasks: Task[]; watch: TaskWatch; draftFor: 
 
 export async function loadTasks() { try { useTaskStore.setState({ tasks: await workbench<Task[]>({ action: 'task-list' }), error: '' }); } catch (error) { useTaskStore.setState({ error: (error as Error).message }); } }
 export async function saveTask(task: Omit<Task, 'id' | 'createdAt'> & { id?: string }) {
-  const { sentAt: _sent, baseline: _baseline, designRef: _design, ...fields } = task as Task;
+  // Fields the host keeps itself are left out; task-save refuses them.
+  const { sentAt: _sent, baseline: _baseline, designRef: _design, createdAt: _created, outcome: _outcome, pullRequest: _pr, ...fields } = task as Task;
   const saved = await workbench<Task>({ action: 'task-save', ...fields }); await loadTasks(); return saved;
 }
 export async function removeTask(id: string) { await workbench({ action: 'task-remove', id }); await loadTasks(); }
