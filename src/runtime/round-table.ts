@@ -3,6 +3,8 @@ import type { ChatImage, RoundTableState } from '../../shared/chat';
 import type { Session } from '../../shared/types';
 import { createSession, partnerOf, useWorkspaceStore } from '../state/workspace-store';
 import { useChatStore } from '../state/chat-store';
+import { hubCall } from '../state/hub-store';
+import { itemTitle } from '../../shared/memory-items';
 import { settled, startSession, stopSession } from './use-native-host';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
@@ -53,9 +55,27 @@ export async function openRoundTable(leadId: string): Promise<string | null> {
  * The lead forgets its table, and its hidden partner is stopped and removed. A partner that would not stop is kept,
  * and as the table is forgotten it gets a tile of its own, so a running agent is never left out of sight.
  */
+/**
+ * Findings not yet verified outlive the table: each becomes an open item in the project's shared memory (the channel's
+ * chosen memory project, or its folder's), so later sessions see it until someone resolves it.
+ */
+export async function keepFindings(lead: Session): Promise<number> {
+  const open = (lead.roundTable?.findings ?? []).filter((finding) => finding.status !== 'verified');
+  const directory = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
+  if (!open.length || lead.config.engine === 'shell' || (!lead.config.memoryKey && !directory)) return 0;
+  const project = lead.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
+  for (const finding of open) {
+    const content = [`Round Table finding ${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}.`, 'Saved by Trace when the Round Table closed, because it was not verified.'].filter(Boolean).join('\n');
+    await hubCall({ action: 'memory-write', project, title: itemTitle(`Round Table ${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}`), content, author: 'human' });
+  }
+  return open.length;
+}
+
 async function retire(leadId: string) {
   if (retiring.has(leadId)) return; retiring.add(leadId);
   try {
+    const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
+    if (lead) await keepFindings(lead).catch(() => { /* The table still closes; its findings are lost only if memory cannot be written. */ });
     const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId);
     if (partner && live(partner)) { await settled([partner.id], 'starting'); await stopSession(partner.id); await settled([partner.id]); }
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions
@@ -78,7 +98,7 @@ export async function tableRequest(leadId: string, request: TableRequest): Promi
 /** The leading channel remembers its table (partner, driver, rounds) whenever the table changes. */
 export function rememberTable(leadId: string, table: RoundTableState) {
   // The review record and a waiting message are kept with it, so a restart loses neither.
-  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting ? { waiting: table.waiting } : {}) };
+  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting !== undefined ? { waiting: table.waiting } : {}), ...(table.waitingImages?.length ? { waitingImages: table.waitingImages } : {}) };
   useWorkspaceStore.setState((state) => {
     const lead = state.sessions.find((session) => session.id === leadId);
     if (!lead || (lead.roundTable && JSON.stringify(lead.roundTable) === JSON.stringify(saved))) return {};
@@ -101,7 +121,7 @@ export function restoreTables() {
     const partner = sessions.find((session) => session.id === lead.roundTable!.partner);
     if (!partner || partner.status !== 'running' || !partner.runId) continue;
     const pair = `${lead.runId}:${partner.runId}`; if (reopened.has(pair)) continue; reopened.add(pair);
-    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds, ...(lead.roundTable.findings?.length ? { findings: lead.roundTable.findings } : {}), ...(lead.roundTable.waiting ? { waiting: lead.roundTable.waiting } : {}) }).catch(() => {});
+    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds, ...(lead.roundTable.findings?.length ? { findings: lead.roundTable.findings } : {}), ...(lead.roundTable.waiting !== undefined ? { waiting: lead.roundTable.waiting } : {}), ...(lead.roundTable.waitingImages?.length ? { waitingImages: lead.roundTable.waitingImages } : {}) }).catch(() => {});
   }
 }
 

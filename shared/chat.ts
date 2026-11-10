@@ -61,6 +61,8 @@ export interface RoundTableState {
   findings?: import('./findings').Finding[];
   /** The text of a message waiting for the agents; after a restart it waits for the person to send or drop it. */
   waiting?: string; waitingKept?: boolean;
+  /** Its images, when small enough to keep through a restart; otherwise how many would be lost. */
+  waitingImages?: ChatImage[]; waitingImagesDropped?: number;
 }
 export const ROUND_TABLE_MAX_ROUNDS = 5;
 export type ChatRequest =
@@ -70,7 +72,7 @@ export type ChatRequest =
   /** What the agent may do without asking, from now on (this computer's window only). */
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
-  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string }
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[] }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }

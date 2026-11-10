@@ -19,10 +19,11 @@ export const permissionLevelSchema = z.enum(['ask', 'edits', 'full']);
 export const DEFAULT_PERMISSIONS = 'edits' as const;
 export const permissionLevel = (config: { permissions?: 'ask' | 'edits' | 'full' }) => config.permissions ?? DEFAULT_PERMISSIONS;
 const permissions = permissionLevelSchema.optional();
+const chatImage = z.object({ mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), data: z.string().min(1).max(14 * 1024 * 1024).regex(/^[A-Za-z0-9+/=]+$/) }).strict();
 /** A Round Table finding as saved with its table and passed back when the table opens again (shared/findings.ts). */
 export const findingSchema = z.object({ id: z.string().regex(/^F\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), evidence: z.string().max(500), text: z.string().min(1).max(500), status: z.enum(['open', 'fixed', 'declined', 'verified']), response: z.string().max(500), check: z.string().max(500), reviewedAt: z.string().max(64).nullable(), changedAt: z.string().max(64).nullable(), filesChanged: z.boolean().optional(), round: z.number().int().min(0).max(5), at: z.iso.datetime() }).strict();
 /** What a table keeps across restarts: its findings, and the text of a message that was waiting for the agents (images are not kept). */
-const tableRecord = { findings: z.array(findingSchema).max(50).optional(), waiting: z.string().max(200_000).optional() };
+const tableRecord = { findings: z.array(findingSchema).max(50).optional(), waiting: z.string().max(200_000).optional(), waitingImages: z.array(chatImage).max(10).refine((images) => images.reduce((sum, image) => sum + image.data.length, 0) <= 6_000_000, 'Too much image data to keep.').optional() };
 /** A shared memory project key, as memory folders are named (memory.ts projectSchema). */
 export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
 const memoryKey = memoryKeySchema.optional();
@@ -77,7 +78,6 @@ export const repositoryReferenceSchema = z.object({ repositoryId: z.string().uui
 export const repositoryPathSchema = repositoryReferenceSchema.extend({ path: directory }).strict();
 export const gitDiffSchema = repositoryPathSchema.extend({ path: directory.min(1), area: z.enum(['working', 'staged', 'untracked']) }).strict();
 
-const chatImage = z.object({ mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), data: z.string().min(1).max(14 * 1024 * 1024).regex(/^[A-Za-z0-9+/=]+$/) }).strict();
 /** Requests from the window to a chat run. Images are base64 (Claude's limit is about 5 MB each; 10 per message). */
 export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),

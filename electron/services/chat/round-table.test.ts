@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
-import { RoundTables, type TableHost } from './round-table';
+import { KEEP_IMAGES, RoundTables, type TableHost } from './round-table';
 
 const CLAUDE = '11111111-1111-4111-8111-111111111111'; const CODEX = '22222222-2222-4222-8222-222222222222';
 
@@ -170,21 +170,27 @@ describe('Round Table review record', () => {
 });
 
 describe('Round Table after a restart', () => {
-  it('opens again with its findings, and holds a kept message until the person sends or drops it', () => {
-    const { tables, sent, say, done, last } = setup();
-    const saved = { id: 'F1', severity: 'high' as const, evidence: 'a.ts:1', text: 'bug', status: 'fixed' as const, response: 'done', check: '', reviewedAt: 'aaaaaaaaaaaa', changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' };
-    tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: [saved], waiting: 'Also update the docs.' });
-    expect(last().table).toMatchObject({ findings: [saved], waiting: 'Also update the docs.', waitingKept: true }); expect(sent).toHaveLength(0);
-    // A new message from the person goes as usual; the kept one still waits.
-    tables.send(CLAUDE, 'First this.', []); say(CLAUDE, 'ok'); done(CLAUDE); say(CODEX, 'ok'); done(CODEX);
-    expect(sent.some((item) => item.text.includes('Also update the docs.'))).toBe(false);
-    // Stopped agents finish their turn; then the kept message goes to both.
-    tables.stop(CLAUDE); done(CLAUDE); done(CODEX); expect(sent.some((item) => item.text.includes('Also update the docs.'))).toBe(false); tables.waiting(CLAUDE, true);
-    expect(sent.slice(-2).map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(sent.at(-1)!.text).toContain('Also update the docs.'); expect(last().table!.waiting).toBeUndefined();
+  const image = { mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' };
+  it('publishes a message queued while the agents work, so a restart before they finish keeps its text and images', () => {
+    const before = setup(); before.tables.open(1, CLAUDE, CODEX, 'claude', 2); before.tables.send(CLAUDE, 'Start.', []);
+    before.tables.send(CLAUDE, 'Then check the docs.', [image]);
+    const saved = before.last().table!; expect(saved).toMatchObject({ waiting: 'Then check the docs.', waitingImages: [image] });
+    // Trace quits before either agent finishes; the window saved that state, and the table opens again from it.
+    const after = setup(); after.tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: saved.findings, waiting: saved.waiting, waitingImages: saved.waitingImages });
+    expect(after.last().table).toMatchObject({ waiting: 'Then check the docs.', waitingKept: true }); expect(after.sent).toHaveLength(0);
+    expect(() => after.tables.send(CLAUDE, 'Something new', [])).toThrow(/Send it or drop it first/);
+    after.tables.waiting(CLAUDE, true);
+    expect(after.sent.map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(after.sent[0].text).toContain('Then check the docs.');
+    expect(after.last().table!.waiting).toBeUndefined();
   });
-  it('drops a kept message when asked', () => {
+  it('keeps findings, and an image-only message, and says when images are too large to keep', () => {
     const { tables, sent, last } = setup();
-    tables.open(1, CLAUDE, CODEX, 'claude', 2, { waiting: 'Old ask' }); tables.waiting(CLAUDE, false);
-    expect(sent).toHaveLength(0); expect(last().table!.waiting).toBeUndefined();
+    const finding = { id: 'F1', severity: 'high' as const, evidence: 'a.ts:1', text: 'bug', status: 'fixed' as const, response: 'done', check: '', reviewedAt: 'aaaaaaaaaaaa', changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' };
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: [finding], waitingImages: [image] });
+    expect(last().table).toMatchObject({ findings: [finding], waiting: '', waitingImages: [image], waitingKept: true });
+    tables.stop(CLAUDE); expect(last().table!.waitingKept).toBe(true); tables.waiting(CLAUDE, false); expect(sent).toHaveLength(0); expect(last().table!.waiting).toBeUndefined();
+    const big = setup(); big.tables.open(1, CLAUDE, CODEX, 'claude', 2); big.tables.send(CLAUDE, 'Go.', []);
+    big.tables.send(CLAUDE, 'Look at these.', [{ mediaType: 'image/png', data: 'A'.repeat(KEEP_IMAGES + 4) }]);
+    expect(big.last().table).toMatchObject({ waiting: 'Look at these.', waitingImagesDropped: 1 }); expect(big.last().table!.waitingImages).toBeUndefined();
   });
 });

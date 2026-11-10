@@ -22,6 +22,8 @@ const RELAY_LIMIT = 12_000;
 const RECENT = 8;
 /** Images in one message (chatRequestSchema). */
 const MAX_IMAGES = 10;
+/** The most image data (base64 characters) a waiting message keeps through a restart; the saved workspace carries it. */
+export const KEEP_IMAGES = 6_000_000;
 /** Tools a reviewer never gets to use: file edits, and leaving Claude's plan mode. */
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
 /** An answer saying the agent agrees and has nothing to add. */
@@ -71,7 +73,12 @@ export class RoundTables {
     return { runId, sessionId: run.sessionId, engine: run.engine, busy: false, text: '', answer: null, briefed: false };
   }
   private state(table: Table): RoundTableState {
-    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...(table.kept ? { waitingKept: true } : {}) } : {}) };
+    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
+  }
+  /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64; beyond that they are counted as dropped. */
+  private keptImages(images: ChatImage[]) {
+    if (!images.length) return {};
+    return images.reduce((sum, image) => sum + image.data.length, 0) <= KEEP_IMAGES ? { waitingImages: images } : { waitingImagesDropped: images.length };
   }
   private publish(table: Table) { this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: this.state(table) } }); }
   private roles(table: Table) {
@@ -92,15 +99,16 @@ export class RoundTables {
     return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE. ${record}`;
   }
 
-  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number, saved: { findings?: Finding[]; waiting?: string } = {}): RoundTableState {
+  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number, saved: { findings?: Finding[]; waiting?: string; waitingImages?: ChatImage[] } = {}): RoundTableState {
     if (this.tableOf(leadRunId) || this.tableOf(partnerRunId)) throw new HubError('TABLE_TAKEN', 'One of these chats is already at a Round Table.');
     const lead = this.seat(leadRunId); const partner = this.seat(partnerRunId);
     const leadRun = this.host.run(leadRunId)!; const partnerRun = this.host.run(partnerRunId)!;
     if (lead.engine === partner.engine) throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     if (leadRun.cwd !== partnerRun.cwd) throw new HubError('TABLE_FOLDER', 'Both agents must work in the same folder.');
     if (leadRun.owner !== owner || partnerRun.owner !== owner) throw new HubError('TABLE_OWNER', 'Both chats must be open in this window.');
-    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: Boolean(saved.waiting) };
-    if (saved.waiting) table.queued = { text: saved.waiting, images: [] };
+    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: false };
+    if (saved.waiting !== undefined || saved.waitingImages?.length) table.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) };
+    table.kept = Boolean(table.queued);
     this.tables.set(leadRunId, table); this.roles(table);
     // A conversation already under way: the leading agent sums it up, and the newcomer gets that plus the latest messages.
     if (table.recent.length) {
@@ -119,10 +127,14 @@ export class RoundTables {
    */
   send(leadRunId: string, text: string, images: ChatImage[]) {
     const table = this.leading(leadRunId);
+    // A message kept from before a restart is the person's to send or drop; a new one is not mixed into it.
+    if (table.kept) throw new HubError('TABLE_KEPT', 'A message from before Trace restarted is waiting. Send it or drop it first (on the Round Table bar).');
     if (table.lead.busy || table.partner.busy || table.reviewing) {
       // Waiting messages go as one, and a message carries at most ten images: refused rather than dropped.
       if (table.queued && table.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${table.queued.images.length} images and a message carries at most ${MAX_IMAGES}. Send this one after the agents finish.`);
-      table.queued = table.queued ? { text: [table.queued.text, text].filter(Boolean).join('\n\n'), images: [...table.queued.images, ...images] } : { text, images }; return;
+      table.queued = table.queued ? { text: [table.queued.text, text].filter(Boolean).join('\n\n'), images: [...table.queued.images, ...images] } : { text, images };
+      // Published at once, so the window saves it: a restart before the agents finish keeps the message.
+      this.publish(table); return;
     }
     this.ask(table, text, images);
   }

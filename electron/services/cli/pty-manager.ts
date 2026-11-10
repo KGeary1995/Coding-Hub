@@ -322,7 +322,7 @@ export class PtyManager {
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
-      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting ? { waiting: request.waiting } : {}) });
+      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
     }
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');

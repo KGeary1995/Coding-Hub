@@ -14,7 +14,7 @@ const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, failed: 1, 't
 export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   // A Round Table message kept from before a restart waits for the person to send or drop it.
-  for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting, since: null, sessionId, taskId: null, action: 'answer' });
+  for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting !== undefined && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: (table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting) || `${table.waitingImages?.length ?? 0} images`, since: null, sessionId, taskId: null, action: 'answer' });
   const taskOf = (sessionId: string) => tasks.find((task) => task.sessionId === sessionId && (task.status === 'active' || task.status === 'review'));
   for (const alert of channelAlerts(sessions, records)) {
     const session = sessions.find((item) => item.id === alert.sessionId); const task = taskOf(alert.sessionId);
