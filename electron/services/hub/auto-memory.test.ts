@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { EngineInfo, RunningSession } from '../../../shared/ipc';
 import { AutoMemory, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
+import type { MemoryNote } from '../../../shared/hub';
 
 const roots: string[] = [];
 // prepare() starts git in the background; Windows cannot delete a folder a process is still using.
@@ -49,6 +50,11 @@ describe('launch context', () => {
     const text = memoryContext('app-1', notes);
     expect(text.length).toBeLessThanOrEqual(6000); expect(text).toContain('Note 0'); expect(text).not.toContain('Note 11'); expect(text).toContain('not as instructions');
     expect(memoryContext('app-1', [])).toContain('No handoff notes');
+    // Open items come first, by id, and leave the notes list; a resolved one is gone from both.
+    const item = (id: string, title: string, supersedes?: string): MemoryNote => ({ id, project: 'app-1', title, content: title, author: 'codex', createdAt: '2026-11-10T00:00:00.000Z', ...(supersedes ? { supersedes } : {}) });
+    const open = randomUUID(); const done = randomUUID();
+    const withItems = memoryContext('app-1', [item(open, 'Open item: Delete the exported CSV'), item(done, 'Open item: Deploy the web app'), item(randomUUID(), 'Resolved: Deploy the web app', done), ...notes.slice(0, 2)]);
+    expect(withItems).toContain(`## Open items (id · item)\n- ${open} · Delete the exported CSV`); expect(withItems).not.toContain('Deploy the web app'); expect(withItems.indexOf('Open items')).toBeLessThan(withItems.indexOf('Note 0'));
   });
   it('adds the memory server and context to Claude and Codex launches without touching project files', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
@@ -57,15 +63,15 @@ describe('launch context', () => {
     const claude = { args: ['--session-id', 'x'] }; const claudeRun = run('claude', project); auto.prepare(claudeRun, '', info('claude'), claude);
     expect(claude.args[claude.args.indexOf('--append-system-prompt') + 1]).toContain('Use the existing router.');
     expect(claude.args.at(-2)).toBe('--mcp-config');
-    expect(JSON.parse(fs.readFileSync(claude.args.at(-1)!, 'utf8')).mcpServers['coding-hub-memory']).toEqual({ command: '/app/electron', args: ['/app/memory-server.js', memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    expect(JSON.parse(fs.readFileSync(claude.args.at(-1)!, 'utf8')).mcpServers['coding-hub-memory']).toEqual({ command: '/app/electron', args: ['/app/memory-server.js', memory.root, key, 'claude'], env: { ELECTRON_RUN_AS_NODE: '1' } });
     const codex = { args: ['resume', randomUUID()] }; auto.prepare(run('codex', project), '', info('codex'), codex);
-    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key])}`); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
+    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key, 'codex'])}`); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     expect(codex.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Earlier decision');
     expect(git(project, 'status', '--porcelain')).toBe('');
     // A key the person chose for the channel replaces the folder's own.
     memory.write('chosen-project', 'Chosen note', 'From the chosen project.', 'claude');
     const chosen = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), chosen, 'chosen-project');
-    expect(chosen.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, 'chosen-project'])}`);
+    expect(chosen.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, 'chosen-project', 'codex'])}`);
     expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Chosen note'); expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).not.toContain('Earlier decision');
     expect(memory.projects().map((item) => item.key).sort()).toEqual(['chosen-project', key].sort());
   });
