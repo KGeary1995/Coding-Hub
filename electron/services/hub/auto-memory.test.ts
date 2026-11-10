@@ -54,6 +54,9 @@ describe('launch context', () => {
     const item = (id: string, title: string, supersedes?: string): MemoryNote => ({ id, project: 'app-1', title, content: title, author: 'codex', createdAt: '2026-11-10T00:00:00.000Z', ...(supersedes ? { supersedes } : {}) });
     const open = randomUUID(); const done = randomUUID();
     const withItems = memoryContext('app-1', [item(open, 'Open item: Delete the exported CSV'), item(done, 'Open item: Deploy the web app'), item(randomUUID(), 'Resolved: Deploy the web app', done), ...notes.slice(0, 2)]);
+    const decided = randomUUID(); const withDecision = memoryContext('app-1', [item(decided, 'Decision: Barrett only'), ...notes.slice(0, 2)]);
+    expect(withDecision.indexOf(`## Decisions (pinned until retired)\n- ${decided} · Barrett only`)).toBeGreaterThan(0); expect(withDecision.indexOf('Decisions')).toBeLessThan(withDecision.indexOf('Note 0'));
+    expect(memoryContext('app-1', [item(decided, 'Decision: Barrett only'), item(randomUUID(), 'Retired decision: Barrett only', decided)])).not.toContain('Barrett only');
     expect(withItems).toContain(`## Open items (id · item)\n- ${open} · Delete the exported CSV`); expect(withItems).not.toContain('Deploy the web app'); expect(withItems.indexOf('Open items')).toBeLessThan(withItems.indexOf('Note 0'));
   });
   it('adds the memory server and context to Claude and Codex launches without touching project files', () => {

@@ -16,7 +16,7 @@ const { spawn } = require('node:child_process');
     // Malformed JSON envelopes must not crash the standalone server.
     child.stdin.write('null\n[]\n42\n');
     const initialized = await call('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } }); assert.equal(initialized.result.protocolVersion, '2025-06-18');
-    const tools = await call('tools/list'); assert.deepEqual(tools.result.tools.map((t) => t.name), ['read_memory', 'write_handoff', 'list_open_items', 'resolve_open_item']); assert.deepEqual(tools.result.tools[1].inputSchema.required, engine ? ['title', 'content'] : ['title', 'content', 'author']);
+    const tools = await call('tools/list'); assert.deepEqual(tools.result.tools.map((t) => t.name), ['read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item']); assert.deepEqual(tools.result.tools[1].inputSchema.required, engine ? ['title', 'content'] : ['title', 'content', 'author']);
     const close = () => new Promise((resolve) => { child.once('exit', () => { children.delete(child); resolve(); }); child.stdin.end(); });
     return { call, close };
   }
@@ -45,7 +45,12 @@ const { spawn } = require('node:child_process');
     const badItems = await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Bad', content: 'x', open_items: [''] } }); assert.equal(badItems.result.isError, true);
     // Commits a handoff names go in a fixed trailer; anything that is not a hash is refused.
     const withCommits = JSON.parse((await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Pushed?', content: 'Made two commits.', commits: ['ABC1234', 'def5678'] } })).result.content[0].text); assert.equal(withCommits.content, 'Made two commits.\n\nCommits: abc1234, def5678');
+    // Decisions stay pinned until retired; retiring keeps both records.
+    const pinnedNote = JSON.parse((await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Decided', content: 'The person chose.', decisions: ['Predictions from Barrett only'] } })).result.content[0].text); assert.equal(pinnedNote.decisions.length, 1);
+    const pinned = JSON.parse((await started.call('tools/call', { name: 'list_decisions', arguments: {} })).result.content[0].text); assert.deepEqual(pinned.map((item) => item.text), ['Predictions from Barrett only']);
+    const retired = JSON.parse((await started.call('tools/call', { name: 'retire_decision', arguments: { id: pinned[0].id, reason: 'The person allowed SRK/T as a fallback.' } })).result.content[0].text); assert.equal(retired.supersedes, pinned[0].id); assert.equal(retired.title, 'Retired decision: Predictions from Barrett only');
+    assert.deepEqual(JSON.parse((await started.call('tools/call', { name: 'list_decisions', arguments: {} })).result.content[0].text), []);
     const badCommits = await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Bad', content: 'x', commits: ['not a hash'] } }); assert.equal(badCommits.result.isError, true); assert.match(badCommits.result.content[0].text, /commit hashes/); await started.close();
-    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search, default author, open items, and named commits.');
+    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search, default author, open items, pinned decisions, and named commits.');
   } finally { for (const child of children) child.kill(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });
