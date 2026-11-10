@@ -1,5 +1,20 @@
 ## What's new
 
+Not released yet: work you can trust is finished, checks that say what they tested, and memory that keeps track (update every computer):
+
+- **Tasks don't call silence or a crash finished.** A task whose channel stops, fails, or ends a chat turn with an error stays in **Working**, marked, with **Send again**. A Codex terminal that goes quiet gets a "may be finished" mark instead of moving to Ready for review; the mark goes when output resumes. Only a turn that ends normally, or you, move a task on.
+- **Checks say which files they tested.** A verification run records the files it ran on (by content) and whether they changed while it ran. Verification and task cards say whether a pass still holds, the files changed since, or Trace can't tell.
+- **Everything about a task in one place.** Each task card has **Everything about this task**: what was asked, channel, folder, branch and commit, changed files, the check, Round Table findings and the pull request opened from it. **Tasks** is in the top bar now.
+- **A task in its own worktree.** **New worktree…** on a To do task makes a branch and folder from the last commit, adds a Claude or Codex chat there and sends the task.
+- **Needs you.** A status bar cell lists everything waiting for you: approvals (with the request and how long it has waited), failed channels, and tasks that stopped, went quiet or are ready for review, each with its next step.
+- **Round Table findings.** The reviewer reports problems as findings (F1, F2, …); the driver answers each FIXED or DECLINED and the reviewer checks it VERIFIED or REOPENED. The table bar lists them with their evidence and the files they were reviewed on.
+- **Shared memory keeps track.**
+  - **Open items:** agents leave to-dos with their handoff and resolve them once checked; they come first at launch, and the Shared memory screen lists them with **Resolve**.
+  - Agents can search notes, revise one, and name the commits a handoff made: Trace says whether each is pushed, as of the last fetch.
+  - Codex chats and Round Table reviewers can use shared memory (Codex refused its tools there).
+  - A channel's settings choose its **Shared memory project**; a channel in your home folder gets a warning, since everything started there would share one set of notes.
+  - Notes written by later versions of Trace are kept rather than skipped.
+
 1.16.4 gives Trace a new logo (update every computer and reload the phone app):
 
 - **New logo: the amber key.** The app icon, the logo in the top bar and the phone's logo are now an amber keycap with a bold T cut out of it, sitting on a darker amber edge. It replaces the cyan ring. The small icons in the Windows taskbar and title bar have their own drawing, with a heavier T, so the T stays clear at 16 and 32 pixels.
