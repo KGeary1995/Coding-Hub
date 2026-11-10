@@ -184,6 +184,18 @@ describe('project-installed memory servers', () => {
     const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex); expect(codex.args.some((arg) => arg.includes('default_tools_approval_mode'))).toBe(false);
   });
 
+  it('approves memory tools only for an entry that runs this Trace, not any file named memory-server.js', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
+    const other = path.join(root, 'elsewhere', 'memory-server.js'); fs.mkdirSync(path.dirname(other)); fs.writeFileSync(other, '');
+    fs.mkdirSync(path.join(project, '.codex'));
+    const write = (command: string, script: string) => fs.writeFileSync(path.join(project, '.codex', 'config.toml'), `[mcp_servers.coding-hub-memory]\ncommand = ${JSON.stringify(command)}\nargs = ${JSON.stringify([script, memory.root, key])}\n`);
+    const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
+    const approved = () => { const launch = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), launch); return launch.args.includes('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"'); };
+    write(current.executable, other); expect(approved()).toBe(false);
+    write(process.execPath, current.server); expect(approved()).toBe(false);
+    write(current.executable, current.server); expect(approved()).toBe(true);
+  });
+
   it('warns when the entry uses another notes folder, even with the right key', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
     fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'coding-hub-memory': entry(current.executable, current.server, path.join(root, 'other-memory'), key) } }));

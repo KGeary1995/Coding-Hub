@@ -27,7 +27,7 @@ export async function saveTask(task: Omit<Task, 'id' | 'createdAt'> & { id?: str
 export async function removeTask(id: string) { await workbench({ action: 'task-remove', id }); await loadTasks(); }
 export async function setTaskStatus(id: string, status: Task['status'], outcome?: TaskOutcome) { await workbench({ action: 'task-status', id, status, ...(outcome ? { outcome } : {}) }); await loadTasks(); }
 /** What a task card says about how Trace moved or flagged it; nothing when the agent simply finished. */
-export const OUTCOME_TEXT: Record<TaskOutcome, string> = { finished: '', quiet: 'Moved here because the channel drew nothing for 45 seconds. The agent may not be finished.', stopped: 'The channel stopped before the agent finished. Send it again, or move it on by hand.', failed: 'The channel failed before the agent finished. Send it again, or move it on by hand.' };
+export const OUTCOME_TEXT: Record<TaskOutcome, string> = { finished: '', quiet: 'The channel has drawn nothing for 45 seconds. The agent may be finished, or waiting for you: look, then move it on by hand.', stopped: 'The channel stopped before the agent finished. Send it again, or move it on by hand.', failed: 'The channel failed before the agent finished. Send it again, or move it on by hand.' };
 export async function refreshTaskWatch() {
   if (!useTaskStore.getState().tasks.some((task) => task.sentAt && (task.status === 'active' || task.status === 'review'))) { useTaskStore.setState({ watch: { changed: {}, warnings: [] } }); return; }
   try { useTaskStore.setState({ watch: await workbench<TaskWatch>({ action: 'task-watch' }) }); } catch { /* Kept as it was. */ }
@@ -56,17 +56,22 @@ export async function sendTask(id: string) {
   await loadTasks(); void refreshTaskWatch();
 }
 
-/** The agent finished a turn in a channel (Claude Code's Stop hook, or a chat reply ending): its working task is ready. */
-export function taskTurnDone(sessionId: string) {
+/**
+ * The agent ended a turn in a channel (Claude Code's Stop hook, or a chat reply ending): its working task is ready, unless
+ * the turn ended in an error or was interrupted (failed), which leaves it in Working.
+ */
+export function taskTurnDone(sessionId: string, failed = false) {
   const task = useTaskStore.getState().tasks.find((item) => item.sessionId === sessionId && item.status === 'active' && item.sentAt);
   // A turn that ends within seconds of the send is the CLI taking the message, not the work.
-  if (task && Date.now() - Date.parse(task.sentAt!) > 5000) void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
+  if (!task || Date.now() - Date.parse(task.sentAt!) <= 5000) return;
+  if (failed) { if (task.outcome !== 'failed') void setTaskStatus(task.id, 'active', 'failed').catch(() => {}); }
+  else void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
 }
 /**
  * Moves working tasks along by themselves, and reads the open tasks' changes every 30 s. A channel that stops or fails
  * leaves its task in Working, marked, since the work was cut short rather than finished. A CLI that does not say when a
- * turn ends (Codex in a terminal) moves its task to Ready for review, marked as a guess, once the channel has drawn
- * nothing for 45 s a minute or more after the task was sent, unless it is waiting for an approval.
+ * turn ends (Codex in a terminal) only gets a mark on its task once the channel has drawn nothing for 45 s, a minute or
+ * more after the task was sent: silence is not completion, so the person moves it on. The mark goes when output resumes.
  */
 export function startTaskAutomation() {
   let ticks = 0;
@@ -78,7 +83,8 @@ export function startTaskAutomation() {
       if (!session || session.status === 'exited' || session.status === 'error' || session.status === 'idle') { const outcome = session?.status === 'error' ? 'failed' : 'stopped'; if (since > 5000 && task.outcome !== outcome) void setTaskStatus(task.id, 'active', outcome).catch(() => {}); continue; }
       if (session.attention) continue;
       const recent = samples[session.id]?.slice(-45) ?? [];
-      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) void setTaskStatus(task.id, 'review', 'quiet').catch(() => {});
+      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) { if (!task.outcome) void setTaskStatus(task.id, 'active', 'quiet').catch(() => {}); }
+      else if (task.outcome === 'quiet' && recent.some((value) => value > 0)) void setTaskStatus(task.id, 'active').catch(() => {});
     }
     // Every 30 s: the open tasks' changes, and the board itself, so a task moved from a phone shows here too.
     if (++ticks % 6 === 0) { void refreshTaskWatch(); void loadTasks(); }

@@ -53,7 +53,7 @@ export function useNativeHost() {
     const unsubscribeChat = host.onChatEvent((envelope) => {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
-      applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
+      applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
       // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).

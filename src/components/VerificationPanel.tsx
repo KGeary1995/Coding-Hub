@@ -3,7 +3,7 @@ import type { VerificationData, VerificationFreshness, VerificationResult, Verif
 import { workbench } from '../runtime/workbench';
 import { useWorkspaceStore } from '../state/workspace-store';
 /** After each result: whether it still describes the folder's files. */
-const FRESH_TEXT = { current: ' · On the current files', changed: ' · Files changed since', during: ' · Files changed while it ran', unknown: '' };
+const FRESH_TEXT = { current: ' · On the current files', changed: ' · Files changed since', during: ' · Files changed while it ran', unknown: ' · Cannot tell which files it tested' };
 export function VerificationPanel() {
   const root = useWorkspaceStore((s) => s.rootDirectory);
   const [directory, setDirectory] = useState(root ?? ''); const [name, setName] = useState('Project checks'); const [commands, setCommands] = useState('[{"label":"Tests","tool":"npm","args":["run","test"]},{"label":"Build","tool":"npm","args":["run","build"]}]'); const [timeout, setTimeout] = useState(60);

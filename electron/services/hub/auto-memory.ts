@@ -124,7 +124,7 @@ function codexInstructions(cwd: string, context: string): string {
 interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void> }
 export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void }
 /** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
-export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null }
+export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
 
 /** The folder whose `.mcp.json` and `.codex/config.toml` sessions there read: the repository's top folder, else the folder. */
 export function projectConfigRoot(directory: string) { return gitLocation(directory)?.root ?? path.resolve(directory); }
@@ -194,14 +194,16 @@ export class AutoMemory {
     if (!written(entry)) return { engine, file, key: null, root: null };
     const args = entry.args;
     const { executable, server } = this.options;
+    const same = (a: string, b: string) => { const norm = (p: string) => { const full = path.resolve(p); return process.platform === 'win32' ? full.toLowerCase() : full; }; return norm(a) === norm(b); };
+    let trace = same(entry.command, executable) && same(args[0], server);
     const stale = !fs.existsSync(entry.command) || !fs.existsSync(args[0]);
     if (stale && (entry.command !== executable || args[0] !== server) && fs.existsSync(executable) && fs.existsSync(server)) {
       try {
-        updateConfig(file, inspected.hash, (data) => { const target = data[slot][SERVER]; target.command = executable; target.args = [server, ...target.args.slice(1)]; });
+        updateConfig(file, inspected.hash, (data) => { const target = data[slot][SERVER]; target.command = executable; target.args = [server, ...target.args.slice(1)]; }); trace = true;
         this.notice(`repaired:${file}`, `Trace updated the memory server paths in ${file}, which pointed at a program that no longer exists. Restart CLIs started outside Trace to use it.`);
       } catch { this.notice(`repair-failed:${file}`, `The memory server in ${file} points at a program that no longer exists, and Trace could not update it. Fix or remove the coding-hub-memory entry.`); }
     }
-    return { engine, file, key: args[2], root: args[1] };
+    return { engine, file, key: args[2], root: args[1], trace };
   }
 
   /**
@@ -256,8 +258,8 @@ export class AutoMemory {
       if (!configured) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
       // Codex asks before every MCP tool call. A chat (and a Round Table reviewer) has no prompt for it, so Trace's own
       // notes tools were refused there ("user rejected MCP tool call"). They only read and write Trace's notes; an entry
-      // Trace did not install keeps Codex's own asking.
-      if (!configured || configured.key) extra.push('--config', `mcp_servers.${SERVER}.default_tools_approval_mode="approve"`);
+      // that runs any other program, even one named memory-server.js, keeps Codex's own asking.
+      if (!configured || configured.trace) extra.push('--config', `mcp_servers.${SERVER}.default_tools_approval_mode="approve"`);
     }
     if (!extra.length) return;
     launch.args.push(...extra);

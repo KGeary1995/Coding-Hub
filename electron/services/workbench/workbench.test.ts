@@ -11,6 +11,7 @@ import { NativeSessions } from './native-sessions';
 import { Tasks, scopesOverlap, matchesScope, taskPrompt } from './tasks';
 import { execFileSync } from 'node:child_process';
 import { Verification } from './verification';
+import { repositoryState } from './repository-state';
 import { Experiments } from './experiments';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
@@ -140,7 +141,18 @@ describe('verification and experiment evidence', () => {
     const writes = await service.execute({ action: 'verification-save', name: 'Writes', directory: project, steps: [{ label: 'Edit', tool: 'python', args: ['-c', 'open("a.txt","w").write("edited by the check")'] }], timeoutSeconds: 10 }) as any;
     const during = await service.execute({ action: 'verification-run', id: writes.id }) as any; expect(during.tested.changedDuring).toBe(true);
     expect((await service.execute({ action: 'verification-fresh' }) as any)[during.id]).toBe('changed');
+    // An edit of the same size with its time put back is still seen: the content is read, not just size and time.
+    const again = await service.execute({ action: 'verification-run', id: quiet.id }) as any; expect((await service.execute({ action: 'verification-fresh' }) as any)[again.id]).toBe('current');
+    const file = path.join(project, 'a.txt'); const { atime, mtime } = fs.statSync(file); const text = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, text.replace('e', 'E')); fs.utimesSync(file, atime, mtime); expect(fs.statSync(file).size).toBe(Buffer.byteLength(text));
+    expect((await service.execute({ action: 'verification-fresh' }) as any)[again.id]).toBe('changed');
   });
+  it('cannot tell, rather than says current, when there are more changed files than it reads', async () => {
+    const project = fixture(); execFileSync('git', ['init'], { cwd: project });
+    for (let i = 0; i <= 5000; i++) fs.writeFileSync(path.join(project, `f${i}.txt`), String(i));
+    expect(await repositoryState(project)).toBeNull();
+    fs.rmSync(path.join(project, 'f5000.txt')); expect(await repositoryState(project)).toMatch(/^[0-9a-f]{64}$/);
+  }, 60000);
   it('requires real run references and prevents counting one run twice in an experiment', () => {
     const root = fixture(); const id = randomUUID(); const service = new Experiments(root, (run) => run === id);
     const experiment = service.execute({ action: 'experiment-save', name: 'Scope', hypothesis: 'Explicit scope reduces rework', criterion: 'Tests pass with no fixes', promptA: 'Fix it', promptB: 'Fix this function and verify tests' }) as any;

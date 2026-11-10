@@ -69,7 +69,7 @@ export function TasksPanel() {
           {task.details && <p>{task.details}</p>}
           {changed.length > 0 && <details><summary>{changed.length} {changed.length === 1 ? 'file' : 'files'} changed</summary><ul>{changed.map((file) => <li key={file}><code>{file}</code></li>)}</ul></details>}
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
-          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' ? 'muted' : 'error-message'}>{OUTCOME_TEXT[task.outcome]}</p>}
+          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}</p>}
           {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
           {task.notes && <small>{task.notes}</small>}
           <div className="task-actions">
