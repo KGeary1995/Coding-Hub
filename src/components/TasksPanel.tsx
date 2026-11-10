@@ -3,6 +3,7 @@ import { ClipboardList, Send } from 'lucide-react';
 import type { Task, TaskDetail, VerificationData, VerificationFreshness } from '../../shared/workbench';
 import { useChatStore } from '../state/chat-store';
 import { startTaskInWorktree } from '../runtime/task-worktree';
+import { findingsForTask } from '../state/task-evidence';
 import type { Finding } from '../../shared/findings';
 import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
@@ -27,7 +28,8 @@ const limitedTo = (task: Task) => task.scope.some((pattern) => pattern === '**' 
 const NO_FINDINGS: Finding[] = [];
 function TaskEverything({ task, channel, changed, check }: { task: Task; channel: string; changed: string[]; check: string }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null); const [open, setOpen] = useState(false);
-  const findings = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.findings ?? NO_FINDINGS : NO_FINDINGS);
+  const channelFindings = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.findings ?? NO_FINDINGS : NO_FINDINGS);
+  const tasks = useTaskStore((state) => state.tasks); const findings = findingsForTask(task, tasks, channelFindings);
   useEffect(() => { if (open) void workbench<TaskDetail>({ action: 'task-detail', id: task.id }).then(setDetail).catch(() => setDetail(null)); }, [open, task.id, changed.length]);
   const waiting = findings.filter((finding) => finding.status !== 'verified');
   return <details className="task-everything" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}><summary>Everything about this task</summary>
@@ -36,8 +38,8 @@ function TaskEverything({ task, channel, changed, check }: { task: Task; channel
       <dt>Where</dt><dd>{channel} · <code>{task.directory}</code>{detail?.branch ? <> · branch <code>{detail.branch}</code></> : null}{detail?.head ? <> · commit <code>{detail.head}</code></> : null}</dd>
       <dt>Changed</dt><dd>{changed.length ? changed.map((file) => <code key={file}>{file} </code>) : task.sentAt ? 'Nothing since it was sent.' : 'Not sent yet.'}</dd>
       <dt>Check</dt><dd>{check || 'No check attached. Attach a passing one under Edit → Review notes and checks.'}</dd>
-      <dt>Review</dt><dd>{findings.length ? `${findings.length} Round Table ${findings.length === 1 ? 'finding' : 'findings'} on this channel, ${waiting.length} not verified${waiting.length ? `: ${waiting.map((finding) => `${finding.id} ${finding.status}`).join(', ')}` : ''}.` : 'No Round Table findings on this channel.'}</dd>
-      <dt>Pull request</dt><dd>{task.pullRequest ? <button className="quiet-button" onClick={() => void workbench({ action: 'flow-open-pr', url: task.pullRequest! })}>{task.pullRequest.replace('https://github.com/', '')}</button> : 'None opened from Changes while this task was open.'}</dd>
+      <dt>Review</dt><dd>{findings.length ? `${findings.length} Round Table ${findings.length === 1 ? 'finding' : 'findings'} since it was sent, ${waiting.length} not verified${waiting.length ? `: ${waiting.map((finding) => `${finding.id} ${finding.status}`).join(', ')}` : ''}.` : 'No Round Table findings since it was sent.'}</dd>
+      <dt>Pull request</dt><dd>{task.pullRequest ? <button className="quiet-button" onClick={() => void workbench({ action: 'flow-open-pr', url: task.pullRequest! })}>{task.pullRequest.replace('https://github.com/', '')}</button> : 'None. Choose this task when you open a pull request in Changes → Delivery.'}</dd>
     </dl>
   </details>;
 }

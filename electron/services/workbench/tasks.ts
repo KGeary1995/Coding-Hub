@@ -16,7 +16,7 @@ const signature = z.string().max(60);
 /** designRef linked a task to an annotation in the removed Design workspace. Saved tasks may still carry it, so it is read and kept, but never set. */
 const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), details: z.string().max(2000).optional(), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime(), sentAt: z.iso.datetime().optional(), baseline: z.record(z.string().max(4096), signature).optional(), outcome: z.enum(['finished', 'quiet', 'stopped', 'failed']).optional(), pullRequest: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/).optional() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('task-list') }).strict(), z.object({ action: z.literal('task-audit') }).strict(), z.object({ action: z.literal('task-watch') }).strict(),
-  z.object({ action: z.literal('task-send'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-detail'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-status'), id: z.uuid(), status: task.shape.status, outcome: task.shape.outcome }).strict(),
+  z.object({ action: z.literal('task-send'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-detail'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-pr'), id: z.uuid(), url: task.shape.pullRequest.unwrap() }).strict(), z.object({ action: z.literal('task-remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-status'), id: z.uuid(), status: task.shape.status, outcome: task.shape.outcome }).strict(),
   task.omit({ createdAt: true, id: true, sentAt: true, baseline: true, designRef: true, outcome: true, pullRequest: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
 export function matchesScope(file: string, patterns: string[]) { return patterns.some((pattern) => pattern === '**' || pattern === '*' || pattern.endsWith('/**') ? pattern === '**' || pattern === '*' || file.startsWith(pattern.slice(0, -2)) : file === pattern || file.startsWith(pattern.replace(/\/$/, '') + '/')); }
 export function scopesOverlap(a: string[], b: string[]) { return a.some((left) => b.some((right) => matchesScope(left.replace(/\/\*\*$/, '/scope-file'), [right]) || matchesScope(right.replace(/\/\*\*$/, '/scope-file'), [left]))); }
@@ -33,13 +33,6 @@ export class Tasks {
   constructor(private root: string, private verification: Verification) {}
   list(): Task[] { return load(this.root, 'tasks.json', z.array(task).max(200), []); }
   private write(tasks: Task[]) { save(this.root, 'tasks.json', tasks); }
-  /** A pull request opened from a folder belongs to the open tasks there (working or ready for review). */
-  linkPullRequest(directoryPath: string, url: string) {
-    if (!/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(url)) return;
-    const where = path.resolve(directoryPath); const tasks = this.list(); let changed = false;
-    const next = tasks.map((t) => { if ((t.status === 'active' || t.status === 'review') && path.resolve(t.directory) === where) { changed = true; return { ...t, pullRequest: url }; } return t; });
-    if (changed) this.write(next);
-  }
   async execute(input: unknown): Promise<Task[] | Task | TaskAudit | TaskSent | TaskWatch | TaskDetail | null> {
     const request = schema.parse(input); const tasks = this.list(); if (request.action === 'task-list') return tasks;
     if (request.action === 'task-save') {
@@ -67,6 +60,8 @@ export class Tasks {
       return request.action === 'task-send' ? { task: value, prompt: taskPrompt(value) } : value;
     }
     if (request.action === 'task-watch') return this.watch(tasks);
+    // A pull request belongs to the one task the person chose when opening it (Changes → Delivery), never to a folder's tasks.
+    if (request.action === 'task-pr') { const current = tasks.find((t) => t.id === request.id); if (!current) throw new HubError('TASK_MISSING', 'This task is no longer here.'); const value = { ...current, pullRequest: request.url }; this.write([...tasks.filter((t) => t.id !== value.id), value]); return value; }
     if (request.action === 'task-detail') {
       const current = tasks.find((t) => t.id === request.id); if (!current) throw new HubError('TASK_MISSING', 'This task is no longer here.');
       const git = async (args: string[]) => { try { const safe = await readOnlyGitOptions(current.directory); return (await promisify(execFile)('git', [...safe, '-C', current.directory, ...args], { timeout: 8000, windowsHide: true, env: { ...hostEnvironment(), GIT_TERMINAL_PROMPT: '0' }, maxBuffer: 65536 })).stdout.trim() || null; } catch { return null; } };

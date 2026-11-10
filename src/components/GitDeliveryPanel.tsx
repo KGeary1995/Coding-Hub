@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { RefreshCw } from 'lucide-react';
 import type { DeliveryResult, DeliveryStatus } from '../../shared/productivity';
 import { workbench } from '../runtime/workbench';
+import { loadTasks, useTaskStore } from '../state/task-store';
 
 /** One numbered step of the delivery column; done steps show a check in the circle. */
 function Step({ index, title, meta, done, children }: { index: number; title: string; meta: ReactNode; done: boolean; children: ReactNode }) {
@@ -21,6 +22,8 @@ export function GitDeliveryPanel({ directory, onChanged }: { directory: string; 
   const [message, setMessage] = useState(''); const [remote, setRemote] = useState('');
   const [title, setTitle] = useState(''); const [body, setBody] = useState(''); const [base, setBase] = useState('main'); const [draft, setDraft] = useState(true);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [result, setResult] = useState<DeliveryResult | null>(null);
+  // The task this pull request is for, chosen by the person; none by default, so no task takes another's pull request.
+  const openTasks = useTaskStore((s) => s.tasks).filter((task) => (task.status === 'active' || task.status === 'review') && task.directory.replace(/[\\/]+$/, '').toLowerCase() === directory.replace(/[\\/]+$/, '').toLowerCase()); const [forTask, setForTask] = useState('');
   async function refresh() { const value = await workbench<DeliveryStatus>({ action: 'flow-git-inspect', directory }); setState(value); setRemote((current) => value.remotes.includes(current) ? current : value.remotes[0] ?? ''); setPaths([]); }
   useEffect(() => { void refresh().catch((e) => setError((e as Error).message)); }, [directory]);
   async function execute(action: 'stage' | 'unstage' | 'commit' | 'push' | 'pr') {
@@ -28,6 +31,7 @@ export function GitDeliveryPanel({ directory, onChanged }: { directory: string; 
     try {
       const ref = { directory: state.directory, revision: state.revision };
       const value = await workbench<DeliveryResult | null>(action === 'stage' || action === 'unstage' ? { action: action === 'stage' ? 'flow-git-stage' : 'flow-git-unstage', ...ref, paths } : action === 'commit' ? { action: 'flow-git-commit', ...ref, message } : action === 'push' ? { action: 'flow-git-push', ...ref, remote } : { action: 'flow-git-pr', ...ref, title, body, base, draft });
+      if (action === 'pr' && value?.url && forTask) { try { await workbench({ action: 'task-pr', id: forTask, url: value.url }); await loadTasks(); } catch { /* The pull request stands; only the task link is missing. */ } }
       setResult(value); await refresh(); onChanged();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
@@ -53,6 +57,7 @@ export function GitDeliveryPanel({ directory, onChanged }: { directory: string; 
           <input aria-label="Delivery PR base" placeholder="Base branch" value={base} required maxLength={150} onChange={(e) => setBase(e.target.value)} />
           <textarea aria-label="Delivery PR body" placeholder="Description" value={body} maxLength={10000} rows={3} onChange={(e) => setBody(e.target.value)} />
           <label className="update-checkbox"><input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />Create as a draft</label>
+          {openTasks.length > 0 && <label>For task<select aria-label="Task for this pull request" value={forTask} onChange={(e) => setForTask(e.target.value)}><option value="">None</option>{openTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label>}
           <button className="button secondary" disabled={busy || !state.branch || !clean}>Review and create pull request</button>
         </form>
       </Step>

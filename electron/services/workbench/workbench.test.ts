@@ -115,8 +115,8 @@ describe('native history and task scope', () => {
     expect((await tasks.execute({ action: 'task-save', id: other.id, title: 'Styles, renamed', directory: root, sessionId: other.sessionId, scope: ['src/a.ts'], status: 'active', notes: '', verificationId: null }) as any).outcome).toBe('stopped');
     expect((await tasks.execute({ action: 'task-send', id: other.id }) as any).task.outcome).toBeUndefined();
     await tasks.execute({ action: 'task-status', id: other.id, status: 'review', outcome: 'quiet' }); expect((await tasks.execute({ action: 'task-status', id: other.id, status: 'done' }) as any).outcome).toBeUndefined();
-    // A pull request opened from the folder belongs to its open tasks, not to finished ones; the details give branch and commit.
-    tasks.linkPullRequest(root, 'https://github.com/owner/repo/pull/7'); tasks.linkPullRequest(root, 'https://example.com/not-a-pr');
+    // A pull request belongs to the task it was opened for, and only a GitHub pull request address is taken; the details give branch and commit.
+    await tasks.execute({ action: 'task-pr', id: saved.id, url: 'https://github.com/owner/repo/pull/7' }); await expect(tasks.execute({ action: 'task-pr', id: other.id, url: 'https://example.com/not-a-pr' })).rejects.toBeTruthy();
     const listed = tasks.list(); expect(listed.find((t) => t.id === saved.id)!.pullRequest).toBe('https://github.com/owner/repo/pull/7'); expect(listed.find((t) => t.id === other.id)!.pullRequest).toBeUndefined();
     const detail = await tasks.execute({ action: 'task-detail', id: saved.id }) as any; expect(detail.head).toMatch(/^[0-9a-f]{7,}$/); expect(typeof detail.branch).toBe('string');
     expect((await tasks.execute({ action: 'task-save', id: saved.id, title: 'Settings', directory: root, sessionId: saved.sessionId, scope: ['src/**'], status: 'review', notes: 'kept', verificationId: null }) as any).pullRequest).toBe('https://github.com/owner/repo/pull/7');
