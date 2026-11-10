@@ -24,7 +24,7 @@ describe('starting a task in its own worktree', () => {
     await expect(startTaskInWorktree(task.id, 'codex')).resolves.toEqual({ ...tree, rulesApplied: false }); expect(rulesSaved).toEqual([]);
     const channel = useWorkspaceStore.getState().sessions.at(-1)!;
     expect(channel.config).toMatchObject({ engine: 'codex', chat: true }); expect(channel.binding).toEqual({ mode: 'independent', cwd: tree.directory });
-    expect(saved[0]).toMatchObject({ id: task.id, sessionId: channel.id, directory: tree.directory }); expect(sent).toEqual([task.id]);
+    expect(saved[0]).toMatchObject({ id: task.id, sessionId: channel.id, directory: tree.directory, verificationId: null }); expect(sent).toEqual([task.id]);
   });
   it('applies the shared rules in the new worktree before its channel starts', async () => {
     rules = { ...rules, content: 'Never guess.' };

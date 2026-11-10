@@ -1,5 +1,6 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ManagedWorktree } from '../../shared/project-tools';
+import { movedTask } from '../state/task-move';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { saveTask, sendTask, useTaskStore } from '../state/task-store';
 import { startSession } from './use-native-host';
@@ -39,7 +40,7 @@ export async function startTaskInWorktree(id: string, engine: 'claude' | 'codex'
   const channel = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!channel) throw new Error(`The worktree ${tree.branch} is ready, but no channel could be added. Add one there by hand.`);
   useWorkspaceStore.getState().updateBinding(channel.id, { mode: 'independent', cwd: tree.directory });
-  await saveTask({ ...task, sessionId: channel.id, directory: tree.directory, status: 'queued' });
+  await saveTask(movedTask(task, channel.id, tree.directory));
   await startSession(channel.id);
   const started = useWorkspaceStore.getState().sessions.find((session) => session.id === channel.id);
   if (!started || started.status !== 'running') throw new Error(`The worktree ${tree.branch} and its channel are ready, but the channel did not start${started?.error ? `: ${started.error}` : ''}. The task waits in To do.`);

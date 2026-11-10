@@ -12,6 +12,7 @@ import { Tasks, scopesOverlap, matchesScope, taskPrompt } from './tasks';
 import { execFileSync } from 'node:child_process';
 import { Verification } from './verification';
 import { repositoryState } from './repository-state';
+import { movedTask } from '../../../src/state/task-move';
 import { Experiments } from './experiments';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
@@ -120,6 +121,21 @@ describe('native history and task scope', () => {
     const listed = tasks.list(); expect(listed.find((t) => t.id === saved.id)!.pullRequest).toBe('https://github.com/owner/repo/pull/7'); expect(listed.find((t) => t.id === other.id)!.pullRequest).toBeUndefined();
     const detail = await tasks.execute({ action: 'task-detail', id: saved.id }) as any; expect(detail.head).toMatch(/^[0-9a-f]{7,}$/); expect(typeof detail.branch).toBe('string');
     expect((await tasks.execute({ action: 'task-save', id: saved.id, title: 'Settings', directory: root, sessionId: saved.sessionId, scope: ['src/**'], status: 'review', notes: 'kept', verificationId: null }) as any).pullRequest).toBe('https://github.com/owner/repo/pull/7');
+  });
+});
+describe('a task moved into a worktree', () => {
+  it('lets go of a check from its old folder, which the host would refuse, and says so in its notes', async () => {
+    const old = fixture(); const tree = fixture(); const verification = new Verification(fixture(), async () => true); const tasks = new Tasks(fixture(), verification);
+    const profile = await verification.execute({ action: 'verification-save', name: 'Check', directory: old, steps: [{ label: 'Pass', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 10 }) as any;
+    const check = await verification.execute({ action: 'verification-run', id: profile.id }) as any; expect(check.passed).toBe(true);
+    const saved = await tasks.execute({ action: 'task-save', title: 'Fix it', directory: old, sessionId: null, scope: ['**'], status: 'queued', notes: 'Earlier note', verificationId: check.id }) as any;
+    // What saveTask sends: the host keeps these fields itself.
+    const fields = ({ sentAt: _s, baseline: _b, designRef: _d, createdAt: _c, outcome: _o, pullRequest: _p, ...rest }: any) => rest;
+    const channel = randomUUID();
+    await expect(tasks.execute({ action: 'task-save', ...fields({ ...saved, sessionId: channel, directory: tree }) })).rejects.toMatchObject({ code: 'TASK_CHECK' });
+    const moved = await tasks.execute({ action: 'task-save', ...fields(movedTask(saved, channel, tree)) }) as any;
+    expect(moved).toMatchObject({ id: saved.id, sessionId: channel, verificationId: null, status: 'queued' }); expect(path.resolve(moved.directory)).toBe(path.resolve(tree));
+    expect(moved.notes).toContain('Earlier note'); expect(moved.notes).toContain(`the check attached before (${check.id})`);
   });
 });
 describe('verification and experiment evidence', () => {
