@@ -322,13 +322,14 @@ export class PtyManager {
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
-      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds);
+      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting ? { waiting: request.waiting } : {}) });
     }
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
       this.tables.send(request.runId, request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
+    else if (request.action === 'table-waiting') this.tables.waiting(request.runId, request.send);
     else if (request.action === 'table-driver') this.tables.setDriver(request.runId, request.driver);
     else if (request.action === 'table-rounds') this.tables.setRounds(request.runId, request.rounds);
     else if (request.action === 'table-stop') this.tables.stop(request.runId);

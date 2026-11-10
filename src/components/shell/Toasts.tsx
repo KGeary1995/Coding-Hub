@@ -5,6 +5,7 @@ import { useHubStore } from '../../state/hub-store';
 import { CHANNEL_STATES, channelAlerts } from '../../state/channel-state';
 import { startSession } from '../../runtime/use-native-host';
 import { jumpToChannel } from './StatusBar';
+import { RestartNotice } from './RestartNotice';
 
 /**
  * Bottom-right notices for channels that need the person (waiting) or have failed. They stay until the channel moves
@@ -24,8 +25,8 @@ export function Toasts() {
   // forgotten, so the next request or failure shows again even when a launch failed before it had a run ID.
   useEffect(() => { setDismissed((current) => { const kept = current.filter((key) => activeKeys.split('\n').includes(key)); return kept.length === current.length ? current : kept; }); }, [activeKeys]);
   const keyed = active.filter(({ key }) => !dismissed.includes(key));
-  if (!keyed.length) return null;
-  return <section className="tr-toasts" aria-label="Channel notifications" aria-live="polite">
+  // The restart notice shares the column, so notices never sit on top of each other (an empty column takes no space).
+  return <section className="tr-toasts" aria-label="Channel notifications" aria-live="polite"><RestartNotice />
     {keyed.map(({ alert, session, key }) => {
       const meta = CHANNEL_STATES[alert.state]; const channel = `CH${alert.channel}`;
       return <article key={key} className={`tr-toast ${alert.state}`}>

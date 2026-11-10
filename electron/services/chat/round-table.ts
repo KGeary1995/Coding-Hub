@@ -33,6 +33,8 @@ interface Table {
   phase: RoundTableState['phase']; agreed: boolean;
   /** A message the person sent while the agents were still busy: sent once both have stopped. */
   queued: { text: string; images: ChatImage[] } | null;
+  /** The queued message came back from before a restart: it is not sent until the person says so. */
+  kept: boolean;
   /** The newest messages of the leading conversation, for the newcomer's brief. */
   recent: string[];
   /** The folder both agents work in, and the review record. */
@@ -69,7 +71,7 @@ export class RoundTables {
     return { runId, sessionId: run.sessionId, engine: run.engine, busy: false, text: '', answer: null, briefed: false };
   }
   private state(table: Table): RoundTableState {
-    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })) };
+    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...(table.kept ? { waitingKept: true } : {}) } : {}) };
   }
   private publish(table: Table) { this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: this.state(table) } }); }
   private roles(table: Table) {
@@ -90,14 +92,15 @@ export class RoundTables {
     return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE. ${record}`;
   }
 
-  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number): RoundTableState {
+  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number, saved: { findings?: Finding[]; waiting?: string } = {}): RoundTableState {
     if (this.tableOf(leadRunId) || this.tableOf(partnerRunId)) throw new HubError('TABLE_TAKEN', 'One of these chats is already at a Round Table.');
     const lead = this.seat(leadRunId); const partner = this.seat(partnerRunId);
     const leadRun = this.host.run(leadRunId)!; const partnerRun = this.host.run(partnerRunId)!;
     if (lead.engine === partner.engine) throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     if (leadRun.cwd !== partnerRun.cwd) throw new HubError('TABLE_FOLDER', 'Both agents must work in the same folder.');
     if (leadRun.owner !== owner || partnerRun.owner !== owner) throw new HubError('TABLE_OWNER', 'Both chats must be open in this window.');
-    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: [], turnStart: null, reviewing: false };
+    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: Boolean(saved.waiting) };
+    if (saved.waiting) table.queued = { text: saved.waiting, images: [] };
     this.tables.set(leadRunId, table); this.roles(table);
     // A conversation already under way: the leading agent sums it up, and the newcomer gets that plus the latest messages.
     if (table.recent.length) {
@@ -135,6 +138,16 @@ export class RoundTables {
     this.publish(table);
   }
 
+  /** A message kept from before a restart: sent now (to both, once they are free), or dropped. */
+  waiting(leadRunId: string, send: boolean) {
+    const table = this.leading(leadRunId); if (!table.queued) return this.state(table);
+    table.kept = false;
+    if (!send) { table.queued = null; this.publish(table); return this.state(table); }
+    if (!table.lead.busy && !table.partner.busy && !table.reviewing) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); }
+    else this.publish(table);
+    return this.state(table);
+  }
+
   setDriver(leadRunId: string, driver: Engine) {
     const table = this.leading(leadRunId); if (table.driver === driver) return this.state(table);
     table.driver = driver; this.roles(table);
@@ -146,7 +159,8 @@ export class RoundTables {
 
   /** Stops both agents and ends the discussion; the table stays. */
   stop(leadRunId: string) {
-    const table = this.leading(leadRunId); table.queued = null; table.round = table.rounds;
+    // A message kept from before a restart waits for the person's own Send now or Drop it.
+    const table = this.leading(leadRunId); if (!table.kept) table.queued = null; table.round = table.rounds;
     for (const seat of [table.lead, table.partner]) if (seat.busy) this.host.interrupt(seat.runId);
     table.phase = table.lead.busy || table.partner.busy ? table.phase : 'idle'; this.publish(table);
   }
@@ -187,7 +201,7 @@ export class RoundTables {
 
   private settle(table: Table, seat: Seat) {
     if (table.lead.busy || table.partner.busy) { this.publish(table); return; }
-    if (table.phase === 'joining' && table.queued) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
+    if (table.phase === 'joining' && table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
     if (table.phase === 'joining') {
       const summary = seat.answer || '(no summary)';
       const recent = table.recent.slice(-RECENT).join('\n\n');
@@ -205,7 +219,7 @@ export class RoundTables {
   }
   /** A message the person sent meanwhile goes next, in place of further rounds; otherwise the discussion goes on. */
   private next(table: Table) {
-    if (table.queued) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
+    if (table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
     this.discuss(table);
   }
 

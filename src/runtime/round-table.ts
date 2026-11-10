@@ -66,7 +66,7 @@ async function retire(leadId: string) {
 /** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */
 const retiring = new Set<string>();
 
-type TableRequest = { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
+type TableRequest = { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 /** A request to the table a running chat channel leads; the error message, or null. */
 export async function tableRequest(leadId: string, request: TableRequest): Promise<string | null> {
   const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
@@ -77,10 +77,11 @@ export async function tableRequest(leadId: string, request: TableRequest): Promi
 
 /** The leading channel remembers its table (partner, driver, rounds) whenever the table changes. */
 export function rememberTable(leadId: string, table: RoundTableState) {
-  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds };
+  // The review record and a waiting message are kept with it, so a restart loses neither.
+  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting ? { waiting: table.waiting } : {}) };
   useWorkspaceStore.setState((state) => {
     const lead = state.sessions.find((session) => session.id === leadId);
-    if (!lead || (lead.roundTable && lead.roundTable.partner === saved.partner && lead.roundTable.driver === saved.driver && lead.roundTable.rounds === saved.rounds)) return {};
+    if (!lead || (lead.roundTable && JSON.stringify(lead.roundTable) === JSON.stringify(saved))) return {};
     return { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session) };
   });
 }
@@ -100,7 +101,7 @@ export function restoreTables() {
     const partner = sessions.find((session) => session.id === lead.roundTable!.partner);
     if (!partner || partner.status !== 'running' || !partner.runId) continue;
     const pair = `${lead.runId}:${partner.runId}`; if (reopened.has(pair)) continue; reopened.add(pair);
-    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds }).catch(() => {});
+    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds, ...(lead.roundTable.findings?.length ? { findings: lead.roundTable.findings } : {}), ...(lead.roundTable.waiting ? { waiting: lead.roundTable.waiting } : {}) }).catch(() => {});
   }
 }
 

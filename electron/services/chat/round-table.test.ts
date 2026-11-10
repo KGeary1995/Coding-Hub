@@ -168,3 +168,23 @@ describe('Round Table review record', () => {
     expect(sent.slice(-2).map((item) => item.text)).toEqual([expect.stringContaining('Also check the docs.'), expect.stringContaining('Also check the docs.')]);
   });
 });
+
+describe('Round Table after a restart', () => {
+  it('opens again with its findings, and holds a kept message until the person sends or drops it', () => {
+    const { tables, sent, say, done, last } = setup();
+    const saved = { id: 'F1', severity: 'high' as const, evidence: 'a.ts:1', text: 'bug', status: 'fixed' as const, response: 'done', check: '', reviewedAt: 'aaaaaaaaaaaa', changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' };
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: [saved], waiting: 'Also update the docs.' });
+    expect(last().table).toMatchObject({ findings: [saved], waiting: 'Also update the docs.', waitingKept: true }); expect(sent).toHaveLength(0);
+    // A new message from the person goes as usual; the kept one still waits.
+    tables.send(CLAUDE, 'First this.', []); say(CLAUDE, 'ok'); done(CLAUDE); say(CODEX, 'ok'); done(CODEX);
+    expect(sent.some((item) => item.text.includes('Also update the docs.'))).toBe(false);
+    // Stopped agents finish their turn; then the kept message goes to both.
+    tables.stop(CLAUDE); done(CLAUDE); done(CODEX); expect(sent.some((item) => item.text.includes('Also update the docs.'))).toBe(false); tables.waiting(CLAUDE, true);
+    expect(sent.slice(-2).map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(sent.at(-1)!.text).toContain('Also update the docs.'); expect(last().table!.waiting).toBeUndefined();
+  });
+  it('drops a kept message when asked', () => {
+    const { tables, sent, last } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { waiting: 'Old ask' }); tables.waiting(CLAUDE, false);
+    expect(sent).toHaveLength(0); expect(last().table!.waiting).toBeUndefined();
+  });
+});

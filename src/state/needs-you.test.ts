@@ -18,6 +18,10 @@ describe('Needs you', () => {
     expect(items[1]).toMatchObject({ detail: 'codex exited with code 1 · task: Ship docs', action: 'retry' });
     expect(items.filter((item) => item.title.includes('Ship docs'))).toHaveLength(0);
   });
+  it('lists a Round Table message kept from before a restart, but not one simply waiting for the agents', () => {
+    const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
+    expect(needsYou([], [], [], { lead: { ...table, waiting: 'Also update the docs.', waitingKept: true }, other: { ...table, waiting: 'In flight' } })).toMatchObject([{ kind: 'table-waiting', sessionId: 'lead', detail: 'Also update the docs.', action: 'answer' }]);
+  });
   it('says how long something has waited', () => {
     const now = Date.parse('2026-11-10T12:00:00.000Z');
     expect(waited('2026-11-10T11:56:00.000Z', now)).toBe('4 min'); expect(waited('2026-11-10T09:00:00.000Z', now)).toBe('3 h'); expect(waited('2026-11-07T12:00:00.000Z', now)).toBe('3 d'); expect(waited(null)).toBe('');

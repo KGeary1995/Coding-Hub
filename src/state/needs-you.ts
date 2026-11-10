@@ -1,17 +1,20 @@
 import type { Session } from '../../shared/types';
 import type { UsageRecord } from '../../shared/hub';
 import type { Task } from '../../shared/workbench';
+import type { RoundTableState } from '../../shared/chat';
 import { channelAlerts } from './channel-state';
 
 /**
  * Everything waiting for the person, in one list: channels waiting for an approval (with the exact request and since
  * when), channels that failed, and tasks that stopped, went quiet or are ready for review. Each says what to do next.
  */
-export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-stopped' | 'task-quiet' | 'task-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' }
-const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, failed: 1, 'task-stopped': 2, 'task-quiet': 3, 'task-review': 4, limit: 5 };
+export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-stopped' | 'task-quiet' | 'task-review' | 'table-waiting'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' }
+const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, failed: 1, 'task-stopped': 2, 'table-waiting': 3, 'task-quiet': 4, 'task-review': 5, limit: 6 };
 
-export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[]): NeedsYouItem[] {
+export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
+  // A Round Table message kept from before a restart waits for the person to send or drop it.
+  for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting, since: null, sessionId, taskId: null, action: 'answer' });
   const taskOf = (sessionId: string) => tasks.find((task) => task.sessionId === sessionId && (task.status === 'active' || task.status === 'review'));
   for (const alert of channelAlerts(sessions, records)) {
     const session = sessions.find((item) => item.id === alert.sessionId); const task = taskOf(alert.sessionId);
