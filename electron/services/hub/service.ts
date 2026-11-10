@@ -25,6 +25,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('drive-resolve'), project: projectSchema, id, localHash: z.string().regex(/^[a-f0-9]{64}$/), remoteHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ action: z.literal('memory-list'), project: projectSchema }).strict(),
   z.object({ action: z.literal('memory-key'), directory: dir }).strict(),
+  z.object({ action: z.literal('memory-projects') }).strict(),
   z.object({ action: z.literal('memory-entries'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-use-auto-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
@@ -68,6 +69,7 @@ export class HubService {
       case 'add-server': this.configs.add(request); return null;
       case 'memory-list': this.projects.add(request.project); return this.memory.list(request.project);
       case 'memory-key': return projectMemoryKey(request.directory);
+      case 'memory-projects': return this.memory.projects();
       case 'memory-write': { this.projects.add(request.project); const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); try { this.drive.sync(request.project); } catch { /* Offline notes sync on next retry. */ } return note; }
       // Without a key, use the automatic one so sessions started in Trace and from other terminals share notes.
       case 'memory-entries': return memoryEntries(request.directory, this.memory.root);

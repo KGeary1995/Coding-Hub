@@ -128,6 +128,8 @@ export interface Configured { engine: CLIEngine; file: string; key: string | nul
 
 /** The folder whose `.mcp.json` and `.codex/config.toml` sessions there read: the repository's top folder, else the folder. */
 export function projectConfigRoot(directory: string) { return gitLocation(directory)?.root ?? path.resolve(directory); }
+/** One folder, however it is spelled (case on Windows, relative parts). */
+const samePath = (a: string, b: string) => { const norm = (p: string) => { const full = path.resolve(p); return process.platform === 'win32' ? full.toLowerCase() : full; }; return norm(a) === norm(b); };
 const slotOf = (engine: CLIEngine) => engine === 'claude' ? 'mcpServers' : 'mcp_servers';
 const configFile = (engine: CLIEngine, root: string) => engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
 /** An entry Trace's own install wrote: a program, then memory-server.js, the memory folder and the key. */
@@ -194,8 +196,7 @@ export class AutoMemory {
     if (!written(entry)) return { engine, file, key: null, root: null };
     const args = entry.args;
     const { executable, server } = this.options;
-    const same = (a: string, b: string) => { const norm = (p: string) => { const full = path.resolve(p); return process.platform === 'win32' ? full.toLowerCase() : full; }; return norm(a) === norm(b); };
-    let trace = same(entry.command, executable) && same(args[0], server);
+    let trace = samePath(entry.command, executable) && samePath(args[0], server);
     const stale = !fs.existsSync(entry.command) || !fs.existsSync(args[0]);
     if (stale && (entry.command !== executable || args[0] !== server) && fs.existsSync(executable) && fs.existsSync(server)) {
       try {
@@ -223,11 +224,14 @@ export class AutoMemory {
   }
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
-  prepare(run: AgentRunningSession, model: string, info: EngineInfo, launch: { args: string[] }) {
+  prepare(run: AgentRunningSession, model: string, info: EngineInfo, launch: { args: string[] }, chosenKey?: string) {
     if (!this.options.enabled()) return;
     let key: string; let context: string;
     try {
-      key = projectMemoryKey(run.cwd);
+      // The person can point a channel at another memory project (Settings → Shared memory); otherwise the folder's own.
+      key = chosenKey ?? projectMemoryKey(run.cwd);
+      // The home folder is no project: everything started there would share (and mix) one set of notes.
+      if (!chosenKey && samePath(run.cwd, os.homedir())) this.notice(`home:${run.cwd}`, `A channel runs in your home folder, so its shared memory (${key}) holds notes from everything started there. Open that channel's Settings and choose its project under Shared memory project, or start it in the project's own folder.`);
       // Pull newer handoffs from other computers first; offline Drive leaves the local notes.
       try { this.options.refresh?.(key); } catch { /* Local notes only. */ }
       context = memoryContext(key, this.options.memory.list(key));

@@ -18,6 +18,8 @@ export interface ClaudeCLIEngineConfig {
   permissions?: PermissionLevel;
   /** Claude in Chrome (`--chrome`): the browser extension's tools, acting in the person's own Chrome with its sign-ins. */
   chrome?: boolean;
+  /** The shared memory project this channel reads and writes, chosen by the person; absent uses the folder's automatic key. */
+  memoryKey?: string;
   model: string;
   thinking: { budget_tokens: number | null };
   tokenLimits: {
@@ -32,6 +34,8 @@ export interface CodexCLIEngineConfig {
   /** A chat channel: Codex's app server, drawn by Trace as a conversation (with images) instead of a terminal. */
   chat?: boolean;
   permissions?: PermissionLevel;
+  /** The shared memory project this channel reads and writes, chosen by the person; absent uses the folder's automatic key. */
+  memoryKey?: string;
   model: string;
   reasoningEffort: ReasoningEffort | null;
 }

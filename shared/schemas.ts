@@ -19,9 +19,12 @@ export const permissionLevelSchema = z.enum(['ask', 'edits', 'full']);
 export const DEFAULT_PERMISSIONS = 'edits' as const;
 export const permissionLevel = (config: { permissions?: 'ask' | 'edits' | 'full' }) => config.permissions ?? DEFAULT_PERMISSIONS;
 const permissions = permissionLevelSchema.optional();
+/** A shared memory project key, as memory folders are named (memory.ts projectSchema). */
+export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
+const memoryKey = memoryKeySchema.optional();
 export const engineConfigSchema = z.discriminatedUnion('engine', [
-  z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
-  z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
+  z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), memoryKey, model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
+  z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
 /** Every channel type: the agents plus a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, z.object({ engine: z.literal('shell') }).strict()]);

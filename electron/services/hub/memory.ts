@@ -12,6 +12,15 @@ export class MemoryService {
   constructor(readonly root: string) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.checkRoot(); }
   private checkRoot() { if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real directory, not a symbolic link.'); }
   directory(project: string) { this.checkRoot(); projectSchema.parse(project); const target = path.join(this.root, project); if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory project cannot be a symbolic link.'); return target; }
+  /** The memory projects with notes, newest first: key, how many notes, and when the newest was written. */
+  projects(): { key: string; notes: number; latest: string }[] {
+    this.checkRoot(); const out: { key: string; notes: number; latest: string }[] = [];
+    for (const entry of fs.readdirSync(this.root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !projectSchema.safeParse(entry.name).success) continue;
+      try { const notes = this.list(entry.name); if (notes.length) out.push({ key: entry.name, notes: notes.length, latest: notes[0].createdAt }); } catch { /* Skipped. */ }
+    }
+    return out.sort((a, b) => b.latest.localeCompare(a.latest)).slice(0, 200);
+  }
   list(project: string): MemoryNote[] {
     const dir = this.directory(project); if (!fs.existsSync(dir)) return [];
     const files = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && /^[0-9a-f-]{36}\.json$/.test(e.name));
