@@ -59,7 +59,7 @@ describe('launch context', () => {
     expect(claude.args.at(-2)).toBe('--mcp-config');
     expect(JSON.parse(fs.readFileSync(claude.args.at(-1)!, 'utf8')).mcpServers['coding-hub-memory']).toEqual({ command: '/app/electron', args: ['/app/memory-server.js', memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } });
     const codex = { args: ['resume', randomUUID()] }; auto.prepare(run('codex', project), '', info('codex'), codex);
-    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key])}`);
+    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key])}`); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     expect(codex.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Earlier decision');
     expect(git(project, 'status', '--porcelain')).toBe('');
   });
@@ -141,7 +141,7 @@ describe('project-installed memory servers', () => {
     const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
     const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex);
     expect(fs.readFileSync(path.join(project, '.codex', 'config.toml'), 'utf8')).toContain(JSON.stringify(current.executable));
-    expect(codex.args.some((arg) => arg.startsWith('mcp_servers.coding-hub-memory.command='))).toBe(false);
+    expect(codex.args.some((arg) => arg.startsWith('mcp_servers.coding-hub-memory.command='))).toBe(false); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     const claude = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), claude);
     expect(JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers['coding-hub-memory']).toEqual(custom);
     expect(claude.args).not.toContain('--mcp-config');
@@ -179,6 +179,9 @@ describe('project-installed memory servers', () => {
     const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch'), onNotice: (message) => notices.push(message) }));
     for (let i = 0; i < 2; i++) { const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch); expect(launch.args).not.toContain('--mcp-config'); }
     expect(notices).toHaveLength(1); expect(notices[0]).toContain('did not install');
+    // Codex keeps asking before a server Trace did not install runs a tool.
+    fs.mkdirSync(path.join(project, '.codex')); fs.writeFileSync(path.join(project, '.codex', 'config.toml'), '[mcp_servers.coding-hub-memory]\ncommand = "node"\nargs = ["mine.js"]\n');
+    const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex); expect(codex.args.some((arg) => arg.includes('default_tools_approval_mode'))).toBe(false);
   });
 
   it('warns when the entry uses another notes folder, even with the right key', () => {

@@ -1,23 +1,19 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Task, TaskAudit, TaskSent, TaskWatch, TaskWarning } from '../../../shared/workbench';
 import type { Verification } from './verification';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
-import { hostEnvironment } from '../cli/discovery';
-import { readOnlyGitOptions } from '../repository/git-safety';
+import { changedFiles } from './repository-state';
 const scope = z.string().trim().min(1).max(300).refine((s) => !s.includes('\\') && !s.startsWith('/') && !s.replace(/\/$/, '').split('/').some((part) => part === '..' || part === '.' || part === '') && !s.includes('\0') && !/^[a-z]:/i.test(s) && !/[?\[\]]/.test(s) && (!s.includes('*') || s === '*' || s === '**' || s.endsWith('/**') && !s.slice(0, -3).includes('*')), 'Use relative paths such as src/** or README.md.');
 /** A changed file as it was when a task was sent: its size and when it last changed, so later edits to it show. */
 const signature = z.string().max(60);
 /** designRef linked a task to an annotation in the removed Design workspace. Saved tasks may still carry it, so it is read and kept, but never set. */
-const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), details: z.string().max(2000).optional(), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime(), sentAt: z.iso.datetime().optional(), baseline: z.record(z.string().max(4096), signature).optional() }).strict();
+const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), details: z.string().max(2000).optional(), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime(), sentAt: z.iso.datetime().optional(), baseline: z.record(z.string().max(4096), signature).optional(), outcome: z.enum(['finished', 'quiet', 'stopped', 'failed']).optional() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('task-list') }).strict(), z.object({ action: z.literal('task-audit') }).strict(), z.object({ action: z.literal('task-watch') }).strict(),
-  z.object({ action: z.literal('task-send'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-status'), id: z.uuid(), status: task.shape.status }).strict(),
-  task.omit({ createdAt: true, id: true, sentAt: true, baseline: true, designRef: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
+  z.object({ action: z.literal('task-send'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-status'), id: z.uuid(), status: task.shape.status, outcome: task.shape.outcome }).strict(),
+  task.omit({ createdAt: true, id: true, sentAt: true, baseline: true, designRef: true, outcome: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
 export function matchesScope(file: string, patterns: string[]) { return patterns.some((pattern) => pattern === '**' || pattern === '*' || pattern.endsWith('/**') ? pattern === '**' || pattern === '*' || file.startsWith(pattern.slice(0, -2)) : file === pattern || file.startsWith(pattern.replace(/\/$/, '') + '/')); }
 export function scopesOverlap(a: string[], b: string[]) { return a.some((left) => b.some((right) => matchesScope(left.replace(/\/\*\*$/, '/scope-file'), [right]) || matchesScope(right.replace(/\/\*\*$/, '/scope-file'), [left]))); }
 /** A task limited to some files, not the whole project. */
@@ -28,28 +24,6 @@ export function taskPrompt(task: Pick<Task, 'title' | 'details' | 'scope'>) {
   return [`Task: ${task.title.trim().replace(/\s*\n\s*/g, ' ')}${/[.!?]$/.test(task.title.trim()) ? '' : '.'}`, details, limited(task) ? `Change only these files or folders: ${task.scope.join(', ')}. If the task needs others, ask me first.` : null, 'When you are done, list the files you changed and how you checked the result.'].filter(Boolean).join(' ');
 }
 
-/** Files Git sees as changed in a project folder (relative to it), with their signatures; null when it is not a repository. */
-async function changedFiles(cwd: string): Promise<Map<string, string> | null> {
-  try {
-    // Hidden console, the host's PATH and no prompts, as for every other Git call; and the repository's own config
-    // must not run programs while it is only read (readOnlyGitOptions).
-    const command = promisify(execFile); const safe = await readOnlyGitOptions(cwd); const options = { timeout: 8000, windowsHide: true, env: { ...hostEnvironment(), GIT_TERMINAL_PROMPT: '0' } };
-    const { stdout: repository } = await command('git', [...safe, '-C', cwd, 'rev-parse', '--show-toplevel'], { ...options, maxBuffer: 65536 });
-    const { stdout } = await command('git', ['--no-optional-locks', ...safe, '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { ...options, maxBuffer: 1048576 });
-    const entries = stdout.split('\0'); const prefix = path.relative(repository.trim(), cwd).replace(/\\/g, '/'); const files = new Map<string, string>();
-    for (let i = 0; i < entries.length && files.size < 500; i++) {
-      if (!entries[i]) continue;
-      // Renames and copies carry their source path as the next entry; a moved-away path is a change too.
-      const names = [entries[i].slice(3)]; if (/[RC]/.test(entries[i].slice(0, 2)) && entries[i + 1]) names.push(entries[++i]);
-      for (const name of names) {
-        const relative = prefix && name.startsWith(prefix + '/') ? name.slice(prefix.length + 1) : name;
-        let mark = 'gone'; try { const stat = fs.statSync(path.join(cwd, relative)); mark = `${stat.size}:${Math.round(stat.mtimeMs)}`; } catch { /* Deleted. */ }
-        files.set(relative, mark);
-      }
-    }
-    return files;
-  } catch { return null; }
-}
 
 export class Tasks {
   constructor(private root: string, private verification: Verification) {}
@@ -64,19 +38,19 @@ export class Tasks {
       if (request.verificationId) { const check = this.verification.data().results.find((r) => r.id === request.verificationId); if (!check?.passed || path.resolve(check.directory) !== cwd) throw new HubError('TASK_CHECK', 'Select a passing verification result for this project.'); }
       const previous = tasks.find((t) => t.id === request.id);
       const designRef = previous?.designRef;
-      const value: Task = { ...(designRef ? { designRef } : {}), id: request.id ?? randomUUID(), title: request.title, ...(request.details?.trim() ? { details: request.details.trim() } : {}), directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: previous?.createdAt ?? new Date().toISOString(), ...(previous?.sentAt ? { sentAt: previous.sentAt } : {}), ...(previous?.baseline ? { baseline: previous.baseline } : {}) };
+      const value: Task = { ...(designRef ? { designRef } : {}), id: request.id ?? randomUUID(), title: request.title, ...(request.details?.trim() ? { details: request.details.trim() } : {}), directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: previous?.createdAt ?? new Date().toISOString(), ...(previous?.sentAt ? { sentAt: previous.sentAt } : {}), ...(previous?.baseline ? { baseline: previous.baseline } : {}), ...(previous?.outcome && previous.status === request.status ? { outcome: previous.outcome } : {}) };
       this.write([...tasks.filter((t) => t.id !== value.id), value]); return value;
     }
     if (request.action === 'task-remove') { this.write(tasks.filter((t) => t.id !== request.id)); return null; }
     if (request.action === 'task-status' || request.action === 'task-send') {
       const current = tasks.find((t) => t.id === request.id); if (!current) throw new HubError('TASK_MISSING', 'This task is no longer here.');
       let value: Task;
-      if (request.action === 'task-status') value = { ...current, status: request.status };
+      if (request.action === 'task-status') { const { outcome: _old, ...rest } = current; value = { ...rest, status: request.status, ...(request.outcome ? { outcome: request.outcome } : {}) }; }
       else {
         if (!current.sessionId) throw new HubError('TASK_CHANNEL', 'Choose the channel to give this task to first.');
         // What was already changed when the task was sent is not this task's work.
         const files = await changedFiles(current.directory);
-        value = { ...current, status: 'active', sentAt: new Date().toISOString(), baseline: Object.fromEntries(files ?? []) };
+        const { outcome: _old, ...rest } = current; value = { ...rest, status: 'active', sentAt: new Date().toISOString(), baseline: Object.fromEntries(files ?? []) };
       }
       this.write([...tasks.filter((t) => t.id !== value.id), value]);
       return request.action === 'task-send' ? { task: value, prompt: taskPrompt(value) } : value;

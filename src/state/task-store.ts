@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Task, TaskSent, TaskWatch } from '../../shared/workbench';
+import type { Task, TaskOutcome, TaskSent, TaskWatch } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
@@ -10,7 +10,7 @@ import { chatFailed, chatSent } from './chat-store';
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
   { status: 'queued', label: 'To do', hint: 'Not sent yet' },
   { status: 'active', label: 'Working', hint: 'The agent has it' },
-  { status: 'review', label: 'Ready for review', hint: 'The agent finished or stopped' },
+  { status: 'review', label: 'Ready for review', hint: 'The agent finished its turn' },
   { status: 'done', label: 'Done', hint: 'You checked it' },
 ];
 /**
@@ -25,7 +25,9 @@ export async function saveTask(task: Omit<Task, 'id' | 'createdAt'> & { id?: str
   const saved = await workbench<Task>({ action: 'task-save', ...fields }); await loadTasks(); return saved;
 }
 export async function removeTask(id: string) { await workbench({ action: 'task-remove', id }); await loadTasks(); }
-export async function setTaskStatus(id: string, status: Task['status']) { await workbench({ action: 'task-status', id, status }); await loadTasks(); }
+export async function setTaskStatus(id: string, status: Task['status'], outcome?: TaskOutcome) { await workbench({ action: 'task-status', id, status, ...(outcome ? { outcome } : {}) }); await loadTasks(); }
+/** What a task card says about how Trace moved or flagged it; nothing when the agent simply finished. */
+export const OUTCOME_TEXT: Record<TaskOutcome, string> = { finished: '', quiet: 'Moved here because the channel drew nothing for 45 seconds. The agent may not be finished.', stopped: 'The channel stopped before the agent finished. Send it again, or move it on by hand.', failed: 'The channel failed before the agent finished. Send it again, or move it on by hand.' };
 export async function refreshTaskWatch() {
   if (!useTaskStore.getState().tasks.some((task) => task.sentAt && (task.status === 'active' || task.status === 'review'))) { useTaskStore.setState({ watch: { changed: {}, warnings: [] } }); return; }
   try { useTaskStore.setState({ watch: await workbench<TaskWatch>({ action: 'task-watch' }) }); } catch { /* Kept as it was. */ }
@@ -58,12 +60,13 @@ export async function sendTask(id: string) {
 export function taskTurnDone(sessionId: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.sessionId === sessionId && item.status === 'active' && item.sentAt);
   // A turn that ends within seconds of the send is the CLI taking the message, not the work.
-  if (task && Date.now() - Date.parse(task.sentAt!) > 5000) void setTaskStatus(task.id, 'review').catch(() => {});
+  if (task && Date.now() - Date.parse(task.sentAt!) > 5000) void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
 }
 /**
- * Moves working tasks along by themselves: to Ready for review when their channel stops, or (for CLIs that do not say
- * when a turn ends, such as Codex in a terminal) when the channel has drawn nothing for 45 s, a minute or more after the
- * task was sent; and reads the open tasks' changes every 30 s.
+ * Moves working tasks along by themselves, and reads the open tasks' changes every 30 s. A channel that stops or fails
+ * leaves its task in Working, marked, since the work was cut short rather than finished. A CLI that does not say when a
+ * turn ends (Codex in a terminal) moves its task to Ready for review, marked as a guess, once the channel has drawn
+ * nothing for 45 s a minute or more after the task was sent, unless it is waiting for an approval.
  */
 export function startTaskAutomation() {
   let ticks = 0;
@@ -72,9 +75,10 @@ export function startTaskAutomation() {
     for (const task of useTaskStore.getState().tasks) {
       if (task.status !== 'active' || !task.sentAt || !task.sessionId) continue;
       const session = sessions.find((item) => item.id === task.sessionId); const since = Date.now() - Date.parse(task.sentAt);
-      if (!session || session.status === 'exited' || session.status === 'error' || session.status === 'idle') { if (since > 5000) void setTaskStatus(task.id, 'review').catch(() => {}); continue; }
+      if (!session || session.status === 'exited' || session.status === 'error' || session.status === 'idle') { const outcome = session?.status === 'error' ? 'failed' : 'stopped'; if (since > 5000 && task.outcome !== outcome) void setTaskStatus(task.id, 'active', outcome).catch(() => {}); continue; }
+      if (session.attention) continue;
       const recent = samples[session.id]?.slice(-45) ?? [];
-      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) void setTaskStatus(task.id, 'review').catch(() => {});
+      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) void setTaskStatus(task.id, 'review', 'quiet').catch(() => {});
     }
     // Every 30 s: the open tasks' changes, and the board itself, so a task moved from a phone shows here too.
     if (++ticks % 6 === 0) { void refreshTaskWatch(); void loadTasks(); }

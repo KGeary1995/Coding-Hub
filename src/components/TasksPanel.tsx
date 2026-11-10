@@ -1,10 +1,10 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { ClipboardList, Send } from 'lucide-react';
-import type { Task, VerificationData } from '../../shared/workbench';
+import type { Task, VerificationData, VerificationFreshness } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
-import { loadTasks, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
+import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
 /** "Only these files": blank means the whole project. */
@@ -20,12 +20,15 @@ export function TasksPanel() {
   const { sessions, rootDirectory } = useWorkspaceStore();
   const { tasks, watch, draftFor, error } = useTaskStore();
   const [form, setForm] = useState(EMPTY_FORM); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [note, setNote] = useState('');
-  const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false });
+  const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
   // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
   const agents = channelsOf(sessions).filter((session) => session.config.engine !== 'shell');
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   useEffect(() => { void loadTasks().then(() => refreshTaskWatch()); void workbench<VerificationData>({ action: 'verification-list' }).then(setChecks).catch(() => {}); }, []);
+  // Whether each task's check still describes its files, read again with the tasks' changes.
+  useEffect(() => { if (tasks.some((task) => task.verificationId)) void workbench<VerificationFreshness>({ action: 'verification-fresh' }).then(setFresh).catch(() => {}); }, [watch, tasks]);
+  const checkText = (task: Task) => { const result = checks.results.find((r) => r.id === task.verificationId); if (!result) return ''; const state = fresh[result.id]; return `Check: ${result.profileName} passed` + (state === 'current' ? ' on these files.' : state === 'changed' ? (result.tested?.changedDuring ? ', but files changed while it ran. Run it again.' : ', but files changed since. Run it again.') : '. Trace cannot tell which files it tested.'); };
   // "Task" on a channel opens the form for it.
   useEffect(() => { if (!draftFor) return; setForm({ ...EMPTY_FORM, sessionId: draftFor, directory: folderOf(draftFor) }); setOpen(true); useTaskStore.setState({ draftFor: null }); }, [draftFor]);
   const run = async (work: () => Promise<unknown>, done = '') => { setBusy(true); setNote(''); useTaskStore.setState({ error: '' }); try { await work(); if (done) setNote(done); } catch (e) { useTaskStore.setState({ error: (e as Error).message }); } finally { setBusy(false); } };
@@ -66,9 +69,11 @@ export function TasksPanel() {
           {task.details && <p>{task.details}</p>}
           {changed.length > 0 && <details><summary>{changed.length} {changed.length === 1 ? 'file' : 'files'} changed</summary><ul>{changed.map((file) => <li key={file}><code>{file}</code></li>)}</ul></details>}
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
+          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' ? 'muted' : 'error-message'}>{OUTCOME_TEXT[task.outcome]}</p>}
+          {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
           {task.notes && <small>{task.notes}</small>}
           <div className="task-actions">
-            {(task.status === 'queued' || task.status === 'review') && task.sessionId && <button className="quiet-button" disabled={busy || !running(task.sessionId)} title={running(task.sessionId) ? 'Type this task into its channel' : 'Start that channel first'} onClick={() => void run(() => sendTask(task.id), 'Sent.')}><Send size={12} />{task.status === 'review' ? 'Send again' : 'Send'}</button>}
+            {(task.status === 'queued' || task.status === 'review' || task.status === 'active' && (task.outcome === 'stopped' || task.outcome === 'failed')) && task.sessionId && <button className="quiet-button" disabled={busy || !running(task.sessionId)} title={running(task.sessionId) ? 'Type this task into its channel' : 'Start that channel first'} onClick={() => void run(() => sendTask(task.id), 'Sent.')}><Send size={12} />{task.status === 'queued' ? 'Send' : 'Send again'}</button>}
             {task.status === 'active' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Ready for review</button>}
             {task.status === 'review' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'done'))}>Mark done</button>}
             {task.status === 'done' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Reopen</button>}

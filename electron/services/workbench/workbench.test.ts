@@ -109,6 +109,11 @@ describe('native history and task scope', () => {
     const both = await tasks.execute({ action: 'task-watch' }) as any;
     expect(both.warnings.some((warning: { taskIds: string[]; text: string }) => warning.taskIds.length === 2 && /same files|src\/a\.ts/.test(warning.text))).toBe(true);
     expect((await tasks.execute({ action: 'task-status', id: saved.id, status: 'review' }) as any).status).toBe('review');
+    // A channel that stopped leaves its task in Working, marked; sending it again or moving it by hand clears the mark.
+    const stopped = await tasks.execute({ action: 'task-status', id: other.id, status: 'active', outcome: 'stopped' }) as any; expect(stopped).toMatchObject({ status: 'active', outcome: 'stopped' });
+    expect((await tasks.execute({ action: 'task-save', id: other.id, title: 'Styles, renamed', directory: root, sessionId: other.sessionId, scope: ['src/a.ts'], status: 'active', notes: '', verificationId: null }) as any).outcome).toBe('stopped');
+    expect((await tasks.execute({ action: 'task-send', id: other.id }) as any).task.outcome).toBeUndefined();
+    await tasks.execute({ action: 'task-status', id: other.id, status: 'review', outcome: 'quiet' }); expect((await tasks.execute({ action: 'task-status', id: other.id, status: 'done' }) as any).outcome).toBeUndefined();
   });
 });
 describe('verification and experiment evidence', () => {
@@ -122,6 +127,19 @@ describe('verification and experiment evidence', () => {
     const root = fixture(); const project = path.join(root, 'project'); fs.mkdirSync(project); const service = new Verification(root, async () => true);
     const profile = await service.execute({ action: 'verification-save', name: 'Missing folder', directory: project, steps: [{ label: 'Check', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 5 }) as any;
     fs.rmdirSync(project); await expect(service.execute({ action: 'verification-run', id: profile.id })).rejects.toBeTruthy(); expect(service.running).toBe(false);
+  });
+  it('records the files a check ran on, and says when they changed since or while it ran', async () => {
+    const project = fixture(); const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project });
+    git('init'); fs.writeFileSync(path.join(project, 'a.txt'), 'a'); git('add', '.'); git('commit', '-m', 'base');
+    const service = new Verification(fixture(), async () => true);
+    const quiet = await service.execute({ action: 'verification-save', name: 'Reads only', directory: project, steps: [{ label: 'Check', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 10 }) as any;
+    const first = await service.execute({ action: 'verification-run', id: quiet.id }) as any; expect(first.tested).toMatchObject({ changedDuring: false });
+    expect(await service.execute({ action: 'verification-fresh' })).toEqual({ [first.id]: 'current' });
+    fs.writeFileSync(path.join(project, 'a.txt'), 'edited after the check');
+    expect(await service.execute({ action: 'verification-fresh' })).toEqual({ [first.id]: 'changed' });
+    const writes = await service.execute({ action: 'verification-save', name: 'Writes', directory: project, steps: [{ label: 'Edit', tool: 'python', args: ['-c', 'open("a.txt","w").write("edited by the check")'] }], timeoutSeconds: 10 }) as any;
+    const during = await service.execute({ action: 'verification-run', id: writes.id }) as any; expect(during.tested.changedDuring).toBe(true);
+    expect((await service.execute({ action: 'verification-fresh' }) as any)[during.id]).toBe('changed');
   });
   it('requires real run references and prevents counting one run twice in an experiment', () => {
     const root = fixture(); const id = randomUUID(); const service = new Experiments(root, (run) => run === id);

@@ -76,7 +76,9 @@ export function memoryContext(key: string, notes: MemoryNote[]): string {
   ].join('\n');
   if (!notes.length) return header + '\n\nNo handoff notes exist for this project yet.';
   let text = header;
-  for (const note of notes.slice(0, 8)) {
+  // A revised note is replaced by its revision; read_memory still has both.
+  const replaced = new Set(notes.flatMap((note) => note.supersedes ? [note.supersedes] : []));
+  for (const note of notes.filter((item) => !replaced.has(item.id)).slice(0, 8)) {
     const body = note.content.length > 1200 ? note.content.slice(0, 1200) + ' …' : note.content;
     const entry = `\n\n## ${note.title}\n_${note.author}, ${note.createdAt.slice(0, 16).replace('T', ' ')} UTC_\n${body}`;
     if (text.length + entry.length > CONTEXT_LIMIT) break;
@@ -252,6 +254,10 @@ export class AutoMemory {
     } else if (info.supportsConfig) {
       extra.push('--config', `developer_instructions=${JSON.stringify(codexInstructions(run.cwd, context))}`);
       if (!configured) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
+      // Codex asks before every MCP tool call. A chat (and a Round Table reviewer) has no prompt for it, so Trace's own
+      // notes tools were refused there ("user rejected MCP tool call"). They only read and write Trace's notes; an entry
+      // Trace did not install keeps Codex's own asking.
+      if (!configured || configured.key) extra.push('--config', `mcp_servers.${SERVER}.default_tools_approval_mode="approve"`);
     }
     if (!extra.length) return;
     launch.args.push(...extra);

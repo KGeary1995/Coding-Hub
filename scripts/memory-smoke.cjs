@@ -27,6 +27,12 @@ const { spawn } = require('node:child_process');
     const rejected = await codex.call('tools/call', { name: 'write_handoff', arguments: { title: '', content: 'Invalid note', author: 'codex' } }); assert.equal(rejected.result.isError, true); assert.match(rejected.result.content[0].text, /^Handoff rejected: title: /);
     // A missing author says so, instead of the generic storage message (which sent a session looking at file permissions).
     const anonymous = await codex.call('tools/call', { name: 'write_handoff', arguments: { title: 'No author', content: 'Note' } }); assert.equal(anonymous.result.isError, true); assert.match(anonymous.result.content[0].text, /author must be "claude" or "codex"/); await codex.close();
-    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, and validation rejection with the reason.');
+    // A revision names the note it replaces; reading marks the old one, and a query finds notes by their words.
+    const third = await connect(); const original = notes.find((note) => note.title === 'Claude handoff');
+    const revised = await third.call('tools/call', { name: 'write_handoff', arguments: { title: 'Claude handoff, corrected', content: 'Validation failed after all.', author: 'codex', supersedes: original.id } }); assert.equal(revised.result.isError, undefined); const revision = JSON.parse(revised.result.content[0].text); assert.equal(revision.supersedes, original.id);
+    const marked = JSON.parse((await third.call('tools/call', { name: 'read_memory', arguments: {} })).result.content[0].text); assert.deepEqual(marked.find((note) => note.id === original.id).supersededBy, [revision.id]);
+    const searched = JSON.parse((await third.call('tools/call', { name: 'read_memory', arguments: { query: 'VALIDATION remaining' } })).result.content[0].text); assert.deepEqual(searched.map((note) => note.id), [original.id]);
+    const unknown = await third.call('tools/call', { name: 'write_handoff', arguments: { title: 'Bad revision', content: 'x', author: 'codex', supersedes: 'not-an-id' } }); assert.equal(unknown.result.isError, true); assert.match(unknown.result.content[0].text, /supersedes must be the id/); await third.close();
+    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search.');
   } finally { for (const child of children) child.kill(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });
