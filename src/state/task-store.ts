@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { Task, TaskOutcome, TaskSent, TaskWatch } from '../../shared/workbench';
 import type { ChannelTranscript } from '../../shared/remote';
-import { taskSignal } from '../../shared/task-signal';
+import type { ChatBlock } from '../../shared/chat';
+import { replyToTask, taskSignal } from '../../shared/task-signal';
 import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
@@ -61,32 +62,35 @@ export async function sendTask(id: string) {
   await loadTasks(); void refreshTaskWatch();
 }
 
-/** The newest reply in a channel's conversation as the CLI recorded it (for terminals, whose screen Trace cannot read). */
-async function lastReply(sessionId: string): Promise<string | null> {
+type Said = { role: 'user' | 'assistant'; text: string };
+const textOf = (blocks: ChatBlock[]) => blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n');
+/** The newest reply to a task in a channel's conversation as the CLI recorded it (for terminals, whose screen Trace cannot read). */
+async function lastReply(sessionId: string, task: Task): Promise<string | null> {
   try {
     const transcript = await workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId });
-    const last = transcript?.messages.filter((message) => message.role === 'assistant').at(-1);
-    return last && last.role === 'assistant' ? last.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n') : null;
+    return replyToTask((transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) }), task.title);
   } catch { return null; }
 }
-/** The newest reply a chat channel drew. */
-export function chatReply(sessionId: string): string {
-  const last = useChatStore.getState().threads[sessionId]?.items.filter((item) => item.kind === 'assistant').at(-1);
-  return last && last.kind === 'assistant' ? last.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n') : '';
+/** The newest reply to a task that a chat channel drew (at a Round Table, the seat's own conversation, which has the task as Trace passed it). */
+export function chatReply(sessionId: string, task: Task): string | null {
+  const items = useChatStore.getState().threads[sessionId]?.items ?? [];
+  return replyToTask(items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []), task.title);
 }
 
 /**
  * The agent ended a turn in a channel (Claude Code's Stop hook, or a chat reply ending). Its task is done only when the
  * reply ends with TASK COMPLETE (task-signal.ts); TASK BLOCKED: … leaves it in Working, waiting for the person, and any
  * other ending (a question, a stop part way) leaves it in Working, marked unconfirmed. An error or interruption: failed.
- * `reply` is the reply's text when the caller has it (chats); otherwise it is read from the CLI's transcript.
+ * Only the reply after the task's own prompt counts. `from` is where to read it: a chat's own conversation (at a Round
+ * Table, the driver seat's), or by default the CLI's transcript of `sessionId`.
  */
-export async function taskTurnDone(sessionId: string, failed = false, reply?: string | null) {
+export async function taskTurnDone(sessionId: string, failed = false, from?: { chat: string } | { text: string | null }) {
   const task = useTaskStore.getState().tasks.find((item) => item.sessionId === sessionId && item.status === 'active' && item.sentAt);
   // A turn that ends within seconds of the send is the CLI taking the message, not the work.
   if (!task || Date.now() - Date.parse(task.sentAt!) <= 5000) return;
   if (failed) { if (task.outcome !== 'failed') await setTaskStatus(task.id, 'active', 'failed').catch(() => {}); return; }
-  const signal = taskSignal((reply === undefined ? await lastReply(sessionId) : reply) ?? '');
+  const reply = !from ? await lastReply(sessionId, task) : 'chat' in from ? chatReply(from.chat, task) : from.text;
+  const signal = taskSignal(reply ?? '');
   if (signal?.kind === 'complete') await setTaskStatus(task.id, 'review', 'finished').catch(() => {});
   else if (signal?.kind === 'blocked') await setTaskStatus(task.id, 'active', 'blocked', signal.reason).catch(() => {});
   else if (task.outcome !== 'unconfirmed') await setTaskStatus(task.id, 'active', 'unconfirmed').catch(() => {});
@@ -97,6 +101,8 @@ export async function taskTurnDone(sessionId: string, failed = false, reply?: st
  * turn ends (Codex in a terminal) only gets a mark on its task once the channel has drawn nothing for 45 s, a minute or
  * more after the task was sent: silence is not completion, so the person moves it on. The mark goes when output resumes.
  */
+/** When each quiet terminal task's reply was last read, and what it said: read again only when it may have changed. */
+const rechecked = new Map<string, { at: number; reply: string }>();
 export function startTaskAutomation() {
   let ticks = 0;
   const tick = () => {
@@ -107,8 +113,17 @@ export function startTaskAutomation() {
       if (!session || session.status === 'exited' || session.status === 'error' || session.status === 'idle') { const outcome = session?.status === 'error' ? 'failed' : 'stopped'; if (since > 5000 && task.outcome !== outcome) void setTaskStatus(task.id, 'active', outcome).catch(() => {}); continue; }
       if (session.attention) continue;
       const recent = samples[session.id]?.slice(-45) ?? [];
-      // A quiet terminal (Codex, which reports no turn end here): its transcript may already say TASK COMPLETE or BLOCKED.
-      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) { if (!task.outcome) void lastReply(session.id).then((reply) => { const signal = taskSignal(reply ?? ''); return signal?.kind === 'complete' ? setTaskStatus(task.id, 'review', 'finished') : signal?.kind === 'blocked' ? setTaskStatus(task.id, 'active', 'blocked', signal.reason) : setTaskStatus(task.id, 'active', 'quiet'); }).catch(() => {}); }
+      // A quiet terminal (Codex, which reports no turn end here): its transcript may say TASK COMPLETE or BLOCKED. A task
+      // already marked (blocked, not confirmed, quiet) is read again whenever its reply changed, at most every 30 s, so a
+      // later TASK COMPLETE after the person answered is not missed.
+      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) {
+        const last = rechecked.get(task.id);
+        if ((!task.outcome || task.outcome === 'blocked' || task.outcome === 'unconfirmed' || task.outcome === 'quiet') && (!last || Date.now() - last.at > 30000)) void lastReply(session.id, task).then((reply) => {
+          const seen = rechecked.get(task.id); rechecked.set(task.id, { at: Date.now(), reply: reply ?? '' }); if (task.outcome && seen && seen.reply === (reply ?? '')) return;
+          const signal = taskSignal(reply ?? '');
+          return signal?.kind === 'complete' ? setTaskStatus(task.id, 'review', 'finished') : signal?.kind === 'blocked' ? (task.outcome === 'blocked' && task.outcomeNote === signal.reason ? undefined : setTaskStatus(task.id, 'active', 'blocked', signal.reason)) : task.outcome ? undefined : setTaskStatus(task.id, 'active', 'quiet');
+        }).catch(() => {});
+      }
       else if (task.outcome === 'quiet' && recent.some((value) => value > 0)) void setTaskStatus(task.id, 'active').catch(() => {});
     }
     // Every 30 s: the open tasks' changes, and the board itself, so a task moved from a phone shows here too.

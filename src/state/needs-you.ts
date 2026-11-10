@@ -8,11 +8,13 @@ import { channelAlerts } from './channel-state';
  * Everything waiting for the person, in one list: channels waiting for an approval (with the exact request and since
  * when), channels that failed, and tasks that stopped, went quiet or are ready for review. Each says what to do next.
  */
-export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' }
-const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8 };
+export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings' }
+const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8, 'findings-unsaved': 4 };
 
 export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
+  // Findings of a closed table that could not be saved to shared memory: kept with the channel until saved.
+  for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !sessions.some((other) => other.id === record.partner)) items.push({ key: `s:${session.id}`, kind: 'findings-unsaved', title: 'Round Table findings not saved yet', detail: `${record.findings.length} ${record.findings.length === 1 ? 'finding' : 'findings'} from a closed table could not be written to shared memory.`, since: null, sessionId: session.id, taskId: null, action: 'save-findings' }); }
   // A Round Table message kept from before a restart waits for the person to send or drop it.
   for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting !== undefined && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: (table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting) || `${table.waitingImages?.length ?? 0} images`, since: null, sessionId, taskId: null, action: 'answer' });
   const taskOf = (sessionId: string) => tasks.find((task) => task.sessionId === sessionId && (task.status === 'active' || task.status === 'review'));

@@ -63,6 +63,11 @@ const taskColumn = async (page) => page.evaluate(() => { for (const section of d
     await page.waitForTimeout(5000);
     note('restored', { bar: await page.locator('.table-bar').innerText().catch(() => 'no bar'), notice: await page.locator('.tr-toast').allInnerTexts().catch(() => []) }); await shot(page, '06-restored');
     const drop = page.getByRole('button', { name: 'Drop it', exact: true }); if (await drop.isVisible().catch(() => false)) { await drop.click(); note('dropped', {}); }
+    // Closing the table saves its review record and unverified findings to shared memory.
+    await page.waitForTimeout(1500); await page.getByRole('button', { name: 'Close the Round Table', exact: true }).click(); await page.waitForTimeout(4000);
+    const memory = path.join(root, 'storage', 'memory'); const titles = [];
+    for (const key of fs.existsSync(memory) ? fs.readdirSync(memory) : []) for (const file of fs.readdirSync(path.join(memory, key)).filter((name) => name.endsWith('.json'))) titles.push(JSON.parse(fs.readFileSync(path.join(memory, key, file), 'utf8')).title);
+    note('closed', { saved: titles.filter((title) => /Round Table/.test(title)) }); await shot(page, '07-closed');
   } catch (error) { note('error', { error: String(error).slice(0, 500) }); await shot(page, '99-error'); }
   finally { fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2)); await app.close().catch(() => {}); }
 })();

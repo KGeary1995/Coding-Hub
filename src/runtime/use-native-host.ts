@@ -10,7 +10,7 @@ import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDim
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
-import { chatReply, startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { startTaskAutomation, taskTurnDone } from '../state/task-store';
 import { useChatStore } from '../state/chat-store';
 
 /**
@@ -21,7 +21,7 @@ function chatTurnDone(sessionId: string, failed: boolean) {
   const sessions = useWorkspaceStore.getState().sessions; const lead = leadOf(sessions, sessionId) ?? sessions.find((session) => session.id === sessionId);
   const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
   if (lead && table && seat && seat.config.engine !== table.driver) return;
-  void taskTurnDone(lead?.id ?? sessionId, failed, chatReply(sessionId));
+  void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
 }
 import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';

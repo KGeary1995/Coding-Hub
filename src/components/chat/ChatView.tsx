@@ -7,7 +7,7 @@ import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/ch
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore } from '../../state/hub-store';
 import { channelToday } from '../../state/channel-state';
-import { forgetTable, openRoundTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
+import { archiveFindings, forgetTable, openRoundTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
 import { startSession } from '../../runtime/use-native-host';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
 import type { PermissionLevel } from '../../../shared/types';
@@ -90,7 +90,8 @@ export function ChatView({ session }: { session: Session }) {
   const partnerState = partnerSession ? seatState(partnerSession, partnerThread.busy) : null;
   const partnerLive = partnerSession?.status === 'running' || partnerSession?.status === 'starting';
   /** An open table is closed through the host, whose `closed` event forgets it (as from a phone); a saved one is forgotten here. */
-  const closeTable = () => { setShowPartner(false); void (async () => { const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
+  // The findings are saved to shared memory first; if that fails the table stays open, so nothing is lost.
+  const closeTable = () => { void (async () => { const unsaved = await archiveFindings(session.id); if (unsaved) { setError(`${unsaved} The Round Table stays open; try Close again.`); return; } setShowPartner(false); const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
   const workers = table ? [chat.busy ? agent : null, partnerThread.busy ? AGENT[table.partner.engine] : null].filter(Boolean) : [agent];
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 

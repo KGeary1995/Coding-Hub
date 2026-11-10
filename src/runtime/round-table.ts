@@ -5,6 +5,7 @@ import { createSession, partnerOf, useWorkspaceStore } from '../state/workspace-
 import { useChatStore } from '../state/chat-store';
 import { hubCall } from '../state/hub-store';
 import { itemTitle } from '../../shared/memory-items';
+import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
@@ -30,7 +31,7 @@ export async function openRoundTable(leadId: string): Promise<string | null> {
   if (!lead || lead.config.engine === 'shell' || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
   if (tableOf(leadId) || opening.has(leadId)) return null;
   // A table saved earlier whose partner did not come back: replaced by a new one.
-  if (lead.roundTable) await retire(leadId);
+  if (lead.roundTable) { const why = await retire(leadId); if (why) return why; }
   if (useWorkspaceStore.getState().sessions.length >= MAX_CHANNELS) return TABLE_FULL;
   const engine = lead.config.engine === 'claude' ? 'codex' as const : 'claude' as const;
   // The same folder the leading chat runs in, whatever the workspace root is now.
@@ -55,32 +56,50 @@ export async function openRoundTable(leadId: string): Promise<string | null> {
  * The lead forgets its table, and its hidden partner is stopped and removed. A partner that would not stop is kept,
  * and as the table is forgotten it gets a tile of its own, so a running agent is never left out of sight.
  */
+/** One line of the review record for a finding: what, where, and what became of it. */
+const findingLine = (finding: Finding) => [`${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}${finding.changedAt ? `, answered on ${finding.changedAt}` : ''}.`].filter(Boolean).join(' · ');
+
 /**
- * Findings not yet verified outlive the table: each becomes an open item in the project's shared memory (the channel's
- * chosen memory project, or its folder's), so later sessions see it until someone resolves it.
+ * A table's findings outlive it, in the project's shared memory (the channel's chosen memory project, or its folder's):
+ * the whole review record as one note, verified findings included, and each finding not yet verified as an open item, so
+ * later sessions see it until someone resolves it. Throws when memory cannot be written; nothing is dropped then.
  */
 export async function keepFindings(lead: Session): Promise<number> {
-  const open = (lead.roundTable?.findings ?? []).filter((finding) => finding.status !== 'verified');
+  const findings = lead.roundTable?.findings ?? []; const open = findings.filter((finding) => finding.status !== 'verified');
   const directory = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
-  if (!open.length || lead.config.engine === 'shell' || (!lead.config.memoryKey && !directory)) return 0;
+  if (!findings.length || lead.config.engine === 'shell') return 0;
+  if (!lead.config.memoryKey && !directory) throw new Error('This channel has no folder to find its memory project from.');
   const project = lead.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
+  await hubCall({ action: 'memory-write', project, title: `Round Table review record: ${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}, ${findings.length - open.length} verified`, content: ['Saved by Trace when the Round Table closed.', ...findings.map((finding) => `- ${findingLine(finding)}`)].join('\n'), author: 'human' });
   for (const finding of open) {
     const content = [`Round Table finding ${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}.`, 'Saved by Trace when the Round Table closed, because it was not verified.'].filter(Boolean).join('\n');
     await hubCall({ action: 'memory-write', project, title: itemTitle(`Round Table ${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}`), content, author: 'human' });
   }
-  return open.length;
+  return findings.length;
 }
 
-async function retire(leadId: string) {
-  if (retiring.has(leadId)) return; retiring.add(leadId);
+/**
+ * Saves a table's findings to shared memory and takes them off its saved record, so they are saved once. The error
+ * message when memory cannot be written (the findings stay on the record then), or null.
+ */
+export async function archiveFindings(leadId: string): Promise<string | null> {
+  const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId); if (!lead?.roundTable?.findings?.length) return null;
+  try { await keepFindings(lead); } catch (error) { return `The Round Table's findings could not be saved to shared memory (${(error as Error).message}). They are kept with the channel; Needs you can try again.`; }
+  useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === leadId && session.roundTable ? { ...session, roundTable: { ...session.roundTable, findings: undefined } } : session) }));
+  return null;
+}
+
+/** Returns an error message when the findings could not be saved: the table's record then stays with the lead, findings and all. */
+async function retire(leadId: string): Promise<string | null> {
+  if (retiring.has(leadId)) return null; retiring.add(leadId);
   try {
-    const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
-    if (lead) await keepFindings(lead).catch(() => { /* The table still closes; its findings are lost only if memory cannot be written. */ });
+    const failure = await archiveFindings(leadId);
     const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId);
     if (partner && live(partner)) { await settled([partner.id], 'starting'); await stopSession(partner.id); await settled([partner.id]); }
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions
       .filter((session) => session.id !== partner?.id || live(session))
-      .map((session) => session.id === leadId && session.roundTable ? { ...session, roundTable: undefined } : session) }));
+      .map((session) => session.id === leadId && session.roundTable && !failure ? { ...session, roundTable: undefined } : session) }));
+    return failure;
   } finally { retiring.delete(leadId); }
 }
 /** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */

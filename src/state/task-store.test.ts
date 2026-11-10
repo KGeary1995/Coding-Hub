@@ -16,32 +16,45 @@ describe('a turn ending moves a working task only when the agent says it is done
   beforeEach(() => { calls.length = 0; transcript = null; });
   it('sends a reply ending in TASK COMPLETE to Ready for review', async () => {
     const task = working('a'); useTaskStore.setState({ tasks: [task] });
-    await taskTurnDone('a', false, 'Changed a.ts; tests pass.\n\n**TASK COMPLETE**');
+    await taskTurnDone('a', false, { text: 'Changed a.ts; tests pass.\n\n**TASK COMPLETE**' });
     expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
   });
   it('keeps a task in Working when the agent is blocked, with what it needs, or ends without the line', async () => {
     const task = working('b'); listed = [task]; useTaskStore.setState({ tasks: [task] });
-    await taskTurnDone('b', false, 'Which database should I use?\nTASK BLOCKED: choose Postgres or SQLite');
-    await taskTurnDone('b', false, 'Should I also update the docs?');
+    await taskTurnDone('b', false, { text: 'Which database should I use?\nTASK BLOCKED: choose Postgres or SQLite' });
+    await taskTurnDone('b', false, { text: 'Should I also update the docs?' });
     expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'blocked', outcomeNote: 'choose Postgres or SQLite' }, { action: 'task-status', id: task.id, status: 'active', outcome: 'unconfirmed' }]);
   });
   it('reads a terminal channel\u2019s reply from its transcript', async () => {
     const task = working('t'); useTaskStore.setState({ tasks: [task] });
-    transcript = { type: 'history', messages: [{ role: 'user', text: 'go', images: 0 }, { role: 'assistant', messageId: 'm', blocks: [{ type: 'text', text: 'Done.\nTASK COMPLETE' }] }], results: {} };
+    transcript = { type: 'history', messages: [{ role: 'user', text: 'Task: Fix it. Do it.', images: 0 }, { role: 'assistant', messageId: 'm', blocks: [{ type: 'text', text: 'Done.\nTASK COMPLETE' }] }], results: {} };
     await taskTurnDone('t'); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
+  });
+  it('never takes an earlier task’s TASK COMPLETE for the next task sent to the same channel', async () => {
+    const second = working('t2', { title: 'Write the docs' }); listed = [second]; useTaskStore.setState({ tasks: [second] });
+    transcript = { type: 'history', messages: [{ role: 'user', text: 'Task: Fix it. ...', images: 0 }, { role: 'assistant', messageId: 'a', blocks: [{ type: 'text', text: 'TASK COMPLETE' }] }, { role: 'user', text: 'Task: Write the docs. ...', images: 0 }], results: {} };
+    await taskTurnDone('t2'); expect(statusCalls()).toEqual([{ action: 'task-status', id: second.id, status: 'active', outcome: 'unconfirmed' }]);
+    calls.length = 0; (transcript as { messages: unknown[] }).messages.push({ role: 'assistant', messageId: 'b', blocks: [{ type: 'text', text: 'Docs written.\nTASK COMPLETE' }] });
+    useTaskStore.setState({ tasks: [{ ...second, outcome: 'unconfirmed' }] }); listed = [{ ...second, outcome: 'unconfirmed' }];
+    await taskTurnDone('t2'); expect(statusCalls()).toEqual([{ action: 'task-status', id: second.id, status: 'review', outcome: 'finished' }]);
+  });
+  it('reads a chat seat’s own conversation after the task’s prompt', async () => {
+    const task = working('c2', { title: 'Rename the file' }); listed = [task]; useTaskStore.setState({ tasks: [task] });
+    useChatStore.setState({ threads: { seat: { runId: null, items: [{ kind: 'user', id: 'u0', text: 'Task: Old one. x', images: [], at: '' }, { kind: 'assistant', id: 'a0', blocks: [{ type: 'text', text: 'TASK COMPLETE' }], streaming: '' }, { kind: 'user', id: 'u1', text: '[Trace Round Table] ...\n\nTask: Rename the file. Do it.', images: [], at: '' }, { kind: 'assistant', id: 'a1', blocks: [{ type: 'text', text: 'Renamed.\nTASK COMPLETE' }], streaming: '' }], results: {}, busy: false, model: null } } as never });
+    await taskTurnDone('c2', false, { chat: 'seat' }); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
   });
   it('keeps a task in Working, marked failed, when the turn ended in an error or was interrupted', async () => {
     const task = working('e'); useTaskStore.setState({ tasks: [task] });
-    await taskTurnDone('e', true, 'TASK COMPLETE'); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'failed' }]);
+    await taskTurnDone('e', true, { text: 'TASK COMPLETE' }); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'failed' }]);
   });
   it('ignores a turn that ends within seconds of the send (the CLI taking the message)', async () => {
     useTaskStore.setState({ tasks: [working('c', { sentAt: new Date().toISOString() })] });
-    await taskTurnDone('c', false, 'TASK COMPLETE'); expect(statusCalls()).toHaveLength(0);
+    await taskTurnDone('c', false, { text: 'TASK COMPLETE' }); expect(statusCalls()).toHaveLength(0);
   });
 });
 
 describe('task automation never takes silence or a stop for completion', () => {
-  beforeEach(() => { calls.length = 0; vi.useFakeTimers(); });
+  beforeEach(() => { calls.length = 0; transcript = null; vi.useFakeTimers(); });
   const run = async (session: Record<string, unknown>, samples: number[], task: Task) => {
     useWorkspaceStore.setState({ sessions: [{ config: { engine: 'codex', chat: false }, attention: null, ...session }] as never });
     useActivityStore.setState({ samples: { [session.id as string]: samples } } as never); listed = [task]; useTaskStore.setState({ tasks: [task] });
@@ -53,6 +66,11 @@ describe('task automation never takes silence or a stop for completion', () => {
   });
   it('does nothing to a quiet channel that is waiting for an approval', async () => {
     expect(await run({ id: 'w', status: 'running', attention: { message: 'Allow?', at: new Date().toISOString() } }, Array(45).fill(0), working('w'))).toEqual([]);
+  });
+  it('reads a blocked quiet terminal again, and takes its later TASK COMPLETE', async () => {
+    const task = working('k', { outcome: 'blocked', outcomeNote: 'which file?' });
+    transcript = { type: 'history', messages: [{ role: 'user', text: 'Task: Fix it. x', images: 0 }, { role: 'assistant', messageId: 'a', blocks: [{ type: 'text', text: 'Used a.ts.\nTASK COMPLETE' }] }], results: {} };
+    expect(await run({ id: 'k', status: 'running' }, Array(45).fill(0), task)).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
   });
   it('clears the quiet mark when the channel draws again', async () => {
     const task = working('r', { outcome: 'quiet' }); expect(await run({ id: 'r', status: 'running' }, [...Array(44).fill(0), 3], task)).toEqual([{ action: 'task-status', id: task.id, status: 'active' }]);
