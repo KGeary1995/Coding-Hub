@@ -25,7 +25,7 @@ export const useTaskStore = create<{ tasks: Task[]; watch: TaskWatch; draftFor: 
 export async function loadTasks() { try { useTaskStore.setState({ tasks: await workbench<Task[]>({ action: 'task-list' }), error: '' }); } catch (error) { useTaskStore.setState({ error: (error as Error).message }); } }
 export async function saveTask(task: Omit<Task, 'id' | 'createdAt'> & { id?: string }) {
   // Fields the host keeps itself are left out; task-save refuses them.
-  const { sentAt: _sent, baseline: _baseline, designRef: _design, createdAt: _created, outcome: _outcome, pullRequest: _pr, ...fields } = task as Task;
+  const { sentAt: _sent, baseline: _baseline, designRef: _design, createdAt: _created, outcome: _outcome, outcomeNote: _note, pullRequest: _pr, sendId: _send, ...fields } = task as Task;
   const saved = await workbench<Task>({ action: 'task-save', ...fields }); await loadTasks(); return saved;
 }
 export async function removeTask(id: string) { await workbench({ action: 'task-remove', id }); await loadTasks(); }
@@ -68,13 +68,13 @@ const textOf = (blocks: ChatBlock[]) => blocks.flatMap((block) => block.type ===
 async function lastReply(sessionId: string, task: Task): Promise<string | null> {
   try {
     const transcript = await workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId });
-    return replyToTask((transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) }), task.title);
+    return replyToTask((transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) }), task);
   } catch { return null; }
 }
 /** The newest reply to a task that a chat channel drew (at a Round Table, the seat's own conversation, which has the task as Trace passed it). */
 export function chatReply(sessionId: string, task: Task): string | null {
   const items = useChatStore.getState().threads[sessionId]?.items ?? [];
-  return replyToTask(items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []), task.title);
+  return replyToTask(items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []), task);
 }
 
 /**

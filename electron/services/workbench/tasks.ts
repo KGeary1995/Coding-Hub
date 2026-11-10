@@ -10,23 +10,23 @@ import type { Verification } from './verification';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 import { changedFiles } from './repository-state';
-import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
+import { promptMark, SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 const scope = z.string().trim().min(1).max(300).refine((s) => !s.includes('\\') && !s.startsWith('/') && !s.replace(/\/$/, '').split('/').some((part) => part === '..' || part === '.' || part === '') && !s.includes('\0') && !/^[a-z]:/i.test(s) && !/[?\[\]]/.test(s) && (!s.includes('*') || s === '*' || s === '**' || s.endsWith('/**') && !s.slice(0, -3).includes('*')), 'Use relative paths such as src/** or README.md.');
 /** A changed file as it was when a task was sent: its size and when it last changed, so later edits to it show. */
 const signature = z.string().max(60);
 /** designRef linked a task to an annotation in the removed Design workspace. Saved tasks may still carry it, so it is read and kept, but never set. */
-const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), details: z.string().max(2000).optional(), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime(), sentAt: z.iso.datetime().optional(), baseline: z.record(z.string().max(4096), signature).optional(), outcome: z.enum(['finished', 'quiet', 'stopped', 'failed', 'blocked', 'unconfirmed']).optional(), outcomeNote: z.string().max(500).optional(), pullRequest: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/).optional() }).strict();
+const task = z.object({ id: z.uuid(), designRef: z.object({ snapshotId: z.uuid(), annotationId: z.uuid() }).strict().optional(), title: z.string().trim().min(1).max(150), details: z.string().max(2000).optional(), directory: z.string().max(4096), sessionId: z.uuid().nullable(), scope: z.array(scope).min(1).max(30), status: z.enum(['queued', 'active', 'review', 'done']), notes: z.string().max(2000), verificationId: z.uuid().nullable(), createdAt: z.iso.datetime(), sentAt: z.iso.datetime().optional(), baseline: z.record(z.string().max(4096), signature).optional(), outcome: z.enum(['finished', 'quiet', 'stopped', 'failed', 'blocked', 'unconfirmed']).optional(), outcomeNote: z.string().max(500).optional(), sendId: z.string().regex(/^t-[0-9a-f]{8}$/).optional(), pullRequest: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/).optional() }).strict();
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('task-list') }).strict(), z.object({ action: z.literal('task-audit') }).strict(), z.object({ action: z.literal('task-watch') }).strict(),
   z.object({ action: z.literal('task-send'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-detail'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-pr'), id: z.uuid(), url: task.shape.pullRequest.unwrap() }).strict(), z.object({ action: z.literal('task-remove'), id: z.uuid() }).strict(), z.object({ action: z.literal('task-status'), id: z.uuid(), status: task.shape.status, outcome: task.shape.outcome, outcomeNote: task.shape.outcomeNote }).strict(),
-  task.omit({ createdAt: true, id: true, sentAt: true, baseline: true, designRef: true, outcome: true, outcomeNote: true, pullRequest: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
+  task.omit({ createdAt: true, id: true, sentAt: true, baseline: true, designRef: true, outcome: true, outcomeNote: true, pullRequest: true, sendId: true }).extend({ action: z.literal('task-save'), id: z.uuid().optional() }).strict()]);
 export function matchesScope(file: string, patterns: string[]) { return patterns.some((pattern) => pattern === '**' || pattern === '*' || pattern.endsWith('/**') ? pattern === '**' || pattern === '*' || file.startsWith(pattern.slice(0, -2)) : file === pattern || file.startsWith(pattern.replace(/\/$/, '') + '/')); }
 export function scopesOverlap(a: string[], b: string[]) { return a.some((left) => b.some((right) => matchesScope(left.replace(/\/\*\*$/, '/scope-file'), [right]) || matchesScope(right.replace(/\/\*\*$/, '/scope-file'), [left]))); }
 /** A task limited to some files, not the whole project. */
 export const limited = (task: Pick<Task, 'scope'>) => !task.scope.some((pattern) => pattern === '**' || pattern === '*');
 /** What a task's agent is asked, on one line (a terminal sends on Enter). */
-export function taskPrompt(task: Pick<Task, 'title' | 'details' | 'scope'>) {
+export function taskPrompt(task: Pick<Task, 'title' | 'details' | 'scope' | 'sendId'>) {
   const details = task.details?.trim().replace(/\s*\n\s*/g, ' ');
-  return [`Task: ${task.title.trim().replace(/\s*\n\s*/g, ' ')}${/[.!?]$/.test(task.title.trim()) ? '' : '.'}`, details, limited(task) ? `Change only these files or folders: ${task.scope.join(', ')}. If the task needs others, ask me first.` : null, SIGNAL_INSTRUCTION].filter(Boolean).join(' ');
+  return [promptMark(task), details, limited(task) ? `Change only these files or folders: ${task.scope.join(', ')}. If the task needs others, ask me first.` : null, SIGNAL_INSTRUCTION].filter(Boolean).join(' ');
 }
 
 
@@ -43,7 +43,7 @@ export class Tasks {
       if (request.verificationId) { const check = this.verification.data().results.find((r) => r.id === request.verificationId); if (!check?.passed || path.resolve(check.directory) !== cwd) throw new HubError('TASK_CHECK', 'Select a passing verification result for this project.'); }
       const previous = tasks.find((t) => t.id === request.id);
       const designRef = previous?.designRef;
-      const value: Task = { ...(designRef ? { designRef } : {}), id: request.id ?? randomUUID(), title: request.title, ...(request.details?.trim() ? { details: request.details.trim() } : {}), directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: previous?.createdAt ?? new Date().toISOString(), ...(previous?.sentAt ? { sentAt: previous.sentAt } : {}), ...(previous?.baseline ? { baseline: previous.baseline } : {}), ...(previous?.outcome && previous.status === request.status ? { outcome: previous.outcome, ...(previous.outcomeNote ? { outcomeNote: previous.outcomeNote } : {}) } : {}), ...(previous?.pullRequest ? { pullRequest: previous.pullRequest } : {}) };
+      const value: Task = { ...(designRef ? { designRef } : {}), id: request.id ?? randomUUID(), title: request.title, ...(request.details?.trim() ? { details: request.details.trim() } : {}), directory: cwd, sessionId: request.sessionId, scope: request.scope, status: request.status, notes: request.notes, verificationId: request.verificationId, createdAt: previous?.createdAt ?? new Date().toISOString(), ...(previous?.sentAt ? { sentAt: previous.sentAt } : {}), ...(previous?.baseline ? { baseline: previous.baseline } : {}), ...(previous?.sendId ? { sendId: previous.sendId } : {}), ...(previous?.outcome && previous.status === request.status ? { outcome: previous.outcome, ...(previous.outcomeNote ? { outcomeNote: previous.outcomeNote } : {}) } : {}), ...(previous?.pullRequest ? { pullRequest: previous.pullRequest } : {}) };
       this.write([...tasks.filter((t) => t.id !== value.id), value]); return value;
     }
     if (request.action === 'task-remove') { this.write(tasks.filter((t) => t.id !== request.id)); return null; }
@@ -55,7 +55,8 @@ export class Tasks {
         if (!current.sessionId) throw new HubError('TASK_CHANNEL', 'Choose the channel to give this task to first.');
         // What was already changed when the task was sent is not this task's work.
         const files = await changedFiles(current.directory);
-        const { outcome: _old, outcomeNote: _note, ...rest } = current; value = { ...rest, status: 'active', sentAt: new Date().toISOString(), baseline: Object.fromEntries(files ?? []) };
+        const { outcome: _old, outcomeNote: _note, ...rest } = current; // A new id each send, in the prompt, so its replies are told apart from an earlier send's or another task's.
+        value = { ...rest, status: 'active', sentAt: new Date().toISOString(), sendId: `t-${randomUUID().replace(/-/g, '').slice(0, 8)}`, baseline: Object.fromEntries(files ?? []) };
       }
       this.write([...tasks.filter((t) => t.id !== value.id), value]);
       return request.action === 'task-send' ? { task: value, prompt: taskPrompt(value) } : value;

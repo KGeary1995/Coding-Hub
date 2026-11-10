@@ -101,6 +101,8 @@ describe('native history and task scope', () => {
     const tasks = new Tasks(fixture(), new Verification(fixture(), async () => true)); const session = randomUUID();
     const saved = await tasks.execute({ action: 'task-save', title: 'Settings', directory: root, sessionId: session, scope: ['src/**'], status: 'queued', notes: '', verificationId: null }) as any;
     const sent = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(sent.task.status).toBe('active'); expect(sent.prompt).toContain('src/**');
+    expect(sent.task.sendId).toMatch(/^t-[0-9a-f]{8}$/); expect(sent.prompt.startsWith(`Task ${sent.task.sendId}: Settings.`)).toBe(true);
+    const again = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(again.task.sendId).not.toBe(sent.task.sendId); expect(again.prompt).toContain(again.task.sendId);
     expect(await tasks.execute({ action: 'task-watch' })).toEqual({ changed: { [saved.id]: [] }, warnings: [] });
     // The agent changes its file, and one outside its task.
     fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'changed'); fs.writeFileSync(path.join(root, 'package.json'), '{}');
@@ -131,7 +133,7 @@ describe('a task moved into a worktree', () => {
     const check = await verification.execute({ action: 'verification-run', id: profile.id }) as any; expect(check.passed).toBe(true);
     const saved = await tasks.execute({ action: 'task-save', title: 'Fix it', directory: old, sessionId: null, scope: ['**'], status: 'queued', notes: 'Earlier note', verificationId: check.id }) as any;
     // What saveTask sends: the host keeps these fields itself.
-    const fields = ({ sentAt: _s, baseline: _b, designRef: _d, createdAt: _c, outcome: _o, pullRequest: _p, ...rest }: any) => rest;
+    const fields = ({ sentAt: _s, baseline: _b, designRef: _d, createdAt: _c, outcome: _o, outcomeNote: _n, pullRequest: _p, sendId: _i, ...rest }: any) => rest;
     const channel = randomUUID();
     await expect(tasks.execute({ action: 'task-save', ...fields({ ...saved, sessionId: channel, directory: tree }) })).rejects.toMatchObject({ code: 'TASK_CHECK' });
     const moved = await tasks.execute({ action: 'task-save', ...fields(movedTask(saved, channel, tree)) }) as any;
