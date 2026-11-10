@@ -37,6 +37,8 @@ interface Table {
   recent: string[];
   /** The folder both agents work in, and the review record. */
   cwd: string; findings: Finding[];
+  /** The files when the current turns were sent; and whether the answers are being read into the record (the next round waits for it). */
+  turnStart: Promise<string | null> | null; reviewing: boolean;
 }
 
 /**
@@ -95,7 +97,7 @@ export class RoundTables {
     if (lead.engine === partner.engine) throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     if (leadRun.cwd !== partnerRun.cwd) throw new HubError('TABLE_FOLDER', 'Both agents must work in the same folder.');
     if (leadRun.owner !== owner || partnerRun.owner !== owner) throw new HubError('TABLE_OWNER', 'Both chats must be open in this window.');
-    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: [] };
+    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: [], turnStart: null, reviewing: false };
     this.tables.set(leadRunId, table); this.roles(table);
     // A conversation already under way: the leading agent sums it up, and the newcomer gets that plus the latest messages.
     if (table.recent.length) {
@@ -114,7 +116,7 @@ export class RoundTables {
    */
   send(leadRunId: string, text: string, images: ChatImage[]) {
     const table = this.leading(leadRunId);
-    if (table.lead.busy || table.partner.busy) {
+    if (table.lead.busy || table.partner.busy || table.reviewing) {
       // Waiting messages go as one, and a message carries at most ten images: refused rather than dropped.
       if (table.queued && table.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${table.queued.images.length} images and a message carries at most ${MAX_IMAGES}. Send this one after the agents finish.`);
       table.queued = table.queued ? { text: [table.queued.text, text].filter(Boolean).join('\n\n'), images: [...table.queued.images, ...images] } : { text, images }; return;
@@ -122,7 +124,7 @@ export class RoundTables {
     this.ask(table, text, images);
   }
   private ask(table: Table, text: string, images: ChatImage[]) {
-    table.round = 0; table.agreed = false; table.phase = 'answering';
+    table.round = 0; table.agreed = false; table.phase = 'answering'; this.snapshot(table);
     // The person's messages reach the agents from here, not from the window, so they are remembered here.
     for (const seat of [table.lead, table.partner]) this.remember(seat.runId, { type: 'user', text, images: images.length });
     for (const seat of [table.lead, table.partner]) {
@@ -185,7 +187,7 @@ export class RoundTables {
 
   private settle(table: Table, seat: Seat) {
     if (table.lead.busy || table.partner.busy) { this.publish(table); return; }
-    if (table.queued) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
+    if (table.phase === 'joining' && table.queued) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
     if (table.phase === 'joining') {
       const summary = seat.answer || '(no summary)';
       const recent = table.recent.slice(-RECENT).join('\n\n');
@@ -193,11 +195,26 @@ export class RoundTables {
       this.host.send(table.partner.runId, `${this.brief(table, table.partner)}\n\nYou are joining a conversation already under way. ${NAME[table.lead.engine]}'s summary:\n\n${summary}\n\nThe latest messages:\n\n${recent}\n\nSay briefly that you are caught up and anything you would add. Wait for the person's next message before changing anything.`, []);
       this.publish(table); return;
     }
-    this.review(table);
+    // The record is read, and the files' state taken, before anyone starts another turn that could change them.
+    if (this.host.stateOf) {
+      table.reviewing = true;
+      void this.review(table).catch(() => { /* Recorded without the files' state. */ }).finally(() => { table.reviewing = false; if (this.tables.get(table.lead.runId) === table) this.next(table); });
+      return;
+    }
+    void this.review(table); this.next(table);
+  }
+  /** A message the person sent meanwhile goes next, in place of further rounds; otherwise the discussion goes on. */
+  private next(table: Table) {
+    if (table.queued) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
+    this.discuss(table);
+  }
+
+  /** After both answered: stop, or pass each the other's answer for the next round. */
+  private discuss(table: Table) {
     const answers = [table.lead.answer ?? '', table.partner.answer ?? ''];
     table.agreed = table.round > 0 && answers.every((answer) => AGREES.test(answer));
     if (table.agreed || table.round >= table.rounds || answers.every((answer) => !answer)) { table.phase = 'idle'; this.publish(table); return; }
-    table.round++; table.phase = 'discussing';
+    table.round++; table.phase = 'discussing'; this.snapshot(table);
     // Both answers are read before either seat starts its next turn (which clears its answer).
     const given = new Map([[table.lead, table.lead.answer], [table.partner, table.partner.answer]]);
     for (const each of [table.lead, table.partner]) {
@@ -216,7 +233,9 @@ export class RoundTables {
    * Reads both answers into the review record: the reviewer's new findings and checks, and the driver's answers. Each
    * change notes the files as they are now, so a finding shows which version was reviewed and which was answered.
    */
-  private review(table: Table) {
+  /** The files as the coming turns start, to compare with how they are when the answers are in. */
+  private snapshot(table: Table) { table.turnStart = this.host.stateOf ? this.host.stateOf(table.cwd).catch(() => null) : null; }
+  private async review(table: Table) {
     const driver = table.lead.engine === table.driver ? table.lead : table.partner; const reviewer = this.other(table, driver);
     const changed: Finding[] = []; const at = new Date().toISOString();
     for (const found of parseFindings(reviewer.answer ?? '')) {
@@ -227,12 +246,14 @@ export class RoundTables {
     for (const [seat, role] of [[reviewer, 'reviewer'], [driver, 'driver']] as const) for (const { id, verb, note } of parseAnswers(seat.answer ?? '', role)) {
       const finding = table.findings.find((item) => item.id === id); if (finding && apply(finding, verb, note) && !changed.includes(finding)) changed.push(finding);
     }
-    if (!changed.length || !this.host.stateOf) return;
-    void this.host.stateOf(table.cwd).then((state) => {
-      const short = state ? state.slice(0, 12) : null;
-      for (const finding of changed) { if (finding.status === 'open' && !finding.reviewedAt) finding.reviewedAt = short; else finding.changedAt = short; }
-      if (this.tables.get(table.lead.runId) === table) this.publish(table);
-    }).catch(() => { /* Recorded without the files' state. */ });
+    if (!changed.length || !this.host.stateOf) { if (changed.length) this.publish(table); return; }
+    const [before, after] = await Promise.all([table.turnStart ?? Promise.resolve(null), this.host.stateOf(table.cwd).catch(() => null)]);
+    const short = after ? after.slice(0, 12) : null; const moved = before !== null && after !== null && before !== after;
+    for (const finding of changed) {
+      if (finding.status === 'open' && !finding.reviewedAt) { finding.reviewedAt = short; if (moved) finding.filesChanged = true; }
+      else finding.changedAt = short;
+    }
+    if (this.tables.get(table.lead.runId) === table) this.publish(table);
   }
 
   private remember(runId: string, event: ChatEvent) {

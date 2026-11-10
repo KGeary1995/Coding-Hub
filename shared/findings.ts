@@ -15,6 +15,8 @@ export interface Finding {
   response: string; check: string;
   /** The files as they were when it was reported, and when its status last changed (repositoryState, shortened); null when not a Git folder. */
   reviewedAt: string | null; changedAt: string | null;
+  /** Files changed while the turn it came from ran (the driver works at the same time), so which version was reviewed is uncertain. */
+  filesChanged?: boolean;
   /** The round it was reported in, and when. */
   round: number; at: string;
 }

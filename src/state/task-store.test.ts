@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../shared/workbench';
 
 const calls: Record<string, unknown>[] = []; let listed: Task[] = [];
-vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'task-list' ? listed : null; }) }));
+vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
 vi.mock('../runtime/terminals', () => ({ writeTerminal: vi.fn(async () => true) }));
 
-const { startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
+const { sendTask, startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
+const { useChatStore } = await import('./chat-store');
 const { useWorkspaceStore } = await import('./workspace-store');
 const { useActivityStore } = await import('./activity-store');
 const working = (sessionId: string, extra: Partial<Task> = {}): Task => ({ id: crypto.randomUUID(), title: 'Fix it', directory: '/project', sessionId, scope: ['**'], status: 'active', notes: '', verificationId: null, createdAt: new Date().toISOString(), sentAt: new Date(Date.now() - 60000).toISOString(), ...extra });
@@ -49,5 +50,16 @@ describe('task automation never takes silence or a stop for completion', () => {
   it('keeps a task whose channel stopped or failed in Working, marked', async () => {
     const stopped = working('s'); expect(await run({ id: 's', status: 'exited' }, [], stopped)).toEqual([{ action: 'task-status', id: stopped.id, status: 'active', outcome: 'stopped' }]);
     calls.length = 0; vi.useFakeTimers(); const failed = working('f'); expect(await run({ id: 'f', status: 'error' }, [], failed)).toEqual([{ action: 'task-status', id: failed.id, status: 'active', outcome: 'failed' }]);
+  });
+});
+
+describe('sending a task to a Round Table', () => {
+  it('goes to both agents through table-send, and to a plain chat through send', async () => {
+    const chats: Record<string, unknown>[] = []; (globalThis as { window?: unknown }).window = { codingHub: { chat: vi.fn(async (request: Record<string, unknown>) => { chats.push(request); return { ok: true, value: null }; }) } };
+    const lead = { id: 'lead', status: 'running', runId: crypto.randomUUID(), config: { engine: 'claude', chat: true } };
+    useWorkspaceStore.setState({ sessions: [lead] as never }); const task = working('lead'); listed = [task]; useTaskStore.setState({ tasks: [task] });
+    useChatStore.setState({ threads: { lead: { runId: lead.runId, items: [], results: {}, busy: false, model: null, table: { partner: { sessionId: 'p', runId: crypto.randomUUID(), engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false } } } });
+    await sendTask(task.id); expect(chats.at(-1)).toMatchObject({ action: 'table-send', sessionId: 'lead', text: 'Task: Fix it.' });
+    useChatStore.setState({ threads: {} }); await sendTask(task.id); expect(chats.at(-1)).toMatchObject({ action: 'send', sessionId: 'lead' });
   });
 });

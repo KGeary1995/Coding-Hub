@@ -139,7 +139,7 @@ function FindingsList({ findings }: { findings: Finding[] }) {
   const open = findings.filter((finding) => finding.status === 'open').length; const unchecked = findings.filter((finding) => finding.status === 'fixed' || finding.status === 'declined').length;
   return <details className="table-findings"><summary>Findings · {open} open{unchecked ? ` · ${unchecked} to check` : ''} · {findings.length - open - unchecked} verified</summary>
     <ol>{findings.map((finding) => <li key={finding.id} className={`finding-${finding.status}`}><strong>{finding.id} · {finding.severity}</strong> {finding.text}{finding.evidence && <> <code>{finding.evidence}</code></>}
-      <small>{STATUS_LABEL[finding.status]}{finding.response ? ` · Driver: ${finding.response}` : ''}{finding.check ? ` · Reviewer: ${finding.check}` : ''}{finding.reviewedAt ? ` · Reviewed on files ${finding.reviewedAt}` : ''}{finding.changedAt ? `, answered on ${finding.changedAt}` : ''}</small></li>)}</ol>
+      <small>{STATUS_LABEL[finding.status]}{finding.response ? ` · Driver: ${finding.response}` : ''}{finding.check ? ` · Reviewer: ${finding.check}` : ''}{finding.reviewedAt ? ` · Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}` : ''}{finding.changedAt ? `, answered on ${finding.changedAt}` : ''}</small></li>)}</ol>
   </details>;
 }
 

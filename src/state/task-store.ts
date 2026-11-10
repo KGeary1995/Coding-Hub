@@ -4,7 +4,7 @@ import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
 import { useActivityStore } from './activity-store';
-import { chatFailed, chatSent } from './chat-store';
+import { chatFailed, chatSent, useChatStore } from './chat-store';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -49,7 +49,9 @@ export async function sendTask(id: string) {
   let sent: boolean;
   if (session.config.chat && window.codingHub) {
     chatSent(session.id, prompt, []);
-    const result = await window.codingHub.chat({ action: 'send', sessionId: session.id, runId: session.runId, text: prompt, images: [] }).catch(() => null);
+    // A chat leading a Round Table passes the task to both agents, as a message typed there would.
+    const table = Boolean(useChatStore.getState().threads[session.id]?.table);
+    const result = await window.codingHub.chat(table ? { action: 'table-send', sessionId: session.id, runId: session.runId, text: prompt, images: [] } : { action: 'send', sessionId: session.id, runId: session.runId, text: prompt, images: [] }).catch(() => null);
     if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.');
     sent = Boolean(result?.ok);
   } else sent = await writeTerminal(session.id, prompt + '\r');

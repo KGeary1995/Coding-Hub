@@ -137,22 +137,34 @@ describe('Round Table', () => {
 });
 
 describe('Round Table review record', () => {
-  it('records the reviewer findings, passes them to the driver, and follows them to verified, noting the files reviewed', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  it('records the reviewer findings, passes them to the driver only after the files are noted, and follows them to verified', async () => {
     const { tables, sent, say, done, last } = setup(); let state = 'a'.repeat(64);
     (tables as unknown as { host: TableHost }).host.stateOf = async () => state;
     tables.open(1, CLAUDE, CODEX, 'claude', 3);
-    expect(sent).toHaveLength(0); tables.send(CLAUDE, 'Review the change.', []); expect(sent[1].text).toContain('FINDING high|medium|low');
+    tables.send(CLAUDE, 'Review the change.', []); expect(sent[1].text).toContain('FINDING high|medium|low');
     say(CLAUDE, 'I changed the parser.'); done(CLAUDE);
     say(CODEX, 'Two problems.\nFINDING high src/parse.ts:40 — drops the last line\nFINDING low docs/a.md — typo'); done(CODEX);
-    expect(last().table!.findings).toMatchObject([{ id: 'F1', severity: 'high', evidence: 'src/parse.ts:40', status: 'open' }, { id: 'F2', severity: 'low', status: 'open' }]);
+    // Nobody starts the next turn until the record and the files' state are in.
+    expect(sent).toHaveLength(2); await settle();
+    expect(last().table!.findings).toMatchObject([{ id: 'F1', severity: 'high', evidence: 'src/parse.ts:40', status: 'open', reviewedAt: 'a'.repeat(12) }, { id: 'F2', severity: 'low', status: 'open' }]);
+    expect(last().table!.findings![0].filesChanged).toBeUndefined();
     const driverTurn = sent.find((item) => item.runId === CLAUDE && item.text.includes('Open findings'))!; expect(driverTurn.text).toContain('F1 (high, src/parse.ts:40): drops the last line');
-    await new Promise((resolve) => setTimeout(resolve, 0)); expect(last().table!.findings![0].reviewedAt).toBe('a'.repeat(12));
     state = 'b'.repeat(64);
-    say(CLAUDE, 'FIXED F1: kept the last line\nDECLINED F2: the typo is in a quote'); done(CLAUDE); say(CODEX, 'Waiting for the fix.'); done(CODEX);
-    expect(last().table!.findings!.map((item) => item.status)).toEqual(['fixed', 'declined']);
+    say(CLAUDE, 'FIXED F1: kept the last line\nDECLINED F2: the typo is in a quote'); done(CLAUDE); say(CODEX, 'Waiting for the fix.'); done(CODEX); await settle();
+    expect(last().table!.findings!.map((item) => item.status)).toEqual(['fixed', 'declined']); expect(last().table!.findings![0]).toMatchObject({ reviewedAt: 'a'.repeat(12), changedAt: 'b'.repeat(12) });
     expect(sent.at(-1)!.text).toContain('waiting for your check'); expect(sent.at(-1)!.runId).toBe(CODEX);
-    await new Promise((resolve) => setTimeout(resolve, 0)); expect(last().table!.findings![0]).toMatchObject({ reviewedAt: 'a'.repeat(12), changedAt: 'b'.repeat(12) });
-    say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'VERIFIED F1\nREOPENED F2: it is not a quote'); done(CODEX);
+    say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'VERIFIED F1\nREOPENED F2: it is not a quote'); done(CODEX); await settle();
     expect(last().table!.findings!.map((item) => item.status)).toEqual(['verified', 'open']);
+  });
+  it('marks a finding uncertain when files changed while it was reviewed, and reads answers before a waiting message goes', async () => {
+    const { tables, sent, say, done, last } = setup(); let state = 'a'.repeat(64);
+    (tables as unknown as { host: TableHost }).host.stateOf = async () => state;
+    tables.open(1, CLAUDE, CODEX, 'claude', 3); tables.send(CLAUDE, 'Fix and review.', []);
+    state = 'c'.repeat(64); // The driver edits while the reviewer reads.
+    tables.send(CLAUDE, 'Also check the docs.', []);
+    say(CLAUDE, 'Edited.'); done(CLAUDE); say(CODEX, 'FINDING medium src/x.ts:1 — off by one'); done(CODEX); await settle();
+    expect(last().table!.findings![0]).toMatchObject({ id: 'F1', filesChanged: true, reviewedAt: 'c'.repeat(12) });
+    expect(sent.slice(-2).map((item) => item.text)).toEqual([expect.stringContaining('Also check the docs.'), expect.stringContaining('Also check the docs.')]);
   });
 });
