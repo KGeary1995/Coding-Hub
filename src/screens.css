@@ -245,3 +245,6 @@
 .tr-plan-bar i { display: block; height: 100%; background: var(--tr-add); }
 .tr-plan-window.warning .tr-plan-bar i { background: var(--tr-st-limit); }
 .tr-plan-window.critical .tr-plan-bar i { background: var(--tr-st-failed); }
+/* A task's details, folded under its card. */
+.task-everything dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 6px 0 0; }
+.task-everything dt { color: var(--tr-fg-muted); } .task-everything dd { margin: 0; overflow-wrap: anywhere; }

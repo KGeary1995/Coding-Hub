@@ -687,7 +687,7 @@ else app.whenReady().then(() => {
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
       if (backups?.busy) throw new HubError('BACKUP_BUSY', 'Finish the backup operation first.');
-      if (action.startsWith('flow-git-')) return delivery!.execute(payload);
+      if (action.startsWith('flow-git-')) { const result = await delivery!.execute(payload); if (action === 'flow-git-pr' && result && typeof result === 'object' && 'url' in result && typeof result.url === 'string') { try { tasks.linkPullRequest((payload as { directory: string }).directory, result.url); } catch { /* The pull request stands; only the task link is missing. */ } } return result; }
       if (action === 'flow-open-pr') { const request = z.object({ action: z.literal('flow-open-pr'), url: z.string().regex(/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/) }).strict().parse(payload); await shell.openExternal(request.url); return null; }
       if (action === 'flow-release-status') {
         z.object({ action: z.literal('flow-release-status') }).strict().parse(payload);

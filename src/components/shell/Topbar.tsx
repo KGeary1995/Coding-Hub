@@ -7,14 +7,13 @@ import { MenuButton, type MenuItem } from './MenuButton';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
-export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'projects', label: 'Projects' }];
+export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
 export const INSIGHT_VIEWS: { view: NavigationView; label: string }[] = [
   { view: 'usage', label: 'Usage' }, { view: 'history', label: 'Session history' }, { view: 'files', label: 'Files' }, { view: 'tools', label: 'More tools' },
 ];
 /** Rarely used tools, listed on the More tools page instead of in the menus. */
 export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
   { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
-  { view: 'tasks', label: 'Tasks', detail: 'Give each agent a job and its files; Trace sends it, follows it and warns about clashes.' },
   { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string }[] = [

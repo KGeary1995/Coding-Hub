@@ -1,6 +1,8 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { ClipboardList, Send } from 'lucide-react';
-import type { Task, VerificationData, VerificationFreshness } from '../../shared/workbench';
+import type { Task, TaskDetail, VerificationData, VerificationFreshness } from '../../shared/workbench';
+import { useChatStore } from '../state/chat-store';
+import type { Finding } from '../../shared/findings';
 import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
@@ -16,6 +18,29 @@ const limitedTo = (task: Task) => task.scope.some((pattern) => pattern === '**' 
  * along as the agent works (task-store), and warns when an agent changes files outside its task or the same files as
  * another task.
  */
+/**
+ * Everything about one task in one place: what was asked, where (channel, folder, branch, commit), what changed, the check
+ * and whether it still holds, the Round Table's findings on its channel, and the pull request opened from it.
+ */
+/** One empty list, so the store selector returns the same value when there are none. */
+const NO_FINDINGS: Finding[] = [];
+function TaskEverything({ task, channel, changed, check }: { task: Task; channel: string; changed: string[]; check: string }) {
+  const [detail, setDetail] = useState<TaskDetail | null>(null); const [open, setOpen] = useState(false);
+  const findings = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.findings ?? NO_FINDINGS : NO_FINDINGS);
+  useEffect(() => { if (open) void workbench<TaskDetail>({ action: 'task-detail', id: task.id }).then(setDetail).catch(() => setDetail(null)); }, [open, task.id, changed.length]);
+  const waiting = findings.filter((finding) => finding.status !== 'verified');
+  return <details className="task-everything" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}><summary>Everything about this task</summary>
+    <dl>
+      <dt>Asked</dt><dd>{task.title}{task.details ? <><br />{task.details}</> : null}</dd>
+      <dt>Where</dt><dd>{channel} · <code>{task.directory}</code>{detail?.branch ? <> · branch <code>{detail.branch}</code></> : null}{detail?.head ? <> · commit <code>{detail.head}</code></> : null}</dd>
+      <dt>Changed</dt><dd>{changed.length ? changed.map((file) => <code key={file}>{file} </code>) : task.sentAt ? 'Nothing since it was sent.' : 'Not sent yet.'}</dd>
+      <dt>Check</dt><dd>{check || 'No check attached. Attach a passing one under Edit → Review notes and checks.'}</dd>
+      <dt>Review</dt><dd>{findings.length ? `${findings.length} Round Table ${findings.length === 1 ? 'finding' : 'findings'} on this channel, ${waiting.length} not verified${waiting.length ? `: ${waiting.map((finding) => `${finding.id} ${finding.status}`).join(', ')}` : ''}.` : 'No Round Table findings on this channel.'}</dd>
+      <dt>Pull request</dt><dd>{task.pullRequest ? <button className="quiet-button" onClick={() => void workbench({ action: 'flow-open-pr', url: task.pullRequest! })}>{task.pullRequest.replace('https://github.com/', '')}</button> : 'None opened from Changes while this task was open.'}</dd>
+    </dl>
+  </details>;
+}
+
 export function TasksPanel() {
   const { sessions, rootDirectory } = useWorkspaceStore();
   const { tasks, watch, draftFor, error } = useTaskStore();
@@ -72,6 +97,7 @@ export function TasksPanel() {
           {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}</p>}
           {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
           {task.notes && <small>{task.notes}</small>}
+          <TaskEverything task={task} channel={channelLabel(task.sessionId)} changed={changed} check={task.verificationId ? checkText(task) : ''} />
           <div className="task-actions">
             {(task.status === 'queued' || task.status === 'review' || task.status === 'active' && (task.outcome === 'stopped' || task.outcome === 'failed')) && task.sessionId && <button className="quiet-button" disabled={busy || !running(task.sessionId)} title={running(task.sessionId) ? 'Type this task into its channel' : 'Start that channel first'} onClick={() => void run(() => sendTask(task.id), 'Sent.')}><Send size={12} />{task.status === 'queued' ? 'Send' : 'Send again'}</button>}
             {task.status === 'active' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Ready for review</button>}
