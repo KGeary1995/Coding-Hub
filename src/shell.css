@@ -118,3 +118,4 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .needs-you-list li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 6px; border-left: 2px solid var(--tr-line); }
 .needs-you-list li p { margin: 2px 0 0; color: var(--tr-fg-muted); overflow-wrap: anywhere; }
 .needs-you-list .needs-you-approval { border-left-color: var(--tr-st-waiting); } .needs-you-list .needs-you-failed, .needs-you-list .needs-you-task-stopped { border-left-color: var(--tr-st-failed); }
+.needs-you-list { text-transform: none; letter-spacing: normal; font: 400 13px/18px var(--tr-font-ui); white-space: normal; }
