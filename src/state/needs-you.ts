@@ -8,8 +8,8 @@ import { channelAlerts } from './channel-state';
  * Everything waiting for the person, in one list: channels waiting for an approval (with the exact request and since
  * when), channels that failed, and tasks that stopped, went quiet or are ready for review. Each says what to do next.
  */
-export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-stopped' | 'task-quiet' | 'task-review' | 'table-waiting'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' }
-const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, failed: 1, 'task-stopped': 2, 'table-waiting': 3, 'task-quiet': 4, 'task-review': 5, limit: 6 };
+export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' }
+const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8 };
 
 export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
@@ -27,8 +27,10 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
     // A failed channel is listed above with its task; its task is not listed twice.
     if (task.sessionId && items.some((item) => item.taskId === task.id)) continue;
     if (task.status === 'active' && (task.outcome === 'stopped' || task.outcome === 'failed')) items.push({ key: `t:${task.id}`, kind: 'task-stopped', title: `Task ${task.outcome === 'failed' ? 'failed' : 'stopped'}: ${task.title}`, detail: task.outcome === 'failed' ? 'Its channel failed before the agent finished. Send it again, or move it on.' : 'Its channel stopped before the agent finished (also after Trace restarts). Send it again, or move it on.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
+    else if (task.status === 'active' && task.outcome === 'blocked') items.push({ key: `t:${task.id}`, kind: 'task-blocked', title: `Task waiting for you: ${task.title}`, detail: task.outcomeNote || 'The agent said TASK BLOCKED: it needs you before it goes on.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'answer' });
+    else if (task.status === 'active' && task.outcome === 'unconfirmed') items.push({ key: `t:${task.id}`, kind: 'task-unconfirmed', title: `Task not confirmed done: ${task.title}`, detail: 'The agent ended its turn without TASK COMPLETE. It may have asked you something.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'answer' });
     else if (task.status === 'active' && task.outcome === 'quiet') items.push({ key: `t:${task.id}`, kind: 'task-quiet', title: `Task gone quiet: ${task.title}`, detail: 'Its channel has drawn nothing for 45 seconds. Look whether the agent finished or is waiting.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
-    else if (task.status === 'review') items.push({ key: `t:${task.id}`, kind: 'task-review', title: `Ready for review: ${task.title}`, detail: 'The agent finished its turn. Check the changes, then mark it done.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
+    else if (task.status === 'review') items.push({ key: `t:${task.id}`, kind: 'task-review', title: `Ready for review: ${task.title}`, detail: 'The agent said TASK COMPLETE. Check the changes, then mark it done.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
   }
   return items.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || (a.since ?? '').localeCompare(b.since ?? ''));
 }

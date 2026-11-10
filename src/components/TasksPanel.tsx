@@ -64,7 +64,7 @@ export function TasksPanel() {
     const saved = await saveTask({ ...(form.id ? { id: form.id } : {}), title: form.title, details: form.details, directory: form.directory || folderOf(form.sessionId), sessionId: form.sessionId || null, scope: scopeOf(form.files), status: form.id ? tasks.find((task) => task.id === form.id)?.status ?? 'queued' : 'queued', notes: form.notes, verificationId: form.verificationId || null });
     setForm(EMPTY_FORM); setOpen(false);
     if (send) await sendTask(saved.id);
-  }, send ? 'Sent. The task moves to Ready for review when the agent finishes.' : 'Saved in To do.');
+  }, send ? 'Sent. The task moves to Ready for review when the agent says TASK COMPLETE.' : 'Saved in To do.');
   const edit = (task: Task) => { setForm({ id: task.id, title: task.title, details: task.details ?? '', sessionId: task.sessionId ?? '', directory: task.directory, files: limitedTo(task)?.join('\n') ?? '', notes: task.notes, verificationId: task.verificationId ?? '' }); setOpen(true); };
   const drop = (status: Task['status']) => (event: DragEvent) => { event.preventDefault(); const id = event.dataTransfer.getData('text/task'); if (id) void run(() => setTaskStatus(id, status)); };
   const running = (sessionId: string | null) => sessions.some((session) => session.id === sessionId && session.status === 'running');
@@ -97,7 +97,7 @@ export function TasksPanel() {
           {task.details && <p>{task.details}</p>}
           {changed.length > 0 && <details><summary>{changed.length} {changed.length === 1 ? 'file' : 'files'} changed</summary><ul>{changed.map((file) => <li key={file}><code>{file}</code></li>)}</ul></details>}
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
-          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}</p>}
+          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' || task.outcome === 'unconfirmed' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}{task.outcome === 'blocked' && task.outcomeNote ? ` It says: ${task.outcomeNote}` : ''}</p>}
           {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
           {task.notes && <small>{task.notes}</small>}
           <TaskEverything task={task} channel={channelLabel(task.sessionId)} changed={changed} check={task.verificationId ? checkText(task) : ''} />

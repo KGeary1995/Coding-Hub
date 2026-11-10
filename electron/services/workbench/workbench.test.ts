@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { Verification } from './verification';
 import { repositoryState } from './repository-state';
 import { movedTask } from '../../../src/state/task-move';
+import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 import { Experiments } from './experiments';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
@@ -92,8 +93,8 @@ describe('native history and task scope', () => {
     for (const bad of ['src//a.ts', 'src/./a.ts']) await expect(tasks.execute({ action: 'task-save', title: 'Bad', directory: root, sessionId: null, scope: [bad], status: 'queued', notes: '', verificationId: null })).rejects.toThrow();
   });
   it('sends a task as one message, and follows what its agent changes from then on', async () => {
-    expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. When you are done, list the files you changed and how you checked the result.');
-    expect(taskPrompt({ title: 'Fix the footer.', scope: ['**'] })).toBe('Task: Fix the footer. When you are done, list the files you changed and how you checked the result.');
+    expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. ' + SIGNAL_INSTRUCTION);
+    expect(taskPrompt({ title: 'Fix the footer.', scope: ['**'] })).toBe('Task: Fix the footer. ' + SIGNAL_INSTRUCTION);
     const root = fixture(); const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root });
     git('init'); fs.mkdirSync(path.join(root, 'src')); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'a'); fs.writeFileSync(path.join(root, 'README.md'), 'r'); git('add', '.'); git('commit', '-m', 'base');
     fs.writeFileSync(path.join(root, 'README.md'), 'already changed before the task');

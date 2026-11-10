@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../shared/workbench';
 
-const calls: Record<string, unknown>[] = []; let listed: Task[] = [];
-vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
+const calls: Record<string, unknown>[] = []; let listed: Task[] = []; let transcript: unknown = null;
+vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'channel-transcript' ? transcript : request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
 vi.mock('../runtime/terminals', () => ({ writeTerminal: vi.fn(async () => true) }));
 
 const { sendTask, startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
@@ -12,21 +12,31 @@ const { useActivityStore } = await import('./activity-store');
 const working = (sessionId: string, extra: Partial<Task> = {}): Task => ({ id: crypto.randomUUID(), title: 'Fix it', directory: '/project', sessionId, scope: ['**'], status: 'active', notes: '', verificationId: null, createdAt: new Date().toISOString(), sentAt: new Date(Date.now() - 60000).toISOString(), ...extra });
 const statusCalls = () => calls.filter((call) => call.action === 'task-status');
 
-describe('a turn ending moves a working task only when it really finished', () => {
-  beforeEach(() => { calls.length = 0; });
-  it('sends a finished turn to Ready for review', async () => {
+describe('a turn ending moves a working task only when the agent says it is done', () => {
+  beforeEach(() => { calls.length = 0; transcript = null; });
+  it('sends a reply ending in TASK COMPLETE to Ready for review', async () => {
     const task = working('a'); useTaskStore.setState({ tasks: [task] });
-    taskTurnDone('a'); await vi.waitFor(() => expect(statusCalls()).toHaveLength(1));
-    expect(statusCalls()[0]).toEqual({ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' });
+    await taskTurnDone('a', false, 'Changed a.ts; tests pass.\n\n**TASK COMPLETE**');
+    expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
+  });
+  it('keeps a task in Working when the agent is blocked, with what it needs, or ends without the line', async () => {
+    const task = working('b'); listed = [task]; useTaskStore.setState({ tasks: [task] });
+    await taskTurnDone('b', false, 'Which database should I use?\nTASK BLOCKED: choose Postgres or SQLite');
+    await taskTurnDone('b', false, 'Should I also update the docs?');
+    expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'blocked', outcomeNote: 'choose Postgres or SQLite' }, { action: 'task-status', id: task.id, status: 'active', outcome: 'unconfirmed' }]);
+  });
+  it('reads a terminal channel\u2019s reply from its transcript', async () => {
+    const task = working('t'); useTaskStore.setState({ tasks: [task] });
+    transcript = { type: 'history', messages: [{ role: 'user', text: 'go', images: 0 }, { role: 'assistant', messageId: 'm', blocks: [{ type: 'text', text: 'Done.\nTASK COMPLETE' }] }], results: {} };
+    await taskTurnDone('t'); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
   });
   it('keeps a task in Working, marked failed, when the turn ended in an error or was interrupted', async () => {
-    const task = working('b'); useTaskStore.setState({ tasks: [task] });
-    taskTurnDone('b', true); await vi.waitFor(() => expect(statusCalls()).toHaveLength(1));
-    expect(statusCalls()[0]).toEqual({ action: 'task-status', id: task.id, status: 'active', outcome: 'failed' });
+    const task = working('e'); useTaskStore.setState({ tasks: [task] });
+    await taskTurnDone('e', true, 'TASK COMPLETE'); expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'failed' }]);
   });
   it('ignores a turn that ends within seconds of the send (the CLI taking the message)', async () => {
     useTaskStore.setState({ tasks: [working('c', { sentAt: new Date().toISOString() })] });
-    taskTurnDone('c'); await new Promise((resolve) => setTimeout(resolve, 20)); expect(statusCalls()).toHaveLength(0);
+    await taskTurnDone('c', false, 'TASK COMPLETE'); expect(statusCalls()).toHaveLength(0);
   });
 });
 

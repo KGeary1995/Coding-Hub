@@ -281,8 +281,8 @@ function readTasks() {
 function renderNeeds() {
   const box = document.getElementById('needs-you'); if (!box) return;
   const asking = channels.filter((channel) => channel.attention && (!shownComputer || channel.computer?.id === shownComputer));
-  const flagged = phoneTasks.filter((task) => task.status === 'review' || task.outcome === 'stopped' || task.outcome === 'failed' || task.outcome === 'quiet');
-  const why = (task: RemoteTask) => task.outcome === 'failed' ? 'channel failed' : task.outcome === 'stopped' ? 'channel stopped' : task.outcome === 'quiet' ? 'gone quiet' : 'ready for review';
+  const flagged = phoneTasks.filter((task) => task.status === 'review' || (task.status === 'working' && task.outcome && task.outcome !== 'finished'));
+  const why = (task: RemoteTask) => task.status === 'review' ? 'ready for review' : task.outcome === 'failed' ? 'channel failed' : task.outcome === 'stopped' ? 'channel stopped' : task.outcome === 'blocked' ? 'waiting for you' : task.outcome === 'unconfirmed' ? 'not confirmed done' : 'gone quiet';
   box.hidden = !asking.length && !flagged.length;
   box.replaceChildren(h('h2', {}, `Needs you · ${asking.length + flagged.length}`), h('ul', {},
     ...asking.map((channel) => h('li', {}, h('button', { type: 'button', className: 'need waiting', onclick: () => showChannel(channel.sessionId) }, h('strong', {}, `CH${channel.channel} needs approval`), h('span', {}, channel.attention ?? '')))),

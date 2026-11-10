@@ -5,12 +5,24 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, partnerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, leadOf, partnerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
-import { startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { chatReply, startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { useChatStore } from '../state/chat-store';
+
+/**
+ * A chat turn ended. The task sits with the channel that leads a Round Table; there, only the driver's reply says whether it
+ * is done (the reviewer's turn ending says nothing about the work).
+ */
+function chatTurnDone(sessionId: string, failed: boolean) {
+  const sessions = useWorkspaceStore.getState().sessions; const lead = leadOf(sessions, sessionId) ?? sessions.find((session) => session.id === sessionId);
+  const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
+  if (lead && table && seat && seat.config.engine !== table.driver) return;
+  void taskTurnDone(lead?.id ?? sessionId, failed, chatReply(sessionId));
+}
 import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 
@@ -53,7 +65,7 @@ export function useNativeHost() {
     const unsubscribeChat = host.onChatEvent((envelope) => {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
-      applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
+      applyChatEvent(envelope); if (envelope.event.type === 'done') chatTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
       // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
