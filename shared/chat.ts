@@ -57,6 +57,8 @@ export interface RoundTableState {
   phase: 'joining' | 'answering' | 'discussing' | 'idle';
   /** The last discussion ended with both agents agreeing. */
   agreed: boolean;
+  /** The review record: what the reviewer reported and what became of each (shared/findings.ts). Missing from Trace before 1.17. */
+  findings?: import('./findings').Finding[];
 }
 export const ROUND_TABLE_MAX_ROUNDS = 5;
 export type ChatRequest =

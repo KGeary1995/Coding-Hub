@@ -288,3 +288,8 @@
 .seat-hex.seat-claude { background: var(--tr-ch-claude); } .seat-hex.seat-codex { background: var(--tr-ch-codex); } .seat-hex.seat-you { background: var(--tr-you); }
 .chat-message.user.table-you { align-items: flex-end; } .table-you .chat-author { color: var(--tr-you); }
 .at-table .chat-message.assistant.table-claude, .at-table .chat-message.assistant.table-codex { border-left-width: 1px; }
+/* The Round Table's review record, on its own line under the bar. */
+.table-findings { flex-basis: 100%; text-transform: none; letter-spacing: normal; }
+.table-findings ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.table-findings small { display: block; color: var(--tr-fg-muted); }
+.table-findings .finding-open strong { color: var(--tr-st-limit); } .table-findings .finding-verified { opacity: .7; }

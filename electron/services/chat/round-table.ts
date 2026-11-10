@@ -1,5 +1,6 @@
 import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
+import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
 
 type Engine = 'claude' | 'codex';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
@@ -10,6 +11,8 @@ export interface TableHost {
   answer(runId: string, requestId: string, allow: boolean): void;
   interrupt(runId: string): void;
   emit(owner: number, envelope: ChatEnvelope): void;
+  /** The files in a folder now, as a hash (repositoryState); null outside Git. Findings record it. */
+  stateOf?(cwd: string): Promise<string | null>;
 }
 
 const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex' };
@@ -32,6 +35,8 @@ interface Table {
   queued: { text: string; images: ChatImage[] } | null;
   /** The newest messages of the leading conversation, for the newcomer's brief. */
   recent: string[];
+  /** The folder both agents work in, and the review record. */
+  cwd: string; findings: Finding[];
 }
 
 /**
@@ -62,7 +67,7 @@ export class RoundTables {
     return { runId, sessionId: run.sessionId, engine: run.engine, busy: false, text: '', answer: null, briefed: false };
   }
   private state(table: Table): RoundTableState {
-    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed };
+    return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })) };
   }
   private publish(table: Table) { this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: this.state(table) } }); }
   private roles(table: Table) {
@@ -76,7 +81,11 @@ export class RoundTables {
     const role = seat.engine === table.driver
       ? `You are the driver: you make the file changes. Carry out what the person asked without asking again whether to proceed; ask only about choices that are theirs to make, or before anything that publishes, deletes or cannot be undone.`
       : `You are the reviewer: read files and check the driver's work, but do not edit files (Trace keeps you read-only).`;
-    return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE.`;
+    // The fixed forms Trace reads into the review record (shared/findings.ts).
+    const record = seat.engine === table.driver
+      ? `When Trace lists open findings, answer each on its own line as "FIXED F<n>: what you changed" or "DECLINED F<n>: why".`
+      : `Report each problem on its own line as "FINDING high|medium|low path:line — the problem" (Trace numbers them F1, F2, …). When the driver answers one, check it, then write "VERIFIED F<n>" or "REOPENED F<n>: why".`;
+    return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE. ${record}`;
   }
 
   open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number): RoundTableState {
@@ -86,7 +95,7 @@ export class RoundTables {
     if (lead.engine === partner.engine) throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     if (leadRun.cwd !== partnerRun.cwd) throw new HubError('TABLE_FOLDER', 'Both agents must work in the same folder.');
     if (leadRun.owner !== owner || partnerRun.owner !== owner) throw new HubError('TABLE_OWNER', 'Both chats must be open in this window.');
-    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])] };
+    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: [] };
     this.tables.set(leadRunId, table); this.roles(table);
     // A conversation already under way: the leading agent sums it up, and the newcomer gets that plus the latest messages.
     if (table.recent.length) {
@@ -184,6 +193,7 @@ export class RoundTables {
       this.host.send(table.partner.runId, `${this.brief(table, table.partner)}\n\nYou are joining a conversation already under way. ${NAME[table.lead.engine]}'s summary:\n\n${summary}\n\nThe latest messages:\n\n${recent}\n\nSay briefly that you are caught up and anything you would add. Wait for the person's next message before changing anything.`, []);
       this.publish(table); return;
     }
+    this.review(table);
     const answers = [table.lead.answer ?? '', table.partner.answer ?? ''];
     table.agreed = table.round > 0 && answers.every((answer) => AGREES.test(answer));
     if (table.agreed || table.round >= table.rounds || answers.every((answer) => !answer)) { table.phase = 'idle'; this.publish(table); return; }
@@ -196,9 +206,33 @@ export class RoundTables {
       if (AGREES.test(answer)) answer = 'AGREE (nothing to add)';
       const intro = each.briefed ? '' : `${this.brief(table, each)}\n\n`; each.briefed = true;
       each.busy = true; each.answer = null; each.text = '';
-      this.host.send(each.runId, `${intro}[Trace Round Table · round ${table.round} of ${table.rounds}] ${NAME[other.engine]} answered:\n\n${answer}\n\nReply briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE.`, []);
+      const waiting = findingsFor(table.findings, each.engine === table.driver ? 'driver' : 'reviewer');
+      this.host.send(each.runId, `${intro}[Trace Round Table · round ${table.round} of ${table.rounds}] ${NAME[other.engine]} answered:\n\n${answer}\n\n${waiting ? `${waiting}\n\n` : ''}Reply briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE.`, []);
     }
     this.publish(table);
+  }
+
+  /**
+   * Reads both answers into the review record: the reviewer's new findings and checks, and the driver's answers. Each
+   * change notes the files as they are now, so a finding shows which version was reviewed and which was answered.
+   */
+  private review(table: Table) {
+    const driver = table.lead.engine === table.driver ? table.lead : table.partner; const reviewer = this.other(table, driver);
+    const changed: Finding[] = []; const at = new Date().toISOString();
+    for (const found of parseFindings(reviewer.answer ?? '')) {
+      if (table.findings.length >= MAX_FINDINGS) break;
+      const finding: Finding = { id: `F${table.findings.length + 1}`, ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: table.round, at };
+      table.findings.push(finding); changed.push(finding);
+    }
+    for (const [seat, role] of [[reviewer, 'reviewer'], [driver, 'driver']] as const) for (const { id, verb, note } of parseAnswers(seat.answer ?? '', role)) {
+      const finding = table.findings.find((item) => item.id === id); if (finding && apply(finding, verb, note) && !changed.includes(finding)) changed.push(finding);
+    }
+    if (!changed.length || !this.host.stateOf) return;
+    void this.host.stateOf(table.cwd).then((state) => {
+      const short = state ? state.slice(0, 12) : null;
+      for (const finding of changed) { if (finding.status === 'open' && !finding.reviewedAt) finding.reviewedAt = short; else finding.changedAt = short; }
+      if (this.tables.get(table.lead.runId) === table) this.publish(table);
+    }).catch(() => { /* Recorded without the files' state. */ });
   }
 
   private remember(runId: string, event: ChatEvent) {

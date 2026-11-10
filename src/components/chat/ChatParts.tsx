@@ -1,4 +1,5 @@
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
+import type { Finding } from '../../../shared/findings';
 import type { ChatBlock, ChatImage, RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
@@ -128,6 +129,17 @@ export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerSt
     {busy && <button className="quiet-button" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
     {onShow && <button className="quiet-button" aria-pressed={showing} title={showing ? 'Back to the Round Table thread' : `${AGENT[table.partner.engine]}'s own conversation, with what Trace passed to it`} onClick={onShow}>{showing ? 'Back to the table' : `Show ${AGENT[table.partner.engine]}`}</button>}
     <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[table.partner.engine]}`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
+    {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;
+}
+
+const STATUS_LABEL: Record<Finding['status'], string> = { open: 'Open', fixed: 'Fixed, not checked', declined: 'Declined, not checked', verified: 'Verified' };
+/** The review record: each finding, its evidence, the driver's answer and the reviewer's check, and the files it was reviewed and answered on. */
+function FindingsList({ findings }: { findings: Finding[] }) {
+  const open = findings.filter((finding) => finding.status === 'open').length; const unchecked = findings.filter((finding) => finding.status === 'fixed' || finding.status === 'declined').length;
+  return <details className="table-findings"><summary>Findings · {open} open{unchecked ? ` · ${unchecked} to check` : ''} · {findings.length - open - unchecked} verified</summary>
+    <ol>{findings.map((finding) => <li key={finding.id} className={`finding-${finding.status}`}><strong>{finding.id} · {finding.severity}</strong> {finding.text}{finding.evidence && <> <code>{finding.evidence}</code></>}
+      <small>{STATUS_LABEL[finding.status]}{finding.response ? ` · Driver: ${finding.response}` : ''}{finding.check ? ` · Reviewer: ${finding.check}` : ''}{finding.reviewedAt ? ` · Reviewed on files ${finding.reviewedAt}` : ''}{finding.changedAt ? `, answered on ${finding.changedAt}` : ''}</small></li>)}</ol>
+  </details>;
 }
 

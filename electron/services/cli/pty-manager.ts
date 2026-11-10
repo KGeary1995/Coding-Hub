@@ -19,6 +19,7 @@ import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { RoundTables } from '../chat/round-table';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
+import { repositoryState } from '../workbench/repository-state';
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -342,6 +343,7 @@ export class PtyManager {
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),
     emit: (owner, envelope) => { try { this.dependencies.onChat?.(owner, envelope); } catch { this.dependencies.onEventError?.(); } },
+    stateOf: (cwd) => repositoryState(cwd),
   });
   private chatRun(runId: string) { const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId); return run && run.chat && !run.finished ? run : null; }
 

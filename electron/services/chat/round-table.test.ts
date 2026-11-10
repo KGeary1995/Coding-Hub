@@ -135,3 +135,24 @@ describe('Round Table', () => {
     expect(last()).toEqual({ type: 'table', table: null, closed: true });
   });
 });
+
+describe('Round Table review record', () => {
+  it('records the reviewer findings, passes them to the driver, and follows them to verified, noting the files reviewed', async () => {
+    const { tables, sent, say, done, last } = setup(); let state = 'a'.repeat(64);
+    (tables as unknown as { host: TableHost }).host.stateOf = async () => state;
+    tables.open(1, CLAUDE, CODEX, 'claude', 3);
+    expect(sent).toHaveLength(0); tables.send(CLAUDE, 'Review the change.', []); expect(sent[1].text).toContain('FINDING high|medium|low');
+    say(CLAUDE, 'I changed the parser.'); done(CLAUDE);
+    say(CODEX, 'Two problems.\nFINDING high src/parse.ts:40 — drops the last line\nFINDING low docs/a.md — typo'); done(CODEX);
+    expect(last().table!.findings).toMatchObject([{ id: 'F1', severity: 'high', evidence: 'src/parse.ts:40', status: 'open' }, { id: 'F2', severity: 'low', status: 'open' }]);
+    const driverTurn = sent.find((item) => item.runId === CLAUDE && item.text.includes('Open findings'))!; expect(driverTurn.text).toContain('F1 (high, src/parse.ts:40): drops the last line');
+    await new Promise((resolve) => setTimeout(resolve, 0)); expect(last().table!.findings![0].reviewedAt).toBe('a'.repeat(12));
+    state = 'b'.repeat(64);
+    say(CLAUDE, 'FIXED F1: kept the last line\nDECLINED F2: the typo is in a quote'); done(CLAUDE); say(CODEX, 'Waiting for the fix.'); done(CODEX);
+    expect(last().table!.findings!.map((item) => item.status)).toEqual(['fixed', 'declined']);
+    expect(sent.at(-1)!.text).toContain('waiting for your check'); expect(sent.at(-1)!.runId).toBe(CODEX);
+    await new Promise((resolve) => setTimeout(resolve, 0)); expect(last().table!.findings![0]).toMatchObject({ reviewedAt: 'a'.repeat(12), changedAt: 'b'.repeat(12) });
+    say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'VERIFIED F1\nREOPENED F2: it is not a quote'); done(CODEX);
+    expect(last().table!.findings!.map((item) => item.status)).toEqual(['verified', 'open']);
+  });
+});
