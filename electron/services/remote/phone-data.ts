@@ -20,7 +20,7 @@ export function remoteUsage(today: DayUsage, limits: PlanLimits[], budget: Pick<
 /** Newest change first; `channel` from the channel's place in this computer's workspace. */
 export function remoteTasks(tasks: Task[], sessionIds: string[]): RemoteTask[] {
   return tasks.map((task): RemoteTask => { const index = task.sessionId ? sessionIds.indexOf(task.sessionId) : -1;
-    return { id: task.id, title: task.title, status: TO_PHONE[task.status], sessionId: task.sessionId, channel: index >= 0 ? index + 1 : null, files: task.scope, updatedAt: task.sentAt ?? task.createdAt }; })
+    return { id: task.id, title: task.title, status: TO_PHONE[task.status], sessionId: task.sessionId, channel: index >= 0 ? index + 1 : null, files: task.scope, updatedAt: task.sentAt ?? task.createdAt, ...(task.outcome ? { outcome: task.outcome } : {}) }; })
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 export const HISTORY_LIMIT = 100;

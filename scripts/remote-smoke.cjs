@@ -86,6 +86,12 @@ ${terminalFixture}
     await phone.locator('#text').fill('need-approval'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#waiting').filter({ hasText: 'Approval requested: npm test' }).waitFor();
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
+    // Needs you lists the approval with its exact request, on the computer and on the phone's channel list.
+    await page.getByRole('button', { name: 'Needs you · 1', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Needs you' }).getByText('Approval requested: npm test').waitFor(); await page.keyboard.press('Escape');
+    await app.evaluate(({ BrowserWindow }, url) => { const list = new BrowserWindow({ width: 390, height: 844, show: true, title: 'phone-list' }); void list.loadURL(url); }, `http://127.0.0.1:${PORT}/#needs-you-check`);
+    let listPage; for (let i = 0; i < 50 && !listPage; i++) { listPage = app.windows().find((item) => item.url().endsWith('#needs-you-check')); if (!listPage) await new Promise((resolve) => setTimeout(resolve, 100)); }
+    listPage.setDefaultTimeout(20000); await listPage.locator('#needs-you').filter({ hasText: 'CH2 needs approval' }).filter({ hasText: 'Approval requested: npm test' }).waitFor(); await listPage.close();
     await phone.getByRole('button', { name: 'y', exact: true }).click(); await phone.getByRole('button', { name: 'Enter', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:y' }).waitFor();
     await tile.locator('.session-attention').waitFor({ state: 'detached' });
@@ -236,7 +242,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });
