@@ -15,6 +15,8 @@ export type HubRequest =
   | { action: 'memory-key'; directory: string }
   /** Every memory project on this computer, with its note count and newest note, for choosing a channel's. */
   | { action: 'memory-projects' }
+  /** Whether commits a note names are in the folder's clone and on remote branches (as of the last fetch). */
+  | { action: 'memory-commits'; directory: string; shas: string[] }
   | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
   | { action: 'memory-install'; directory: string; project?: string }
   | { action: 'memory-entries'; directory: string }
@@ -55,7 +57,7 @@ export interface SharedRules { content: string; revision: string; directories: s
 export interface MemoryEntry { engine: CLIEngine; file: string; key: string | null; root: string | null; current: boolean }
 /** A memory project on this computer (memory-projects). */
 export interface MemoryProject { key: string; notes: number; latest: string }
-export type HubResponse = MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
+export type HubResponse = import('./commit-refs').CommitStatus | MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
 export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };
 

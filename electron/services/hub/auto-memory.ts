@@ -244,7 +244,7 @@ export class AutoMemory {
       try { this.options.refresh?.(key); } catch { /* Local notes only. */ }
       context = memoryContext(key, this.options.memory.list(key));
     } catch { return; }
-    const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key, run.engine], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key, run.engine, run.cwd], env: { ELECTRON_RUN_AS_NODE: '1' } };
     const configured = this.configured(run.engine, run.cwd);
     // A project entry with another key would read and write a different set of notes than the context above.
     if (configured?.key && (configured.key !== key || configured.root !== this.options.memory.root)) {

@@ -749,7 +749,7 @@ else app.whenReady().then(() => {
     },
   });
   handle(IPC_CHANNELS.updates, (_owner, payload) => updates!.execute(payload));
-  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage directory.'); return hub.execute(payload); });
+  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage directory.'); return hub.executeAsync(payload); });
   handle(IPC_CHANNELS.openRepository, (owner, payload) => repositoryFiles.open(owner, payload));
   handle(IPC_CHANNELS.closeRepository, (owner, payload) => { repositoryFiles.close(owner, payload); return null; });
   handle(IPC_CHANNELS.listDirectory, (owner, payload) => repositoryFiles.list(owner, payload));

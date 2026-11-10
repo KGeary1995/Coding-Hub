@@ -5,6 +5,7 @@ import { DEFAULT_PREFERENCES, type HubPreferences, type HubRequest, type HubResp
 import { ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService, projectSchema } from './memory';
 import { DriveMirror } from './drive';
+import { commitStatus } from './commit-status';
 import { memoryEntries, projectConfigRoot, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { HubError } from '../cli/engine-adapter';
 import { repriced, type TelemetryService } from './telemetry';
@@ -26,6 +27,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('memory-list'), project: projectSchema }).strict(),
   z.object({ action: z.literal('memory-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-projects') }).strict(),
+  z.object({ action: z.literal('memory-commits'), directory: dir, shas: z.array(z.string().regex(/^[0-9a-fA-F]{7,40}$/)).max(10) }).strict(),
   z.object({ action: z.literal('memory-entries'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-use-auto-key'), directory: dir }).strict(),
   z.object({ action: z.literal('memory-write'), project: projectSchema, title: z.string().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), supersedes: z.uuid().optional() }).strict(),
@@ -59,6 +61,12 @@ export class HubService {
     const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: process.platform === 'win32' ? DEFAULT_PREFERENCES.driveDirectory : '', prices: [] };
     const result = preferencesSchema.safeParse(cfg.data); if (!result.success) throw new HubError('PREFERENCES_INVALID', 'Saved preferences are invalid. Existing file was preserved.'); return result.data;
   }
+  /** Requests that wait on other programs (Git); everything else is answered at once by execute. */
+  async executeAsync(input: unknown): Promise<HubResponse> {
+    const parsed = hubRequestSchema.safeParse(input);
+    if (parsed.success && parsed.data.action === 'memory-commits') return commitStatus(parsed.data.directory, parsed.data.shas);
+    return this.execute(input);
+  }
   execute(input: unknown): HubResponse {
     const parsed = hubRequestSchema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_HUB_REQUEST', parsed.error.issues.map((i) => i.message).join(' ')); const request = parsed.data as HubRequest;
     switch (request.action) {
@@ -70,6 +78,8 @@ export class HubService {
       case 'memory-list': this.projects.add(request.project); return this.memory.list(request.project);
       case 'memory-key': return projectMemoryKey(request.directory);
       case 'memory-projects': return this.memory.projects();
+      // Git runs asynchronously: the IPC handler awaits it (see executeAsync).
+      case 'memory-commits': throw new HubError('HUB_ASYNC', 'memory-commits is answered by executeAsync.');
       case 'memory-write': { this.projects.add(request.project); const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); try { this.drive.sync(request.project); } catch { /* Offline notes sync on next retry. */ } return note; }
       // Without a key, use the automatic one so sessions started in Trace and from other terminals share notes.
       case 'memory-entries': return memoryEntries(request.directory, this.memory.root);
