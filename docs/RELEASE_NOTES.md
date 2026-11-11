@@ -1,5 +1,17 @@
 ## What's new
 
+1.17.1 shows which model is at work at a hierarchy Round Table, fixes several ways a hierarchy table could go wrong, and keeps backups out of your projects (update every computer):
+
+- **See who is working.** A hierarchy table's bar lists its three seats (the planner, the builder and Codex), each with what it is doing now and its tokens today, and each step names its model: "Fable 5.2 writing the plan…", "Opus 5.5 building…". The planner's messages have their own colour (lime), so they no longer look like the builder's.
+- **Your reply goes on with the task.** When the table stops or needs you, what you write continues the same task: it goes with the step when it continues, or to the builder as changes that the planner then reviews again. Before, it replaced the task, so "go ahead" became the whole task. A new task starts once the table is idle or done, or when you send one from Tasks.
+- **Continue after Stop waits for the agent to stop.** Pressing Continue right after Stop could let the stopped turn move the table on, to the review while the builder was still working. The bar now says **Stopping…** until the agent has stopped, then offers Continue.
+- **A planner or reviewer that stops no longer leaves the builder working alone.** The table refuses messages and tasks instead of sending them to the builder unplanned and unreviewed, and offers **Reopen**, which starts that agent again and picks the work up at its step.
+- **"Each channel must have exactly one grid tile" is fixed** after closing a Round Table opened from the phone, or one whose agent took a while to stop.
+- **Findings are kept.** A closed table's findings that could not be saved to shared memory stay with the channel through a restart.
+- **Restart and Close from the phone** wait for a hierarchy table's planner too.
+- **A task from Tasks reaches a hierarchy table's steps cleanly.** Its "end with TASK COMPLETE" instruction is left out, since the planner's APPROVED decides, so it can no longer hide APPROVED or PLAN READY.
+- **Backups stay out of your projects.** When Trace changes `CLAUDE.md`, `AGENTS.md`, `.mcp.json`, Codex's `config.toml` or `.claude.json`, it now keeps the earlier version in its own data folder (`~/.coding-hub/config-backups`, the newest 20 per file) instead of a `.coding-hub-backup-…` file beside it. Backup files already in your projects are left alone; you can delete them.
+
 1.17.0 brings a hierarchy Round Table, work you can trust is finished, checks that say what they tested, and memory that keeps track (update every computer and reload the phone app):
 
 - **A task is done when the agent says so.** Every task asks the agent to end with `TASK COMPLETE`, or `TASK BLOCKED:` and what it needs. Only `TASK COMPLETE`, as the reply's last line and after that send of the task, moves a task to Ready for review; `TASK BLOCKED` keeps it in **Working** as waiting for you, and a turn that ends any other way (a question, say) keeps it there marked "not confirmed done". A channel that stops or fails, or a chat turn that ends in an error, marks the task too, with **Send again**. A quiet Codex terminal is checked the same way from its transcript.
