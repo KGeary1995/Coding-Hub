@@ -286,7 +286,8 @@ export class PtyManager {
       // The window size goes with the run's usage (and from there to every view), not into the conversation.
       if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size); } catch { this.dependencies.onEventError?.(); } return; }
       // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
-      if (event.type === 'permission') { const declined = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (declined) { emit({ type: 'notice', text: declined }); return; } }
+      // At Full access its commands are allowed at once ('' : nothing to show), with no card or alert either.
+      if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
@@ -375,7 +376,7 @@ export class PtyManager {
   /** Hierarchy Round Tables (plan, build, review, fix, final review), on the same chat runs. */
   private readonly chains = new ReviewChains(this.tableHost());
   private tableHost(): TableHost { return {
-    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner } : null; },
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions() } : null; },
     send: (runId, text, images) => this.chatRun(runId)?.chat?.send(text, images),
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },

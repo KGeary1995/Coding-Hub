@@ -371,6 +371,31 @@ describe('Chat channels', () => {
     // Closed by the person (here from a phone), so the window also stops the hidden partner.
     manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null, closed: true });
   });
+  it('runs a read-only seat’s command at Full access without an approval card or alert, and asks at other levels', async () => {
+    const processes: (FakePty & { onStderr: () => void })[] = []; const chats: ChatEnvelope[] = []; const events: SessionEvent[] = [];
+    const permitting = (engine: 'claude' | 'codex') => { const found = engines(engine); found.info.supportsPermissions = true; return found; };
+    const manager = new PtyManager((_owner, event) => events.push(event), { discover: async (engine) => permitting(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
+      spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    const claude = (sessionId: string) => ({ sessionId, cwd: process.cwd(), config: { engine: 'claude' as const, chat: true, model: '', permissions: 'full' as const, thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, cols: 80, rows: 24 });
+    const builder = await manager.start(1, claude('builder'));
+    const reviewer = await manager.start(1, { sessionId: 'reviewer', cwd: process.cwd(), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null, permissions: 'full' as const }, cols: 80, rows: 24 });
+    const planner = await manager.start(1, claude('planner'));
+    manager.chat(1, { action: 'table-open', kind: 'hierarchy', sessionId: builder.sessionId, runId: builder.runId, partner: { sessionId: reviewer.sessionId, runId: reviewer.runId }, planner: { sessionId: planner.sessionId, runId: planner.runId }, driver: 'claude', rounds: 2 });
+    const plannerPty = processes[2];
+    const ask = (id: string, tool: string) => plannerPty.data(JSON.stringify({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: tool, display_name: tool, input: { command: 'git status' }, description: 'git status', permission_suggestions: [] } }) + '\n');
+    const written = () => plannerPty.write.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('control_response')).map((line) => JSON.parse(line).response as { request_id: string; response: { behavior: string } });
+    ask('cmd-1', 'Bash');
+    expect(written()).toEqual([expect.objectContaining({ request_id: 'cmd-1', response: expect.objectContaining({ behavior: 'allow' }) })]);
+    expect(chats.some((chat) => chat.event.type === 'permission' || chat.event.type === 'notice')).toBe(false); expect(events.some((event) => event.type === 'attention')).toBe(false);
+    ask('edit-1', 'Write');
+    expect(written().at(-1)).toMatchObject({ request_id: 'edit-1', response: { behavior: 'deny' } }); expect(chats.some((chat) => chat.event.type === 'notice')).toBe(true);
+    // At Ask, the person decides: an approval card and an alert.
+    manager.chat(1, { action: 'permissions', sessionId: planner.sessionId, runId: planner.runId, level: 'ask' });
+    ask('cmd-2', 'Bash');
+    expect(written().map((item) => item.request_id)).not.toContain('cmd-2');
+    expect(chats.some((chat) => chat.event.type === 'permission' && chat.event.requestId === 'cmd-2')).toBe(true); expect(events.some((event) => event.type === 'attention')).toBe(true);
+  });
 });
 
 describe('Gemini CLI channels', () => {

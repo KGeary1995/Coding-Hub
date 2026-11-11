@@ -1,11 +1,13 @@
 import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
+import type { PermissionLevel } from '../../../shared/types';
 import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
 
 type Engine = 'claude' | 'codex';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
 export interface TableHost {
-  run(runId: string): { sessionId: string; engine: Engine; cwd: string; owner: number } | null;
+  /** `permissions`: the level the person set for the run; at Full a read-only seat runs its commands without asking. */
+  run(runId: string): { sessionId: string; engine: Engine; cwd: string; owner: number; permissions?: PermissionLevel } | null;
   send(runId: string, text: string, images: ChatImage[]): void;
   setReadOnly(runId: string, readOnly: boolean): void;
   answer(runId: string, requestId: string, allow: boolean): void;
@@ -25,7 +27,15 @@ const MAX_IMAGES = 10;
 /** The most image data (base64 characters) a waiting message keeps through a restart; the saved workspace carries it. */
 export const KEEP_IMAGES = 6_000_000;
 /** Tools a reviewer never gets to use: file edits, and leaving Claude's plan mode. */
-const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
+export const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
+/**
+ * A read-only seat's request that is not an edit (a command, a web fetch) at Full access: allowed at once, as the
+ * person's level says, instead of an approval card. Returns whether it was. Edits are declined before this.
+ */
+export function allowAtFull(host: TableHost, runId: string, requestId: string): boolean {
+  if (host.run(runId)?.permissions !== 'full') return false;
+  host.answer(runId, requestId, true); return true;
+}
 /** An answer saying the agent agrees and has nothing to add. */
 const AGREES = /^\s*\**AGREE\**\s*[.!]?\s*$/i;
 
@@ -193,7 +203,8 @@ export class RoundTables {
 
   /**
    * Every chat event passes here before it reaches the window. Returns a notice to show in place of an approval the
-   * reviewer asked for and Trace declined (an edit, or leaving plan mode), so no approval card or alert appears for it.
+   * reviewer asked for and Trace declined (an edit, or leaving plan mode), so no approval card or alert appears for it;
+   * or '' for one Trace allowed (a command, at Full access), which shows nothing.
    */
   observe(envelope: ChatEnvelope): string | null {
     const { runId, event } = envelope;
@@ -205,6 +216,7 @@ export class RoundTables {
       this.host.answer(runId, event.requestId, false);
       return `Trace declined ${event.toolName} for ${NAME[seat.engine]}: the reviewer does not edit files. Swap the driver to let it.`;
     }
+    if (event.type === 'permission' && seat.engine !== table.driver && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     this.settle(table, seat);

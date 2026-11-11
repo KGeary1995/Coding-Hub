@@ -1,7 +1,7 @@
 import type { ChainStep, ChatEnvelope, ChatImage, RoundTableState, SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
-import { KEEP_IMAGES, type TableHost } from './round-table';
+import { allowAtFull, EDITS, KEEP_IMAGES, type TableHost } from './round-table';
 import { BLOCKED_LINE, SIGNAL_INSTRUCTION, taskSignal } from '../../../shared/task-signal';
 
 /** Review rounds (Codex reviews, Opus fixes) before the planner's final review. */
@@ -11,8 +11,6 @@ export const FINAL_ROUNDS = 2;
 /** The longest earlier output passed into a prompt; more is cut, and the agent is told so. */
 const RELAY_LIMIT = 12_000;
 const MAX_IMAGES = 10;
-/** Tools a read-only seat never gets to use: file edits, and leaving Claude's plan mode. */
-const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
 
 type Role = 'planner' | 'builder' | 'reviewer';
 interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex'; role: Role; busy: boolean; text: string; answer: string | null; briefed: boolean }
@@ -230,7 +228,7 @@ export class ReviewChains {
   }
   ended(runId: string) { const chain = this.chainOf(runId); if (chain) this.close(chain.builder.runId, false); }
 
-  /** Every chat event passes here; returns a notice in place of an edit a read-only seat asked for (declined). */
+  /** Every chat event passes here; returns a notice in place of an edit a read-only seat asked for (declined), or '' for a command allowed at Full. */
   observe(envelope: ChatEnvelope): string | null {
     const { runId, event } = envelope; const chain = this.chainOf(runId); if (!chain) return null;
     const seat = this.seats(chain).find((item) => item.runId === runId)!;
@@ -239,6 +237,8 @@ export class ReviewChains {
       this.host.answer(runId, event.requestId, false);
       return `Trace declined ${event.toolName} for the ${seat.role}: only the builder edits files.`;
     }
+    // At Full access a read-only seat's commands run without an approval card, as the person's level says.
+    if (event.type === 'permission' && seat.role !== 'builder' && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     if (event.isError || chain.step === 'stopped' || chain.step === 'needs-you') { if (chain.step !== 'stopped') { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.note = event.error ?? 'The agent stopped with an error.'; } this.publish(chain); return null; }
