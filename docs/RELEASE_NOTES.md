@@ -1,6 +1,6 @@
 ## What's new
 
-Not released yet: work you can trust is finished, checks that say what they tested, and memory that keeps track (update every computer):
+1.17.0 brings a hierarchy Round Table, work you can trust is finished, checks that say what they tested, and memory that keeps track (update every computer and reload the phone app):
 
 - **A task is done when the agent says so.** Every task asks the agent to end with `TASK COMPLETE`, or `TASK BLOCKED:` and what it needs. Only `TASK COMPLETE`, as the reply's last line and after that send of the task, moves a task to Ready for review; `TASK BLOCKED` keeps it in **Working** as waiting for you, and a turn that ends any other way (a question, say) keeps it there marked "not confirmed done". A channel that stops or fails, or a chat turn that ends in an error, marks the task too, with **Send again**. A quiet Codex terminal is checked the same way from its transcript.
 - **Checks say which files they tested.** A verification run records the files it ran on (by content) and whether they changed while it ran. Verification and task cards say whether a pass still holds, the files changed since, or Trace can't tell.
