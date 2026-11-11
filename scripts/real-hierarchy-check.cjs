@@ -1,11 +1,13 @@
 // Manual check, not part of CI: a hierarchy Round Table with the real CLIs on your own logins (Fable 5.2 plans and gives
 // the final review, Opus 5.5 builds and fixes, Codex reviews), in the built app, on a scratch project and scratch Trace
 // data. A task is given, the plan approved, Trace quit part way, reopened and continued, until the planner approves.
-// Uses some of your Claude and Codex plans. Usage: npm run build && node scripts/real-hierarchy-check.cjs <outDir>
+// Uses some of your Claude and Codex plans. Usage: npm run build && node scripts/real-hierarchy-check.cjs <outDir> [--reject-once]
+// --reject-once: the task asks the planner to send its first final review back (CHANGES NEEDED), to run the loop back
+// through Fix and Codex's review; the restart part is skipped.
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
-const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); fs.mkdirSync(out, { recursive: true });
+const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); const rejectOnce = process.argv.includes('--reject-once'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-chain-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project, stdio: 'pipe' });
 git('init', '-q'); fs.writeFileSync(path.join(project, 'README.md'), '# Scratch\n'); git('add', '.'); git('commit', '-qm', 'base');
@@ -33,10 +35,15 @@ async function until(page, test, minutes, label) {
     await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: 'Round Table (hierarchy)', exact: true }).click();
     await page.waitForSelector('.chain-bar', { timeout: 240000 }); await shot(page, '01-open'); note('open', { bar: await bar(page) });
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' });
-    await box.fill('Create hello.txt containing the word hello, and a test.sh that checks it.'); await box.press('Enter');
+    await box.fill(rejectOnce ? 'Create hello.txt containing the word hello, and a test.sh that checks it. Planner: in your first final review, end with CHANGES NEEDED: add a one-line comment at the top of test.sh saying what it checks. In your next final review, approve if that comment is there.' : 'Create hello.txt containing the word hello, and a test.sh that checks it.'); await box.press('Enter');
     let r = await until(page, (text) => /plan is ready/i.test(text), 10, 'plan'); note('plan', r); await shot(page, '02-plan');
     await page.getByRole('button', { name: 'Approve plan', exact: true }).click();
     r = await until(page, (text) => /Codex reviewing|Approved by|Stopped|Needs you/i.test(text), 15, 'build'); note('built', r); await shot(page, '03-reviewing');
+    if (rejectOnce) {
+      r = await until(page, (text) => /Approved by|Needs you|planner still asks|without APPROVED/i.test(text), 40, 'finish'); note('finished', r); await shot(page, '05-finished');
+      note('files', { test: fs.existsSync(path.join(project, 'test.sh')) ? fs.readFileSync(path.join(project, 'test.sh'), 'utf8').split('\n').slice(0, 3) : null });
+      return;
+    }
     // Quit part way, reopen, start the table again, and continue where it stopped.
     await page.waitForTimeout(2500); await app.close(); ({ app, page } = await launch());
     await page.waitForSelector('.session-tile'); const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' });
