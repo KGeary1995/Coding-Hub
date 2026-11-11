@@ -23,10 +23,10 @@ export function EngineHealth({ detailed = false }: { detailed?: boolean }) {
   </section>;
 }
 
-/** Gemini CLI (agy), for Gemini channels: found or not, its version, and the flags those channels need. */
+/** Gemini CLI (agy), for Gemini channels and a hierarchy Round Table's Gemini seat: found or not, its version, and the flags and ACP server they need. */
 function GeminiHealth({ info, discovering }: { info: EngineInfo | undefined; discovering: boolean }) {
   return <details className={`engine-health-item ${info?.available ? 'available' : ''}`}><summary><span className="engine-glyph gemini"><TerminalSquare size={14} /></span><strong>Gemini CLI</strong><span className="engine-detection">{discovering ? 'Checking' : !window.codingHub ? 'Desktop required' : info?.available ? info.version : 'Not detected'}</span>{info?.available ? <Check size={13} /> : <CircleAlert size={13} />}<ChevronDown size={11} /></summary><div className="engine-diagnostic">{info?.executable && <code>{info.executable}</code>}<p>{info?.error ?? (info?.available ? 'agy found. agy handles its own sign-in; Trace does not check it.' : 'Install Gemini CLI (agy) and run it once in a terminal to sign in.')}</p>{info?.available && <>
-    <dl className="engine-capabilities"><dt>Model flag</dt><dd>{info.supportsModel ? `Supported (always ${GEMINI_MODEL})` : 'Not advertised: Gemini channels cannot start'}</dd><dt>--mode</dt><dd>{info.supportsMode ? 'Supported' : 'Not advertised'}</dd><dt>--dangerously-skip-permissions</dt><dd>{info.supportsSkipPermissions ? 'Supported' : 'Not advertised'}</dd></dl>
+    <dl className="engine-capabilities"><dt>Model flag</dt><dd>{info.supportsModel ? `Supported (always ${GEMINI_MODEL})` : 'Not advertised: Gemini channels cannot start'}</dd><dt>--mode</dt><dd>{info.supportsMode ? 'Supported' : 'Not advertised'}</dd><dt>--dangerously-skip-permissions</dt><dd>{info.supportsSkipPermissions ? 'Supported' : 'Not advertised'}</dd><dt>ACP server (agy acp)</dt><dd>{info.supportsAcp ? 'Listed: hierarchy Round Tables seat Gemini' : 'Not listed: hierarchy Round Tables open without Gemini'}</dd></dl>
     {info.checkedAt && <small className="muted">Checked {new Date(info.checkedAt).toLocaleString()}</small>}
   </>}</div></details>;
 }

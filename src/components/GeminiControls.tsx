@@ -24,6 +24,6 @@ export function GeminiControls({ config, onChange }: { config: GeminiChannelConf
       <small>{GEMINI_PERMISSION_HELP[permissions]} Applies when the channel starts.</small>
     </label>
     <p className="control-note">Model: {GEMINI_MODEL}, the highest model on your subscription. Gemini channels always run it.</p>
-    <p className="control-note">A Gemini channel is Gemini CLI in a terminal. Usage, resume, shared memory, tasks, image paste and Round Tables are for Claude Code and Codex channels.</p>
+    <p className="control-note">A Gemini channel is Gemini CLI in a terminal. Usage, resume, shared memory, tasks and image paste are for Claude Code and Codex channels. In a hierarchy Round Table, Gemini sits as a hidden, read-only seat that challenges the plan and reviews the build.</p>
   </div>;
 }

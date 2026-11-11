@@ -6,7 +6,7 @@ import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
 function setup() {
-  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number }> = {
+  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number; permissions?: 'ask' | 'edits' | 'full' }> = {
     [BUILDER]: { sessionId: 'builder', engine: 'claude', cwd: '/p', owner: 1 }, [REVIEWER]: { sessionId: 'reviewer', engine: 'codex', cwd: '/p', owner: 1 }, [PLANNER]: { sessionId: 'planner', engine: 'claude', cwd: '/p', owner: 1 },
   };
   const sent: { runId: string; text: string }[] = []; const modes: Record<string, boolean> = {}; const answers: { requestId: string; allow: boolean }[] = []; const interrupted: string[] = []; const events: ChatEnvelope[] = [];
@@ -17,7 +17,7 @@ function setup() {
     chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError, error: isError ? 'crashed' : null } }); await new Promise((resolve) => setTimeout(resolve, 0));
   };
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
-  return { chains, sent, modes, answers, interrupted, reply, last };
+  return { chains, sent, modes, answers, interrupted, reply, last, runs };
 }
 
 describe('hierarchy Round Table', () => {
@@ -65,6 +65,17 @@ describe('hierarchy Round Table', () => {
     expect(chains.observe({ sessionId: 'reviewer', runId: REVIEWER, event: { type: 'permission', requestId: 'r2', toolName: 'File changes', description: '', input: {}, canAllowEdits: true } })).toContain('only the builder edits');
     expect(chains.observe({ sessionId: 'builder', runId: BUILDER, event: { type: 'permission', requestId: 'r3', toolName: 'Write', description: '', input: {}, canAllowEdits: true } })).toBeNull();
     expect(answers).toEqual([{ requestId: 'r1', allow: false }, { requestId: 'r2', allow: false }]);
+  });
+  it('allows the planner’s and reviewer’s commands at Full access only, still declines their edits, and leaves the builder’s to the person', () => {
+    const { chains, answers, runs } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER);
+    const ask = (runId: string, requestId: string, toolName: string) => chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'permission', requestId, toolName, description: '', input: {}, canAllowEdits: false } });
+    for (const level of ['ask', 'edits'] as const) { runs[PLANNER].permissions = level; runs[REVIEWER].permissions = level; expect(ask(PLANNER, `p-${level}`, 'Bash')).toBeNull(); expect(ask(REVIEWER, `r-${level}`, 'Shell')).toBeNull(); }
+    expect(answers).toEqual([]);
+    for (const id of [PLANNER, REVIEWER, BUILDER]) runs[id].permissions = 'full';
+    expect(ask(PLANNER, 'p1', 'Bash')).toBe(''); expect(ask(REVIEWER, 'r1', 'Shell')).toBe('');
+    expect(ask(PLANNER, 'p2', 'Write')).toContain('only the builder edits'); expect(ask(PLANNER, 'p3', 'ExitPlanMode')).toContain('only the builder edits');
+    expect(ask(BUILDER, 'b1', 'Bash')).toBeNull();
+    expect(answers).toEqual([{ requestId: 'p1', allow: true }, { requestId: 'r1', allow: true }, { requestId: 'p2', allow: false }, { requestId: 'p3', allow: false }]);
   });
   it('stops at a step and continues it; an error stops it too; a restart brings it back stopped at that step', async () => {
     const { chains, sent, interrupted, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);

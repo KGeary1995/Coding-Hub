@@ -7,7 +7,7 @@ const CLAUDE = '11111111-1111-4111-8111-111111111111'; const CODEX = '22222222-2
 /** Two running chats in one folder; records what the coordinator sends and sets. */
 function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' | 'codex'] } = {}) {
   const [a, b] = options.engines ?? ['claude', 'codex'];
-  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number }> = {
+  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number; permissions?: 'ask' | 'edits' | 'full' }> = {
     [CLAUDE]: { sessionId: 'lead', engine: a, cwd: '/project', owner: 1 },
     [CODEX]: { sessionId: 'partner', engine: b, cwd: options.cwd ?? '/project', owner: 1 },
   };
@@ -25,7 +25,7 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
   const say = (runId: string, text: string) => { const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; tables.observe({ sessionId: runs[runId].sessionId, runId, event }); };
   const done = (runId: string) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } });
   const last = () => events.filter((envelope) => envelope.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>;
-  return { tables, sent, modes, answers, interrupted, say, done, last };
+  return { tables, sent, modes, answers, interrupted, say, done, last, runs };
 }
 
 describe('Round Table', () => {
@@ -57,6 +57,15 @@ describe('Round Table', () => {
     expect(sent).toHaveLength(4); expect(last().table).toMatchObject({ phase: 'idle', agreed: true, round: 1 });
   });
 
+  it('allows the reviewer’s commands at Full access only, still declines its edits, and leaves the driver’s to the person', () => {
+    const { tables, answers, runs } = setup(); tables.open(1, CLAUDE, CODEX, 'codex', 0);
+    const ask = (runId: string, requestId: string, toolName: string) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'permission', requestId, toolName, description: '', input: {}, canAllowEdits: false } });
+    for (const level of ['ask', 'edits'] as const) { runs[CLAUDE].permissions = level; expect(ask(CLAUDE, `c-${level}`, 'Bash')).toBeNull(); }
+    expect(answers).toEqual([]);
+    runs[CLAUDE].permissions = 'full'; runs[CODEX].permissions = 'full';
+    expect(ask(CLAUDE, 'c1', 'Bash')).toBe(''); expect(ask(CLAUDE, 'c2', 'Edit')).toContain('reviewer does not edit'); expect(ask(CODEX, 'x1', 'Shell')).toBeNull();
+    expect(answers).toEqual([{ runId: CLAUDE, requestId: 'c1', allow: true }, { runId: CLAUDE, requestId: 'c2', allow: false }]);
+  });
   it('keeps the reviewer read-only, declines its edits, and swaps roles without restarting', () => {
     const { tables, modes, answers, sent, say, done } = setup();
     tables.open(1, CLAUDE, CODEX, 'codex', 0);

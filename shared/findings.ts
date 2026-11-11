@@ -19,6 +19,10 @@ export interface Finding {
   filesChanged?: boolean;
   /** The round it was reported in, and when. */
   round: number; at: string;
+  /** Who reported it: Gemini, at a hierarchy table with a Gemini seat; absent, the reviewer (Codex). */
+  source?: 'gemini';
+  /** Gemini's word on it when it compared the two reviews, and why; and the finding it repeats (it is closed then). */
+  gemini?: 'agree' | 'dispute'; geminiNote?: string; duplicateOf?: string;
 }
 export const MAX_FINDINGS = 50;
 const LINE_LIMIT = 500;
@@ -59,12 +63,43 @@ export function apply(finding: Finding, verb: 'FIXED' | 'DECLINED' | 'VERIFIED' 
   return false;
 }
 
+/** Who reported a finding and, at a table with Gemini, what Gemini said about it: "" when neither applies. */
+export function findingOrigin(finding: Finding): string {
+  const view = finding.gemini === 'agree' ? 'Gemini agrees' : finding.gemini === 'dispute' ? `Gemini disputes${finding.geminiNote ? `: ${finding.geminiNote}` : ''}` : '';
+  return [finding.source === 'gemini' ? 'from Gemini' : finding.gemini ? 'from Codex' : '', view].filter(Boolean).join('; ');
+}
 /** One line per finding still needing someone, for the agent it is waiting on. */
 export function findingsFor(findings: Finding[], role: 'driver' | 'reviewer'): string {
-  const waiting = findings.filter((finding) => role === 'driver' ? finding.status === 'open' : finding.status === 'fixed' || finding.status === 'declined');
+  const waiting = findings.filter((finding) => !finding.duplicateOf && (role === 'driver' ? finding.status === 'open' : finding.status === 'fixed' || finding.status === 'declined'));
   if (!waiting.length) return '';
-  const lines = waiting.map((finding) => `${finding.id} (${finding.severity}${finding.evidence ? `, ${finding.evidence}` : ''}${finding.status !== 'open' ? `, ${finding.status}: ${finding.response || 'no reason given'}` : ''}): ${finding.text}`);
+  const lines = waiting.map((finding) => `${finding.id} (${finding.severity}${finding.evidence ? `, ${finding.evidence}` : ''}${findingOrigin(finding) ? `, ${findingOrigin(finding)}` : ''}${finding.status !== 'open' ? `, ${finding.status}: ${finding.response || 'no reason given'}` : ''}): ${finding.text}`);
   return role === 'driver'
     ? `Open findings, waiting for you. Answer each on its own line as "FIXED F<n>: what you changed" or "DECLINED F<n>: why":\n${lines.join('\n')}`
     : `Findings the driver answered, waiting for your check. Check each, then answer on its own line "VERIFIED F<n>" or "REOPENED F<n>: why":\n${lines.join('\n')}`;
+}
+
+const CHALLENGE = /^\s*(?:[-*]\s*)?\**CHALLENGE\**\s*[:(\[]?\s*(high|medium|low)\s*[)\]]?\s*[:,—–-]*\s*(.+)$/i;
+const RESPONSE = /^\s*(?:[-*]\s*)?\**(ACCEPTED|REJECTED)\**\s+C(\d{1,3})\b\s*[:,.—–-]*\s*(.*)$/i;
+const COMPARE = /^\s*(?:[-*]\s*)?\**(AGREE|DISPUTE|DUPLICATE)\**\s+F(\d{1,3})\b(?:\s+of\s+F(\d{1,3})\b)?\s*[:,.—–-]*\s*(.*)$/i;
+/** Gemini's challenges to a plan: "CHALLENGE high|medium|low — text" lines (Trace numbers them C1, C2, …). */
+export function parseChallenges(answer: string): { severity: FindingSeverity; text: string }[] {
+  const out: { severity: FindingSeverity; text: string }[] = [];
+  for (const line of answer.split(/\r?\n/)) { const match = CHALLENGE.exec(line); if (match && match[2].trim()) out.push({ severity: match[1].toLowerCase() as FindingSeverity, text: match[2].trim().slice(0, LINE_LIMIT) }); }
+  return out;
+}
+/** The planner's answers to challenges: "ACCEPTED C1" or "REJECTED C1 — why". */
+export function parseChallengeAnswers(answer: string): { id: string; answer: 'accepted' | 'rejected'; reason: string }[] {
+  const out: { id: string; answer: 'accepted' | 'rejected'; reason: string }[] = [];
+  for (const line of answer.split(/\r?\n/)) { const match = RESPONSE.exec(line); if (match) out.push({ id: `C${Number(match[2])}`, answer: match[1].toUpperCase() === 'ACCEPTED' ? 'accepted' : 'rejected', reason: match[3].trim().slice(0, LINE_LIMIT) }); }
+  return out;
+}
+/** Gemini's comparison of the two reviews: "AGREE F1", "DISPUTE F2 — why", "DUPLICATE F3 of F1". */
+export function parseComparison(answer: string): { id: string; verdict: 'agree' | 'dispute' | 'duplicate'; of: string | null; note: string }[] {
+  const out: { id: string; verdict: 'agree' | 'dispute' | 'duplicate'; of: string | null; note: string }[] = [];
+  for (const line of answer.split(/\r?\n/)) {
+    const match = COMPARE.exec(line); if (!match) continue;
+    const verdict = match[1].toLowerCase() as 'agree' | 'dispute' | 'duplicate'; if (verdict === 'duplicate' && !match[3]) continue;
+    out.push({ id: `F${Number(match[2])}`, verdict, of: match[3] ? `F${Number(match[3])}` : null, note: match[4].trim().slice(0, LINE_LIMIT) });
+  }
+  return out;
 }

@@ -35,6 +35,8 @@ export interface EngineInfo {
   /** Gemini CLI's --mode (accept-edits) and --dangerously-skip-permissions. */
   supportsMode?: boolean;
   supportsSkipPermissions?: boolean;
+  /** Gemini CLI lists its ACP server (`agy acp`), which a hierarchy Round Table's Gemini seat runs. */
+  supportsAcp?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;

@@ -6,7 +6,7 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, leadOf, partnerOf, plannerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, leadOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
@@ -79,8 +79,10 @@ export function useNativeHost() {
       if (event.type === 'answered' && event.finished) taskTurnDone(event.sessionId);
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-      if (event.type === 'started' && before && isAgentConfig(before.config) && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
-      if (event.type === 'exit' && before && isAgentConfig(before.config) && before.config.chat) chatEnded(event.sessionId);
+      // A chat's thread: Claude Code's or Codex's, or a hierarchy table's Gemini seat (which never resumes).
+      const chatRun = before && (isAgentConfig(before.config) || before.config.engine === 'gemini') && before.config.chat === true;
+      if (event.type === 'started' && before && chatRun) chatStarted(event.sessionId, event.runId, isAgentConfig(before.config) && Boolean(before.config.resumeId));
+      if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
       catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
@@ -160,10 +162,10 @@ export async function startSession(id: string) {
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
   // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
-  // A hierarchy table's planner too: its hidden seats start together.
+  // A hierarchy table's planner and Gemini seat too: its hidden seats start together.
   const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
-  const seats = [partnerOf(useWorkspaceStore.getState().sessions, id), plannerOf(useWorkspaceStore.getState().sessions, id)];
-  await Promise.all(seats.map((seat) => seat && lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
+  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
+  await Promise.all(seats.map((seat) => lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
 }
 
 /** Waits (up to `ms`) until none of these sessions is running, or only until they are past starting. */
@@ -174,16 +176,16 @@ export async function settled(ids: (string | undefined)[], past: 'running' | 'st
 
 /** Stops a channel, and the hidden partner of a Round Table it leads with it (that has no Stop of its own). */
 export async function stopSession(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
-  const [own, seat, plan] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true, planner ? stopRun(planner.id) : true]);
-  return own && seat && plan;
+  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
+  const stopped = await Promise.all([stopRun(id), ...seats.map((seat) => stopRun(seat.id))]);
+  return stopped.every(Boolean);
 }
 /** Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped. */
 export async function closeChannel(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
+  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
   if (!(await stopSession(id))) return false;
   // The exit events can arrive just after the stop requests return; a session still running is never removed.
-  await settled([id, partner?.id, planner?.id]);
+  await settled([id, ...seats.map((seat) => seat.id)]);
   useWorkspaceStore.getState().removeSession(id);
   return !useWorkspaceStore.getState().sessions.some((session) => session.id === id);
 }
@@ -233,11 +235,11 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): s
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {
   const current = () => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const session = current(); if (!session) return 'That channel is no longer on this computer.';
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
-  if (control !== 'start' && [session, partner, planner].some((seat) => seat?.status === 'running')) {
+  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
+  if (control !== 'start' && [session, ...seats].some((seat) => seat.status === 'running')) {
     if (!(await stopSession(id))) return current()?.error ?? 'The channel could not be stopped.';
-    // The exit events (a Round Table's partner's and planner's too) can arrive just after the stop requests return.
-    await settled([id, partner?.id, planner?.id]);
+    // The exit events (a Round Table's hidden seats' too) can arrive just after the stop requests return.
+    await settled([id, ...seats.map((seat) => seat.id)]);
   }
   if (control === 'stop') return undefined;
   if (control === 'close') {

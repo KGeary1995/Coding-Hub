@@ -43,6 +43,7 @@ export class CodexStream implements ChatStream {
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: CodexThreadOptions) { this.level = options.permissions ?? 'ask'; this.applied = this.level; }
   /** Applies from the next turn: Codex takes its sandbox and approval policy with each turn. */
   setReadOnly(readOnly: boolean) { if (readOnly !== this.readOnly) { this.readOnly = readOnly; this.policyChanged = true; } }
+  permissions() { return this.level; }
   setPermissions(level: PermissionLevel) { if (level !== this.level) { this.level = level; this.policyChanged = true; } }
   private policy() {
     const approvalPolicy = this.level === 'ask' ? this.own.approvalPolicy : APPROVAL[this.level];

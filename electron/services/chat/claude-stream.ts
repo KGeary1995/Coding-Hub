@@ -22,6 +22,8 @@ export interface ChatStream {
   setReadOnly(readOnly: boolean): void;
   /** What the agent may do without asking, from its next action (Claude) or next turn (Codex). */
   setPermissions(level: PermissionLevel): void;
+  /** The level the person set for this channel (a Round Table's read-only seat keeps it, for what it may do without asking). */
+  permissions(): PermissionLevel;
 }
 
 export class ClaudeStream implements ChatStream {
@@ -45,6 +47,7 @@ export class ClaudeStream implements ChatStream {
     if (readOnly === this.readOnly) return; this.readOnly = readOnly;
     this.setMode(readOnly ? 'plan' : this.mode());
   }
+  permissions() { return this.level; }
   setPermissions(level: PermissionLevel) {
     if (level === this.level) return; const previous = this.level; this.level = level;
     if (!this.readOnly) this.setMode(this.mode(), previous);

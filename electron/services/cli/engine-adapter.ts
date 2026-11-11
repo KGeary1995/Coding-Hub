@@ -87,3 +87,15 @@ export function buildGeminiLaunch(config: GeminiChannelConfig, engine: EngineInf
   if (level === 'full' && !engine.supportsSkipPermissions) throw new HubError('UNSUPPORTED_PERMISSIONS', 'This Gemini CLI does not advertise --dangerously-skip-permissions. Set Permissions to Ask, or update agy.');
   return ['--model', config.model, ...(level === 'edits' ? ['--mode', 'accept-edits'] : level === 'full' ? ['--dangerously-skip-permissions'] : [])];
 }
+/**
+ * A hierarchy Round Table's Gemini seat: agy's ACP server, with no flags. The model and plan mode are set in the
+ * protocol (GeminiStream), which refuses to go on unless the session confirms GEMINI_MODEL. Never
+ * --dangerously-skip-permissions: Trace answers each request itself.
+ */
+export function buildGeminiChatLaunch(config: GeminiChannelConfig, engine: EngineInfo): string[] {
+  if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'Gemini CLI is unavailable.');
+  if (engine.engine !== 'gemini') throw new HubError('ENGINE_MISMATCH', 'Engine configuration does not match the installed CLI.');
+  if (config.model !== GEMINI_MODEL) throw new HubError('UNSUPPORTED_MODEL', `A Gemini seat runs only ${GEMINI_MODEL}.`);
+  if (!engine.supportsAcp) throw new HubError('UNSUPPORTED_ACP', 'This Gemini CLI does not list its ACP server (agy acp), which a Round Table seat needs. Update agy.');
+  return ['acp'];
+}
