@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, desktopCapturer, screen, session } from 'electron';
 import type { FrameRect, ScreenSource } from './rfb-server';
-import { layoutDisplays, type DisplayRect } from './screen-layout';
+import { layoutDisplays, mainDisplayFallback, orderDisplays, pictureRegion, WHOLE_DESKTOP, type DisplayRect, type PictureRegion } from './screen-layout';
 
 const PARTITION = 'trace-screen-capture';
 
@@ -11,10 +11,19 @@ const PARTITION = 'trace-screen-capture';
  */
 export class ScreenCapture implements ScreenSource {
   width = 0; height = 0;
+  /** How many displays this computer has, which one is shown (0: all), and where the picture is on the desktop (for clicks). */
+  displays = 1; display = 0; region: PictureRegion = WHOLE_DESKTOP;
   private next = 0; private pending = new Map<number, { resolve: (rects: FrameRect[]) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private constructor(private window: BrowserWindow) {}
+  /**
+   * The layout is read once, at the start: a display added or removed, or one whose size, place or scaling changed, makes
+   * the picture and click positions wrong, so the capture stops (the session ends and the viewer connects again).
+   */
+  private changed = () => this.stop();
+  private metrics = (_event: unknown, _display: unknown, changed: string[]) => { if (changed.includes('bounds') || changed.includes('scaleFactor')) this.stop(); };
 
-  static async start(page: string): Promise<ScreenCapture> {
+  /** `display`: 0 for every display side by side, or one of them, 1 and up from the left. */
+  static async start(page: string, display = 0): Promise<ScreenCapture> {
     const capture = session.fromPartition(PARTITION);
     let window: BrowserWindow | null = null;
     capture.setPermissionRequestHandler((contents, permission, callback, details) => callback(contents === window?.webContents && permission === 'media' && !(details as { mediaTypes?: string[] }).mediaTypes?.includes('audio')));
@@ -30,10 +39,19 @@ export class ScreenCapture implements ScreenSource {
         const rect = process.platform === 'win32' ? screen.dipToScreenRect(null, display.bounds) : { x: display.bounds.x * display.scaleFactor, y: display.bounds.y * display.scaleFactor, width: display.bounds.width * display.scaleFactor, height: display.bounds.height * display.scaleFactor };
         return { id: String(display.id), ...rect };
       });
-      const layout = layoutDisplays(displays);
+      // One display (numbered from the left) at the size one display gets, or all of them; a number that is gone shows all.
+      const ordered = orderDisplays(displays); const one = display >= 1 && display <= ordered.length ? ordered[display - 1] : null;
+      const shown = one ? [one] : displays;
+      const layout = layoutDisplays(shown);
       let parts = layout.parts.flatMap((part) => { const source = sources.find((item) => item.display_id === part.id); return source ? [{ ...part, sourceId: source.id }] : []; });
       let size = { width: layout.width, height: layout.height };
-      if (!parts.length) { const one = layoutDisplays([{ id: '', x: 0, y: 0, ...screen.getPrimaryDisplay().size }]); size = one; parts = [{ ...one.parts[0], sourceId: sources[0].id }]; }
+      instance.displays = displays.length; instance.display = one ? display : 0; instance.region = one ? pictureRegion(displays, [one]) : WHOLE_DESKTOP;
+      // No source names its display: the first source, taken as the main display (in physical pixels, clicks on it alone).
+      if (!parts.length) {
+        const primary = String(screen.getPrimaryDisplay().id); const main = displays.find((item) => item.id === primary) ?? displays[0];
+        const fallback = main ? mainDisplayFallback(displays, main) : { layout: layoutDisplays([{ id: '', x: 0, y: 0, ...screen.getPrimaryDisplay().size }]), region: WHOLE_DESKTOP };
+        size = { width: fallback.layout.width, height: fallback.layout.height }; parts = [{ ...fallback.layout.parts[0], sourceId: sources[0].id }]; instance.displays = 1; instance.display = 0; instance.region = fallback.region;
+      }
       const started = await new Promise<{ width?: number; height?: number; error?: string }>((resolve) => {
         const timer = setTimeout(() => resolve({ error: 'The capture did not start.' }), 15000);
         window!.webContents.ipc.once('trace-capture-started', (_event, value) => { clearTimeout(timer); resolve(value); });
@@ -46,6 +64,7 @@ export class ScreenCapture implements ScreenSource {
         if (value.error || !value.rects) waiting.reject(new Error(value.error ?? 'No frame.')); else waiting.resolve(value.rects);
       });
       window.webContents.on('render-process-gone', () => instance.stop());
+      screen.on('display-added', instance.changed); screen.on('display-removed', instance.changed); screen.on('display-metrics-changed', instance.metrics);
       return instance;
     } catch (error) { window.destroy(); throw error; }
   }
@@ -60,6 +79,7 @@ export class ScreenCapture implements ScreenSource {
   }
 
   stop() {
+    screen.off('display-added', this.changed); screen.off('display-removed', this.changed); screen.off('display-metrics-changed', this.metrics);
     for (const waiting of this.pending.values()) { clearTimeout(waiting.timer); waiting.reject(new Error('The capture stopped.')); } this.pending.clear();
     if (!this.window.isDestroyed()) this.window.destroy();
   }

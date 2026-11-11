@@ -34,10 +34,24 @@ describe('the Windows screen service', () => {
     await until(() => viewers.length > 0, 'the viewer'); expect(viewers.at(-1)).toBe('MacBook-Air-2.local');
   });
 
+  it('shows the display the viewer asks for, and says how many there are', async () => {
+    const asked: number[] = [];
+    const open = async (display: number) => { asked.push(display); return { source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => {}, displays: 3, display: display > 3 ? 0 : display }; };
+    const { url } = await service(true, { open: open as never });
+    const one = await openTraceScreen('Obsidian-Halo', url, COMPUTER, undefined, 2); one.socket.destroy();
+    expect(asked).toEqual([2]); expect(one).toMatchObject({ displays: 3, display: 2 });
+    // A number that is gone (a display was unplugged) shows them all; no choice asks for all.
+    const gone = await openTraceScreen('Obsidian-Halo', url, COMPUTER, undefined, 5); gone.socket.destroy(); expect(gone).toMatchObject({ displays: 3, display: 0 });
+    const all = await openTraceScreen('Obsidian-Halo', url, COMPUTER); all.socket.destroy(); expect(asked).toEqual([2, 5, 0]); expect(all).toMatchObject({ displays: 3, display: 0 });
+    // An older service (or one that cannot say) gives neither, and the viewer offers no choice.
+    const older = await service(); const plain = await openTraceScreen('Obsidian-Halo', older.url, COMPUTER, undefined, 2); plain.socket.destroy();
+    expect(plain.displays).toBeUndefined(); expect(plain.display).toBeUndefined();
+  });
+
   it('refuses unknown keys, phones, and a switched-off share, saying why', async () => {
     const { url, root } = await service();
     await expect(openTraceScreen('Obsidian-Halo', url, 'x'.repeat(43))).rejects.toThrow(/no longer accepts this computer/);
-    await expect(openTraceScreen('Obsidian-Halo', url, PHONE)).rejects.toThrow(/phones cannot/);
+    await expect(openTraceScreen('Obsidian-Halo', url, PHONE)).rejects.toThrow(/through Trace’s phone access/);
     fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: false }));
     await expect(openTraceScreen('Obsidian-Halo', url, COMPUTER)).rejects.toThrow(/Screen sharing is off on Obsidian-Halo/);
   });

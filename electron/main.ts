@@ -48,9 +48,10 @@ import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, stopServing, tailscalePeers, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
-import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
+import { openTraceScreen, ScreenSharing, screenHost } from './services/remote/screen-sharing';
+import { localScreenToken, shareEnabled } from './services/remote/screen-service-server';
 import { ScreenShare } from './services/remote/screen-share';
-import { SCREEN_PORT } from '../shared/screen';
+import { MAX_DISPLAYS, SCREEN_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
 import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
@@ -160,7 +161,7 @@ const manager = new PtyManager((owner, event) => {
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
-}, abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onStarted: (run, config, owner) => {
+}, abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
@@ -253,23 +254,23 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
 const screenSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('screen-open'), id: z.uuid(), streamId: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-open'), id: z.uuid(), streamId: z.uuid(), display: z.number().int().min(0).max(MAX_DISPLAYS).optional() }).strict(),
   z.object({ action: z.literal('screen-send'), streamId: z.uuid(), data: z.instanceof(Uint8Array).refine((data) => data.byteLength > 0 && data.byteLength <= 1024 * 1024) }).strict(),
   z.object({ action: z.literal('screen-close'), streamId: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-credentials'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-save-credentials'), id: z.uuid(), username: z.string().min(1).max(256), password: z.string().min(1).max(1024) }).strict(),
   z.object({ action: z.literal('screen-forget-credentials'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-share-status') }).strict(),
-  z.object({ action: z.literal('screen-share-set'), enabled: z.boolean() }).strict(),
+  z.object({ action: z.literal('screen-share-set'), enabled: z.boolean(), elevated: z.boolean().optional() }).strict(),
 ]);
 async function screenRequest(owner: number, payload: unknown) {
   const request = screenSchema.parse(payload);
   if (request.action === 'screen-share-status' || request.action === 'screen-share-set') {
     if (!screenShare) throw new HubError('SCREEN_UNAVAILABLE', 'Sharing this screen needs writable local storage.');
-    return request.action === 'screen-share-set' ? screenShare.set(request.enabled) : screenShare.status();
+    return request.action === 'screen-share-set' ? screenShare.set(request.enabled, request.elevated) : screenShare.status();
   }
   if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
-  if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId);
+  if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId, request.display ?? 0);
   if (request.action === 'screen-send') return screens.send(owner, request.streamId, request.data);
   if (request.action === 'screen-close') return screens.close(owner, request.streamId);
   if (request.action === 'screen-save-credentials') return screens.saveCredentials(request.id, { username: request.username, password: request.password });
@@ -578,8 +579,13 @@ else app.whenReady().then(() => {
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
     transcript: channelTranscript,
-    // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
+    // A phone's Screen reaches this Mac's own Screen Sharing on loopback, or, on Windows, Trace's screen service (when
+    // Share this screen is on), signed in with Trace's own key and named as the phone.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
+    ...(process.platform === 'win32' ? {
+      screenService: () => shareEnabled(storageRoot),
+      openScreenService: (viewer: string) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${SCREEN_SERVICE_PORT}/`, token, undefined, 0, { 'X-Trace-Viewer': viewer }); },
+    } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
     // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
     // asks for a fresh read in the background, at most every five minutes like Usage (PlanLimitsService.refresh).
@@ -600,7 +606,7 @@ else app.whenReady().then(() => {
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
   screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);
-  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed'));
+  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed')); screenShare.watch();
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;

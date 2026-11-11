@@ -3,7 +3,7 @@ import tls from 'node:tls';
 import { z } from 'zod';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
-import { SCREEN_SERVICE_PATH, type ScreenCredentials, type ScreenEvent, type ScreenKind } from '../../../shared/screen';
+import { MAX_DISPLAYS, SCREEN_SERVICE_PATH, type ScreenCredentials, type ScreenEvent, type ScreenKind, type ScreenOpened } from '../../../shared/screen';
 
 const FILE = 'screen-sharing.json';
 const MAX_STREAMS = 4;
@@ -23,7 +23,10 @@ export interface SecretCipher { available(): boolean; encrypt(text: string): str
  */
 export interface ScreenTarget { name: string; trace: { url: string; token: string } | null; system: { host: string; port: number } | null }
 /** `ready` once its listeners are attached; until then a close ends it here. */
-interface Stream { socket: net.Socket; owner: number; name: string; closing: boolean; ready: boolean }
+/** `abort`: closing it while it is still connecting closes the connection being made too, at once. */
+interface Stream { socket: net.Socket; owner: number; name: string; closing: boolean; ready: boolean; abort: AbortController }
+/** The connection was closed here while it was being made: nothing else is tried. */
+class Aborted extends Error {}
 /** The other computer's screen service answered but refused: say why, rather than try its system's. */
 class Refused extends Error {}
 
@@ -56,13 +59,16 @@ function connected(socket: net.Socket, event: 'connect' | 'secureConnect') {
  * there and said no, as does no answer in time; anything else (Trace there is older, or the computer is a Mac) means
  * there is no such service.
  */
-export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT): Promise<{ socket: net.Socket; head: Buffer }> {
+export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT, display = 0, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<{ socket: net.Socket; head: Buffer; displays?: number; display?: number }> {
   const address = new URL(url); const secure = address.protocol === 'https:';
   const socket = secure ? tls.connect({ host: address.hostname, port: Number(address.port) || 443, servername: address.hostname }) : net.connect({ host: address.hostname, port: Number(address.port) || 80 });
   socket.on('error', () => { /* Reported below. */ });
+  // Closed while connecting or waiting for the answer: the socket goes at once, rather than when the answer comes.
+  const abort = () => socket.destroy(); signal?.addEventListener('abort', abort, { once: true });
   try {
+    if (signal?.aborted) throw new Aborted('The screen connection was closed.');
     await connected(socket, secure ? 'secureConnect' : 'connect');
-    socket.write(`GET ${SCREEN_SERVICE_PATH} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\nConnection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
+    socket.write(`GET ${SCREEN_SERVICE_PATH}${display ? `?display=${display}` : ''} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\n${Object.entries(headers).map(([key, value]) => `${key}: ${value.replace(/[\r\n]/g, '')}\r\n`).join('')}Connection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
     const answer = await new Promise<Buffer>((resolve, reject) => {
       let received = Buffer.alloc(0); let done = false;
       const finish = (error?: Error) => { if (done) return; done = true; clearTimeout(timer); socket.off('data', data); socket.off('close', end); if (error) reject(error); else resolve(received); };
@@ -80,14 +86,20 @@ export async function openTraceScreen(name: string, url: string, token: string, 
       socket.on('data', data); socket.once('close', end);
     });
     const split = answer.indexOf('\r\n\r\n'); const status = split < 0 ? 0 : Number(/^HTTP\/1\.1 (\d{3})/.exec(answer.toString('latin1', 0, split))?.[1]);
-    if (status === 101) return { socket, head: answer.subarray(split + 4) };
+    if (status === 101) {
+      // A service that can show one display says how many it has and which it shows; an older one says neither.
+      const header = (field: string) => { const value = Number(answer.toString('latin1', 0, split).split('\r\n').find((line) => line.toLowerCase().startsWith(`${field}:`))?.slice(field.length + 1).trim()); return Number.isInteger(value) && value >= 0 && value <= MAX_DISPLAYS ? value : undefined; };
+      const displays = header('x-trace-displays'); const shown = header('x-trace-display');
+      return { socket, head: answer.subarray(split + 4), ...(displays !== undefined ? { displays } : {}), ...(shown !== undefined ? { display: shown } : {}) };
+    }
     if (status === 401 || status === 403 || status === 503) {
       let message = `${name} refused to share its screen.`;
       try { message = (JSON.parse(answer.subarray(split + 4).toString('utf8')) as { error?: string }).error || message; } catch { /* Not JSON. */ }
       throw new Refused(message);
     }
     throw new Error(`No screen service (${status || 'no answer'}).`);
-  } catch (error) { socket.destroy(); throw error; }
+  } catch (error) { socket.destroy(); throw signal?.aborted ? new Aborted('The screen connection was closed.') : error; }
+  finally { signal?.removeEventListener('abort', abort); }
 }
 
 /**
@@ -98,19 +110,23 @@ export class ScreenSharing {
   private streams = new Map<string, Stream>();
   constructor(private root: string, private target: (id: string) => ScreenTarget | null, private emit: (owner: number, event: ScreenEvent) => void, private cipher: SecretCipher, private answerTimeout = ANSWER_TIMEOUT) {}
 
-  async open(owner: number, id: string, streamId: string): Promise<{ kind: ScreenKind }> {
+  async open(owner: number, id: string, streamId: string, display = 0): Promise<ScreenOpened> {
     const target = this.target(id);
     if (!target || (!target.trace && !target.system)) throw new HubError('SCREEN_UNKNOWN', 'That computer is not linked, or has no Tailscale address. Open Settings → Other computers.');
     if (this.streams.has(streamId)) throw new HubError('SCREEN_STREAM', 'That screen connection is already open.');
     if (this.streams.size >= MAX_STREAMS) throw new HubError('SCREEN_LIMIT', 'Close another screen before opening this one.');
-    const stream: Stream = { socket: new net.Socket(), owner, name: target.name, closing: false, ready: false }; this.streams.set(streamId, stream);
-    let kind: ScreenKind = 'trace'; let head: Buffer = Buffer.alloc(0);
+    const stream: Stream = { socket: new net.Socket(), owner, name: target.name, closing: false, ready: false, abort: new AbortController() }; this.streams.set(streamId, stream);
+    let kind: ScreenKind = 'trace'; let head: Buffer = Buffer.alloc(0); let chosen: { displays?: number; display?: number } = {};
     try {
       // Trace's own screen service first (Windows). Where there is none (a Mac), its own Screen Sharing.
-      let opened: { socket: net.Socket; head: Buffer } | null = null;
-      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token, this.answerTimeout); } catch (error) { if (error instanceof Refused || !target.system) throw error; }
-      if (opened) { stream.socket = opened.socket; head = opened.head; }
-      else { kind = 'system'; stream.socket = net.connect({ host: target.system!.host, port: target.system!.port }); await connected(stream.socket, 'connect'); }
+      let opened: Awaited<ReturnType<typeof openTraceScreen>> | null = null;
+      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token, this.answerTimeout, display, {}, stream.abort.signal); } catch (error) { if (error instanceof Refused || error instanceof Aborted || !target.system) throw error; }
+      if (opened) { stream.socket = opened.socket; head = opened.head; chosen = { ...(opened.displays !== undefined ? { displays: opened.displays } : {}), ...(opened.display !== undefined ? { display: opened.display } : {}) }; }
+      else {
+        if (stream.abort.signal.aborted) throw new Aborted('The screen connection was closed.');
+        kind = 'system'; stream.socket = net.connect({ host: target.system!.host, port: target.system!.port });
+        const socket = stream.socket; stream.abort.signal.addEventListener('abort', () => socket.destroy(), { once: true }); await connected(socket, 'connect');
+      }
       if (this.streams.get(streamId) !== stream) throw new HubError('SCREEN_CLOSED', 'That screen connection has closed.');
     } catch (error) {
       if (this.streams.get(streamId) === stream) this.streams.delete(streamId); stream.socket.destroy();
@@ -126,7 +142,7 @@ export class ScreenSharing {
       this.emit(owner, stream.closing ? { type: 'closed', streamId } : { type: 'closed', streamId, error: hadError ? `The connection to ${target.name}'s screen was lost.` : `${target.name} ended screen sharing.` });
     });
     stream.ready = true;
-    return { kind };
+    return { kind, ...chosen };
   }
 
   send(owner: number, streamId: string, data: Uint8Array) {
@@ -136,13 +152,13 @@ export class ScreenSharing {
 
   close(owner: number, streamId: string) {
     const stream = this.streams.get(streamId); if (!stream || stream.owner !== owner) return null;
-    stream.closing = true; stream.socket.destroy();
+    stream.closing = true; stream.abort.abort(); stream.socket.destroy();
     if (!stream.ready) { this.streams.delete(streamId); this.emit(owner, { type: 'closed', streamId }); }
     return null;
   }
 
   /** On quit, or when the window that opened them reloads. */
-  closeAll(owner?: number) { for (const [streamId, stream] of [...this.streams]) if (owner === undefined || stream.owner === owner) { stream.closing = true; stream.socket.destroy(); this.streams.delete(streamId); } }
+  closeAll(owner?: number) { for (const [streamId, stream] of [...this.streams]) if (owner === undefined || stream.owner === owner) { stream.closing = true; stream.abort.abort(); stream.socket.destroy(); this.streams.delete(streamId); } }
 
   credentials(id: string): ScreenCredentials | null {
     const saved = this.saved()[id]; if (!saved || !this.cipher.available()) return null;

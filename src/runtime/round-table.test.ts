@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RoundTableState } from '../../shared/chat';
+import { HIERARCHY_MODELS, type RoundTableState } from '../../shared/chat';
 import type { Session } from '../../shared/types';
 import { savedWorkspaceSchema } from '../../shared/schemas';
 import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
-import { forgetTable, hierarchyDetached, openRoundTable, rememberTable, restoreTables } from './round-table';
+import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, rememberTable, restoreTables } from './round-table';
 import { closeChannel, startSession, stopSession } from './use-native-host';
 
 // Chat channels draw no terminal; the real module needs a DOM.
@@ -47,6 +47,8 @@ function host(chatResult: { ok: boolean; error?: { message: string } } = { ok: t
   useWorkspaceStore.setState({ persistenceReady: true, rootDirectory: '/project' });
   return { codingHub, stops, chats };
 }
+/** The model a session was last started with, as the host was asked. */
+const startedModel = (codingHub: ReturnType<typeof host>['codingHub'], id: string) => { const calls = codingHub.startSession.mock.calls.map(([request]) => request as unknown as { sessionId: string; config: { model: string } }).filter((request) => request.sessionId === id); return calls[calls.length - 1]!.config.model; };
 async function runningLead(others: Session[] = []) {
   const lead = claudeChat(); useWorkspaceStore.setState({ sessions: [lead, ...others], tiles: arrangeTiles([lead, ...others], 'grid'), layoutMode: 'grid' });
   await startSession(lead.id); return find(lead.id)!;
@@ -133,6 +135,25 @@ describe('A Round Table in one tile', () => {
     const shell = createSession('shell'); useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, shell] }));
     expect(await closeChannel(lead.id)).toBe(true);
     expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([shell.id]);
+  });
+  it('starts a hierarchy table\'s reviewer on its own model, not Codex\'s default, and keeps one chosen under Models', async () => {
+    const { codingHub } = host(); const modelOf = (id: string) => startedModel(codingHub, id);
+    const lead = await runningLead(); await openHierarchy(lead.id);
+    const reviewer = useWorkspaceStore.getState().sessions.find((session) => session.config.engine === 'codex')!;
+    expect(modelOf(reviewer.id)).toBe(HIERARCHY_MODELS.reviewer); expect(HIERARCHY_MODELS.reviewer).toBe('gpt-6-astra');
+    // A table saved before the reviewer had a model of its own: it gets the table's when it starts again.
+    await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === reviewer.id ? { ...session, config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null } } : session) }));
+    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6-astra');
+    // One chosen under Models stays.
+    await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
+    useWorkspaceStore.getState().updateConfig(reviewer.id, { engine: 'codex', chat: true, model: 'gpt-6.1-sol', reasoningEffort: null });
+    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-sol');
+  });
+  it('leaves a discussion table\'s Codex partner on Codex\'s own settings', async () => {
+    const { codingHub } = host(); const lead = await runningLead(); await openRoundTable(lead.id);
+    const partner = useWorkspaceStore.getState().sessions.at(-1)!;
+    expect(startedModel(codingHub, partner.id)).toBe('');
   });
   it('counts the hidden partner toward the eight, and says so', () => {
     const { lead, partner, table } = seated(); rememberTable(lead.id, table);

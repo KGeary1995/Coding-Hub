@@ -1,4 +1,4 @@
-import type { ScreenCredentials, ScreenEvent, ScreenKind, ScreenRequest } from '../../shared/screen';
+import type { ScreenCredentials, ScreenEvent, ScreenKind, ScreenOpened, ScreenRequest } from '../../shared/screen';
 
 export async function screen<T = null>(request: ScreenRequest): Promise<T> {
   if (!window.codingHub) throw new Error('This feature requires the desktop app.');
@@ -28,17 +28,20 @@ export class ScreenChannel {
   error: string | null = null;
   /** Which screen server answered, once open: Trace's (Windows) or the system's (macOS Screen Sharing). */
   kind: ScreenKind | null = null;
+  /** From a Trace screen service: how many displays that computer has, and which it shows (0: all); undefined from others. */
+  displays: number | undefined = undefined; display = 0;
   private readonly streamId = crypto.randomUUID();
   /** The server speaks first, as soon as the host connects, which can be before the host's answer to open arrives. */
   private early: Uint8Array[] = [];
 
-  constructor(computerId: string) {
+  /** `display`: 0 for every display, or one of them (1 and up, from the left), on a Trace screen service. */
+  constructor(computerId: string, display = 0) {
     if (window.codingHub && listening !== window.codingHub) { window.codingHub.onScreenEvent(route); listening = window.codingHub; }
     channels.set(this.streamId, this);
-    screen<{ kind: ScreenKind }>({ action: 'screen-open', id: computerId, streamId: this.streamId }).then((opened) => {
+    screen<ScreenOpened>({ action: 'screen-open', id: computerId, streamId: this.streamId, ...(display ? { display } : {}) }).then((opened) => {
       if (this.readyState === 'closing') { void screen({ action: 'screen-close', streamId: this.streamId }).catch(() => {}); return; }
       if (this.readyState !== 'connecting') return;
-      this.kind = opened?.kind ?? null; this.readyState = 'open'; this.onopen?.(new Event('open'));
+      this.kind = opened?.kind ?? null; this.displays = opened?.displays; this.display = opened?.display ?? 0; this.readyState = 'open'; this.onopen?.(new Event('open'));
       for (const data of this.early) this.deliver(data); this.early = [];
     }, (error: Error) => this.ended(error.message));
   }

@@ -7,6 +7,8 @@ import net from 'node:net';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
 import { HubError } from '../cli/engine-adapter';
+import { localScreenToken, ScreenService, SHARE_FILE } from './screen-service-server';
+import { openTraceScreen } from './screen-sharing';
 import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscalePeers, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -299,6 +301,153 @@ describe('phone screen', () => {
     // A ticket works once.
     const again = new WebSocket(`ws://127.0.0.1:${server.address}/api/screen?ticket=${ticket}`);
     expect(await new Promise((resolve) => { again.onopen = () => resolve('open'); again.onerror = () => resolve('refused'); })).toBe('refused');
+  });
+});
+
+describe('phone screen of a Windows computer', () => {
+  /** A remote on a Windows computer that shares its screen through a real ScreenService, and a paired phone (setting off). */
+  async function windows() {
+    const { server, root } = await remote();
+    fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true })); const viewers: (string | null)[] = [];
+    const service = new ScreenService(root, () => 'Obsidian-Halo', { open: async () => ({ source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => {} }), viewing: (name) => viewers.push(name) });
+    const port = await service.listen(0); cleanup.push(() => service.close());
+    const host = (server as unknown as { host: RemoteHost }).host;
+    host.screenService = () => true; host.openScreenService = (viewer) => openTraceScreen('This computer', `http://127.0.0.1:${port}/`, localScreenToken(root)!, undefined, 0, { 'X-Trace-Viewer': viewer });
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id;
+    const ticket = () => fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } });
+    /** Opens the phone's WebSocket: the server's first bytes, or 'refused'. */
+    const open = (value: string) => { const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${value}`); socket.binaryType = 'arraybuffer'; cleanup.push(() => socket.close()); return { socket, first: new Promise<string>((resolve) => { socket.onmessage = (event) => resolve(Buffer.from(event.data as ArrayBuffer).toString()); socket.onerror = () => resolve('refused'); }) }; };
+    return { server, port, phone, id, viewers, ticket, open };
+  }
+  it('reaches Trace\'s screen service with Trace\'s own key, named as the phone, on paths the service\'s own does not take', async () => {
+    const { server, port, phone, id, viewers, ticket, open } = await windows(); server.setCanRun(id, true);
+    // The phone's own key does not open the service; only Trace's, for a phone with a ticket.
+    await expect(openTraceScreen('Obsidian-Halo', `http://127.0.0.1:${port}/`, phone)).rejects.toThrow(/through Trace/);
+    const { ticket: value } = await (await ticket()).json() as { ticket: string };
+    expect(await open(value).first).toBe('RFB 003.008\n');
+    for (let i = 0; i < 100 && !viewers.length; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(viewers).toEqual(['Test phone']);
+  });
+  it('needs Can start and stop agents for the phone, and says where to turn it on', async () => {
+    const { ticket, viewers } = await windows();
+    const response = await ticket(); expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toBe('This phone can’t see or control this computer’s screen. On the computer, turn on Settings → Phone access → Can start and stop agents for it.');
+    expect(viewers).toEqual([]);
+  });
+  it('refuses a ticket given while the setting was on once it is turned off', async () => {
+    const { server, id, ticket, open, viewers } = await windows(); server.setCanRun(id, true);
+    const { ticket: value } = await (await ticket()).json() as { ticket: string }; server.setCanRun(id, false);
+    expect(await open(value).first).toBe('refused'); expect(viewers).toEqual([]);
+  });
+  it('closes the phone\'s screen when the setting is turned off while it watches', async () => {
+    const { server, id, ticket, open } = await windows(); server.setCanRun(id, true);
+    const { ticket: value } = await (await ticket()).json() as { ticket: string }; const { socket, first } = open(value);
+    expect(await first).toBe('RFB 003.008\n');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    server.setCanRun(id, false); expect(await closed).toBe(true);
+  });
+  it('removing the phone closes its open screen and drops its unused tickets', async () => {
+    const { server, id, ticket, open } = await windows(); server.setCanRun(id, true);
+    const { ticket: watching } = await (await ticket()).json() as { ticket: string }; const { ticket: spare } = await (await ticket()).json() as { ticket: string };
+    const { socket, first } = open(watching); expect(await first).toBe('RFB 003.008\n');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    server.revoke(id); expect(await closed).toBe(true);
+    expect(await open(spare).first).toBe('refused');
+  });
+  it('removing the phone while its screen is still connecting passes nothing on, and lets the service go', async () => {
+    const { server, root } = await remote(); fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true }));
+    let answer: (value: { socket: net.Socket; head: Buffer }) => void = () => {}; let asked = false;
+    const host = (server as unknown as { host: RemoteHost }).host; host.screenService = () => true;
+    host.openScreenService = () => { asked = true; return new Promise((resolve) => { answer = resolve; }); };
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id; server.setCanRun(id, true);
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}`); cleanup.push(() => socket.close());
+    const outcome = new Promise<string>((resolve) => { socket.onopen = () => resolve('open'); socket.onerror = () => resolve('refused'); });
+    for (let i = 0; i < 100 && !asked; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    server.revoke(id);
+    const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) });
+    expect(await outcome).toBe('refused'); expect(service.destroyed).toBe(true);
+  });
+  /** A phone of a linked computer, given a key here through it (relayKey), with Can start and stop agents, watching the screen. */
+  async function relayed() {
+    const setup = await windows(); const { server, open } = setup; const linked = await computer(server);
+    const key = (relayKey: string) => fetch(base(server) + '/api/phone-key', { method: 'POST', headers: { Authorization: `Bearer ${linked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Relayed phone', relayKey }) }).then(async (response) => (await response.json() as { token: string }).token);
+    const token = await key('p1'); const id = server.status().devices.find((device) => device.name === 'Relayed phone')!.id; server.setCanRun(id, true);
+    const ticketOf = async () => (await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })).json() as { ticket: string }).ticket;
+    const spare = await ticketOf(); const { socket, first } = open(await ticketOf()); expect(await first).toBe('RFB 003.008\n');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    return { ...setup, linked, key, spare, closed };
+  }
+  it('a phone removed through the linked computer that gave it its key loses its screen at once', async () => {
+    const { server, linked, spare, closed, open } = await relayed();
+    const response = await fetch(base(server) + '/api/phone-key/revoke', { method: 'POST', headers: { Authorization: `Bearer ${linked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ relayKey: 'p1' }) });
+    expect(await response.json()).toEqual({ ok: true, removed: 1 }); expect(await closed).toBe(true);
+    expect(await open(spare).first).toBe('refused');
+  });
+  it('a phone given a new key through the linked computer loses what its old key had open', async () => {
+    const { key, spare, closed, open } = await relayed();
+    await key('p1'); expect(await closed).toBe(true); expect(await open(spare).first).toBe('refused');
+  });
+  it('a computer linked again still speaks for its phones: removing one through it closes its screen', async () => {
+    const { server, spare, closed, open } = await relayed();
+    // The same computer (same machine id) links again: a new key and a new device id.
+    const relinked = await computer(server);
+    const response = await fetch(base(server) + '/api/phone-key/revoke', { method: 'POST', headers: { Authorization: `Bearer ${relinked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ relayKey: 'p1' }) });
+    expect(await response.json()).toEqual({ ok: true, removed: 1 }); expect(await closed).toBe(true);
+    expect(server.status().devices.some((device) => device.name === 'Relayed phone')).toBe(false); expect(await open(spare).first).toBe('refused');
+  });
+  it('removing a computer linked again takes the phones it gave keys to before', async () => {
+    const { server, closed } = await relayed(); await computer(server);
+    const id = server.status().devices.find((device) => device.kind === 'computer')!.id; server.revoke(id);
+    expect(await closed).toBe(true); expect(server.status().devices.some((device) => device.name === 'Relayed phone')).toBe(false);
+  });
+  it('linking another phone or computer leaves a phone\'s open screen alone', async () => {
+    const { server, closed } = await relayed();
+    await paired(server); await computer(server);
+    expect(await closed).toBe(false);
+  });
+  it('survives a phone dropping its connection while the screen is still being reached, and lets that go', async () => {
+    const { server, root } = await remote(); fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true }));
+    let answer: (value: { socket: net.Socket; head: Buffer }) => void = () => {}; let asked = false;
+    const host = (server as unknown as { host: RemoteHost }).host; host.screenService = () => true;
+    host.openScreenService = () => { asked = true; return new Promise((resolve) => { answer = resolve; }); };
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id; server.setCanRun(id, true);
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const uncaught: unknown[] = []; const catcher = (error: unknown) => uncaught.push(error); process.on('uncaughtException', catcher); cleanup.push(() => { process.off('uncaughtException', catcher); });
+    // A raw connection that asks for the screen, then resets (as a phone losing its network does) before it is reached.
+    const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {});
+    await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+    client.write(`GET /api/phone-screen?ticket=${ticket} HTTP/1.1\r\nHost: 127.0.0.1:${server.address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString('base64')}\r\n\r\n`);
+    for (let i = 0; i < 100 && !asked; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(asked).toBe(true); client.resetAndDestroy(); await new Promise((resolve) => setTimeout(resolve, 200));
+    const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) }); await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(uncaught).toEqual([]); expect(service.destroyed).toBe(true);
+  });
+  it('tells another computer there is no Trace screen service here, so it tries the computer\'s own (a Mac\'s) instead of reporting a refusal', async () => {
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: 5900 });
+    await server.setEnabled(true); const linked = await computer(server);
+    await expect(openTraceScreen('MacBook', `http://127.0.0.1:${server.address}/`, linked, 5000)).rejects.toThrow('No screen service (404).');
+  });
+  it('removing the phone also closes a Mac screen it has open', async () => {
+    const vnc = net.createServer((client) => { client.write('RFB 003.889\n'); client.on('error', () => {}); });
+    await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { vnc.close(() => resolve()); vnc.unref(); }));
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: (vnc.address() as net.AddressInfo).port });
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id;
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}`); cleanup.push(() => socket.close());
+    expect(await new Promise((resolve) => { socket.onmessage = () => resolve('data'); socket.onerror = () => resolve('refused'); })).toBe('data');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    server.revoke(id); expect(await closed).toBe(true);
+  });
+  it('leaves a Mac\'s own Screen Sharing to its password: no setting needed there', async () => {
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: 5900 });
+    await server.setEnabled(true);
+    expect((await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${await paired(server)}` } })).status).toBe(200);
+  });
+  it('says how to turn sharing on when the computer shares no screen', async () => {
+    const { server } = await remote(); await server.setEnabled(true);
+    const response = await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${await paired(server)}` } });
+    expect(response.status).toBe(409); expect((await response.json() as { error: string }).error).toContain('Share this screen');
   });
 });
 

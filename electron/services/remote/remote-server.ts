@@ -55,6 +55,12 @@ export interface RemoteHost {
   transcript?(sessionId: string): ChannelTranscript;
   /** This computer's own screen-sharing server (macOS Screen Sharing on loopback), for a phone's Screen; null when there is none. */
   screenTarget?(): { host: string; port: number } | null;
+  /**
+   * This computer's Trace screen service (Windows, when Share this screen is on), for a phone's Screen: whether it is
+   * on, and a VNC stream from it for the phone named `viewer` (shown by the clock there while it watches).
+   */
+  screenService?(): boolean;
+  openScreenService?(viewer: string): Promise<{ socket: Duplex; head: Buffer }>;
   /** Today's usage, the plan limits last read, and the daily budgets (null when Settings cannot be read). */
   usage?(): { today: DayUsage; limits: PlanLimits[]; budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null };
   /** The task board, and moving a card on it (as dragging it on the desktop does). */
@@ -129,6 +135,8 @@ const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict
 const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal channel cannot be a chat.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
+/** A Windows computer's screen (Trace's screen service) asks no password of its own, so a phone needs the same setting as starting agents. */
+const SCREEN_REFUSED = 'This phone can’t see or control this computer’s screen. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const taskStatusSchema = z.object({ id: z.uuid(), status: z.enum(['todo', 'working', 'review', 'done']) }).strict();
 const resumeSchema = z.object({ key: z.string().min(1).max(200) }).strict();
@@ -160,6 +168,11 @@ export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
   private screenTickets = new Map<string, { device: string; expires: number }>(); private screens = new Set<Duplex>();
+  /**
+   * The phone each screen connection belongs to, open or still connecting, and whether it comes from Trace's screen
+   * service: removing the phone closes all of its own, and taking its setting away closes those from the service.
+   */
+  private screenOwners = new Map<Duplex, { device: string; service: boolean }>();
   private replay = new Map<string, ScreenMirror>();
   /** Chat channels' recent events, kept whether or not phone access is on, so a phone opening a chat sees its thread. */
   private chats = new ChatReplayBuffer();
@@ -262,33 +275,47 @@ export class RemoteServer {
   async stop() {
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
-    for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenTickets.clear();
+    for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenOwners.clear(); this.screenTickets.clear();
     for (const id of [...this.replay.keys()]) this.forget(id);
     const server = this.server; this.server = null; this.pairing = null;
     if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
   }
   /**
-   * A phone's Screen: its WebSocket, opened with a ticket from /api/screen-ticket, carries this computer's own screen-sharing
-   * server's VNC stream. The Mac still asks for its user name and password, which go from the phone to it, not to Trace.
+   * A phone's Screen: its WebSocket, opened with a ticket from /api/phone-screen-ticket, carries a VNC stream: from this
+   * computer's own screen-sharing server (a Mac, which still asks for its user name and password; they go from the phone to
+   * it, not to Trace), or from Trace's screen service (Windows, which the ticket alone lets in).
    */
   private async upgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer) {
+    // Node takes its own error handler off an upgraded socket: without one, a phone dropping the connection while the
+    // screen is still being reached (the service starting, or the Mac's port connecting) is an uncaught error in Trace's
+    // main process. A close before the stream is passed on lets go of its place, so whatever was opening for it is dropped.
+    socket.on('error', () => { /* It closes; handled there. */ });
+    socket.once('close', () => { this.screens.delete(socket); this.screenOwners.delete(socket); });
     const refuse = (status: number, text: string) => { socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); };
     const url = new URL(request.url ?? '/', 'http://localhost');
-    if (url.pathname !== '/api/screen') return refuse(404, 'Not Found');
+    if (url.pathname !== '/api/screen' && url.pathname !== '/api/phone-screen') return refuse(404, 'Not Found');
+    // Another computer asking for a Trace screen service here: there is none (on Windows with Share this screen on,
+    // `tailscale serve` sends /api/screen to the service, not here). Not a refusal, so it tries the computer's own
+    // screen sharing (a Mac's) instead of reporting that this computer refused.
+    if (request.headers.upgrade?.toLowerCase() === 'trace-screen') return refuse(404, 'Not Found');
     if (!this.allowedHost(request.headers.host) || request.headers['tailscale-funnel-request'] !== undefined) return refuse(403, 'Forbidden');
     const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return refuse(403, 'Forbidden');
     const ticket = this.screenTickets.get(url.searchParams.get('ticket') ?? ''); this.screenTickets.delete(url.searchParams.get('ticket') ?? '');
     if (!ticket || ticket.expires < Date.now() || !this.devices().some((device) => device.id === ticket.device)) return refuse(401, 'Unauthorized');
     const key = request.headers['sec-websocket-key'];
     if (request.headers.upgrade?.toLowerCase() !== 'websocket' || typeof key !== 'string') return refuse(400, 'Bad Request');
-    const target = this.host.screenTarget?.(); if (!target) return refuse(409, 'Conflict');
+    const target = this.host.screenTarget?.(); const service = !target && this.host.screenService?.() && this.host.openScreenService;
+    if (!target && !service) return refuse(409, 'Conflict');
+    // The setting is read again here: it may have been turned off since the ticket was given.
+    if (service) { const now = this.devices().find((device) => device.id === ticket.device); if (!now || !this.me(now).canRun) return refuse(403, 'Forbidden'); }
     if (this.screens.size >= MAX_SCREENS) return refuse(429, 'Too Many Requests');
-    const server = net.connect(target.port, target.host); this.screens.add(socket);
-    const end = () => { this.screens.delete(socket); server.destroy(); socket.destroy(); };
-    server.once('error', () => { if (!socket.writableEnded) refuse(502, 'Bad Gateway'); end(); });
-    server.once('connect', () => {
+    this.screens.add(socket); this.screenOwners.set(socket, { device: ticket.device, service: Boolean(service) });
+    // The phone's WebSocket carries the VNC bytes both ways, once the server is there.
+    const pipe = (server: Duplex, first: Buffer) => {
+      const end = () => { this.screens.delete(socket); this.screenOwners.delete(socket); server.destroy(); socket.destroy(); };
       const protocol = String(request.headers['sec-websocket-protocol'] ?? '').split(',')[0].trim();
       socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptKey(key)}\r\n${protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : ''}\r\n`);
+      if (first.length) socket.write(frame(first));
       const reader = new FrameReader();
       const receive = (chunk: Buffer) => {
         try {
@@ -302,8 +329,18 @@ export class RemoteServer {
       if (head.length) receive(head);
       socket.on('data', receive);
       server.on('data', (data: Buffer) => socket.write(frame(data)));
-      server.once('close', end); socket.once('close', end); socket.once('error', end);
-    });
+      server.once('close', end); server.on('error', end); socket.once('close', end); socket.once('error', end);
+    };
+    if (service) {
+      const phone = this.devices().find((device) => device.id === ticket.device)?.name ?? 'A phone';
+      // Taken away (or the phone gone) while the service was answering: nothing is passed on.
+      try { const opened = await service(phone); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } pipe(opened.socket, opened.head); }
+      catch { this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
+      return;
+    }
+    const server = net.connect(target!.port, target!.host);
+    const failed = () => { this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); server.destroy(); socket.destroy(); };
+    server.once('error', failed); server.once('connect', () => { server.off('error', failed); if (!this.screenOwners.has(socket)) { server.destroy(); return; } pipe(server, Buffer.alloc(0)); });
   }
   get address() { return this.server ? (this.server.address() as AddressInfo).port : null; }
 
@@ -320,12 +357,27 @@ export class RemoteServer {
     return this.status();
   }
   cancelPairing() { this.pairing = null; return this.status(); }
+  /** Closes the phones' screen connections that match, open or still connecting (a pending one sees it is gone). */
+  private closeScreens(matches: (owner: { device: string; service: boolean }) => boolean) {
+    for (const [socket, owner] of [...this.screenOwners]) if (matches(owner)) { this.screenOwners.delete(socket); this.screens.delete(socket); socket.destroy(); }
+  }
+  /**
+   * Devices that are gone (removed here, removed through the linked computer that gave them their key, or their key
+   * replaced): their streams end, their screens close (open or still connecting), and their unused screen tickets go,
+   * so removing one locks it out at once.
+   */
+  private dropped(ids: Set<string>) {
+    if (!ids.size) return;
+    for (const stream of this.streams) if (ids.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    this.closeScreens((owner) => ids.has(owner.device));
+    for (const [value, ticket] of [...this.screenTickets]) if (ids.has(ticket.device)) this.screenTickets.delete(value);
+  }
   revoke(id: string) {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
     // A linked computer's phones were given keys here through it (relayKey `<its id>:<phone>`): they go with it.
     const removed = new Set([id, ...devices.filter((item) => item.relayKey?.startsWith(id + ':')).map((item) => item.id)]);
     this.saveDevices(devices.filter((item) => !removed.has(item.id)));
-    for (const stream of this.streams) if (removed.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    this.dropped(removed);
     // A phone of this computer was given keys on linked computers through this one: ask them to forget those too.
     if (!device.kind || device.kind === 'phone') void this.relay?.revokePhone?.(id).catch(() => {});
     return this.status();
@@ -335,6 +387,8 @@ export class RemoteServer {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
     if (device.kind === 'computer') throw new HubError('REMOTE_COMPUTER', 'A linked computer can always start and stop channels. Remove it under Other computers to stop that.');
     if (canRun) device.canRun = true; else delete device.canRun; this.saveDevices(devices);
+    // Taken away: its open screens from Trace's screen service close (a Mac's own Screen Sharing asks its own password).
+    if (!canRun) this.closeScreens((owner) => owner.device === id && owner.service);
     const payload = `event: me\ndata: ${eventJSON(this.me(device))}\n\n`; for (const stream of this.streams) if (stream.device === id) this.write(stream, payload);
     return this.status();
   }
@@ -555,9 +609,12 @@ export class RemoteServer {
     const token = randomBytes(32).toString('base64url'); const name = rawName.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || (kind === 'computer' ? 'Computer' : 'Phone');
     const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, ...(kind === 'computer' ? { kind, ...(machineId ? { machineId } : {}) } : {}) };
     // Linking the same computer again replaces its old key rather than leaving it working too.
-    const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
-    for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
-    this.saveDevices([...kept, device]);
+    const all = this.devices(); const kept = all.filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
+    const replaced = new Set(all.filter((item) => !kept.includes(item)).map((item) => item.id));
+    // Its phones (keys given here through it, relayKey `<its id>:<phone>`) move to its new id: the same computer still
+    // speaks for them, so it can remove them later, and removing the computer here takes them with it.
+    for (const item of kept) { const owner = item.relayKey?.split(':')[0]; if (owner && replaced.has(owner)) item.relayKey = `${device.id}${item.relayKey!.slice(owner.length)}`; }
+    this.saveDevices([...kept, device]); this.dropped(replaced);
     return { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) };
   }
   /**
@@ -700,7 +757,7 @@ export class RemoteServer {
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can withdraw a phone key.' });
       const parsed = phoneKeyRevokeSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
       const relayKey = `${device.id}:${parsed.data.relayKey}`; const gone = this.devices().filter((item) => item.relayKey === relayKey).map((item) => item.id);
-      if (gone.length) { this.saveDevices(this.devices().filter((item) => !gone.includes(item.id))); for (const stream of this.streams) if (gone.includes(stream.device)) { stream.response.end(); this.streams.delete(stream); } }
+      if (gone.length) { this.saveDevices(this.devices().filter((item) => !gone.includes(item.id))); this.dropped(new Set(gone)); }
       return this.send(response, 200, { ok: true, removed: gone.length });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-key') {
@@ -712,8 +769,9 @@ export class RemoteServer {
       const relayKey = `${device.id}:${parsed.data.relayKey}`; const kept = this.devices().filter((item) => item.relayKey !== relayKey);
       if (kept.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
       const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || 'Phone';
-      for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device) && stream.device !== device.id) { stream.response.end(); this.streams.delete(stream); }
-      this.saveDevices([...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]);
+      // The phone's earlier key here stops working, and whatever it had open closes.
+      const replaced = new Set(this.devices().filter((item) => item.relayKey === relayKey).map((item) => item.id));
+      this.saveDevices([...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]); this.dropped(replaced);
       return this.send(response, 200, { token, computer: this.identity, url: this.status().url });
     }
     if (request.method === 'GET' && url.pathname === '/api/computers') {
@@ -728,9 +786,13 @@ export class RemoteServer {
       try { return this.send(response, 200, await this.relay.phoneKey(parsed.data.id, `${device.name} (through ${this.identity.name})`, device.id)); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That computer could not be reached.' }); }
     }
-    if (request.method === 'POST' && url.pathname === '/api/screen-ticket') {
+    // Both names: a Windows computer that shares its screen has `tailscale serve` send /api/screen to its screen
+    // service, so the phone uses /api/phone-screen… there (and everywhere, from this version on).
+    if (request.method === 'POST' && (url.pathname === '/api/screen-ticket' || url.pathname === '/api/phone-screen-ticket')) {
       if (kind !== 'phone') return this.send(response, 403, { error: 'Only a phone opens this computer\'s screen here.' });
-      if (!this.host.screenTarget?.()) return this.send(response, 409, { error: 'This computer has no screen sharing for phones yet. On a Mac, turn on System Settings → General → Sharing → Screen Sharing.' });
+      const target = this.host.screenTarget?.(); const service = !target && this.host.screenService?.();
+      if (service && !this.me(device).canRun) return this.send(response, 403, { error: SCREEN_REFUSED });
+      if (!target && !service) return this.send(response, 409,{ error: 'This computer does not share its screen. On a Mac, turn on System Settings → General → Sharing → Screen Sharing. On Windows, in Trace, turn on Settings → Other computers → Share this screen.' });
       for (const [id, item] of this.screenTickets) if (item.expires < Date.now()) this.screenTickets.delete(id);
       const ticket = randomBytes(24).toString('base64url'); this.screenTickets.set(ticket, { device: device.id, expires: Date.now() + SCREEN_TICKET_MS });
       return this.send(response, 200, { ticket });

@@ -21,9 +21,13 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
   await fs.writeFile(path.join(serviceRoot, 'remote-devices.json'), JSON.stringify([{ id: '5a9e3c3e-2f7e-4c1b-9d55-0c2f8e9b1a01', name: 'Test-Mac', tokenHash: createHash('sha256').update(TOKEN).digest('hex'), createdAt: new Date().toISOString(), lastSeen: null, kind: 'computer' }]));
   // The viewer: linked to the PC, whose address is the service itself here (Tailscale would pass /api/screen to it).
   await fs.writeFile(path.join(viewerRoot, 'linked-computers.json'), JSON.stringify([{ id: PC, name: 'Test-PC', url: `http://127.0.0.1:${PORT}/`, token: TOKEN, linkedAt: new Date().toISOString() }]));
-  const log = path.join(root, 'input.log');
+  const log = path.join(root, 'input.log'); const crash = path.join(root, 'crash');
   const base = { ...process.env }; delete base.ELECTRON_RUN_AS_NODE;
-  const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log }, stdio: 'ignore' });
+  // The administrator kind (started by its scheduled task) gives way when the setting does not ask for it: it quits at once.
+  const wrongKind = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'wrong-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC', '--elevated'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT) }, stdio: 'ignore' });
+  const quit = await new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 20000); wrongKind.once('exit', () => { clearTimeout(timer); resolve(true); }); });
+  if (!quit) wrongKind.kill(); assert.ok(quit && !(await healthy()), 'A service of the kind the setting does not ask for quits without listening');
+  const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log, CODING_HUB_TEST_RELAUNCH_AFTER: '1000', CODING_HUB_TEST_SCREEN_SERVICE_CRASH: crash }, stdio: 'ignore' });
   let app;
   try {
     await until(healthy, 'the screen service to listen');
@@ -45,15 +49,57 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     const halves = await canvas.evaluate((element) => [0, 1].map((half) => { const { width, height } = element; const data = element.getContext('2d').getImageData(half * (width >> 1), 0, width >> 1, height).data; const colours = new Set(); for (let i = 0; i < data.length; i += 4 * 499) colours.add(data[i] << 16 | data[i + 1] << 8 | data[i + 2]); return colours.size; }));
     if (size[0] / size[1] > 2.5) assert.ok(halves.every((count) => count > 20), `both displays show a picture (colours per half: ${halves.join(', ')})`);
     console.log('colours per half', halves.join(', '));
+    // Pictures keep coming after the first ones: each update waits for the viewer's answer to a fence (at most two on
+    // their way), so a viewer that never answered would freeze here: after the first picture and the sharp copy that
+    // follows once it is still, several more different pictures must arrive. The viewer's own window is on the screen it
+    // shows, so painting it magenta changes the screen (and shows up, when that window is the one in view).
+    // Kept on top meanwhile: another window over it would hide the magenta from the capture.
+    await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.setAlwaysOnTop(true); window.show(); });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const fingerprint = () => canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let sum = 0; for (let i = 0; i < data.length; i += 4 * 211) sum = (sum * 31 + data[i] + data[i + 1] * 7 + data[i + 2] * 13) >>> 0; return sum; });
+    const pictures = new Set([await fingerprint()]);
+    await page.evaluate(() => { const cover = document.createElement('div'); cover.id = 'smoke-cover'; cover.style.cssText = 'position:fixed;inset:0;background:#ff00ff;z-index:99999;pointer-events:none'; document.body.append(cover); });
+    try {
+      await until(async () => { pictures.add(await fingerprint()); return canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let magenta = 0; for (let i = 0; i < data.length; i += 4 * 101) if (data[i] > 230 && data[i + 1] < 40 && data[i + 2] > 230) magenta++; return magenta > 200; }) || pictures.size > 6; }, 'later pictures (the viewer answering fences)');
+    } catch (error) { console.log(`the picture changed ${pictures.size - 1} times while waiting`); throw error; }
+    await page.evaluate(() => document.getElementById('smoke-cover')?.remove());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setAlwaysOnTop(false));
     // A Windows viewer of Windows needs no key swap.
-    assert.equal(await panel.locator('.linked-screen-toggle').count(), 0);
+    assert.equal(await panel.getByLabel('Ctrl as ⌘').count() + await panel.getByLabel('⌘ as Ctrl').count(), 0);
     await canvas.click({ position: { x: 40, y: 30 } }); await page.keyboard.press('a');
     await until(async () => /key 97 0/.test(await fs.readFile(log, 'utf8').catch(() => '')), 'the key press in the log');
     const lines = (await fs.readFile(log, 'utf8')).split('\n');
     assert.ok(lines.some((line) => /^pointer \d+ \d+ 1$/.test(line)), 'The click reached the service');
+    // A paste, as the viewer sends it: the text (the extended clipboard's Notify, then Request and Provide), then V at once.
+    // The text must reach this computer's clipboard intact, and before the V that pastes it.
+    const pasted = '“quoted” — text 🙂';
+    await panel.locator('.linked-screen-paste').evaluate((field, text) => { const data = new DataTransfer(); data.setData('text/plain', text); field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); }, pasted);
+    await until(async () => /key 118 0/.test(await fs.readFile(log, 'utf8')), 'the pasted V');
+    const after = (await fs.readFile(log, 'utf8')).split('\n'); const copied = after.indexOf(`clipboard ${pasted}`); const pressed = after.indexOf('key 118 1');
+    assert.ok(copied >= 0, `The text arrived intact (log: ${after.filter((line) => line.startsWith('clipboard')).join(' | ')})`); assert.ok(copied < pressed, 'The text reached the clipboard before V was pressed');
+    // With several displays: one of them on its own, at the size one display gets, then all of them again.
+    const picker = panel.getByLabel('Display');
+    if (await picker.count()) {
+      await picker.selectOption('2'); await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+      await until(() => canvas.evaluate((element) => element.width > 0 && element.width <= 1920 && element.height <= 1200), 'one display\'s picture');
+      console.log('display 2 at', (await canvas.evaluate((element) => [element.width, element.height])).join('×'));
+      await picker.selectOption('0'); await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+      await until(async () => (await canvas.evaluate((element) => element.width)) === size[0], 'all displays again');
+    } else console.log('one display here: the display choice is not checked');
     // Back to the channels: the service lets go of the viewer.
     await page.getByRole('button', { name: 'Channels', exact: true }).click();
     await until(async () => (await fs.readFile(log, 'utf8')).includes('close'), 'the viewer to leave');
+    // An error nothing caught, five times: each time the service starts itself again (it has run longer than the test's
+    // 1 s), and answers again within 15 s. The relaunched one must get past the single-instance lock the old one held.
+    const restarts = [];
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const begun = Date.now(); await fs.writeFile(crash, '');
+      await until(async () => !(await healthy()), 'the service to fail', 100);
+      await until(healthy, 'the service to start again', 150);
+      restarts.push(Date.now() - begun);
+    }
+    console.log('restarted after', restarts.join(', '), 'ms');
     // Turning sharing off stops the service.
     await fs.writeFile(path.join(serviceRoot, 'screen-share.json'), JSON.stringify({ enabled: false }));
     await until(async () => !(await healthy()), 'the service to quit', 100);

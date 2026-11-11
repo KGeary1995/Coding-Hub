@@ -72,10 +72,14 @@ const hex = (text) => Buffer.from(text).toString('hex');
     mark = (await received()).length; await page.keyboard.press('Control+C');
     assert.deepEqual(await after(mark, 'TTY'), ['TTY 03'], 'Ctrl+C without a selection still reaches the CLI as ^C');
 
-    // The menu item's name includes its description ("Claude chat Claude as a conversation, …").
-    await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: /^Claude chat/ }).click();
+    // + Channel has no Claude chat of its own: a Round Table's lead is the Claude chat. Without a project the table stops
+    // at its start and leaves that chat, which is then given a folder and started alone (the same message box).
+    const tiles = await page.locator('.session-tile').count();
+    await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: /^Round Table(?! \(hierarchy\))/ }).click();
+    await page.waitForFunction((count) => document.querySelectorAll('.session-tile').length === count + 1, tiles, { timeout: 15000 });
+    // It tried to start without a folder, so it offers Retry (not Start) once it has one.
     const chatTile = page.locator('.session-tile').last(); await useFolder(chatTile);
-    await chatTile.getByRole('button', { name: 'Start session', exact: true }).click();
+    await chatTile.getByRole('button', { name: /^(Start session|Retry)$/ }).first().click();
     const box = chatTile.locator('textarea'); await page.waitForFunction(() => { const area = [...document.querySelectorAll('.session-tile')].at(-1)?.querySelector('textarea'); return area && !area.disabled; }, null, { timeout: 30000 });
     setClipboard('image'); await box.click(); await page.keyboard.press('Control+V');
     await page.waitForFunction(() => [...document.querySelectorAll('.session-tile')].at(-1)?.querySelectorAll('.chat-attachments li').length === 1, null, { timeout: 10000 });

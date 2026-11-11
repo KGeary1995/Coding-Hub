@@ -67,6 +67,13 @@ export function projectMemoryKey(directory: string): string {
   return `${slug(path.basename(root))}-${createHash('sha256').update('path:' + identity).digest('hex').slice(0, 10)}`;
 }
 
+/** The end-of-session note Trace writes by itself (AutoMemory.finish), as opposed to a handoff someone wrote. */
+export const isSessionSummary = (note: Pick<MemoryNote, 'title' | 'content'>) => note.title.startsWith('Session summary: ') && note.content.startsWith('Automatic summary of a');
+/** Automatic summaries in the launch context, after every curated note that fits: they would otherwise crowd those out. */
+const SUMMARIES_IN_CONTEXT = 2;
+/** A summary with no file changes and no commits is worth writing only if the agent's last message says something. */
+const SHORT_MESSAGE = 200;
+
 /** Recent notes as launch context. Notes are data from earlier sessions, never instructions. */
 export function memoryContext(key: string, notes: MemoryNote[]): string {
   const header = [
@@ -92,7 +99,10 @@ export function memoryContext(key: string, notes: MemoryNote[]): string {
   }
   // A revised note is replaced by its revision; read_memory still has both. Items and resolutions are listed above.
   const replaced = new Set(notes.flatMap((note) => note.supersedes ? [note.supersedes] : []));
-  for (const note of notes.filter((item) => !replaced.has(item.id) && !isItemNote(item)).slice(0, 8)) {
+  // Curated notes first (newest first), then at most SUMMARIES_IN_CONTEXT automatic summaries in the space left.
+  const shown = notes.filter((item) => !replaced.has(item.id) && !isItemNote(item));
+  const curated = shown.filter((item) => !isSessionSummary(item)); const summaries = shown.filter(isSessionSummary).slice(0, SUMMARIES_IN_CONTEXT);
+  for (const note of [...curated, ...summaries].slice(0, 8)) {
     const body = note.content.length > 1200 ? note.content.slice(0, 1200) + ' …' : note.content;
     const entry = `\n\n## ${note.title}\n_${note.author}, ${note.createdAt.slice(0, 16).replace('T', ' ')} UTC_\n${body}`;
     if (text.length + entry.length > CONTEXT_LIMIT) break;
@@ -135,7 +145,7 @@ function codexInstructions(cwd: string, context: string): string {
   return [...parts, context].join('\n\n');
 }
 
-interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void> }
+interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void>; /** A hidden Round Table seat: the leading channel's summary covers the table. */ seat?: boolean }
 export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void }
 /** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
 export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
@@ -286,6 +296,11 @@ export class AutoMemory {
     tracked.ready = Promise.all([changedFiles(run.cwd), git(run.cwd, ['rev-parse', 'HEAD'])]).then(([files, head]) => { tracked.files = files; tracked.head = head[0] ?? null; });
   }
 
+  /**
+   * Runs seated at a Round Table without a tile of their own (a partner, reviewer or planner): they write no summary of
+   * their own, since each ends with the table and would add a note per seat (often one line, such as "AGREE").
+   */
+  seated(runIds: string[]) { for (const runId of runIds) { const tracked = this.runs.get(runId); if (tracked) tracked.seat = true; } }
   /** A run that was prepared but never started: no summary, and its MCP config file goes. */
   abandon(runId: string) { this.runs.delete(runId); try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder. */ } }
   /** Resolves once background Git checks started by prepare() have finished. */
@@ -305,14 +320,15 @@ export class AutoMemory {
     const tracked = this.runs.get(runId); if (!tracked) return null; this.runs.delete(runId);
     const transcript = await located;
     try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder later. */ }
-    if (!this.options.enabled()) return null;
+    if (!this.options.enabled() || tracked.seat) return null;
     await tracked.ready;
     const before = new Set(tracked.files); const after = await changedFiles(tracked.cwd);
     // Lines that were already in git status at launch are left out; commits made during the session are listed instead.
     const changed = after.filter((line) => !before.has(line));
     const commits = tracked.head ? await git(tracked.cwd, ['log', '--oneline', '--no-decorate', '-n', '20', `${tracked.head}..HEAD`]) : [];
     const message = transcript ? lastAssistantMessage(tracked.engine, transcript) : null;
-    if (!changed.length && !commits.length && !message) return null;
+    // A session that changed nothing and ended on a short line ("AGREE", "Done.") leaves nothing worth a note.
+    if (!changed.length && !commits.length && (message?.trim().length ?? 0) < SHORT_MESSAGE) return null;
     const minutes = Math.max(1, Math.round((Date.now() - tracked.startedAt) / 60000));
     const name = tracked.engine === 'claude' ? 'Claude Code' : 'Codex';
     const lines = [`Automatic summary of a ${minutes}-minute ${name} session${tracked.model ? ` (${tracked.model})` : ''} in ${tracked.cwd}.`, ''];

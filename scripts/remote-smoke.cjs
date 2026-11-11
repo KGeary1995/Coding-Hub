@@ -191,7 +191,12 @@ else if (args.startsWith('serve --bg --https=443')) {
     for (let i = 0; i < 100 && !(await allow.isChecked()); i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(await allow.isChecked(), 'the phone is allowed to start agents');
     await phone.locator('#add-channel').waitFor({ state: 'visible' });
-    await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude chat', exact: true }).click();
+    // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
+    // the same request (linked computers and older phone apps send it), so the chat checks below use that.
+    await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
+    assert.equal(await phone.getByRole('menuitem', { name: /chat/i }).count(), 0, 'no Claude chat or Codex chat on the phone\'s + Channel');
+    await phone.locator('#add-channel').click();
+    assert.equal(await phone.evaluate(async () => (await fetch('/api/channel-add', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'claude', chat: true }) })).status), 200);
     await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();
     await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).click();
     await phone.getByRole('button', { name: 'Start CH3', exact: true }).click();
