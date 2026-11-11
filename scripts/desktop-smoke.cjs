@@ -378,6 +378,7 @@ console.log('FAKE-AGY ' + process.argv.slice(2).join(' ')); setInterval(() => {}
     await gemini.waitFor();
     assert.equal(await gemini.locator('.tr-ch-engine').textContent(), 'Gemini CLI');
     assert.equal(await gemini.locator('.tr-tile-model').textContent(), 'gemini-4-argon-high');
+    assert.equal(await gemini.locator('.terminal-frame h3').textContent(), 'Gemini CLI');
     if (process.platform !== 'win32') {
       await gemini.getByRole('button', { name: 'Start session', exact: true }).click();
       await page.waitForFunction(() => window.testEvents.some((event) => event.type === 'started' && event.engine === 'gemini'));

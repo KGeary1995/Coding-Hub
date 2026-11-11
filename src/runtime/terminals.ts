@@ -25,6 +25,9 @@ const pastedLabel = () => `Pasted ${new Date().toLocaleTimeString([], { hour: 'n
  */
 async function showClipboardImage(id: string) {
   if (!terminals.get(id)?.run || !window.codingHub) return;
+  // Only Claude Code and Codex read the clipboard image; in a terminal or Gemini CLI it would show as attached and sent
+  // without ever reaching the CLI.
+  const config = useWorkspaceStore.getState().sessions.find((item) => item.id === id)?.config; if (!config || !isAgentConfig(config)) return;
   try { const result = await window.codingHub.clipboardImage(); if (result.ok && result.value) addPastedImage(id, { label: pastedLabel(), thumbnail: result.value.thumbnail, full: result.value.full }); }
   catch { /* The preview is a convenience; the paste itself still reaches the CLI. */ }
 }
