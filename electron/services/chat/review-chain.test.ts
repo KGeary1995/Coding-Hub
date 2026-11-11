@@ -51,8 +51,10 @@ describe('hierarchy Round Table', () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
     await reply(BUILDER, 'Done.'); await reply(REVIEWER, 'Looks right.\nNO FINDINGS'); expect(last().chain!.step).toBe('final');
     for (let round = 1; round <= FINAL_ROUNDS; round++) {
-      await reply(PLANNER, 'CHANGES NEEDED: rename the class'); expect(last().chain).toMatchObject({ step: 'final-fixing', finalRound: round }); expect(sent.at(-1)!.text).toContain('rename the class');
-      await reply(BUILDER, 'Renamed.'); expect(last().chain!.step).toBe('final');
+      // Changes from the final review go back to the fix step, then to the reviewer once more, then to the planner.
+      await reply(PLANNER, 'CHANGES NEEDED: rename the class'); expect(last().chain).toMatchObject({ step: 'fixing', finalRound: round }); expect(sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(sent.at(-1)!.text).toContain("The planner's final review asks for changes:\n\nrename the class");
+      await reply(BUILDER, 'Renamed.'); expect(last().chain).toMatchObject({ step: 'reviewing', reviewRound: REVIEW_ROUNDS }); expect(sent.at(-1)!.runId).toBe(REVIEWER);
+      await reply(REVIEWER, 'NO FINDINGS'); expect(last().chain!.step).toBe('final'); expect(sent.at(-1)!.runId).toBe(PLANNER);
     }
     await reply(PLANNER, 'CHANGES NEEDED: still wrong'); expect(last().chain).toMatchObject({ step: 'needs-you', verdict: 'changes' }); expect(last().chain!.note).toContain(`after ${FINAL_ROUNDS} rounds`);
   });

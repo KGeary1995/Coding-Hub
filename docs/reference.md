@@ -195,7 +195,7 @@ A Round Table puts you, Claude Code and Codex in one conversation. In a **Claude
 3. **Build:** the builder implements the plan and reports what it changed.
 4. **Review:** Codex reviews the files and reports `FINDING` lines, or `NO FINDINGS`.
 5. **Fix:** the builder answers each finding `FIXED` or `DECLINED`; Codex checks them and looks again, for up to two review rounds.
-6. **Final review:** the planner checks the work against the task, its plan and the findings, and ends with `APPROVED`, or `CHANGES NEEDED:` and what to change. Changes go back to the builder and then to the planner again, up to twice; after that the table stops and asks you.
+6. **Final review:** the planner checks the work against the task, its plan and the findings, and ends with `APPROVED`, or `CHANGES NEEDED:` and what to change. Changes go back to the **Fix** step: the builder makes them, Codex reviews them once more, and the planner reviews again; up to twice, after which the table stops and asks you.
 
 A task given to the table (from Tasks, or typed) is done only on `APPROVED`; while the plan waits, or the table needs you, the task is marked so and Needs you lists it. A message you write during the steps goes along with the next one. **Stop** halts the seat at work and **Continue** runs that step again; an error stops it the same way, and after a restart the table comes back stopped at its step, with its plan, findings and a kept message. Each Claude seat's model is on the bar under **Models**, used when that seat starts. Reviewer edits are declined as at any table.
 

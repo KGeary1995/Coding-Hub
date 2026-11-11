@@ -5,7 +5,7 @@ import type { TableHost } from './round-table';
 
 /** Review rounds (Codex reviews, Opus fixes) before the planner's final review. */
 export const REVIEW_ROUNDS = 2;
-/** Times the planner can send work back (CHANGES NEEDED) before the table stops and asks the person. */
+/** Times the planner can send work back to the fix step (CHANGES NEEDED) before the table stops and asks the person. */
 export const FINAL_ROUNDS = 2;
 /** The longest earlier output passed into a prompt; more is cut, and the agent is told so. */
 const RELAY_LIMIT = 12_000;
@@ -34,7 +34,8 @@ export function verdictOf(answer: string): { approved: true } | { approved: fals
  * default, read-only) writes a plan, which the person approves or sends back; the builder (the leading Claude chat, Opus
  * 5.5 by default, the only seat that edits) implements it; the reviewer (Codex, read-only) reviews, as findings; the
  * builder fixes them, for up to REVIEW_ROUNDS rounds; then the planner reviews the whole and ends with APPROVED or
- * CHANGES NEEDED, which sends the work back to the builder up to FINAL_ROUNDS times before the table asks the person.
+ * CHANGES NEEDED. Changes go back to the fix step: the builder makes them, the reviewer checks them, and the planner
+ * reviews again; up to FINAL_ROUNDS times before the table asks the person.
  * The task is complete only on APPROVED. Trace passes each step's output to the next seat.
  */
 export class ReviewChains {
@@ -99,7 +100,11 @@ export class ReviewChains {
     const check = findingsFor(chain.findings, 'reviewer');
     return `[Step: review, round ${chain.reviewRound} of ${REVIEW_ROUNDS}] The task:\n\n${chain.task}\n\nThe plan:\n\n${cut(chain.plan)}\n\nThe builder's report:\n\n${cut(chain.report)}\n\n${check ? `${check}\n\n` : ''}Review the changes in the files. Report each problem on its own line as "FINDING high|medium|low path:line — the problem" (Trace numbers them). If you find nothing wrong, end with the line NO FINDINGS.`;
   }
-  private fixPrompt(chain: Chain) { return `[Step: fix] ${findingsFor(chain.findings, 'driver')}\n\nThen report what you changed.`; }
+  private fixPrompt(chain: Chain) {
+    const open = findingsFor(chain.findings, 'driver');
+    const final = chain.verdict === 'changes' && chain.note ? `The planner's final review asks for changes:\n\n${chain.note}` : '';
+    return `[Step: fix${final ? ', after the final review' : ''}] ${[final, open].filter(Boolean).join('\n\n')}\n\nThen report what you changed.`;
+  }
   private finalPrompt(chain: Chain) {
     const record = chain.findings.length ? chain.findings.map((finding) => `${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}${finding.response ? ` · builder: ${finding.response}` : ''}${finding.check ? ` · reviewer: ${finding.check}` : ''}`).join('\n') : 'No findings.';
     return `[Step: final review${chain.finalRound ? `, again after changes (${chain.finalRound} of ${FINAL_ROUNDS})` : ''}] The task:\n\n${chain.task}\n\nYour plan:\n\n${cut(chain.plan)}\n\nThe builder's latest report:\n\n${cut(chain.report)}\n\nThe review record:\n${record}\n\nCheck the finished work in the files against the task, your plan and the findings. End with the line APPROVED, or CHANGES NEEDED: and what to change.`;
@@ -213,6 +218,8 @@ export class ReviewChains {
     }
     if (chain.step === 'fixing') {
       chain.report = answer || chain.report; await this.record(chain, seat);
+      // The planner's changes are done once the builder has had its turn at them.
+      if (chain.verdict === 'changes') { chain.verdict = null; chain.note = ''; }
       if (chain.reviewRound < REVIEW_ROUNDS) { chain.reviewRound++; this.turn(chain, chain.reviewer, 'reviewing', this.reviewPrompt(chain)); return; }
       this.turn(chain, chain.planner, 'final', this.finalPrompt(chain)); return;
     }
@@ -222,7 +229,8 @@ export class ReviewChains {
       if (!verdict) { chain.step = 'needs-you'; chain.note = 'The planner ended its final review without APPROVED or CHANGES NEEDED.'; this.publish(chain); return; }
       chain.verdict = 'changes'; chain.note = verdict.changes;
       if (chain.finalRound >= FINAL_ROUNDS) { chain.step = 'needs-you'; chain.note = `The planner still asks for changes after ${FINAL_ROUNDS} rounds: ${verdict.changes}`; this.publish(chain); return; }
-      chain.finalRound++; this.turn(chain, chain.builder, 'final-fixing', this.finalFixPrompt(chain)); return;
+      // Back to the fix step: the builder makes the changes, the reviewer checks them once more, then the final review again.
+      chain.finalRound++; chain.reviewRound = REVIEW_ROUNDS - 1; this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return;
     }
     this.publish(chain);
   }
