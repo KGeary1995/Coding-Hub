@@ -7,7 +7,7 @@ import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/ch
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore } from '../../state/hub-store';
 import { channelToday } from '../../state/channel-state';
-import { archiveFindings, forgetTable, openRoundTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
+import { archiveFindings, forgetTable, hierarchyDetached, openRoundTable, reopenHierarchy, TABLE_FULL, tableRequest } from '../../runtime/round-table';
 import { startSession } from '../../runtime/use-native-host';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
 import type { PermissionLevel } from '../../../shared/types';
@@ -73,6 +73,8 @@ export function ChatView({ session }: { session: Session }) {
   const send = async () => {
     // At a table a message may be written while the agents work: it goes to both once they finish their turn.
     if (!running || seatedAt || (chat.busy && !table) || (!text.trim() && !images.length) || !window.codingHub) return;
+    // A hierarchy channel whose table is not open would send to the builder alone: the message stays in the box.
+    const detachedWhy = hierarchyDetached(session.id); if (detachedWhy) { setError(detachedWhy); return; }
     const message = text.trim(); const attached = images;
     chatSent(session.id, message, attached, !hierarchy); setText(''); setImages([]); pinned.current = true;
     // A message that was not taken goes back in the box (unless something new was written meanwhile), so nothing is lost.
@@ -95,6 +97,9 @@ export function ChatView({ session }: { session: Session }) {
   const partnerEngine = table?.partner.engine ?? (partnerSession?.config.engine === 'codex' ? 'codex' : partnerSession?.config.engine === 'claude' ? 'claude' : engine === 'claude' ? 'codex' : 'claude');
   const partnerState = partnerSession ? seatState(partnerSession, partnerThread.busy) : null;
   const partnerLive = partnerSession?.status === 'running' || partnerSession?.status === 'starting';
+  const plannerLive = plannerSession?.status === 'running' || plannerSession?.status === 'starting';
+  /** A running hierarchy channel without its table open: why (and Reopen, when a seat can be started again). */
+  const detached = running && !table && hierarchy && session.roundTable ? hierarchyDetached(session.id) : null;
   /** An open table is closed through the host, whose `closed` event forgets it (as from a phone); a saved one is forgotten here. */
   // The findings are saved to shared memory first; if that fails the table stays open, so nothing is lost.
   const closeTable = () => { void (async () => { const unsaved = await archiveFindings(session.id); if (unsaved) { setError(`${unsaved} The Round Table stays open; try Close again.`); return; } setShowPartner(false); const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
@@ -106,7 +111,7 @@ export function ChatView({ session }: { session: Session }) {
     {table && hierarchy && <ChainBar table={table} busy={busy} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
       onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
-    {!table && hierarchy && session.roundTable && <ChainBar table={{ kind: 'hierarchy', partner: { sessionId: session.roundTable.partner, runId: '', engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, ...(session.roundTable.chain ? { chain: session.roundTable.chain } : {}), ...(session.roundTable.findings ? { findings: session.roundTable.findings } : {}) }} busy={false} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') closeTable(); }} />}
+    {!table && hierarchy && session.roundTable && <ChainBar table={{ kind: 'hierarchy', partner: { sessionId: session.roundTable.partner, runId: '', engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, ...(session.roundTable.chain ? { chain: session.roundTable.chain } : {}), ...(session.roundTable.findings ? { findings: session.roundTable.findings } : {}) }} busy={false} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') closeTable(); }} detached={detached ? { note: detached, ...(partnerSession && plannerSession && (!partnerLive || !plannerLive) ? { onReopen: () => void reopenHierarchy(session.id).then((failure) => { if (failure) setError(failure); }) } : {}) } : undefined} />}
     {!table && !hierarchy && partnerSession && <div className="table-bar" role="group" aria-label="Round Table">
       <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${engine}`} /><i className={`seat-${partnerEngine}`} /></span>
       <strong>Round Table</strong>

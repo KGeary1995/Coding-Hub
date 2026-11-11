@@ -62,6 +62,8 @@ export interface RoundTableState {
   /** The hierarchy's planner and final reviewer (a Claude chat); `partner` is its reviewer (Codex). */
   planner?: { sessionId: string; runId: string; engine: 'claude' };
   chain?: SavedChain;
+  /** A hierarchy table was stopped and a seat's interrupted turn has not ended yet: Continue waits for it. */
+  stopping?: boolean;
   partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' };
   driver: 'claude' | 'codex'; rounds: number; round: number;
   /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */

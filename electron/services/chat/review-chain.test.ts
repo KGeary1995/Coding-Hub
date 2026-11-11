@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
 import type { TableHost } from './round-table';
 import { FINAL_ROUNDS, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
+import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
 function setup() {
@@ -116,6 +117,22 @@ describe('hierarchy Round Table', () => {
     await flush();
     // The old review's answer does not move the resumed review on to Fix.
     expect(last().chain!.step).toBe('reviewing'); expect(sent.length).toBe(before); expect(sent.at(-1)!.runId).toBe(REVIEWER);
+  });
+  it('waits for a stopped seat to stop before Continue, so its late end does not move the resumed step on', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    chains.stop(BUILDER); expect(last()).toMatchObject({ stopping: true, chain: { step: 'stopped', stoppedAt: 'implementing' } });
+    // The builder has not ended its interrupted turn yet: Continue is refused rather than taking that end as its own.
+    expect(() => chains.continue(BUILDER)).toThrow(/still stopping/); const before = sent.length;
+    await reply(BUILDER, 'Half built.'); expect(last().stopping).toBeUndefined(); expect(last().chain!.step).toBe('stopped'); expect(sent.length).toBe(before);
+    chains.continue(BUILDER); expect(last().chain!.step).toBe('implementing'); expect(sent.at(-1)!.runId).toBe(BUILDER);
+    await reply(BUILDER, 'Built.'); expect(last().chain).toMatchObject({ step: 'reviewing', report: 'Built.' });
+  });
+  it('keeps a task’s TASK COMPLETE instruction out of the steps, and reads a verdict followed by TASK COMPLETE', async () => {
+    const { chains, sent } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER);
+    chains.send(BUILDER, `Task t-0123abcd: Add a footer. ${SIGNAL_INSTRUCTION}`, []);
+    expect(sent.at(-1)!.text).toContain('Task t-0123abcd: Add a footer.'); expect(sent.at(-1)!.text).not.toContain(SIGNAL_INSTRUCTION); expect(sent.at(-1)!.text).toContain('TASK BLOCKED:');
+    expect(verdictOf('Looks right.\nAPPROVED\nTASK COMPLETE')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: rename it\n**TASK COMPLETE**')).toEqual({ approved: false, changes: 'rename it' });
+    expect(verdictOf('TASK COMPLETE')).toBeNull();
   });
   it('reads the planner’s verdict only from its last line', () => {
     expect(verdictOf('Fine.\n**APPROVED**')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: add tests')).toEqual({ approved: false, changes: 'add tests' });

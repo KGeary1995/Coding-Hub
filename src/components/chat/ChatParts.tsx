@@ -158,10 +158,10 @@ const CHAIN_STEPS: { step: string; label: string; of: string[] }[] = [
  * The bar of a hierarchy Round Table: where the task is among plan, approve, build, review, fix and final review; the
  * plan approval; Stop and Continue; each Claude seat's model (used when that seat starts); findings and a kept message.
  */
-export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead?: Session; planner?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void }) {
+export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel, detached }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead?: Session; planner?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const current = CHAIN_STEPS.findIndex((item) => at && item.of.includes(at));
-  const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? `Stopped${chain?.note ? `: ${chain.note}` : ''}` : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
+  const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner].some((session) => session?.status === 'running' || session?.status === 'starting');
   const model = (session: Session | null | undefined, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
@@ -170,9 +170,10 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-claude" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>
     <ol className="chain-steps" aria-label="Steps">{CHAIN_STEPS.map((item, index) => <li key={item.step} className={index === current ? 'current' : index < current || step === 'done' ? 'past' : ''} aria-current={index === current ? 'step' : undefined}>{item.label}</li>)}</ol>
-    <span className="table-status" aria-live="polite">{status}</span>
+    <span className="table-status" aria-live="polite">{detached ? detached.note : status}</span>
+    {detached?.onReopen && <button className="button primary" onClick={detached.onReopen}>Reopen</button>}
     {step === 'plan-review' && <button className="button primary" onClick={() => onRequest({ action: 'table-plan', approve: true, note: '' })}>Approve plan</button>}
-    {step === 'stopped' && chain?.stoppedAt && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
+    {!detached && step === 'stopped' && chain?.stoppedAt && !table.stopping && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
     {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
     {onModel && lead && <details className="chain-models"><summary>Models</summary>
       <label>Planner and final review<input aria-label="Planner model" disabled={locked} defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>

@@ -73,6 +73,17 @@ export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
   }));
 }
 
+/**
+ * Tiles that match the channels the person sees: one each, none for a hidden Round Table seat or a removed session.
+ * The same tiles when they already match; extra tiles are dropped in place; a channel without a tile lays all out again.
+ */
+export function fitTiles(sessions: Session[], tiles: GridTile[], mode: LayoutMode): GridTile[] {
+  const shown = new Set(channelsOf(sessions).map((session) => session.id));
+  const kept = tiles.filter((tile, index) => shown.has(tile.sessionId) && tiles.findIndex((other) => other.sessionId === tile.sessionId) === index);
+  if (kept.length !== shown.size || !kept.length) return arrangeTiles(sessions, mode);
+  return kept.length === tiles.length ? tiles : kept;
+}
+
 interface WorkspaceState {
   persistenceReady: boolean;
   persistenceStatus: 'loading' | 'saving' | 'saved' | 'error' | 'browser';
@@ -216,7 +227,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorkspace {
   return {
     version: 1, rootDirectory: state.rootDirectory,
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && state.sessions.some((item) => item.id === roundTable.partner) ? { roundTable } : {}) })),
-    tiles: state.tiles, layoutMode: state.layoutMode, focusedSessionId: state.focusedSessionId,
+    // A table whose partner is gone is not saved, unless it still holds findings that could not be saved to memory.
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && (state.sessions.some((item) => item.id === roundTable.partner) || roundTable.findings?.length) ? { roundTable } : {}) })),
+    // Saved tiles always match the channels, whichever path added or removed a hidden seat.
+    tiles: fitTiles(state.sessions, state.tiles, state.layoutMode), layoutMode: state.layoutMode,
+    focusedSessionId: state.focusedSessionId && channelsOf(state.sessions).some((session) => session.id === state.focusedSessionId) ? state.focusedSessionId : null,
   };
 }

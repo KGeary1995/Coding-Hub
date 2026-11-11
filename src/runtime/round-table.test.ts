@@ -5,7 +5,7 @@ import { savedWorkspaceSchema } from '../../shared/schemas';
 import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
-import { forgetTable, openRoundTable, rememberTable, restoreTables } from './round-table';
+import { forgetTable, hierarchyDetached, openRoundTable, rememberTable, restoreTables } from './round-table';
 import { closeChannel, startSession, stopSession } from './use-native-host';
 
 // Chat channels draw no terminal; the real module needs a DOM.
@@ -141,5 +141,38 @@ describe('A Round Table in one tile', () => {
     expect(channelsOf(sessions)).toHaveLength(7); expect(sessions.find((session) => session.id === partner.id)).toBeDefined();
     expect(channelsFullNote(sessions)).toContain('a Round Table runs two agents in one channel');
     expect(channelsFullNote(more)).toBeNull();
+  });
+});
+
+describe('Round Table tiles and seats that come and go', () => {
+  it('drops the tile of a seat added as a channel (a table opened from a phone), and saves after the table closes', async () => {
+    // The phone adds the partner as an ordinary chat channel, with a tile, before the table hides it.
+    const { lead, partner, table } = seated(); expect(useWorkspaceStore.getState().tiles).toHaveLength(2);
+    rememberTable(lead.id, table); expect(useWorkspaceStore.getState().tiles.map((tile) => tile.sessionId)).toEqual([lead.id]);
+    await forgetTable(lead.id); expect(find(partner.id)).toBeUndefined();
+    const saved = savedWorkspace(); expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true); expect(saved.tiles.map((tile) => tile.sessionId)).toEqual([lead.id]);
+  });
+  it('saves matching tiles whatever left them behind: a removed seat’s tile goes, a channel without one gets one', () => {
+    const { lead, partner } = seated(); const tiles = useWorkspaceStore.getState().tiles;
+    useWorkspaceStore.setState({ sessions: [lead], tiles }); expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
+    useWorkspaceStore.setState({ sessions: [lead, partner], tiles: [tiles[0]], focusedSessionId: 'gone' });
+    const saved = savedWorkspace(); expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true); expect(saved.tiles).toHaveLength(2); expect(saved.focusedSessionId).toBeNull();
+  });
+  it('keeps a closed table’s findings that memory could not take, though its partner is gone', () => {
+    const lead = { ...claudeChat(), roundTable: { partner: '44444444-4444-4444-8444-444444444444', driver: 'claude' as const, rounds: 2, findings: [{ id: 'F1', severity: 'high' as const, text: 'bug', evidence: 'a.ts:1', status: 'open' as const, response: '', check: '', reviewedAt: null, changedAt: null, round: 1, at: new Date().toISOString() }] } };
+    useWorkspaceStore.setState({ sessions: [lead], tiles: arrangeTiles([lead], 'grid') });
+    const saved = savedWorkspace(); expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true); expect(saved.sessions[0].roundTable?.findings).toHaveLength(1);
+  });
+  it('refuses messages and tasks to a hierarchy channel whose table is not open, and says how to go on', () => {
+    const lead = { ...claudeChat(), status: 'running' as const, runId: RUN_A }; const reviewer = { ...createSession('codex'), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null } }; const planner = claudeChat();
+    const withTable = { ...lead, roundTable: { partner: reviewer.id, planner: planner.id, kind: 'hierarchy' as const, driver: 'claude' as const, rounds: 2 } };
+    useWorkspaceStore.setState({ sessions: [withTable, reviewer, planner], tiles: arrangeTiles([withTable], 'grid') });
+    expect(hierarchyDetached(lead.id)).toMatch(/stopped\. Press Reopen/);
+    run(reviewer.id, RUN_B); run(planner.id, '33333333-3333-4333-8333-333333333333'); expect(hierarchyDetached(lead.id)).toMatch(/opening/);
+    useChatStore.setState({ threads: { [lead.id]: { ...useChatStore.getState().threads[lead.id], table: { kind: 'hierarchy', partner: { sessionId: reviewer.id, runId: RUN_B, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false } } as never } });
+    expect(hierarchyDetached(lead.id)).toBeNull();
+    useChatStore.setState({ threads: {} }); useWorkspaceStore.setState((state) => ({ sessions: state.sessions.filter((session) => session.id !== planner.id) }));
+    expect(hierarchyDetached(lead.id)).toMatch(/lost its planner or reviewer/);
+    expect(hierarchyDetached(reviewer.id)).toBeNull();
   });
 });

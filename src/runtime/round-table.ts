@@ -1,7 +1,8 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ChatImage, RoundTableState } from '../../shared/chat';
 import type { Session } from '../../shared/types';
-import { createSession, partnerOf, plannerOf, useWorkspaceStore } from '../state/workspace-store';
+import { createSession, fitTiles, partnerOf, plannerOf, useWorkspaceStore } from '../state/workspace-store';
+export { hierarchyDetached } from '../state/hierarchy-state';
 import { useChatStore } from '../state/chat-store';
 import { hubCall } from '../state/hub-store';
 import { itemTitle } from '../../shared/memory-items';
@@ -97,9 +98,13 @@ async function retire(leadId: string): Promise<string | null> {
     const failure = await archiveFindings(leadId);
     const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId); const planner = plannerOf(useWorkspaceStore.getState().sessions, leadId);
     for (const seat of [partner, planner]) if (seat && live(seat)) { await settled([seat.id], 'starting'); await stopSession(seat.id); await settled([seat.id]); }
-    useWorkspaceStore.setState((state) => ({ sessions: state.sessions
-      .filter((session) => (session.id !== partner?.id && session.id !== planner?.id) || live(session))
-      .map((session) => session.id === leadId && session.roundTable && !failure ? { ...session, roundTable: undefined } : session) }));
+    useWorkspaceStore.setState((state) => {
+      const sessions = state.sessions
+        .filter((session) => (session.id !== partner?.id && session.id !== planner?.id) || live(session))
+        .map((session) => session.id === leadId && session.roundTable && !failure ? { ...session, roundTable: undefined } : session);
+      // A seat removed, or one that would not stop (now a channel of its own, so it stays in sight): tiles to match.
+      return { sessions, tiles: fitTiles(sessions, state.tiles, state.layoutMode) };
+    });
     return failure;
   } finally { retiring.delete(leadId); }
 }
@@ -122,7 +127,9 @@ export function rememberTable(leadId: string, table: RoundTableState) {
   useWorkspaceStore.setState((state) => {
     const lead = state.sessions.find((session) => session.id === leadId);
     if (!lead || (lead.roundTable && JSON.stringify(lead.roundTable) === JSON.stringify(saved))) return {};
-    return { sessions: state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session) };
+    const sessions = state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session);
+    // A seat added as a channel (a table opened from a phone) is hidden now: its tile goes.
+    return { sessions, tiles: fitTiles(sessions, state.tiles, state.layoutMode) };
   });
 }
 /** Closing the table (the person's choice, not Trace quitting) forgets it, so it is not opened again, and stops its partner. */
@@ -202,4 +209,15 @@ export async function openHierarchy(leadId: string): Promise<string | null> {
     if (result?.ok) return null;
     await retire(leadId); return result?.error.message ?? 'The Round Table could not be opened.';
   } finally { opening.delete(leadId); }
+}
+
+/** Starts a hierarchy table's stopped seats; restoreTables then seats them again, and the work waits for Continue. */
+export async function reopenHierarchy(leadId: string): Promise<string | null> {
+  const sessions = useWorkspaceStore.getState().sessions; const lead = sessions.find((session) => session.id === leadId);
+  if (!lead || lead.status !== 'running') return 'Start this channel first.';
+  const seats = [partnerOf(sessions, leadId), plannerOf(sessions, leadId)];
+  if (seats.some((seat) => !seat)) return 'This Round Table lost its planner or reviewer. Close the table to chat with the builder alone.';
+  await Promise.all(seats.map((seat) => live(seat) ? undefined : startSession(seat!.id)));
+  const failed = seats.map((seat) => useWorkspaceStore.getState().sessions.find((session) => session.id === seat!.id)).find((seat) => !live(seat));
+  return failed ? failed.error ?? 'The planner or reviewer could not be started.' : null;
 }
