@@ -7,11 +7,12 @@ import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngine, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
+import { isAgentConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
-import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
-import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
+import { buildGeminiLaunch, buildLaunch, HubError, launchedLevel } from './engine-adapter';
+import { discoverEngine, discoverGemini, hostEnvironment, type DiscoveredEngine } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
@@ -94,11 +95,12 @@ export class PtyManager {
   private closing = false;
   private spawn: Spawn;
   private discover: typeof discoverEngine;
+  private discoverGemini: typeof discoverGemini;
   private environment: () => Record<string, string>;
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; discoverGemini?: typeof discoverGemini; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
       abandonLaunch?: (session: AgentRunningSession) => void;
       /** Runs just seated at a Round Table without a tile of their own (partner, reviewer, planner). */
@@ -108,6 +110,7 @@ export class PtyManager {
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
+    this.discoverGemini = dependencies.discoverGemini ?? discoverGemini;
     this.environment = dependencies.environment ?? hostEnvironment;
   }
 
@@ -187,7 +190,7 @@ export class PtyManager {
     if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
     if (this.runs.size + this.pending.size >= MAX_CHANNELS) throw new HubError('SESSION_LIMIT', `At most ${MAX_CHANNELS} CLI processes can run simultaneously.`);
     const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
-    const resumeId = request.config.engine === 'shell' ? undefined : request.config.resumeId;
+    const resumeId = isAgentConfig(request.config) ? request.config.resumeId : undefined;
     const nativeKey = resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${resumeId}` : undefined;
     if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');
     const reservation = { owner, cancelled: false, profileId, nativeKey };
@@ -202,13 +205,23 @@ export class PtyManager {
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
       const baseEnvironment = this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
-      const chat = request.config.engine !== 'shell' && request.config.chat === true;
+      const chat = isAgentConfig(request.config) && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const program = shellProgram(baseEnvironment);
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
         session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
         ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      } else if (request.config.engine === 'gemini') {
+        // Gemini CLI (agy) in a terminal: its fixed model and permission flags only. No rules, telemetry, attention hooks,
+        // memory or usage: prepareLaunch and onStarted are for Claude Code and Codex.
+        const engine = await this.discoverGemini(baseEnvironment);
+        const launch = buildGeminiLaunch(request.config, engine.info);
+        if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The Gemini CLI executable is unavailable.');
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
+        session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'gemini', pid: 0, cwd };
+        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...launch];
+        env = { ...baseEnvironment, ...engine.executable.extraEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       } else {
         const profileEnvironment = this.dependencies.profileEnvironment;
         if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
@@ -246,9 +259,9 @@ export class PtyManager {
         if (run.osc) for (const message of run.osc.push(data)) this.notifyAttention(run.session.runId, message);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
-      if (request.config.engine !== 'shell') this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
+      if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
       this.send(owner, { type: 'started', ...session });
-      if (chat && request.config.engine !== 'shell' && request.config.resumeId) {
+      if (chat && isAgentConfig(request.config) && request.config.resumeId) {
         let history: Extract<ChatEvent, { type: 'history' }> | null = null; try { history = this.dependencies.chatHistory?.(request.config) ?? null; } catch { /* Shown without its earlier messages. */ }
         if (history) try { this.dependencies.onChat?.(owner, { sessionId: session.sessionId, runId: session.runId, event: history }); } catch { this.dependencies.onEventError?.(); }
       }

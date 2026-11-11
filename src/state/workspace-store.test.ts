@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
 import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
 import type { CLIEngineConfig, CodexCLIEngineConfig } from '../../shared/types';
+import { GEMINI_MODEL } from '../../shared/gemini';
 
 beforeEach(() => {
   const sessions = [createSession('claude'), createSession('codex')];
@@ -166,4 +167,21 @@ it('closes a Round Table lead with its stopped partner, but never drops a partne
   seat('running'); useWorkspaceStore.getState().removeSession(lead.id);
   expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([partner.id, shell.id]);
   expect(useWorkspaceStore.getState().tiles.map((tile) => tile.sessionId)).toEqual([partner.id, shell.id]);
+});
+
+describe('Gemini CLI channels', () => {
+  it('are added as "Gemini" with the fixed model, are saved and restored, and keep a permission change', () => {
+    useWorkspaceStore.getState().addSession('gemini');
+    const added = useWorkspaceStore.getState().sessions.at(-1)!;
+    expect(added).toMatchObject({ title: 'Gemini', config: { engine: 'gemini', model: GEMINI_MODEL } });
+    useWorkspaceStore.getState().updateConfig(added.id, { engine: 'gemini', model: GEMINI_MODEL, permissions: 'ask' });
+    const saved = savedWorkspace();
+    expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true);
+    expect(saved.sessions.at(-1)!.config).toEqual({ engine: 'gemini', model: GEMINI_MODEL, permissions: 'ask' });
+  });
+  it('cannot be turned into a chat', () => {
+    useWorkspaceStore.getState().addChatSession('codex');
+    useWorkspaceStore.getState().addSession('gemini');
+    expect(useWorkspaceStore.getState().sessions.at(-1)!.config).toEqual({ engine: 'gemini', model: GEMINI_MODEL });
+  });
 });

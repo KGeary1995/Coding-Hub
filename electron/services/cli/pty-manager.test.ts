@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DiscoveredEngine } from './discovery';
+import { GEMINI_MODEL } from '../../../shared/gemini';
 
 class FakePty {
   pid = 99999999;
@@ -369,5 +370,36 @@ describe('Chat channels', () => {
     manager.chatRemote({ action: 'table-stop', ...lead }); expect(table().envelope.event).toMatchObject({ table: { round: 3 } });
     // Closed by the person (here from a phone), so the window also stops the hidden partner.
     manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null, closed: true });
+  });
+});
+
+describe('Gemini CLI channels', () => {
+  const gemini = (overrides: Partial<DiscoveredEngine['info']> = {}): DiscoveredEngine => ({ info: { engine: 'gemini', available: true, executable: '/agy', version: '1.5.6', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsMode: true, supportsSkipPermissions: true, error: null, ...overrides }, executable: { file: '/fixture/agy', prefixArgs: [], extraEnv: {}, displayPath: '/fixture/agy' } });
+  function geminiFixture(found = gemini()) {
+    const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine)); const discoverGemini = vi.fn(async () => found);
+    const prepareLaunch = vi.fn(); const onStarted = vi.fn(); const events: SessionEvent[] = [];
+    const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
+    const manager = new PtyManager((_owner, event) => events.push(event), { spawn, discover, discoverGemini, prepareLaunch, onStarted, environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } });
+    managers.push(manager);
+    return { manager, spawn, discover, prepareLaunch, onStarted, events };
+  }
+  it('run agy in a terminal with the fixed model and the permission flags, without the Claude and Codex launch pipeline', async () => {
+    const { manager, spawn, discover, prepareLaunch, onStarted, events } = geminiFixture();
+    const session = await manager.start(1, { sessionId: 'gemini-one', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL }, cols: 80, rows: 24 });
+    expect(session).toMatchObject({ engine: 'gemini', cwd: fs.realpathSync(process.cwd()) });
+    const [file, args, options] = spawn.mock.calls[0];
+    expect(file).toBe('/fixture/agy'); expect(args).toEqual(['--model', GEMINI_MODEL, '--mode', 'accept-edits']);
+    expect(options).toMatchObject({ cwd: fs.realpathSync(process.cwd()), env: { PATH: '/bin', TERM: 'xterm-256color' } });
+    expect(discover).not.toHaveBeenCalled(); expect(prepareLaunch).not.toHaveBeenCalled(); expect(onStarted).not.toHaveBeenCalled();
+    expect(events[0]).toMatchObject({ type: 'started', engine: 'gemini' });
+    await manager.start(1, { sessionId: 'gemini-two', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL, permissions: 'full' }, cols: 80, rows: 24 });
+    expect(spawn.mock.calls[1][1]).toEqual(['--model', GEMINI_MODEL, '--dangerously-skip-permissions']);
+  });
+  it('refuse another model, a chat, and a missing agy, before anything starts', async () => {
+    const { manager, spawn } = geminiFixture(gemini({ available: false, error: 'Gemini CLI (agy) was not found on PATH.' }));
+    await expect(manager.start(1, { sessionId: 'g-model', cwd: process.cwd(), config: { engine: 'gemini', model: 'gemini-3.8-flash-high' }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(manager.start(1, { sessionId: 'g-chat', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL, chat: true }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(manager.start(1, { sessionId: 'g-missing', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'ENGINE_UNAVAILABLE', message: 'Gemini CLI (agy) was not found on PATH.' });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });

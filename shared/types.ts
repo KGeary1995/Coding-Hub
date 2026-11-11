@@ -45,8 +45,16 @@ export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
 /** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */
 export interface ShellChannelConfig { engine: 'shell' }
-export type ChannelEngine = CLIEngine | 'shell';
-export type ChannelConfig = CLIEngineConfig | ShellChannelConfig;
+/**
+ * Gemini CLI (`agy`) running in a terminal tile. Kept apart from CLIEngine on purpose: code written for Claude and Codex
+ * often says `engine === 'claude' ? … : …` and would treat a third agent as Codex. A Gemini channel has no chat, resume,
+ * usage, memory or Round Table seat; it is the real CLI in a terminal. The model is always GEMINI_MODEL (shared/gemini.ts).
+ */
+export interface GeminiChannelConfig { engine: 'gemini'; model: string; permissions?: PermissionLevel }
+export type ChannelEngine = CLIEngine | 'gemini' | 'shell';
+export type ChannelConfig = CLIEngineConfig | GeminiChannelConfig | ShellChannelConfig;
+/** Claude Code or Codex: the channels with chat, resume, usage, memory, tasks and Round Table seats. */
+export const isAgentConfig = (config: ChannelConfig): config is CLIEngineConfig => config.engine === 'claude' || config.engine === 'codex';
 
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'exited' | 'error';
 export type WorkspaceBinding =

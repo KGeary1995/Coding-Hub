@@ -184,8 +184,10 @@ describe('the Windows screen as a VNC server', () => {
     it('does not send text it was given back as a new copy when the clipboard reads it with other line ends', async () => {
       const table = await extended(); const { vnc, messages } = table;
       const utf8 = Buffer.from('one\r\ntwo\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
-      table.send((1 << 27) | 1); table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
-      await until(() => vnc.events.length === 1, 'the clipboard'); const sent = messages().length;
+      // The server's Request (its answer to the Notify) is waited for, so it is not counted as a copy sent back below.
+      table.send((1 << 27) | 1); await until(() => messages().length === 2, 'the request');
+      table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 1, 'the clipboard'); const sent = messages().length; expect(sent).toBe(2);
       // This computer's clipboard reads the same text back with LF line ends.
       vnc.setClipboard('one\ntwo'); await new Promise((resolve) => setTimeout(resolve, 2200));
       expect(messages().length).toBe(sent);

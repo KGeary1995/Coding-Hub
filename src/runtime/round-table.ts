@@ -9,6 +9,7 @@ import { itemTitle } from '../../shared/memory-items';
 import { HIERARCHY_MODELS } from '../../shared/chat';
 import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
+import { isAgentConfig } from '../../shared/types';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
@@ -30,7 +31,7 @@ const live = (session: Session | null | undefined) => session?.status === 'runni
  */
 export async function openRoundTable(leadId: string): Promise<string | null> {
   const workspace = useWorkspaceStore.getState(); const lead = workspace.sessions.find((session) => session.id === leadId);
-  if (!lead || lead.config.engine === 'shell' || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
+  if (!lead || !isAgentConfig(lead.config) || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
   if (tableOf(leadId) || opening.has(leadId)) return null;
   // A table saved earlier whose partner did not come back: replaced by a new one.
   if (lead.roundTable) { const why = await retire(leadId); if (why) return why; }
@@ -39,7 +40,7 @@ export async function openRoundTable(leadId: string): Promise<string | null> {
   // The same folder the leading chat runs in, whatever the workspace root is now.
   const partner = createSession(engine, { mode: 'independent', cwd: lead.runningCwd });
   // A chat like the lead, with the same permissions and memory project (one table, one setting).
-  if (partner.config.engine !== 'shell') partner.config = { ...partner.config, chat: true, ...(lead.config.permissions ? { permissions: lead.config.permissions } : {}), ...(lead.config.memoryKey ? { memoryKey: lead.config.memoryKey } : {}) };
+  if (isAgentConfig(partner.config)) partner.config = { ...partner.config, chat: true, ...(lead.config.permissions ? { permissions: lead.config.permissions } : {}), ...(lead.config.memoryKey ? { memoryKey: lead.config.memoryKey } : {}) };
   useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, partner].map((session) => session.id === leadId ? { ...session, roundTable: { partner: partner.id, driver: lead.config.engine as 'claude' | 'codex', rounds: DEFAULT_ROUNDS } } : session) }));
   opening.add(leadId);
   try {
@@ -69,7 +70,7 @@ const findingLine = (finding: Finding) => [`${finding.id} (${finding.severity}),
 export async function keepFindings(lead: Session): Promise<number> {
   const findings = lead.roundTable?.findings ?? []; const open = findings.filter((finding) => finding.status !== 'verified');
   const directory = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
-  if (!findings.length || lead.config.engine === 'shell') return 0;
+  if (!findings.length || !isAgentConfig(lead.config)) return 0;
   if (!lead.config.memoryKey && !directory) throw new Error('This channel has no folder to find its memory project from.');
   const project = lead.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
   await hubCall({ action: 'memory-write', project, title: `Round Table review record: ${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}, ${findings.length - open.length} verified`, content: ['Saved by Trace when the Round Table closed.', ...findings.map((finding) => `- ${findingLine(finding)}`)].join('\n'), author: 'human' });

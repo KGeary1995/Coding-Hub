@@ -28,6 +28,7 @@ function chatTurnDone(sessionId: string, failed: boolean) {
 }
 import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
+import { isAgentConfig } from '../../shared/types';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -78,8 +79,8 @@ export function useNativeHost() {
       if (event.type === 'answered' && event.finished) taskTurnDone(event.sessionId);
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-      if (event.type === 'started' && before && before.config.engine !== 'shell' && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
-      if (event.type === 'exit' && before && before.config.engine !== 'shell' && before.config.chat) chatEnded(event.sessionId);
+      if (event.type === 'started' && before && isAgentConfig(before.config) && before.config.chat) chatStarted(event.sessionId, event.runId, Boolean(before.config.resumeId));
+      if (event.type === 'exit' && before && isAgentConfig(before.config) && before.config.chat) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
       catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
@@ -222,7 +223,7 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): s
   const before = useWorkspaceStore.getState().sessions.length;
   const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
   // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
-  if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
+  if (chat && (engine === 'claude' || engine === 'codex')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
   // In the folder another channel works in (a Round Table's partner), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
   if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);

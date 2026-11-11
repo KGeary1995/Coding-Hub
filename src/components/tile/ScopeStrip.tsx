@@ -1,6 +1,7 @@
 import { useActivityStore, ACTIVITY_WINDOW } from '../../state/activity-store';
 import { LIMIT_THRESHOLD, type ChannelState } from '../../state/channel-state';
 import { TRACE_HEIGHT, TRACE_RAIL, TRACE_WIDTH, tracePath } from '../../state/trace';
+import type { ChannelEngine } from '../../../shared/types';
 import { compact } from '../shell/StatusBar';
 
 const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
@@ -10,13 +11,13 @@ const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
  * channel's tokens today, then terminal output over the last two minutes as a small trace with its rate. The trace is
  * real output only; the state shows in its colour, never in invented data.
  */
-export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, tokens, contextUsed }: { sessionId: string; state: ChannelState; engine: 'claude' | 'codex' | 'shell'; limit: number | null; limitLabel: string; tokens?: number; contextUsed?: number | null }) {
+export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, tokens, contextUsed }: { sessionId: string; state: ChannelState; engine: ChannelEngine; limit: number | null; limitLabel: string; tokens?: number; contextUsed?: number | null }) {
   const samples = useActivityStore((store) => store.samples[sessionId]) ?? EMPTY;
   const rate = samples.at(-1) ?? 0;
   const color = state === 'working' ? `var(--tr-ch-${engine})` : `var(--tr-st-${state})`;
   const hot = limit !== null && limit >= LIMIT_THRESHOLD;
   return <div className={`tr-scope tr-tile-foot state-${state}`}>
-    {engine !== 'shell' && <>
+    {(engine === 'claude' || engine === 'codex') && <>
       <span className="tr-foot-label" aria-hidden="true">ctx</span>
       <span className={`tr-scope-limit ${hot ? 'hot' : ''}`} role="img" aria-label={limit !== null ? limitLabel : contextUsed ? `${compact(contextUsed)} tokens in context` : 'No context report yet'} title={limit !== null ? limitLabel : 'Claude Code does not report its context window, so there is no percentage.'}><i style={{ width: `${limit !== null ? Math.min(100, Math.round(limit * 100)) : 0}%` }} /></span>
       <b className={`tr-foot-value tnum ${hot ? 'hot' : ''}`}>{limit !== null ? `${Math.round(limit * 100)}%` : contextUsed ? compact(contextUsed) : '—'}</b>

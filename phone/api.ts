@@ -123,7 +123,7 @@ export const chat = async (request: ChatRequest) => { await api('/api/chat', { m
 /** Start, stop, restart or close a channel on this computer (the phone needs Can start and stop agents). */
 export const control = async (sessionId: string, value: ChannelControl) => { await api('/api/control', { method: 'POST', body: JSON.stringify({ sessionId, control: value }) }); };
 /** Adds a channel on this computer: a terminal channel, or Claude chat / Codex chat with `chat`. */
-export const addChannel = async (engine: 'claude' | 'codex' | 'shell', chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
+export const addChannel = async (engine: 'claude' | 'codex' | 'gemini' | 'shell', chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
 
 /**
  * Follows a computer's event stream (server-sent events read through fetch, which can send the device key): the one

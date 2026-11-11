@@ -1,7 +1,10 @@
 import { create } from 'zustand';
-import type { ChannelEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
+import type { ChannelEngine, CLIEngineConfig, GeminiChannelConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS } from '../../shared/schemas';
+import { isAgentConfig } from '../../shared/types';
+import { DEFAULT_TITLES } from '../../shared/channel-name';
+import { GEMINI_MODEL } from '../../shared/gemini';
 
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -9,10 +12,10 @@ export type LayoutMode = 'columns' | 'rows' | 'grid';
 export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
   return {
     id: crypto.randomUUID(),
-    title: engine === 'claude' ? 'Claude Code' : engine === 'codex' ? 'Codex' : 'Terminal',
+    title: DEFAULT_TITLES[engine],
     config: engine === 'claude'
       ? { engine, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : { engine },
+      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : engine === 'gemini' ? { engine, model: GEMINI_MODEL } : { engine },
     binding,
     status: 'idle',
     pid: null,
@@ -125,7 +128,7 @@ interface WorkspaceState {
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
   addChatSession: (engine: 'claude' | 'codex') => void;
   removeSession: (id: string) => void;
-  updateConfig: (id: string, config: CLIEngineConfig) => void;
+  updateConfig: (id: string, config: CLIEngineConfig | GeminiChannelConfig) => void;
   resetCodexConfig: (id: string) => void;
   updateBinding: (id: string, binding: WorkspaceBinding) => void;
   setTiles: (tiles: GridTile[]) => void;
@@ -190,12 +193,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null, activeView: 'workspace' });
     return true;
   },
-  addChatSession: (engine) => { useWorkspaceStore.getState().addSession(engine); useWorkspaceStore.setState((state) => { const last = state.sessions.at(-1); return last && last.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === last.id && session.config.engine !== 'shell' ? { ...session, config: { ...session.config, chat: true } } : session) } : {}; }); },
+  addChatSession: (engine) => { useWorkspaceStore.getState().addSession(engine); useWorkspaceStore.setState((state) => { const last = state.sessions.at(-1); return last && last.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === last.id && isAgentConfig(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : {}; }); },
   addSession: (engine, sourceSessionId) => set((state) => {
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
     const session = createSession(engine, source ? { ...source.binding } : undefined);
-    if (source?.config.engine === engine) { session.config = structuredClone(source.config); if (session.config.engine !== 'shell') delete session.config.resumeId; }
+    if (source?.config.engine === engine) { session.config = structuredClone(source.config); if (isAgentConfig(session.config)) delete session.config.resumeId; }
     const sessions = [...state.sessions, session];
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),

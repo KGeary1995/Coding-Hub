@@ -175,7 +175,10 @@ export class LinkedComputers implements RemoteRelay {
   async add(id: string, engine: ChannelEngine, chat = false) {
     const link = this.linked(id);
     try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chat ? { chat } : {}) }), signal: AbortSignal.timeout(30000) }); }
-    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
+    catch (error) {
+      // A Trace there from before Gemini CLI channels refuses the engine with 400 "Invalid channel."
+      if (engine === 'gemini' && error instanceof HubError && error.code === 'LINK_FAILED' && /Invalid channel/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add Gemini CLI channels there.`);
+      if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
   }
   /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */
   async pasteImage(id: string, sessionId: string, runId: string, image: string) {

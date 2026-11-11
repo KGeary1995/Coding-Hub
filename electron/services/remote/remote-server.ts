@@ -132,7 +132,7 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
-const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal channel cannot be a chat.');
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'gemini')), 'Only Claude Code and Codex channels can be chats.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 /** A Windows computer's screen (Trace's screen service) asks no password of its own, so a phone needs the same setting as starting agents. */
@@ -561,7 +561,7 @@ export class RemoteServer {
       const seat = sessions.find((item) => item.seatedAt === session.id); const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
       const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seat && seat.engine !== 'shell' ? { table: seat.engine } : {}), ...(session.account ? { account: session.account } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine === 'gemini' ? 'shell' : session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seat && (seat.engine === 'claude' || seat.engine === 'codex') ? { table: seat.engine } : {}), ...(session.account ? { account: session.account } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.

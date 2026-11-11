@@ -15,7 +15,8 @@ import type { HubRequest, HubResponse, UsageRecord } from './hub';
 export interface HostError { code: string; message: string }
 export type HostResult<T> = { ok: true; value: T } | { ok: false; error: HostError };
 export interface EngineInfo {
-  engine: CLIEngine;
+  /** 'gemini' is Gemini CLI (agy), discovered for its own terminal channels only (discoverGemini); it never reaches buildLaunch. */
+  engine: CLIEngine | 'gemini';
   available: boolean;
   executable: string | null;
   version: string | null;
@@ -31,6 +32,9 @@ export interface EngineInfo {
   supportsPermissions?: boolean;
   /** Claude's --chrome (Claude in Chrome). */
   supportsChrome?: boolean;
+  /** Gemini CLI's --mode (accept-edits) and --dangerously-skip-permissions. */
+  supportsMode?: boolean;
+  supportsSkipPermissions?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;

@@ -4,7 +4,7 @@ Instructions for AI coding agents (Codex reads this file; Claude Code reads it t
 
 ## What this is
 
-**Trace** (formerly *AI Coding Hub*) is an Electron desktop app for Windows and macOS. It runs the real **Claude Code** and **Codex** CLIs, plus plain shells, in up to eight "channels" side by side. Each channel is a terminal or a chat view. Around the channels it adds:
+**Trace** (formerly *AI Coding Hub*) is an Electron desktop app for Windows and macOS. It runs the real **Claude Code** and **Codex** CLIs, **Gemini CLI** (`agy`, terminal only), plus plain shells, in up to eight "channels" side by side. Each channel is a terminal or a chat view. Around the channels it adds:
 - Git review
 - usage and cost tracking
 - shared rules and handoff memory for both agents

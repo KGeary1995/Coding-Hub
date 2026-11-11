@@ -2,7 +2,7 @@ import type { ITheme } from '@xterm/xterm';
 
 /** Trace terminal colours (docs/design/trace, Flight Deck Lite), as hex because xterm needs it. */
 export const TERMINAL_FONT = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
-export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', shell: '#a9c6bd' } as const;
+export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', shell: '#a9c6bd' } as const;
 export const TERMINAL_THEME: ITheme = {
   background: '#080b0e', foreground: '#dce7ee', cursor: '#dce7ee', cursorAccent: '#080b0e', selectionBackground: '#1d3340',
   // xterm draws its own scroll slider; a slate one, not its default grey block.

@@ -31,6 +31,7 @@
   --tr-ch-claude: #ffb547;
   --tr-ch-codex: #5fe1ff;
   --tr-ch-shell: #a9c6bd;      /* Terminal channels: a plain shell, kept quieter than the agents */
+  --tr-ch-gemini: #8c9cff;     /* Gemini CLI channels (agy in a terminal) */
   --tr-you: #d0c4ff;
   --tr-ch-planner: #c6f26b;    /* a hierarchy Round Table's planner (a second Claude seat), told apart from the builder's amber */
 
