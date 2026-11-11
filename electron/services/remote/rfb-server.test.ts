@@ -192,6 +192,25 @@ describe('the Windows screen as a VNC server', () => {
       // A real change still goes.
       vnc.setClipboard('three'); await until(() => messages().length === sent + 1, 'the new copy');
     });
+    const provide = (table: Awaited<ReturnType<typeof extended>>, text: string) => {
+      const utf8 = Buffer.from(text + '\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+    };
+    const key = Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x76]);
+    it('keeps V held when a reply with no text arrives while the clipboard write is still under way', async () => {
+      let finish: () => void = () => {}; const table = await extended(() => new Promise<void>((resolve) => { finish = resolve; })); const { vnc } = table;
+      table.send((1 << 27) | 1); vnc.viewer.write(key); provide(table, 'new text');
+      await until(() => vnc.events.length === 1, 'the write to start');
+      table.send(1 << 28); await new Promise((resolve) => setTimeout(resolve, 150)); expect(vnc.events).toEqual(['clipboard new text']);
+      finish(); await until(() => vnc.events.length === 2, 'the paste'); expect(vnc.events).toEqual(['clipboard new text', 'key 76 true']);
+    });
+    it('keeps V held after the first of two announced copies arrives, until the second does', async () => {
+      const table = await extended(); const { vnc } = table;
+      table.send((1 << 27) | 1); table.send((1 << 27) | 1); vnc.viewer.write(key);
+      provide(table, 'first'); await until(() => vnc.events.length === 1, 'the first text'); await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(vnc.events).toEqual(['clipboard first']);
+      provide(table, 'second'); await until(() => vnc.events.length === 3, 'the paste'); expect(vnc.events).toEqual(['clipboard first', 'clipboard second', 'key 76 true']);
+    });
     it('pastes several lines with every line intact', async () => {
       const table = await extended(); const { vnc } = table; const lines = 'first line\nsecond — line\n\nfourth 🙂';
       // noVNC sends line ends as CRLF; they reach this computer's clipboard that way.

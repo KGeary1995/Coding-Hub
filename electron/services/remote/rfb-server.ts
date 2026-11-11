@@ -78,11 +78,11 @@ export class RfbSession {
    * a paste (Ctrl+V right after the text) would otherwise reach this computer before its clipboard has the new text.
    */
   private held: (() => void)[] | null = null; private heldTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Updates sent and not yet answered by the viewer's fence, and the pump waiting for one. */
-  /** Notify messages with text so far: a finished write lets held input go only if no newer copy was announced since. */
-  private notified = 0;
   /** Text Requests sent and not yet answered with text; when input was first held; a hold never lasts past twice PASTE_WAIT. */
   private awaiting = 0; private heldSince = 0;
+  /** Clipboard writes still under way: a paste waits for the text to be on the clipboard. */
+  private writing = 0;
+  /** Updates sent and not yet answered by the viewer's fence, and the pump waiting for one. */
   private inFlight = 0; private fenced: (() => void) | null = null; private fenceId = 0;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
@@ -181,11 +181,16 @@ export class RfbSession {
    * something newer meanwhile (another Notify), that text's arrival lets them go instead.
    */
   private copied(text: string) {
-    this.lastClipboard = text; const notice = this.notified; const written = this.input.clipboard(text);
-    if (!(written instanceof Promise)) { if (this.notified === notice) this.release(); return; }
-    this.hold();
-    void written.then(() => {}, () => {}).then(() => { if (!this.closed && this.notified === notice) this.release(); });
+    this.lastClipboard = text; const written = this.input.clipboard(text);
+    if (!(written instanceof Promise)) { this.settle(); return; }
+    this.writing++; this.hold();
+    void written.then(() => {}, () => {}).then(() => { this.writing--; if (!this.closed) this.settle(); });
   }
+  /**
+   * A reply from the viewer lets held input go only once nothing it waits on is left: no text this side asked for is still to
+   * come, and no clipboard write is still under way. (PASTE_WAIT, through hold(), stays the limit.)
+   */
+  private settle() { if (this.awaiting === 0 && this.writing === 0) this.release(); }
   /** Input now, or after the text the viewer copied, in the order it came. */
   private act(action: () => void) { if (this.held) this.held.push(action); else action(); }
   /**
@@ -205,7 +210,7 @@ export class RfbSession {
     if (flags & CAPS) { this.extended = true; return; }
     if (flags & PROVIDE) {
       // No text in it: held input goes only if no text this side asked for is still to come.
-      if (!text) { if (this.awaiting === 0) this.release(); return; }
+      if (!text) { this.settle(); return; }
       this.awaiting = Math.max(0, this.awaiting - 1);
       // noVNC flushes without finishing its stream; the size limit applies to the text inflated, not just what was sent.
       const data = inflateSync(body.subarray(4), { finishFlush: constants.Z_SYNC_FLUSH, maxOutputLength: CLIPBOARD_LIMIT + 5 });
@@ -214,7 +219,7 @@ export class RfbSession {
       const value = data.subarray(4, 4 + size).toString('utf8'); this.copied(value.endsWith('\0') ? value.slice(0, -1) : value);
       return;
     }
-    if (flags & NOTIFY) { if (text) { this.notified++; this.awaiting++; this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
+    if (flags & NOTIFY) { if (text) { this.awaiting++; this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
     if (flags & REQUEST) {
       if (!text || this.offer === null) return;
       // The size, then the text (CRLF, NUL, within the limit in bytes), all deflated.
