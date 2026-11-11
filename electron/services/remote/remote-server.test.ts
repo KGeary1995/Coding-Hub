@@ -368,6 +368,31 @@ describe('phone screen of a Windows computer', () => {
     const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) });
     expect(await outcome).toBe('refused'); expect(service.destroyed).toBe(true);
   });
+  /** A phone of a linked computer, given a key here through it (relayKey), with Can start and stop agents, watching the screen. */
+  async function relayed() {
+    const setup = await windows(); const { server, open } = setup; const linked = await computer(server);
+    const key = (relayKey: string) => fetch(base(server) + '/api/phone-key', { method: 'POST', headers: { Authorization: `Bearer ${linked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Relayed phone', relayKey }) }).then(async (response) => (await response.json() as { token: string }).token);
+    const token = await key('p1'); const id = server.status().devices.find((device) => device.name === 'Relayed phone')!.id; server.setCanRun(id, true);
+    const ticketOf = async () => (await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })).json() as { ticket: string }).ticket;
+    const spare = await ticketOf(); const { socket, first } = open(await ticketOf()); expect(await first).toBe('RFB 003.008\n');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    return { ...setup, linked, key, spare, closed };
+  }
+  it('a phone removed through the linked computer that gave it its key loses its screen at once', async () => {
+    const { server, linked, spare, closed, open } = await relayed();
+    const response = await fetch(base(server) + '/api/phone-key/revoke', { method: 'POST', headers: { Authorization: `Bearer ${linked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ relayKey: 'p1' }) });
+    expect(await response.json()).toEqual({ ok: true, removed: 1 }); expect(await closed).toBe(true);
+    expect(await open(spare).first).toBe('refused');
+  });
+  it('a phone given a new key through the linked computer loses what its old key had open', async () => {
+    const { key, spare, closed, open } = await relayed();
+    await key('p1'); expect(await closed).toBe(true); expect(await open(spare).first).toBe('refused');
+  });
+  it('linking another phone or computer leaves a phone\'s open screen alone', async () => {
+    const { server, closed } = await relayed();
+    await paired(server); await computer(server);
+    expect(await closed).toBe(false);
+  });
   it('removing the phone also closes a Mac screen it has open', async () => {
     const vnc = net.createServer((client) => { client.write('RFB 003.889\n'); client.on('error', () => {}); });
     await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { vnc.close(() => resolve()); vnc.unref(); }));

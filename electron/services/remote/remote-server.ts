@@ -352,14 +352,23 @@ export class RemoteServer {
   private closeScreens(matches: (owner: { device: string; service: boolean }) => boolean) {
     for (const [socket, owner] of [...this.screenOwners]) if (matches(owner)) { this.screenOwners.delete(socket); this.screens.delete(socket); socket.destroy(); }
   }
+  /**
+   * Devices that are gone (removed here, removed through the linked computer that gave them their key, or their key
+   * replaced): their streams end, their screens close (open or still connecting), and their unused screen tickets go,
+   * so removing one locks it out at once.
+   */
+  private dropped(ids: Set<string>) {
+    if (!ids.size) return;
+    for (const stream of this.streams) if (ids.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    this.closeScreens((owner) => ids.has(owner.device));
+    for (const [value, ticket] of [...this.screenTickets]) if (ids.has(ticket.device)) this.screenTickets.delete(value);
+  }
   revoke(id: string) {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
     // A linked computer's phones were given keys here through it (relayKey `<its id>:<phone>`): they go with it.
     const removed = new Set([id, ...devices.filter((item) => item.relayKey?.startsWith(id + ':')).map((item) => item.id)]);
     this.saveDevices(devices.filter((item) => !removed.has(item.id)));
-    for (const stream of this.streams) if (removed.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
-    // Its screens close too, open or still connecting, and its unused tickets go: removing it locks it out at once.
-    this.closeScreens((owner) => removed.has(owner.device)); for (const [value, ticket] of [...this.screenTickets]) if (removed.has(ticket.device)) this.screenTickets.delete(value);
+    this.dropped(removed);
     // A phone of this computer was given keys on linked computers through this one: ask them to forget those too.
     if (!device.kind || device.kind === 'phone') void this.relay?.revokePhone?.(id).catch(() => {});
     return this.status();
@@ -591,9 +600,9 @@ export class RemoteServer {
     const token = randomBytes(32).toString('base64url'); const name = rawName.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || (kind === 'computer' ? 'Computer' : 'Phone');
     const device: Device = { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, ...(kind === 'computer' ? { kind, ...(machineId ? { machineId } : {}) } : {}) };
     // Linking the same computer again replaces its old key rather than leaving it working too.
-    const kept = this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
-    for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device)) { stream.response.end(); this.streams.delete(stream); }
-    this.saveDevices([...kept, device]);
+    const all = this.devices(); const kept = all.filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
+    const replaced = new Set(all.filter((item) => !kept.includes(item)).map((item) => item.id));
+    this.saveDevices([...kept, device]); this.dropped(replaced);
     return { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) };
   }
   /**
@@ -736,7 +745,7 @@ export class RemoteServer {
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can withdraw a phone key.' });
       const parsed = phoneKeyRevokeSchema.safeParse(await this.body(request)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid request.' });
       const relayKey = `${device.id}:${parsed.data.relayKey}`; const gone = this.devices().filter((item) => item.relayKey === relayKey).map((item) => item.id);
-      if (gone.length) { this.saveDevices(this.devices().filter((item) => !gone.includes(item.id))); for (const stream of this.streams) if (gone.includes(stream.device)) { stream.response.end(); this.streams.delete(stream); } }
+      if (gone.length) { this.saveDevices(this.devices().filter((item) => !gone.includes(item.id))); this.dropped(new Set(gone)); }
       return this.send(response, 200, { ok: true, removed: gone.length });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-key') {
@@ -748,8 +757,9 @@ export class RemoteServer {
       const relayKey = `${device.id}:${parsed.data.relayKey}`; const kept = this.devices().filter((item) => item.relayKey !== relayKey);
       if (kept.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
       const token = randomBytes(32).toString('base64url'); const name = parsed.data.name.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 60) || 'Phone';
-      for (const stream of this.streams) if (!kept.some((item) => item.id === stream.device) && stream.device !== device.id) { stream.response.end(); this.streams.delete(stream); }
-      this.saveDevices([...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]);
+      // The phone's earlier key here stops working, and whatever it had open closes.
+      const replaced = new Set(this.devices().filter((item) => item.relayKey === relayKey).map((item) => item.id));
+      this.saveDevices([...kept, { id: randomUUID(), name, tokenHash: hash(token), createdAt: new Date().toISOString(), lastSeen: null, relayKey }]); this.dropped(replaced);
       return this.send(response, 200, { token, computer: this.identity, url: this.status().url });
     }
     if (request.method === 'GET' && url.pathname === '/api/computers') {
