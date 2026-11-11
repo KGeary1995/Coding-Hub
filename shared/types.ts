@@ -18,6 +18,8 @@ export interface ClaudeCLIEngineConfig {
   permissions?: PermissionLevel;
   /** Claude in Chrome (`--chrome`): the browser extension's tools, acting in the person's own Chrome with its sign-ins. */
   chrome?: boolean;
+  /** The shared memory project this channel reads and writes, chosen by the person; absent uses the folder's automatic key. */
+  memoryKey?: string;
   model: string;
   thinking: { budget_tokens: number | null };
   tokenLimits: {
@@ -32,6 +34,8 @@ export interface CodexCLIEngineConfig {
   /** A chat channel: Codex's app server, drawn by Trace as a conversation (with images) instead of a terminal. */
   chat?: boolean;
   permissions?: PermissionLevel;
+  /** The shared memory project this channel reads and writes, chosen by the person; absent uses the folder's automatic key. */
+  memoryKey?: string;
   model: string;
   reasoningEffort: ReasoningEffort | null;
 }
@@ -50,7 +54,7 @@ export type WorkspaceBinding =
   | { mode: 'independent'; cwd: string };
 
 /** A Round Table this chat channel leads, kept with the workspace so it is opened again when both chats run after a restart. */
-export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number }
+export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number; /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }
 export interface Session {
   roundTable?: SavedRoundTable;
   budget?: import('./productivity').SessionBudget;

@@ -288,3 +288,13 @@
 .seat-hex.seat-claude { background: var(--tr-ch-claude); } .seat-hex.seat-codex { background: var(--tr-ch-codex); } .seat-hex.seat-you { background: var(--tr-you); }
 .chat-message.user.table-you { align-items: flex-end; } .table-you .chat-author { color: var(--tr-you); }
 .at-table .chat-message.assistant.table-claude, .at-table .chat-message.assistant.table-codex { border-left-width: 1px; }
+/* The Round Table's review record, on its own line under the bar. */
+.table-findings { flex-basis: 100%; text-transform: none; letter-spacing: normal; }
+.table-findings ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+.table-findings small { display: block; color: var(--tr-fg-muted); }
+.table-findings .finding-open strong { color: var(--tr-st-limit); } .table-findings .finding-verified { opacity: .7; }
+/* A hierarchy Round Table: its steps, current one marked, and its seats' models. */
+.chain-steps { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font-size: 12px; }
+.chain-steps li { padding: 2px 6px; border: 1px solid var(--tr-line); color: var(--tr-fg-dim); }
+.chain-steps li.past { color: var(--tr-fg-muted); } .chain-steps li.current { color: var(--tr-fg-strong); border-color: var(--tr-st-waiting); }
+.chain-models { text-transform: none; letter-spacing: normal; } .chain-models label { display: inline-flex; gap: 6px; align-items: center; margin-right: 10px; } .chain-models input { width: 16ch; }

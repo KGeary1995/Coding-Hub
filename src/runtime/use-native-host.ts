@@ -5,12 +5,26 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, partnerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, leadOf, partnerOf, plannerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
-import { startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { chainTasks, startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { useChatStore } from '../state/chat-store';
+
+/**
+ * A chat turn ended. The task sits with the channel that leads a Round Table; there, only the driver's reply says whether it
+ * is done (the reviewer's turn ending says nothing about the work).
+ */
+function chatTurnDone(sessionId: string, failed: boolean) {
+  const sessions = useWorkspaceStore.getState().sessions; const lead = leadOf(sessions, sessionId) ?? sessions.find((session) => session.id === sessionId);
+  const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
+  // A hierarchy's task is done on the planner's APPROVED (chainTasks), never when a seat's turn ends.
+  if (table?.kind === 'hierarchy') return;
+  if (lead && table && seat && seat.config.engine !== table.driver) return;
+  void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
+}
 import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 
@@ -53,7 +67,7 @@ export function useNativeHost() {
     const unsubscribeChat = host.onChatEvent((envelope) => {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
-      applyChatEvent(envelope); if (envelope.event.type === 'done') taskTurnDone(envelope.sessionId); if (envelope.event.type === 'table' && envelope.event.table) rememberTable(envelope.sessionId, envelope.event.table);
+      applyChatEvent(envelope); if (envelope.event.type === 'done') chatTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) { rememberTable(envelope.sessionId, envelope.event.table); chainTasks(envelope.sessionId, envelope.event.table); }
       // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
@@ -137,8 +151,10 @@ export async function startSession(id: string) {
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
   // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
-  if (partner && lead?.status === 'running' && partner.status !== 'running' && partner.status !== 'starting') await startSession(partner.id);
+  // A hierarchy table's planner too: its hidden seats start together.
+  const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
+  const seats = [partnerOf(useWorkspaceStore.getState().sessions, id), plannerOf(useWorkspaceStore.getState().sessions, id)];
+  await Promise.all(seats.map((seat) => seat && lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
 }
 
 /** Waits (up to `ms`) until none of these sessions is running, or only until they are past starting. */
@@ -149,16 +165,16 @@ export async function settled(ids: (string | undefined)[], past: 'running' | 'st
 
 /** Stops a channel, and the hidden partner of a Round Table it leads with it (that has no Stop of its own). */
 export async function stopSession(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
-  const [own, seat] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true]);
-  return own && seat;
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
+  const [own, seat, plan] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true, planner ? stopRun(planner.id) : true]);
+  return own && seat && plan;
 }
 /** Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped. */
 export async function closeChannel(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
   if (!(await stopSession(id))) return false;
   // The exit events can arrive just after the stop requests return; a session still running is never removed.
-  await settled([id, partner?.id]);
+  await settled([id, partner?.id, planner?.id]);
   useWorkspaceStore.getState().removeSession(id);
   return !useWorkspaceStore.getState().sessions.some((session) => session.id === id);
 }

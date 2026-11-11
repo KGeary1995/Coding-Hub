@@ -38,8 +38,9 @@ export function forgetChatsExcept(sessionIds: Iterable<string>) {
 }
 
 /** The person's message, shown at once; images as data URLs for the thread. */
-export function chatSent(sessionId: string, text: string, images: ChatImage[]) {
-  update(sessionId, (current) => ({ ...current, busy: true, items: [...current.items, { kind: 'user', order: ++counter, id: nextId(), text, images: images.map((image) => `data:${image.mediaType};base64,${image.data}`), at: new Date().toISOString() }] }));
+/** `busy`: the message went to this chat's agent, which now answers (a hierarchy table passes it to another seat). */
+export function chatSent(sessionId: string, text: string, images: ChatImage[], busy = true) {
+  update(sessionId, (current) => ({ ...current, busy: busy || current.busy, items: [...current.items, { kind: 'user', order: ++counter, id: nextId(), text, images: images.map((image) => `data:${image.mediaType};base64,${image.data}`), at: new Date().toISOString() }] }));
 }
 export function chatAnswered(sessionId: string, requestId: string, allow: boolean) {
   update(sessionId, (current) => ({ ...current, items: current.items.map((item) => item.kind === 'permission' && item.id === requestId ? { ...item, answer: allow ? 'allowed' : 'denied' } : item) }));

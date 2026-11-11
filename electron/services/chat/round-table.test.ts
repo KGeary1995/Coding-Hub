@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
-import { RoundTables, type TableHost } from './round-table';
+import { KEEP_IMAGES, RoundTables, type TableHost } from './round-table';
 
 const CLAUDE = '11111111-1111-4111-8111-111111111111'; const CODEX = '22222222-2222-4222-8222-222222222222';
 
@@ -133,5 +133,64 @@ describe('Round Table', () => {
     const { tables, last } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 1); tables.close(CLAUDE);
     expect(last()).toEqual({ type: 'table', table: null, closed: true });
+  });
+});
+
+describe('Round Table review record', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  it('records the reviewer findings, passes them to the driver only after the files are noted, and follows them to verified', async () => {
+    const { tables, sent, say, done, last } = setup(); let state = 'a'.repeat(64);
+    (tables as unknown as { host: TableHost }).host.stateOf = async () => state;
+    tables.open(1, CLAUDE, CODEX, 'claude', 3);
+    tables.send(CLAUDE, 'Review the change.', []); expect(sent[1].text).toContain('FINDING high|medium|low');
+    say(CLAUDE, 'I changed the parser.'); done(CLAUDE);
+    say(CODEX, 'Two problems.\nFINDING high src/parse.ts:40 — drops the last line\nFINDING low docs/a.md — typo'); done(CODEX);
+    // Nobody starts the next turn until the record and the files' state are in.
+    expect(sent).toHaveLength(2); await settle();
+    expect(last().table!.findings).toMatchObject([{ id: 'F1', severity: 'high', evidence: 'src/parse.ts:40', status: 'open', reviewedAt: 'a'.repeat(12) }, { id: 'F2', severity: 'low', status: 'open' }]);
+    expect(last().table!.findings![0].filesChanged).toBeUndefined();
+    const driverTurn = sent.find((item) => item.runId === CLAUDE && item.text.includes('Open findings'))!; expect(driverTurn.text).toContain('F1 (high, src/parse.ts:40): drops the last line');
+    state = 'b'.repeat(64);
+    say(CLAUDE, 'FIXED F1: kept the last line\nDECLINED F2: the typo is in a quote'); done(CLAUDE); say(CODEX, 'Waiting for the fix.'); done(CODEX); await settle();
+    expect(last().table!.findings!.map((item) => item.status)).toEqual(['fixed', 'declined']); expect(last().table!.findings![0]).toMatchObject({ reviewedAt: 'a'.repeat(12), changedAt: 'b'.repeat(12) });
+    expect(sent.at(-1)!.text).toContain('waiting for your check'); expect(sent.at(-1)!.runId).toBe(CODEX);
+    say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'VERIFIED F1\nREOPENED F2: it is not a quote'); done(CODEX); await settle();
+    expect(last().table!.findings!.map((item) => item.status)).toEqual(['verified', 'open']);
+  });
+  it('marks a finding uncertain when files changed while it was reviewed, and reads answers before a waiting message goes', async () => {
+    const { tables, sent, say, done, last } = setup(); let state = 'a'.repeat(64);
+    (tables as unknown as { host: TableHost }).host.stateOf = async () => state;
+    tables.open(1, CLAUDE, CODEX, 'claude', 3); tables.send(CLAUDE, 'Fix and review.', []);
+    state = 'c'.repeat(64); // The driver edits while the reviewer reads.
+    tables.send(CLAUDE, 'Also check the docs.', []);
+    say(CLAUDE, 'Edited.'); done(CLAUDE); say(CODEX, 'FINDING medium src/x.ts:1 — off by one'); done(CODEX); await settle();
+    expect(last().table!.findings![0]).toMatchObject({ id: 'F1', filesChanged: true, reviewedAt: 'c'.repeat(12) });
+    expect(sent.slice(-2).map((item) => item.text)).toEqual([expect.stringContaining('Also check the docs.'), expect.stringContaining('Also check the docs.')]);
+  });
+});
+
+describe('Round Table after a restart', () => {
+  const image = { mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' };
+  it('publishes a message queued while the agents work, so a restart before they finish keeps its text and images', () => {
+    const before = setup(); before.tables.open(1, CLAUDE, CODEX, 'claude', 2); before.tables.send(CLAUDE, 'Start.', []);
+    before.tables.send(CLAUDE, 'Then check the docs.', [image]);
+    const saved = before.last().table!; expect(saved).toMatchObject({ waiting: 'Then check the docs.', waitingImages: [image] });
+    // Trace quits before either agent finishes; the window saved that state, and the table opens again from it.
+    const after = setup(); after.tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: saved.findings, waiting: saved.waiting, waitingImages: saved.waitingImages });
+    expect(after.last().table).toMatchObject({ waiting: 'Then check the docs.', waitingKept: true }); expect(after.sent).toHaveLength(0);
+    expect(() => after.tables.send(CLAUDE, 'Something new', [])).toThrow(/Send it or drop it first/);
+    after.tables.waiting(CLAUDE, true);
+    expect(after.sent.map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(after.sent[0].text).toContain('Then check the docs.');
+    expect(after.last().table!.waiting).toBeUndefined();
+  });
+  it('keeps findings, and an image-only message, and says when images are too large to keep', () => {
+    const { tables, sent, last } = setup();
+    const finding = { id: 'F1', severity: 'high' as const, evidence: 'a.ts:1', text: 'bug', status: 'fixed' as const, response: 'done', check: '', reviewedAt: 'aaaaaaaaaaaa', changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' };
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { findings: [finding], waitingImages: [image] });
+    expect(last().table).toMatchObject({ findings: [finding], waiting: '', waitingImages: [image], waitingKept: true });
+    tables.stop(CLAUDE); expect(last().table!.waitingKept).toBe(true); tables.waiting(CLAUDE, false); expect(sent).toHaveLength(0); expect(last().table!.waiting).toBeUndefined();
+    const big = setup(); big.tables.open(1, CLAUDE, CODEX, 'claude', 2); big.tables.send(CLAUDE, 'Go.', []);
+    big.tables.send(CLAUDE, 'Look at these.', [{ mediaType: 'image/png', data: 'A'.repeat(KEEP_IMAGES + 4) }]);
+    expect(big.last().table).toMatchObject({ waiting: 'Look at these.', waitingImagesDropped: 1 }); expect(big.last().table!.waitingImages).toBeUndefined();
   });
 });

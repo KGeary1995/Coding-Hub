@@ -3,15 +3,16 @@ import path from 'node:path';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { VerificationData, VerificationProfile, VerificationResult, VerificationTool } from '../../../shared/workbench';
+import type { VerificationData, VerificationFreshness, VerificationProfile, VerificationResult, VerificationTool } from '../../../shared/workbench';
 import { load, save, directory } from './local-store';
 import { hostEnvironment } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
+import { repositoryState } from './repository-state';
 const step = z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm', 'pnpm', 'yarn', 'python', 'cargo', 'go', 'dotnet']), args: z.array(z.string().max(500).refine((s) => !s.includes('\0'))).min(1).max(30) }).strict();
 const profile = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), directory: z.string().max(4096), steps: z.array(step).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300), createdAt: z.iso.datetime() }).strict();
-const result = z.object({ id: z.uuid(), profileId: z.uuid(), directory: z.string(), profileName: z.string(), startedAt: z.iso.datetime(), endedAt: z.iso.datetime(), passed: z.boolean(), cancelled: z.boolean(), steps: z.array(z.object({ label: z.string(), exitCode: z.number().int().nullable(), output: z.string().max(512000), timedOut: z.boolean(), truncated: z.boolean() }).strict()).max(8) }).strict();
+const result = z.object({ id: z.uuid(), profileId: z.uuid(), directory: z.string(), profileName: z.string(), startedAt: z.iso.datetime(), endedAt: z.iso.datetime(), passed: z.boolean(), cancelled: z.boolean(), steps: z.array(z.object({ label: z.string(), exitCode: z.number().int().nullable(), output: z.string().max(512000), timedOut: z.boolean(), truncated: z.boolean() }).strict()).max(8), tested: z.object({ state: z.string().max(64), changedDuring: z.boolean() }).strict().optional() }).strict();
 const dataSchema = z.object({ profiles: z.array(profile).max(100), results: z.array(result).max(50) }).strict();
-const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('verification-list') }).strict(), z.object({ action: z.literal('verification-save'), id: z.uuid().optional(), name: profile.shape.name, directory: profile.shape.directory, steps: profile.shape.steps, timeoutSeconds: profile.shape.timeoutSeconds }).strict(), z.object({ action: z.literal('verification-run'), id: z.uuid() }).strict(), z.object({ action: z.literal('verification-cancel') }).strict()]);
+const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('verification-list') }).strict(), z.object({ action: z.literal('verification-save'), id: z.uuid().optional(), name: profile.shape.name, directory: profile.shape.directory, steps: profile.shape.steps, timeoutSeconds: profile.shape.timeoutSeconds }).strict(), z.object({ action: z.literal('verification-run'), id: z.uuid() }).strict(), z.object({ action: z.literal('verification-cancel') }).strict(), z.object({ action: z.literal('verification-fresh') }).strict()]);
 export class Verification {
   private child: ChildProcess | null = null;
   private busy = false; private cancelled = false;
@@ -45,9 +46,20 @@ export class Verification {
     }
     throw new HubError('CHECK_TOOL', `${tool} was not found on PATH. Install it or use another verification command.`);
   }
-  async execute(input: unknown): Promise<VerificationData | VerificationProfile | VerificationResult | null> {
+  /** Each recorded result against the project's files now: one Git read per folder. */
+  async freshness(): Promise<VerificationFreshness> {
+    const results = this.data().results; const states = new Map<string, Promise<string | null>>(); const out: VerificationFreshness = {};
+    for (const result of results) {
+      if (!result.tested) { out[result.id] = 'unknown'; continue; }
+      if (!states.has(result.directory)) states.set(result.directory, repositoryState(result.directory));
+      const now = await states.get(result.directory)!; out[result.id] = now === null ? 'unknown' : now === result.tested.state && !result.tested.changedDuring ? 'current' : 'changed';
+    }
+    return out;
+  }
+  async execute(input: unknown): Promise<VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null> {
     const request = schema.parse(input); const data = this.data();
     if (request.action === 'verification-list') return data;
+    if (request.action === 'verification-fresh') return this.freshness();
     if (request.action === 'verification-cancel') { this.cancel(); return null; }
     if (request.action === 'verification-save') {
       if (this.busy) throw new HubError('CHECK_BUSY', 'Finish or cancel verification before editing profiles.');
@@ -65,6 +77,9 @@ export class Verification {
       if (!await this.confirm(selected)) { completed.cancelled = true; return null; }
       if (this.cancelled) return null;
       if (JSON.stringify(this.data().profiles.find((p) => p.id === selected.id)) !== JSON.stringify(selected)) throw new HubError('CHECK_CHANGED', 'The profile changed after review. Run it again.');
+      // The files the checks see, before and after: a pass describes these files only, and an edit during the run (by an
+      // agent, or by the checks themselves) means no single version was tested.
+      const before = await repositoryState(cwd);
       for (const command of selected.steps) {
         if (this.cancelled) break;
         const program = this.executable(command.tool);
@@ -79,6 +94,7 @@ export class Verification {
         });
         completed.steps.push(outcome); if (outcome.exitCode !== 0 || outcome.timedOut) break;
       }
+      const after = before === null ? null : await repositoryState(cwd); if (before !== null && after !== null) completed.tested = { state: after, changedDuring: before !== after };
       completed.endedAt = new Date().toISOString(); completed.cancelled = this.cancelled; completed.passed = !this.cancelled && completed.steps.length === selected.steps.length && completed.steps.every((s) => s.exitCode === 0 && !s.timedOut);
       const current = this.data(); return this.persist(current.profiles, [completed, ...current.results].slice(0, 50))[0];
     } finally { this.busy = false; }

@@ -8,6 +8,7 @@ import { focusTerminal } from '../../runtime/terminals';
 import { useLinkedStore } from '../../state/linked-store';
 import type { LinkedComputer } from '../../../shared/remote';
 import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
+import { NeedsYouCell } from './NeedsYou';
 
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
@@ -87,6 +88,7 @@ export function StatusBar() {
     <span className="tr-spacer" />
     <PlanLimitCells />
     <span className={`tr-sb-cell tr-sb-limits tnum ${budgetLevel}`} title={`${budgetNote}New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's and Codex's own logs, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}` : ', in Trace channels'}`}>Σ today {compact(today.tokens)} tok {today.cost === null ? '' : dollars(today.cost)}</span>
+    <NeedsYouCell />
     {alerts.length
       ? <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => alerts[0].computerId ? useWorkspaceStore.setState({ computerId: alerts[0].computerId, activeView: 'computer' }) : jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
         <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>

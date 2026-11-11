@@ -11,6 +11,9 @@ import { NativeSessions } from './native-sessions';
 import { Tasks, scopesOverlap, matchesScope, taskPrompt } from './tasks';
 import { execFileSync } from 'node:child_process';
 import { Verification } from './verification';
+import { repositoryState } from './repository-state';
+import { movedTask } from '../../../src/state/task-move';
+import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 import { Experiments } from './experiments';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
@@ -90,14 +93,16 @@ describe('native history and task scope', () => {
     for (const bad of ['src//a.ts', 'src/./a.ts']) await expect(tasks.execute({ action: 'task-save', title: 'Bad', directory: root, sessionId: null, scope: [bad], status: 'queued', notes: '', verificationId: null })).rejects.toThrow();
   });
   it('sends a task as one message, and follows what its agent changes from then on', async () => {
-    expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. When you are done, list the files you changed and how you checked the result.');
-    expect(taskPrompt({ title: 'Fix the footer.', scope: ['**'] })).toBe('Task: Fix the footer. When you are done, list the files you changed and how you checked the result.');
+    expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. ' + SIGNAL_INSTRUCTION);
+    expect(taskPrompt({ title: 'Fix the footer.', scope: ['**'] })).toBe('Task: Fix the footer. ' + SIGNAL_INSTRUCTION);
     const root = fixture(); const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root });
     git('init'); fs.mkdirSync(path.join(root, 'src')); fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'a'); fs.writeFileSync(path.join(root, 'README.md'), 'r'); git('add', '.'); git('commit', '-m', 'base');
     fs.writeFileSync(path.join(root, 'README.md'), 'already changed before the task');
     const tasks = new Tasks(fixture(), new Verification(fixture(), async () => true)); const session = randomUUID();
     const saved = await tasks.execute({ action: 'task-save', title: 'Settings', directory: root, sessionId: session, scope: ['src/**'], status: 'queued', notes: '', verificationId: null }) as any;
     const sent = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(sent.task.status).toBe('active'); expect(sent.prompt).toContain('src/**');
+    expect(sent.task.sendId).toMatch(/^t-[0-9a-f]{8}$/); expect(sent.prompt.startsWith(`Task ${sent.task.sendId}: Settings.`)).toBe(true);
+    const again = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(again.task.sendId).not.toBe(sent.task.sendId); expect(again.prompt).toContain(again.task.sendId);
     expect(await tasks.execute({ action: 'task-watch' })).toEqual({ changed: { [saved.id]: [] }, warnings: [] });
     // The agent changes its file, and one outside its task.
     fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'changed'); fs.writeFileSync(path.join(root, 'package.json'), '{}');
@@ -109,6 +114,31 @@ describe('native history and task scope', () => {
     const both = await tasks.execute({ action: 'task-watch' }) as any;
     expect(both.warnings.some((warning: { taskIds: string[]; text: string }) => warning.taskIds.length === 2 && /same files|src\/a\.ts/.test(warning.text))).toBe(true);
     expect((await tasks.execute({ action: 'task-status', id: saved.id, status: 'review' }) as any).status).toBe('review');
+    // A channel that stopped leaves its task in Working, marked; sending it again or moving it by hand clears the mark.
+    const stopped = await tasks.execute({ action: 'task-status', id: other.id, status: 'active', outcome: 'stopped' }) as any; expect(stopped).toMatchObject({ status: 'active', outcome: 'stopped' });
+    expect((await tasks.execute({ action: 'task-save', id: other.id, title: 'Styles, renamed', directory: root, sessionId: other.sessionId, scope: ['src/a.ts'], status: 'active', notes: '', verificationId: null }) as any).outcome).toBe('stopped');
+    expect((await tasks.execute({ action: 'task-send', id: other.id }) as any).task.outcome).toBeUndefined();
+    await tasks.execute({ action: 'task-status', id: other.id, status: 'review', outcome: 'quiet' }); expect((await tasks.execute({ action: 'task-status', id: other.id, status: 'done' }) as any).outcome).toBeUndefined();
+    // A pull request belongs to the task it was opened for, and only a GitHub pull request address is taken; the details give branch and commit.
+    await tasks.execute({ action: 'task-pr', id: saved.id, url: 'https://github.com/owner/repo/pull/7' }); await expect(tasks.execute({ action: 'task-pr', id: other.id, url: 'https://example.com/not-a-pr' })).rejects.toBeTruthy();
+    const listed = tasks.list(); expect(listed.find((t) => t.id === saved.id)!.pullRequest).toBe('https://github.com/owner/repo/pull/7'); expect(listed.find((t) => t.id === other.id)!.pullRequest).toBeUndefined();
+    const detail = await tasks.execute({ action: 'task-detail', id: saved.id }) as any; expect(detail.head).toMatch(/^[0-9a-f]{7,}$/); expect(typeof detail.branch).toBe('string');
+    expect((await tasks.execute({ action: 'task-save', id: saved.id, title: 'Settings', directory: root, sessionId: saved.sessionId, scope: ['src/**'], status: 'review', notes: 'kept', verificationId: null }) as any).pullRequest).toBe('https://github.com/owner/repo/pull/7');
+  });
+});
+describe('a task moved into a worktree', () => {
+  it('lets go of a check from its old folder, which the host would refuse, and says so in its notes', async () => {
+    const old = fixture(); const tree = fixture(); const verification = new Verification(fixture(), async () => true); const tasks = new Tasks(fixture(), verification);
+    const profile = await verification.execute({ action: 'verification-save', name: 'Check', directory: old, steps: [{ label: 'Pass', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 10 }) as any;
+    const check = await verification.execute({ action: 'verification-run', id: profile.id }) as any; expect(check.passed).toBe(true);
+    const saved = await tasks.execute({ action: 'task-save', title: 'Fix it', directory: old, sessionId: null, scope: ['**'], status: 'queued', notes: 'Earlier note', verificationId: check.id }) as any;
+    // What saveTask sends: the host keeps these fields itself.
+    const fields = ({ sentAt: _s, baseline: _b, designRef: _d, createdAt: _c, outcome: _o, outcomeNote: _n, pullRequest: _p, sendId: _i, ...rest }: any) => rest;
+    const channel = randomUUID();
+    await expect(tasks.execute({ action: 'task-save', ...fields({ ...saved, sessionId: channel, directory: tree }) })).rejects.toMatchObject({ code: 'TASK_CHECK' });
+    const moved = await tasks.execute({ action: 'task-save', ...fields(movedTask(saved, channel, tree)) }) as any;
+    expect(moved).toMatchObject({ id: saved.id, sessionId: channel, verificationId: null, status: 'queued' }); expect(path.resolve(moved.directory)).toBe(path.resolve(tree));
+    expect(moved.notes).toContain('Earlier note'); expect(moved.notes).toContain(`the check attached before (${check.id})`);
   });
 });
 describe('verification and experiment evidence', () => {
@@ -123,6 +153,30 @@ describe('verification and experiment evidence', () => {
     const profile = await service.execute({ action: 'verification-save', name: 'Missing folder', directory: project, steps: [{ label: 'Check', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 5 }) as any;
     fs.rmdirSync(project); await expect(service.execute({ action: 'verification-run', id: profile.id })).rejects.toBeTruthy(); expect(service.running).toBe(false);
   });
+  it('records the files a check ran on, and says when they changed since or while it ran', async () => {
+    const project = fixture(); const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project });
+    git('init'); fs.writeFileSync(path.join(project, 'a.txt'), 'a'); git('add', '.'); git('commit', '-m', 'base');
+    const service = new Verification(fixture(), async () => true);
+    const quiet = await service.execute({ action: 'verification-save', name: 'Reads only', directory: project, steps: [{ label: 'Check', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 10 }) as any;
+    const first = await service.execute({ action: 'verification-run', id: quiet.id }) as any; expect(first.tested).toMatchObject({ changedDuring: false });
+    expect(await service.execute({ action: 'verification-fresh' })).toEqual({ [first.id]: 'current' });
+    fs.writeFileSync(path.join(project, 'a.txt'), 'edited after the check');
+    expect(await service.execute({ action: 'verification-fresh' })).toEqual({ [first.id]: 'changed' });
+    const writes = await service.execute({ action: 'verification-save', name: 'Writes', directory: project, steps: [{ label: 'Edit', tool: 'python', args: ['-c', 'open("a.txt","w").write("edited by the check")'] }], timeoutSeconds: 10 }) as any;
+    const during = await service.execute({ action: 'verification-run', id: writes.id }) as any; expect(during.tested.changedDuring).toBe(true);
+    expect((await service.execute({ action: 'verification-fresh' }) as any)[during.id]).toBe('changed');
+    // An edit of the same size with its time put back is still seen: the content is read, not just size and time.
+    const again = await service.execute({ action: 'verification-run', id: quiet.id }) as any; expect((await service.execute({ action: 'verification-fresh' }) as any)[again.id]).toBe('current');
+    const file = path.join(project, 'a.txt'); const { atime, mtime } = fs.statSync(file); const text = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, text.replace('e', 'E')); fs.utimesSync(file, atime, mtime); expect(fs.statSync(file).size).toBe(Buffer.byteLength(text));
+    expect((await service.execute({ action: 'verification-fresh' }) as any)[again.id]).toBe('changed');
+  });
+  it('cannot tell, rather than says current, when there are more changed files than it reads', async () => {
+    const project = fixture(); execFileSync('git', ['init'], { cwd: project });
+    for (let i = 0; i <= 5000; i++) fs.writeFileSync(path.join(project, `f${i}.txt`), String(i));
+    expect(await repositoryState(project)).toBeNull();
+    fs.rmSync(path.join(project, 'f5000.txt')); expect(await repositoryState(project)).toMatch(/^[0-9a-f]{64}$/);
+  }, 60000);
   it('requires real run references and prevents counting one run twice in an experiment', () => {
     const root = fixture(); const id = randomUUID(); const service = new Experiments(root, (run) => run === id);
     const experiment = service.execute({ action: 'experiment-save', name: 'Scope', hypothesis: 'Explicit scope reduces rework', criterion: 'Tests pass with no fixes', promptA: 'Fix it', promptB: 'Fix this function and verify tests' }) as any;

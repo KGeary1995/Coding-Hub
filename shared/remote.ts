@@ -101,7 +101,7 @@ export interface RemoteUsage { day: string; tokens: { claude: number; codex: num
  * whole project). `updatedAt` is when it was last sent to its channel, else when it was made: the board keeps no time
  * for other moves.
  */
-export interface RemoteTask { id: string; title: string; status: RemoteTaskStatus; sessionId: string | null; channel: number | null; files: string[]; updatedAt: string }
+export interface RemoteTask { id: string; title: string; status: RemoteTaskStatus; sessionId: string | null; channel: number | null; files: string[]; updatedAt: string; /** Why Trace flagged it (from 1.17): stopped, failed or quiet tasks need the person. */ outcome?: import('./workbench').TaskOutcome }
 export type RemoteTaskStatus = 'todo' | 'working' | 'review' | 'done';
 /**
  * A Claude Code or Codex conversation on this computer (GET /api/history), newest first. `folder` is only the last part

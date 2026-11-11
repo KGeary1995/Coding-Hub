@@ -1,5 +1,23 @@
 ## What's new
 
+1.17.0 brings a hierarchy Round Table, work you can trust is finished, checks that say what they tested, and memory that keeps track (update every computer and reload the phone app):
+
+- **A task is done when the agent says so.** Every task asks the agent to end with `TASK COMPLETE`, or `TASK BLOCKED:` and what it needs. Only `TASK COMPLETE`, as the reply's last line and after that send of the task, moves a task to Ready for review; `TASK BLOCKED` keeps it in **Working** as waiting for you, and a turn that ends any other way (a question, say) keeps it there marked "not confirmed done". A channel that stops or fails, or a chat turn that ends in an error, marks the task too, with **Send again**. A quiet Codex terminal is checked the same way from its transcript.
+- **Checks say which files they tested.** A verification run records the files it ran on (by content) and whether they changed while it ran. Verification and task cards say whether a pass still holds, the files changed since, or Trace can't tell.
+- **Everything about a task in one place.** Each task card has **Everything about this task**: what was asked, channel, folder, branch and commit, changed files, the check, Round Table findings and the pull request opened from it. **Tasks** is in the top bar now.
+- **A task in its own worktree.** **New worktree…** on a To do task makes a branch and folder from the last commit, applies your shared rules there, adds a Claude or Codex chat and sends the task. Dependencies are not installed for you.
+- **Tasks reach both agents at a Round Table**, and a task shows only its own evidence: the findings reported while it was the channel's task, and the pull request you chose it for (**For task** in Changes → Delivery).
+- **Needs you, on the computer and the phone.** A status bar cell, and the top of the phone's channel list, list everything waiting for you: approvals (with the request and how long it has waited), failed channels, and tasks that stopped, went quiet or are ready for review, each with its next step.
+- **After a restart.** One notice says which tasks were cut short. A Round Table keeps its findings, and a message that was waiting for the agents is kept, with its images up to a size limit, until you choose **Send now** or **Drop it**. Closing a table saves its whole review record, and each finding not yet verified as an open item, in shared memory; if that fails, the table stays open.
+- **A hierarchy Round Table.** **+ Channel → Round Table (hierarchy)** gives a task to three agents in fixed steps: Fable 5.2 writes the plan, you approve it (or say what to change), Opus 5.5 builds it, Codex reviews, Opus fixes (up to two review rounds), and Fable gives the final review. The task is done only when Fable says APPROVED; CHANGES NEEDED goes back to the Fix step (Opus fixes, Codex reviews again, Fable reviews again), up to twice, before the table asks you. Only Opus edits files. The bar shows each step, **Approve plan**, **Stop** and **Continue**, and both Claude models, which you can change. It runs three agents, so it counts as three of the eight channels. The Round Table where both agents discuss is still there.
+- **Round Table findings.** The reviewer reports problems as findings (F1, F2, …); the driver answers each FIXED or DECLINED and the reviewer checks it VERIFIED or REOPENED. The table bar lists them with their evidence and the files they were reviewed on; a finding from a turn during which files changed says so. The next round waits until the record is written.
+- **Shared memory keeps track.**
+  - **Pinned decisions** stay in front of every session until retired, and **open items** (to-dos) until resolved. Both come first at launch; the Shared memory screen lists them with **Retire** and **Resolve**.
+  - Agents can search notes, revise one, and name the commits a handoff made: Trace says whether each is pushed, as of the last fetch.
+  - Codex chats and Round Table reviewers can use shared memory (Codex refused its tools there).
+  - A channel's settings choose its **Shared memory project**; a channel in your home folder gets a warning, since everything started there would share one set of notes.
+  - Notes written by later versions of Trace are kept rather than skipped.
+
 1.16.4 gives Trace a new logo (update every computer and reload the phone app):
 
 - **New logo: the amber key.** The app icon, the logo in the top bar and the phone's logo are now an amber keycap with a bold T cut out of it, sitting on a darker amber edge. It replaces the cyan ring. The small icons in the Windows taskbar and title bar have their own drawing, with a heavier T, so the T stays clear at 16 and 32 pixels.

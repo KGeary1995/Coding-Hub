@@ -110,3 +110,12 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-topbar .tr-new-channel > .tr-menu-button:hover, .tr-topbar .tr-new-channel.tr-menu-button:hover { background: color-mix(in srgb, var(--tr-ch-claude) 20%, transparent); color: var(--tr-ch-claude); }
 .app-statusbar.tr-statusbar { text-transform: uppercase; letter-spacing: .06em; }
 .tr-topbar .tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-ch-claude); }
+/* Needs you: everything waiting for the person, opened from the status bar. */
+.needs-you { position: relative; flex: 0 0 auto; }
+.needs-you-cell { color: var(--tr-st-waiting); }
+.needs-you-list { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 60; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 6px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); color: var(--tr-fg); }
+.needs-you-list ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.needs-you-list li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 6px; border-left: 2px solid var(--tr-line); }
+.needs-you-list li p { margin: 2px 0 0; color: var(--tr-fg-muted); overflow-wrap: anywhere; }
+.needs-you-list .needs-you-approval { border-left-color: var(--tr-st-waiting); } .needs-you-list .needs-you-failed, .needs-you-list .needs-you-task-stopped { border-left-color: var(--tr-st-failed); }
+.needs-you-list { text-transform: none; letter-spacing: normal; font: 400 13px/18px var(--tr-font-ui); white-space: normal; }

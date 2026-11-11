@@ -58,9 +58,10 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.getByRole('button', { name: 'Insight views', exact: true }).click();
     assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'More tools']);
     await page.getByRole('menuitem', { name: 'More tools', exact: true }).click();
-    assert.deepEqual(await page.locator('.more-tools h2').allTextContents(), ['AI coaching', 'Tasks', 'Verification profiles']);
-    await page.getByRole('button', { name: 'Open Tasks', exact: true }).click();
-    await page.getByRole('heading', { name: 'Tasks', exact: true }).waitFor();
+    // Tasks moved to the top bar in 1.17; More tools keeps the occasional ones.
+    assert.deepEqual(await page.locator('.more-tools h2').allTextContents(), ['AI coaching', 'Verification profiles']);
+    await page.getByRole('button', { name: 'Open Verification profiles', exact: true }).click();
+    await page.getByRole('heading', { name: 'Verification profiles', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Insight views', exact: true }).textContent(), 'More tools▾');
     await page.getByRole('button', { name: 'More tools', exact: true }).click();
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();

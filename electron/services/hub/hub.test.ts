@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { claudeProjectKey, ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService } from './memory';
 import { DriveMirror } from './drive';
+import { decisions, decisionTitle, itemTitle, openItems, resolvedTitle, retiredTitle } from '../../../shared/memory-items';
+import { memoryContext } from './auto-memory';
 import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
 import { parseUsage, repriced, TelemetryService, totalTokens, usageCost } from './telemetry';
 import { hubRequestSchema } from './service';
@@ -266,6 +268,30 @@ describe('structured telemetry', () => {
 });
 
 describe('memory revisions and Drive conflict review', () => {
+  it('carries decisions, open items, review records and resolutions between two computers through Drive, and into the next session', () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
+    const desk = new MemoryService(path.join(root, 'desk')); const laptop = new MemoryService(path.join(root, 'laptop'));
+    const sync = (memory: MemoryService) => new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })).sync('shared');
+    const decision = desk.write('shared', decisionTitle('Predictions from Barrett only'), 'The person decided.', 'claude');
+    const item = desk.write('shared', itemTitle('Delete the exported CSV'), 'It holds chart numbers.', 'codex');
+    desk.write('shared', 'Round Table review record: 1 finding, 0 verified', '- F1 (high), open: bug', 'human');
+    desk.import({ id: randomUUID(), project: 'shared', title: 'From a later version', content: 'Body', author: 'claude', createdAt: new Date().toISOString(), laterField: 1 });
+    sync(desk); sync(laptop);
+    expect(decisions(laptop.list('shared')).map((d) => d.text)).toEqual(['Predictions from Barrett only']); expect(openItems(laptop.list('shared')).map((i) => i.id)).toEqual([item.id]);
+    expect(laptop.list('shared')).toHaveLength(4);
+    // The next session on the laptop starts with them.
+    const context = memoryContext('shared', laptop.list('shared')); expect(context).toContain(`${decision.id} · Predictions from Barrett only`); expect(context).toContain(`${item.id} · Delete the exported CSV`);
+    // Resolved and retired on the laptop: gone on the desk after both sync, with every record kept.
+    laptop.write('shared', resolvedTitle({ title: item.title }), 'Deleted.', 'claude', item.id); laptop.write('shared', retiredTitle(decisions(laptop.list('shared'))[0]), 'Changed.', 'claude', decision.id);
+    sync(laptop); sync(desk);
+    expect(openItems(desk.list('shared'))).toEqual([]); expect(decisions(desk.list('shared'))).toEqual([]); expect(desk.list('shared')).toHaveLength(6);
+  });
+  it('keeps notes with fields a later Trace adds, rather than skipping them, and passes those fields on', () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'memory')); const copy = new MemoryService(path.join(root, 'copy'));
+    const later = { id: randomUUID(), project: 'shared', title: 'From a later version', content: 'Body', author: 'codex', createdAt: new Date().toISOString(), laterField: { kept: true } };
+    expect(memory.import(later)).toBe(true); const listed = memory.list('shared'); expect(listed.map((note) => note.id)).toEqual([later.id]);
+    copy.import(listed[0]); expect((copy.list('shared')[0] as Record<string, unknown>).laterField).toEqual({ kept: true });
+  });
   it('preserves originals and rejects stale conflict resolution while retaining both reviewed versions', () => {
     const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
     const memory = new MemoryService(path.join(root, 'memory')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory'));

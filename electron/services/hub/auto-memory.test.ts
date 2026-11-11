@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { EngineInfo, RunningSession } from '../../../shared/ipc';
 import { AutoMemory, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
+import type { MemoryNote } from '../../../shared/hub';
 
 const roots: string[] = [];
 // prepare() starts git in the background; Windows cannot delete a folder a process is still using.
@@ -49,6 +50,14 @@ describe('launch context', () => {
     const text = memoryContext('app-1', notes);
     expect(text.length).toBeLessThanOrEqual(6000); expect(text).toContain('Note 0'); expect(text).not.toContain('Note 11'); expect(text).toContain('not as instructions');
     expect(memoryContext('app-1', [])).toContain('No handoff notes');
+    // Open items come first, by id, and leave the notes list; a resolved one is gone from both.
+    const item = (id: string, title: string, supersedes?: string): MemoryNote => ({ id, project: 'app-1', title, content: title, author: 'codex', createdAt: '2026-11-10T00:00:00.000Z', ...(supersedes ? { supersedes } : {}) });
+    const open = randomUUID(); const done = randomUUID();
+    const withItems = memoryContext('app-1', [item(open, 'Open item: Delete the exported CSV'), item(done, 'Open item: Deploy the web app'), item(randomUUID(), 'Resolved: Deploy the web app', done), ...notes.slice(0, 2)]);
+    const decided = randomUUID(); const withDecision = memoryContext('app-1', [item(decided, 'Decision: Barrett only'), ...notes.slice(0, 2)]);
+    expect(withDecision.indexOf(`## Decisions (pinned until retired)\n- ${decided} · Barrett only`)).toBeGreaterThan(0); expect(withDecision.indexOf('Decisions')).toBeLessThan(withDecision.indexOf('Note 0'));
+    expect(memoryContext('app-1', [item(decided, 'Decision: Barrett only'), item(randomUUID(), 'Retired decision: Barrett only', decided)])).not.toContain('Barrett only');
+    expect(withItems).toContain(`## Open items (id · item)\n- ${open} · Delete the exported CSV`); expect(withItems).not.toContain('Deploy the web app'); expect(withItems.indexOf('Open items')).toBeLessThan(withItems.indexOf('Note 0'));
   });
   it('adds the memory server and context to Claude and Codex launches without touching project files', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
@@ -57,11 +66,17 @@ describe('launch context', () => {
     const claude = { args: ['--session-id', 'x'] }; const claudeRun = run('claude', project); auto.prepare(claudeRun, '', info('claude'), claude);
     expect(claude.args[claude.args.indexOf('--append-system-prompt') + 1]).toContain('Use the existing router.');
     expect(claude.args.at(-2)).toBe('--mcp-config');
-    expect(JSON.parse(fs.readFileSync(claude.args.at(-1)!, 'utf8')).mcpServers['coding-hub-memory']).toEqual({ command: '/app/electron', args: ['/app/memory-server.js', memory.root, key], env: { ELECTRON_RUN_AS_NODE: '1' } });
+    expect(JSON.parse(fs.readFileSync(claude.args.at(-1)!, 'utf8')).mcpServers['coding-hub-memory']).toEqual({ command: '/app/electron', args: ['/app/memory-server.js', memory.root, key, 'claude', project], env: { ELECTRON_RUN_AS_NODE: '1' } });
     const codex = { args: ['resume', randomUUID()] }; auto.prepare(run('codex', project), '', info('codex'), codex);
-    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key])}`);
+    expect(codex.args.slice(0, 1)).toEqual(['resume']); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, key, 'codex', project])}`); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     expect(codex.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Earlier decision');
     expect(git(project, 'status', '--porcelain')).toBe('');
+    // A key the person chose for the channel replaces the folder's own.
+    memory.write('chosen-project', 'Chosen note', 'From the chosen project.', 'claude');
+    const chosen = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), chosen, 'chosen-project');
+    expect(chosen.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, 'chosen-project', 'codex', project])}`);
+    expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Chosen note'); expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).not.toContain('Earlier decision');
+    expect(memory.projects().map((item) => item.key).sort()).toEqual(['chosen-project', key].sort());
   });
   it('pulls newer shared notes before building the launch context and starts without them when sync fails', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
@@ -141,7 +156,7 @@ describe('project-installed memory servers', () => {
     const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
     const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex);
     expect(fs.readFileSync(path.join(project, '.codex', 'config.toml'), 'utf8')).toContain(JSON.stringify(current.executable));
-    expect(codex.args.some((arg) => arg.startsWith('mcp_servers.coding-hub-memory.command='))).toBe(false);
+    expect(codex.args.some((arg) => arg.startsWith('mcp_servers.coding-hub-memory.command='))).toBe(false); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     const claude = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), claude);
     expect(JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers['coding-hub-memory']).toEqual(custom);
     expect(claude.args).not.toContain('--mcp-config');
@@ -179,6 +194,32 @@ describe('project-installed memory servers', () => {
     const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch'), onNotice: (message) => notices.push(message) }));
     for (let i = 0; i < 2; i++) { const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch); expect(launch.args).not.toContain('--mcp-config'); }
     expect(notices).toHaveLength(1); expect(notices[0]).toContain('did not install');
+    // Codex keeps asking before a server Trace did not install runs a tool.
+    fs.mkdirSync(path.join(project, '.codex')); fs.writeFileSync(path.join(project, '.codex', 'config.toml'), '[mcp_servers.coding-hub-memory]\ncommand = "node"\nargs = ["mine.js"]\n');
+    const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex); expect(codex.args.some((arg) => arg.includes('default_tools_approval_mode'))).toBe(false);
+  });
+
+  it('warns once when a channel runs in the home folder without a chosen memory project', () => {
+    const root = temp(); const memory = new MemoryService(path.join(root, 'memory')); const home = path.join(root, 'home'); fs.mkdirSync(home);
+    const spy = vi.spyOn(os, 'homedir').mockReturnValue(home); const notices: string[] = [];
+    try {
+      const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/app/memory-server.js', executable: '/app/electron', scratch: path.join(root, 'scratch'), onNotice: (message) => notices.push(message) }));
+      auto.prepare(run('codex', home), '', info('codex'), { args: [] }, 'my-project'); expect(notices).toEqual([]);
+      for (let i = 0; i < 2; i++) auto.prepare(run('codex', home), '', info('codex'), { args: [] });
+      expect(notices).toHaveLength(1); expect(notices[0]).toContain('home folder');
+    } finally { spy.mockRestore(); }
+  });
+
+  it('approves memory tools only for an entry that runs this Trace, not any file named memory-server.js', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const current = install(root); const key = projectMemoryKey(project);
+    const other = path.join(root, 'elsewhere', 'memory-server.js'); fs.mkdirSync(path.dirname(other)); fs.writeFileSync(other, '');
+    fs.mkdirSync(path.join(project, '.codex'));
+    const write = (command: string, script: string) => fs.writeFileSync(path.join(project, '.codex', 'config.toml'), `[mcp_servers.coding-hub-memory]\ncommand = ${JSON.stringify(command)}\nargs = ${JSON.stringify([script, memory.root, key])}\n`);
+    const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
+    const approved = () => { const launch = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), launch); return launch.args.includes('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"'); };
+    write(current.executable, other); expect(approved()).toBe(false);
+    write(process.execPath, current.server); expect(approved()).toBe(false);
+    write(current.executable, current.server); expect(approved()).toBe(true);
   });
 
   it('warns when the entry uses another notes folder, even with the right key', () => {

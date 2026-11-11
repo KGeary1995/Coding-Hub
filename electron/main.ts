@@ -156,7 +156,7 @@ const manager = new PtyManager((owner, event) => {
   }
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
-  autoMemory?.prepare(run, config.model, info, launch);
+  autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
 }, abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onStarted: (run, config, owner) => {
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
@@ -174,7 +174,7 @@ const manager = new PtyManager((owner, event) => {
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
-  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) if (session.roundTable && session.roundTable.partner !== session.id && saved!.sessions.some((item) => item.id === session.roundTable!.partner)) seats.set(session.roundTable.partner, session.id);
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
@@ -749,7 +749,7 @@ else app.whenReady().then(() => {
     },
   });
   handle(IPC_CHANNELS.updates, (_owner, payload) => updates!.execute(payload));
-  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage directory.'); return hub.execute(payload); });
+  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage directory.'); return hub.executeAsync(payload); });
   handle(IPC_CHANNELS.openRepository, (owner, payload) => repositoryFiles.open(owner, payload));
   handle(IPC_CHANNELS.closeRepository, (owner, payload) => { repositoryFiles.close(owner, payload); return null; });
   handle(IPC_CHANNELS.listDirectory, (owner, payload) => repositoryFiles.list(owner, payload));

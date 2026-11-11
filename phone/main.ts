@@ -14,7 +14,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
-import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe } from '../shared/remote';
+import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
@@ -192,7 +192,7 @@ function showList() {
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
   app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
@@ -271,8 +271,26 @@ function computerSwitcher() {
 /** Whose Claude account a channel runs on (personal, work…), in that account's colour, as on the computer's tiles. */
 const tone = (channel: RemoteChannel): Record<string, string> => channel.account ? { account: String(channel.account.tone % 4) } : {};
 const account = (channel: RemoteChannel) => channel.account ? h('span', { className: 'account', dataset: tone(channel) }, channel.account.name) : '';
+/** The tasks of the computer shown, read at most every 30 s for Needs you. */
+let phoneTasks: RemoteTask[] = []; let tasksRead = 0;
+function readTasks() {
+  if (Date.now() - tasksRead < 30000) return; tasksRead = Date.now();
+  void api('/api/tasks').then((response) => response.json()).then((value: RemoteTask[]) => { phoneTasks = Array.isArray(value) ? value : []; renderNeeds(); }).catch(() => { /* Shown without tasks. */ });
+}
+/** Needs you, as on the computer: approvals with the exact request first, then tasks that stopped, went quiet or are ready for review. */
+function renderNeeds() {
+  const box = document.getElementById('needs-you'); if (!box) return;
+  const asking = channels.filter((channel) => channel.attention && (!shownComputer || channel.computer?.id === shownComputer));
+  const flagged = phoneTasks.filter((task) => task.status === 'review' || (task.status === 'working' && task.outcome && task.outcome !== 'finished'));
+  const why = (task: RemoteTask) => task.status === 'review' ? 'ready for review' : task.outcome === 'failed' ? 'channel failed' : task.outcome === 'stopped' ? 'channel stopped' : task.outcome === 'blocked' ? 'waiting for you' : task.outcome === 'unconfirmed' ? 'not confirmed done' : 'gone quiet';
+  box.hidden = !asking.length && !flagged.length;
+  box.replaceChildren(h('h2', {}, `Needs you · ${asking.length + flagged.length}`), h('ul', {},
+    ...asking.map((channel) => h('li', {}, h('button', { type: 'button', className: 'need waiting', onclick: () => showChannel(channel.sessionId) }, h('strong', {}, `CH${channel.channel} needs approval`), h('span', {}, channel.attention ?? '')))),
+    ...flagged.map((task) => h('li', {}, h('button', { type: 'button', className: `need ${task.outcome ?? 'review'}`, onclick: () => showTab('tasks') }, h('strong', {}, task.title), h('span', {}, `${task.channel ? `CH${task.channel} · ` : ''}${why(task)}`))))));
+}
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
+  renderNeeds(); readTasks();
   computerSwitcher();
   const shown = channels.filter((channel) => !shownComputer || channel.computer?.id === shownComputer);
   const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;

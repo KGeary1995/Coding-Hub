@@ -1,10 +1,14 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { ClipboardList, Send } from 'lucide-react';
-import type { Task, VerificationData } from '../../shared/workbench';
+import type { Task, TaskDetail, VerificationData, VerificationFreshness } from '../../shared/workbench';
+import { useChatStore } from '../state/chat-store';
+import { startTaskInWorktree } from '../runtime/task-worktree';
+import { findingsForTask } from '../state/task-evidence';
+import type { Finding } from '../../shared/findings';
 import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
-import { loadTasks, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
+import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
 /** "Only these files": blank means the whole project. */
@@ -16,16 +20,43 @@ const limitedTo = (task: Task) => task.scope.some((pattern) => pattern === '**' 
  * along as the agent works (task-store), and warns when an agent changes files outside its task or the same files as
  * another task.
  */
+/**
+ * Everything about one task in one place: what was asked, where (channel, folder, branch, commit), what changed, the check
+ * and whether it still holds, the Round Table's findings on its channel, and the pull request opened from it.
+ */
+/** One empty list, so the store selector returns the same value when there are none. */
+const NO_FINDINGS: Finding[] = [];
+function TaskEverything({ task, channel, changed, check }: { task: Task; channel: string; changed: string[]; check: string }) {
+  const [detail, setDetail] = useState<TaskDetail | null>(null); const [open, setOpen] = useState(false);
+  const channelFindings = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.findings ?? NO_FINDINGS : NO_FINDINGS);
+  const tasks = useTaskStore((state) => state.tasks); const findings = findingsForTask(task, tasks, channelFindings);
+  useEffect(() => { if (open) void workbench<TaskDetail>({ action: 'task-detail', id: task.id }).then(setDetail).catch(() => setDetail(null)); }, [open, task.id, changed.length]);
+  const waiting = findings.filter((finding) => finding.status !== 'verified');
+  return <details className="task-everything" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}><summary>Everything about this task</summary>
+    <dl>
+      <dt>Asked</dt><dd>{task.title}{task.details ? <><br />{task.details}</> : null}</dd>
+      <dt>Where</dt><dd>{channel} · <code>{task.directory}</code>{detail?.branch ? <> · branch <code>{detail.branch}</code></> : null}{detail?.head ? <> · commit <code>{detail.head}</code></> : null}</dd>
+      <dt>Changed</dt><dd>{changed.length ? changed.map((file) => <code key={file}>{file} </code>) : task.sentAt ? 'Nothing since it was sent.' : 'Not sent yet.'}</dd>
+      <dt>Check</dt><dd>{check || 'No check attached. Attach a passing one under Edit → Review notes and checks.'}</dd>
+      <dt>Review</dt><dd>{findings.length ? `${findings.length} Round Table ${findings.length === 1 ? 'finding' : 'findings'} since it was sent, ${waiting.length} not verified${waiting.length ? `: ${waiting.map((finding) => `${finding.id} ${finding.status}`).join(', ')}` : ''}.` : 'No Round Table findings since it was sent.'}</dd>
+      <dt>Pull request</dt><dd>{task.pullRequest ? <button className="quiet-button" onClick={() => void workbench({ action: 'flow-open-pr', url: task.pullRequest! })}>{task.pullRequest.replace('https://github.com/', '')}</button> : 'None. Choose this task when you open a pull request in Changes → Delivery.'}</dd>
+    </dl>
+  </details>;
+}
+
 export function TasksPanel() {
   const { sessions, rootDirectory } = useWorkspaceStore();
   const { tasks, watch, draftFor, error } = useTaskStore();
   const [form, setForm] = useState(EMPTY_FORM); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [note, setNote] = useState('');
-  const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false });
+  const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
   // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
   const agents = channelsOf(sessions).filter((session) => session.config.engine !== 'shell');
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   useEffect(() => { void loadTasks().then(() => refreshTaskWatch()); void workbench<VerificationData>({ action: 'verification-list' }).then(setChecks).catch(() => {}); }, []);
+  // Whether each task's check still describes its files, read again with the tasks' changes.
+  useEffect(() => { if (tasks.some((task) => task.verificationId)) void workbench<VerificationFreshness>({ action: 'verification-fresh' }).then(setFresh).catch(() => {}); }, [watch, tasks]);
+  const checkText = (task: Task) => { const result = checks.results.find((r) => r.id === task.verificationId); if (!result) return ''; const state = fresh[result.id]; return `Check: ${result.profileName} passed` + (state === 'current' ? ' on these files.' : state === 'changed' ? (result.tested?.changedDuring ? ', but files changed while it ran. Run it again.' : ', but files changed since. Run it again.') : '. Trace cannot tell which files it tested.'); };
   // "Task" on a channel opens the form for it.
   useEffect(() => { if (!draftFor) return; setForm({ ...EMPTY_FORM, sessionId: draftFor, directory: folderOf(draftFor) }); setOpen(true); useTaskStore.setState({ draftFor: null }); }, [draftFor]);
   const run = async (work: () => Promise<unknown>, done = '') => { setBusy(true); setNote(''); useTaskStore.setState({ error: '' }); try { await work(); if (done) setNote(done); } catch (e) { useTaskStore.setState({ error: (e as Error).message }); } finally { setBusy(false); } };
@@ -33,7 +64,7 @@ export function TasksPanel() {
     const saved = await saveTask({ ...(form.id ? { id: form.id } : {}), title: form.title, details: form.details, directory: form.directory || folderOf(form.sessionId), sessionId: form.sessionId || null, scope: scopeOf(form.files), status: form.id ? tasks.find((task) => task.id === form.id)?.status ?? 'queued' : 'queued', notes: form.notes, verificationId: form.verificationId || null });
     setForm(EMPTY_FORM); setOpen(false);
     if (send) await sendTask(saved.id);
-  }, send ? 'Sent. The task moves to Ready for review when the agent finishes.' : 'Saved in To do.');
+  }, send ? 'Sent. The task moves to Ready for review when the agent says TASK COMPLETE.' : 'Saved in To do.');
   const edit = (task: Task) => { setForm({ id: task.id, title: task.title, details: task.details ?? '', sessionId: task.sessionId ?? '', directory: task.directory, files: limitedTo(task)?.join('\n') ?? '', notes: task.notes, verificationId: task.verificationId ?? '' }); setOpen(true); };
   const drop = (status: Task['status']) => (event: DragEvent) => { event.preventDefault(); const id = event.dataTransfer.getData('text/task'); if (id) void run(() => setTaskStatus(id, status)); };
   const running = (sessionId: string | null) => sessions.some((session) => session.id === sessionId && session.status === 'running');
@@ -66,9 +97,13 @@ export function TasksPanel() {
           {task.details && <p>{task.details}</p>}
           {changed.length > 0 && <details><summary>{changed.length} {changed.length === 1 ? 'file' : 'files'} changed</summary><ul>{changed.map((file) => <li key={file}><code>{file}</code></li>)}</ul></details>}
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
+          {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' || task.outcome === 'unconfirmed' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}{task.outcome === 'blocked' && task.outcomeNote ? ` It says: ${task.outcomeNote}` : ''}</p>}
+          {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
           {task.notes && <small>{task.notes}</small>}
+          <TaskEverything task={task} channel={channelLabel(task.sessionId)} changed={changed} check={task.verificationId ? checkText(task) : ''} />
           <div className="task-actions">
-            {(task.status === 'queued' || task.status === 'review') && task.sessionId && <button className="quiet-button" disabled={busy || !running(task.sessionId)} title={running(task.sessionId) ? 'Type this task into its channel' : 'Start that channel first'} onClick={() => void run(() => sendTask(task.id), 'Sent.')}><Send size={12} />{task.status === 'review' ? 'Send again' : 'Send'}</button>}
+            {(task.status === 'queued' || task.status === 'review' || task.status === 'active' && (task.outcome === 'stopped' || task.outcome === 'failed')) && task.sessionId && <button className="quiet-button" disabled={busy || !running(task.sessionId)} title={running(task.sessionId) ? 'Type this task into its channel' : 'Start that channel first'} onClick={() => void run(() => sendTask(task.id), 'Sent.')}><Send size={12} />{task.status === 'queued' ? 'Send' : 'Send again'}</button>}
+            {task.status === 'queued' && task.directory && <select className="quiet-button" aria-label="Start this task in a new worktree" disabled={busy} value="" title="A new branch and folder from the last commit, a new chat channel there, and the task sent to it" onChange={(e) => { const engine = e.target.value as 'claude' | 'codex'; if (engine) void run(async () => { const tree = await startTaskInWorktree(task.id, engine); setNote(`Started on ${tree.branch} in ${tree.directory}.${tree.rulesApplied ? ' Shared rules were applied there.' : ''} Uncommitted changes were not copied, and dependencies were not installed.`); }); }}><option value="">New worktree…</option><option value="claude">Claude chat</option><option value="codex">Codex chat</option></select>}
             {task.status === 'active' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Ready for review</button>}
             {task.status === 'review' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'done'))}>Mark done</button>}
             {task.status === 'done' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Reopen</button>}
