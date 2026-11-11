@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { spawn } from 'node:child_process';
-import { helperArguments, keyCommand, pointerCommands } from './screen-input';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { helperArguments, keyCommand, pointerCommands, WindowsInput } from './screen-input';
 import { keyAction } from './keysyms';
 
 describe('input from a viewer of the Windows screen', () => {
@@ -19,6 +21,17 @@ describe('input from a viewer of the Windows screen', () => {
     expect(pointerCommands(10, 10, 0, 1, 1920, 1080).at(-1)).toMatch(/ 49156 0$/);
     expect(pointerCommands(10, 10, 8, 0, 1920, 1080).at(-1)).toBe('m 0 0 2048 120');
     expect(pointerCommands(10, 10, 0, 8, 1920, 1080)).toHaveLength(1);
+  });
+
+  it('starts its helper with the viewer, ends it on close without any input, and starts it again after it exits', () => {
+    const helpers: (EventEmitter & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough })[] = [];
+    const spawnHelper = () => { const helper = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() }); helpers.push(helper); return helper as unknown as ChildProcessWithoutNullStreams; };
+    const idle = new WindowsInput(1920, 1080, () => {}, spawnHelper); expect(helpers).toHaveLength(1);
+    idle.close(); expect(helpers[0].stdin.writableEnded).toBe(true);
+    const busy = new WindowsInput(1920, 1080, () => {}, spawnHelper); expect(helpers).toHaveLength(2);
+    busy.key(0x61, true); expect(helpers).toHaveLength(2);
+    helpers[1].emit('exit', 1); busy.key(0x61, false); expect(helpers).toHaveLength(3);
+    busy.close();
   });
 
   it.runIf(process.platform === 'win32')('compiles its helper with the PowerShell every Windows has', async () => {

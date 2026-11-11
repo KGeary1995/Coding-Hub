@@ -13,6 +13,12 @@ export class ScreenCapture implements ScreenSource {
   width = 0; height = 0;
   private next = 0; private pending = new Map<number, { resolve: (rects: FrameRect[]) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private constructor(private window: BrowserWindow) {}
+  /**
+   * The layout is read once, at the start: a display added or removed, or one whose size, place or scaling changed, makes
+   * the picture and click positions wrong, so the capture stops (the session ends and the viewer connects again).
+   */
+  private changed = () => this.stop();
+  private metrics = (_event: unknown, _display: unknown, changed: string[]) => { if (changed.includes('bounds') || changed.includes('scaleFactor')) this.stop(); };
 
   static async start(page: string): Promise<ScreenCapture> {
     const capture = session.fromPartition(PARTITION);
@@ -46,6 +52,7 @@ export class ScreenCapture implements ScreenSource {
         if (value.error || !value.rects) waiting.reject(new Error(value.error ?? 'No frame.')); else waiting.resolve(value.rects);
       });
       window.webContents.on('render-process-gone', () => instance.stop());
+      screen.on('display-added', instance.changed); screen.on('display-removed', instance.changed); screen.on('display-metrics-changed', instance.metrics);
       return instance;
     } catch (error) { window.destroy(); throw error; }
   }
@@ -60,6 +67,7 @@ export class ScreenCapture implements ScreenSource {
   }
 
   stop() {
+    screen.off('display-added', this.changed); screen.off('display-removed', this.changed); screen.off('display-metrics-changed', this.metrics);
     for (const waiting of this.pending.values()) { clearTimeout(waiting.timer); waiting.reject(new Error('The capture stopped.')); } this.pending.clear();
     if (!this.window.isDestroyed()) this.window.destroy();
   }

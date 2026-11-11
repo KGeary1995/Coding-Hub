@@ -69,7 +69,7 @@ export function keyCommand(keysym: number, down: boolean): string | null {
  */
 export class WindowsInput implements ScreenInput {
   private helper: ChildProcessWithoutNullStreams | null = null; private buttons = 0; private held = new Set<number>();
-  constructor(private width: number, private height: number, private setClipboard: (text: string) => void, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true })) {}
+  constructor(private width: number, private height: number, private setClipboard: (text: string) => void, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true })) { this.start(); }
 
   pointer(x: number, y: number, buttons: number) { for (const command of pointerCommands(x, y, buttons, this.buttons, this.width, this.height)) this.send(command); this.buttons = buttons; }
   key(keysym: number, down: boolean) {
@@ -83,13 +83,13 @@ export class WindowsInput implements ScreenInput {
     if (this.buttons) this.pointer(0, 0, 0);
     this.helper?.stdin.end(); this.helper = null;
   }
-  private send(command: string) {
-    if (!this.helper) {
-      const helper = this.spawnHelper(); this.helper = helper;
-      helper.on('error', () => { if (this.helper === helper) this.helper = null; }); helper.on('exit', () => { if (this.helper === helper) this.helper = null; });
-      helper.stdout.resume(); helper.stderr.resume(); helper.stdin.on('error', () => {});
-    }
-    // Lines written before Add-Type finishes wait in the pipe, in order.
-    this.helper.stdin.write(command + '\n');
+  /** Started with the viewer, not on its first input: compiling the helper takes a while, and the first clicks waited for it. */
+  private start() {
+    const helper = this.spawnHelper(); this.helper = helper;
+    helper.on('error', () => { if (this.helper === helper) this.helper = null; }); helper.on('exit', () => { if (this.helper === helper) this.helper = null; });
+    helper.stdout.resume(); helper.stderr.resume(); helper.stdin.on('error', () => {});
+    return helper;
   }
+  /** A helper that exited is started again on the next input. Lines written before Add-Type finishes wait in the pipe, in order. */
+  private send(command: string) { (this.helper ?? this.start()).stdin.write(command + '\n'); }
 }

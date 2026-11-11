@@ -1,4 +1,5 @@
 import type { Duplex } from 'node:stream';
+import { constants, deflateSync, inflateSync } from 'node:zlib';
 
 /** A changed part of the screen, as JPEG (sent with Tight encoding, which noVNC draws natively). */
 export interface FrameRect { x: number; y: number; width: number; height: number; jpeg: Uint8Array }
@@ -28,6 +29,14 @@ export function compactLength(length: number): Buffer {
 }
 /** Classic VNC clipboard text is Latin-1; anything outside it becomes "?". */
 const latin1 = (text: string) => Buffer.from(text.replace(/[^\x00-\xff]/g, '?'), 'latin1');
+/**
+ * The extended clipboard (as noVNC's core/rfb.js speaks it): UTF-8 text, so quotes, dashes and emoji arrive intact. A
+ * clipboard message with a negative length carries flags (actions in the top byte, formats in the low bits); one side
+ * says it has text (Notify), the other asks for it (Request), and it comes back deflated (Provide).
+ */
+const EXTENDED_CLIPBOARD = 0xc0a1e5ce | 0; const TEXT = 1;
+const CAPS = 1 << 24; const REQUEST = 1 << 25; const PEEK = 1 << 26; const NOTIFY = 1 << 27; const PROVIDE = 1 << 28;
+const u32 = (value: number) => { const buffer = Buffer.alloc(4); buffer.writeUInt32BE(value >>> 0, 0); return buffer; };
 
 /**
  * One viewer of this computer's screen, speaking VNC (RFB 3.8). The connection reaching here is already authenticated
@@ -40,6 +49,8 @@ export class RfbSession {
   private encodings = new Set<number>(); private request: { incremental: boolean } | null = null; private pumping = false;
   private continuous = false; private offered = false;
   private closed = false; private clipboardTimer: ReturnType<typeof setInterval> | null = null; private lastClipboard: string | null = null;
+  /** The extended clipboard: whether this side offered it, whether the viewer took it up (its own Caps), and the text copied here that the viewer was told about. */
+  private extendedOffered = false; private extended = false; private offer: string | null = null;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
     socket.on('data', (data: Buffer) => { try { this.receive(data); } catch { this.close(); } });
@@ -85,6 +96,8 @@ export class RfbSession {
       if (type === 2) {
         if (this.buffer.length < 4) return; const count = this.buffer.readUInt16BE(2); if (this.buffer.length < 4 + 4 * count) return;
         const message = this.take(4 + 4 * count); this.encodings = new Set(Array.from({ length: count }, (_, index) => message.readInt32BE(4 + 4 * index)));
+        // Our Caps: text up to the limit, and the actions this side answers; the viewer replies with its own.
+        if (!this.extendedOffered && this.encodings.has(EXTENDED_CLIPBOARD)) { this.extendedOffered = true; this.writeExtended(CAPS | REQUEST | PEEK | NOTIFY | PROVIDE | TEXT, u32(CLIPBOARD_LIMIT)); }
         continue;
       }
       if (type === 3) {
@@ -106,13 +119,44 @@ export class RfbSession {
         continue;
       }
       if (type === 6) {
-        if (this.buffer.length < 8) return; const length = this.buffer.readUInt32BE(4); if (length > CLIPBOARD_LIMIT) throw new Error('clipboard');
+        // A negative length is an extended clipboard message.
+        if (this.buffer.length < 8) return; const signed = this.buffer.readInt32BE(4); const length = Math.abs(signed); if (length > CLIPBOARD_LIMIT) throw new Error('clipboard');
         if (this.buffer.length < 8 + length) return;
-        const text = this.take(8 + length).subarray(8).toString('latin1'); this.lastClipboard = text; this.input.clipboard(text);
+        const body = this.take(8 + length).subarray(8);
+        if (signed >= 0) this.copied(body.toString('latin1')); else this.extendedClipboard(body);
         continue;
       }
       throw new Error('message ' + type);
     }
+  }
+
+  /** Text copied on the viewer's computer, for this one's clipboard (and not sent back as a change made here). */
+  private copied(text: string) { this.lastClipboard = text; this.input.clipboard(text); }
+
+  private extendedClipboard(body: Buffer) {
+    if (body.length < 4) throw new Error('clipboard'); const flags = body.readUInt32BE(0); const text = (flags & TEXT) !== 0;
+    if (flags & CAPS) { this.extended = true; return; }
+    if (flags & PROVIDE) {
+      if (!text) return;
+      // noVNC flushes without finishing its stream; the size limit applies to the text inflated, not just what was sent.
+      const data = inflateSync(body.subarray(4), { finishFlush: constants.Z_SYNC_FLUSH, maxOutputLength: CLIPBOARD_LIMIT + 5 });
+      if (data.length < 4) throw new Error('clipboard'); const size = data.readUInt32BE(0); if (size > data.length - 4) throw new Error('clipboard');
+      const value = data.subarray(4, 4 + size).toString('utf8'); this.copied(value.endsWith('\0') ? value.slice(0, -1) : value);
+      return;
+    }
+    if (flags & NOTIFY) { if (text) this.writeExtended(REQUEST | TEXT); return; }
+    if (flags & REQUEST) {
+      if (!text || this.offer === null) return;
+      // Lines end in CRLF and the text in a NUL, as the protocol has it; then the size, all deflated.
+      const utf8 = Buffer.from(this.offer.replace(/\r\n|\r|\n/g, '\r\n') + '\0', 'utf8');
+      this.writeExtended(PROVIDE | TEXT, deflateSync(Buffer.concat([u32(utf8.length), utf8])));
+      return;
+    }
+    if (flags & PEEK) this.writeExtended(NOTIFY | (this.offer !== null ? TEXT : 0));
+  }
+  private writeExtended(flags: number, payload: Buffer = Buffer.alloc(0)) {
+    const header = Buffer.alloc(8); header[0] = 3; header.writeInt32BE(-(4 + payload.length), 4);
+    this.socket.write(Buffer.concat([header, u32(flags), payload]));
   }
 
   private take(length: number) { const part = this.buffer.subarray(0, length); this.buffer = this.buffer.subarray(length); return part; }
@@ -136,7 +180,9 @@ export class RfbSession {
         }
         this.socket.write(Buffer.concat(parts));
       }
-    } finally { this.pumping = false; }
+    // A capture that fails (stopped, ended, the displays changed) ends the session, so the viewer connects again to a
+    // fresh one; carrying on would leave the last picture up with nothing more sent.
+    } catch { this.close(); } finally { this.pumping = false; }
   }
 
   /** Text copied here reaches the viewer's clipboard; what is there when the viewer connects stays here. */
@@ -145,6 +191,8 @@ export class RfbSession {
     const text = (await this.readClipboard().catch(() => '')).slice(0, CLIPBOARD_LIMIT);
     if (this.lastClipboard === null) { this.lastClipboard = text; return; }
     if (text === this.lastClipboard || this.closed) return; this.lastClipboard = text;
+    // A viewer with the extended clipboard is told there is text, and asks for it (Request, answered above).
+    if (this.extended) { this.offer = text; this.writeExtended(NOTIFY | TEXT); return; }
     const body = latin1(text); const header = Buffer.alloc(8); header[0] = 3; header.writeUInt32BE(body.length, 4);
     this.socket.write(Buffer.concat([header, body]));
   }

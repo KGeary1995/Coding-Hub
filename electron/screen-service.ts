@@ -24,6 +24,8 @@ if (!root || !path.isAbsolute(root) || !app.requestSingleInstanceLock()) app.exi
 else {
   // With no window open the app must keep running; the capture window comes and goes with each viewer.
   app.on('window-all-closed', () => {});
+  // One viewer's failure (a capture or clipboard call nothing waited for) must not take the service down for the next.
+  process.on('unhandledRejection', () => {});
   void app.whenReady().then(async () => {
     let tray: Tray | null = null; const icon = await app.getFileIcon(process.execPath, { size: 'small' });
     const service = new ScreenService(root, () => computer, {

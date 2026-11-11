@@ -7,7 +7,15 @@ import { savedCredentials, screen, ScreenChannel, unlockKeys, WAKE_KEYS, type Ke
 import { workbench } from '../../runtime/workbench';
 
 const XK_SUPER_L = 0xffeb; const XK_CONTROL_L = 0xffe3; const XK_V = 0x0076;
-type Status = 'connecting' | 'signin' | 'connected' | 'ended';
+type Status = 'connecting' | 'reconnecting' | 'signin' | 'connected' | 'ended';
+/**
+ * A screen that was showing and dropped (a network blip, the other computer's displays changing, its capture restarting)
+ * connects again by itself after these waits; then it waits for Reconnect. The limit also keeps two computers that take
+ * the screen from each other from doing so forever.
+ */
+const RETRY_DELAYS = [1000, 3000, 6000];
+/** Connected this long, a drop starts the count of retries again. */
+const RETRY_RESET_MS = 30000;
 /** How often an open screen asks whether that computer is locked, so the note comes and goes with it. */
 const LOCK_CHECK_MS = 5000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,10 +50,14 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   const [unlockOpen, setUnlockOpen] = useState(false);
   /** Why the computer refused the sign-in, kept for the disconnect that follows; other notes give way to it. */
   const refusal = useRef('');
+  /** Automatic reconnects since the screen last stayed up; when it last connected; the wait before the next try. */
+  const retries = useRef(0); const connectedAt = useRef<number | null>(null); const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelRetry = () => { if (retryTimer.current) clearTimeout(retryTimer.current); retryTimer.current = null; };
+  useEffect(() => cancelRetry, []);
 
   useEffect(() => {
     const target = view.current; if (!target) return; let cancelled = false; let client: RFB | null = null;
-    setStatus('connecting'); setMessage(''); refusal.current = '';
+    setStatus((current) => current === 'reconnecting' ? current : 'connecting'); setMessage(''); refusal.current = '';
     void (async () => {
       // Loaded only when a screen is opened: the viewer is large and most sessions never use it.
       const { default: Viewer } = await import('@novnc/novnc');
@@ -57,7 +69,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       // Windows service), which arrives a moment later.
       client.scaleViewport = true; client.viewOnly = !control; client.background = 'transparent'; client.showDotCursor = true;
       client.addEventListener('connect', () => {
-        setStatus('connected'); setKind(channel.kind); useSaved.current = true;
+        setStatus('connected'); setKind(channel.kind); useSaved.current = true; connectedAt.current = Date.now();
         const credentials = toSave.current; toSave.current = null;
         if (credentials) void screen({ action: 'screen-save-credentials', id: computer.id, ...credentials }).then(() => setHasSaved(true), (error: Error) => setMessage(error.message));
       });
@@ -70,6 +82,15 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       });
       client.addEventListener('disconnect', (event) => {
         if (rfb.current === client) rfb.current = null;
+        // Closed here (Reconnect, Close): nothing more to do.
+        if (cancelled) return;
+        const since = connectedAt.current; connectedAt.current = null; if (since !== null && Date.now() - since >= RETRY_RESET_MS) retries.current = 0;
+        // A screen that was showing, or a try to bring one back, goes on by itself; a refused sign-in or a first try that failed does not.
+        if ((since !== null || retries.current > 0) && !refusal.current && retries.current < RETRY_DELAYS.length) {
+          const delay = RETRY_DELAYS[retries.current++]; setStatus('reconnecting'); setMessage('');
+          cancelRetry(); retryTimer.current = setTimeout(() => { retryTimer.current = null; setAttempt((value) => value + 1); }, delay);
+          return;
+        }
         setStatus('ended'); setMessage(refusal.current || channel.error || ((event as CustomEvent<{ clean: boolean }>).detail.clean ? 'Screen sharing ended.' : `The connection to ${computer.name}'s screen closed.`));
       });
       // What is copied there lands on this computer's clipboard too.
@@ -133,7 +154,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       setMessage(`${computer.name} is still locked. Check the password and try again; if it is right, unlock it there once and reconnect.`);
     } finally { setUnlocking(false); client.focus(); }
   };
-  const retry = () => { setMessage(''); setAttempt((value) => value + 1); };
+  const retry = () => { cancelRetry(); retries.current = 0; setMessage(''); setStatus('connecting'); setAttempt((value) => value + 1); };
   const named = types.includes('username');
   const lockUnknown = status === 'connected' && kind === 'system' && locked === null;
   const showUnlock = status === 'connected' && kind === 'system' && (locked === true || (lockUnknown && unlockOpen));
@@ -143,7 +164,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   return <section className="linked-screen" aria-label={`${computer.name} screen`}>
     <header className="linked-screen-bar">
       <strong>Screen</strong>
-      <span className={`storage-status ${status === 'connected' ? 'saved' : ''}`} role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : 'Disconnected'}</span>
+      <span className={`storage-status ${status === 'connected' ? 'saved' : ''}`} role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : status === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}</span>
       <span className="tr-spacer" />
       <button className="tr-detail-button" aria-pressed={control} title={control ? 'Mouse and keyboard reach the other computer' : 'Only watching: nothing is sent'} onClick={() => setControl((value) => !value)}><MousePointer2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">{control ? 'Control' : 'View only'}</span></button>
       {lockUnknown && <button className="tr-detail-button" aria-pressed={unlockOpen} title={`Wake ${computer.name} and type your password at its lock screen`} onClick={() => setUnlockOpen((value) => !value)}><LockKeyhole size={13} className="tr-detail-icon" /><span className="tr-detail-label">Unlock</span></button>}

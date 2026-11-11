@@ -7,15 +7,15 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 // A linked computer's screen end to end: the Screen button on its tab connects noVNC, through the host, to a stand-in
 // screen-sharing server on loopback (CODING_HUB_TEST_SCREEN_PORT). It checks sign-in with a saved password, the
-// picture, the note and unlock when that Mac is locked (or when Trace there cannot say), Ctrl sent as ⌘, Ctrl+V handing this computer's text over first, and
-// reconnecting after the server ends it.
+// picture, the note and unlock when that Mac is locked (or when Trace there cannot say), Ctrl sent as ⌘, Ctrl+V handing this computer's text over first,
+// reconnecting by itself after the server ends it, and giving up (Disconnected, Reconnect) when the server keeps refusing.
 const MAC = '6c119c8a-b055-4476-b16f-b3e50e873bb8'; const WIDTH = 64; const HEIGHT = 48;
 
 /** Just enough of a VNC server (RFB 3.8, VNC password security, raw pixels), recording what the viewer sends. */
 function vncServer() {
-  const keys = []; const cutText = []; const sockets = []; let connections = 0;
+  const keys = []; const cutText = []; const sockets = []; let connections = 0; const state = { refuse: false };
   const server = net.createServer((socket) => {
-    connections++; sockets.push(socket); let buffer = Buffer.alloc(0); let stage = 'version'; let sentPicture = false;
+    connections++; if (state.refuse) { socket.destroy(); return; } sockets.push(socket); let buffer = Buffer.alloc(0); let stage = 'version'; let sentPicture = false;
     socket.write('RFB 003.008\n');
     socket.on('error', () => {});
     socket.on('data', (data) => {
@@ -46,7 +46,7 @@ function vncServer() {
       }
     });
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, keys, cutText, sockets, connections: () => connections })));
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, keys, cutText, sockets, state, connections: () => connections })));
 }
 /** Just enough of the other computer's remote to say whether its screen is locked; the rest is not there. */
 function remote() {
@@ -138,15 +138,25 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
     assert.equal(vnc.keys.length, 0, 'View only sends no keys');
     await panel.getByRole('button', { name: 'View only', exact: true }).click();
 
-    // The other computer ends it; Reconnect signs in again with the saved password, without asking.
+    // The other computer ends it: the screen connects again by itself, signing in with the saved password, without asking.
     vnc.sockets.at(-1).end();
-    await panel.getByRole('alert').filter({ hasText: 'Test-Mac ended screen sharing.' }).waitFor();
-    await panel.getByRole('button', { name: 'Reconnect', exact: true }).click();
+    await panel.getByRole('status').filter({ hasText: 'Reconnecting…' }).waitFor();
     if (encryption) {
       await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
       assert.equal(await panel.locator('.linked-screen-signin').count(), 0, 'The saved password is used');
     } else await panel.getByLabel('Password').waitFor();
     assert.equal(vnc.connections(), 2);
+
+    if (encryption) {
+      // It keeps refusing: the tries run out (the first was used above, less than 30 s ago), then Disconnected and the
+      // reason, until Reconnect, which starts the count again.
+      vnc.state.refuse = true; const before = vnc.connections(); vnc.sockets.at(-1).end();
+      await panel.getByRole('status').filter({ hasText: 'Disconnected' }).waitFor({ timeout: 30000 });
+      await panel.getByRole('alert').waitFor(); assert.equal(vnc.connections() - before, 2, 'The two tries left were made');
+      await new Promise((resolve) => setTimeout(resolve, 1500)); assert.equal(vnc.connections() - before, 2, 'No more tries after Disconnected');
+      vnc.state.refuse = false; await panel.getByRole('button', { name: 'Reconnect', exact: true }).click();
+      await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+    }
 
     // Back to the channels: the screen connection closes.
     await page.getByRole('button', { name: 'Channels', exact: true }).click();

@@ -12,9 +12,11 @@ interface Part { sourceId: string; x: number; y: number; width: number; height: 
 let captures: { part: Part; track: MediaStreamTrack; latest: VideoFrame | null }[] = []; let previous: Uint32Array | null = null;
 /** A frame has arrived since the last comparison; without one nothing can have changed, so nothing is read back. */
 let fresh = false; let generation = 0;
+/** A display's capture stopped by itself (unplugged, the session locked, the driver reset): the picture is stale from then on. */
+let ended = false;
 let canvas: OffscreenCanvas | null = null; let context: OffscreenCanvasRenderingContext2D | null = null;
 
-function stop() { generation++; for (const capture of captures) { capture.track.stop(); capture.latest?.close(); } captures = []; previous = null; canvas = null; context = null; }
+function stop() { generation++; ended = false; for (const capture of captures) { capture.track.stop(); capture.latest?.close(); } captures = []; previous = null; canvas = null; context = null; }
 
 async function open(part: Part, current: number) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: part.sourceId, maxWidth: part.width, maxHeight: part.height, maxFrameRate: 30 } } } as unknown as MediaStreamConstraints);
@@ -24,7 +26,7 @@ async function open(part: Part, current: number) {
   if (current !== generation) { track.stop(); first.value.close(); return; }
   captures.push(capture); fresh = true;
   // Keeps only the newest frame; each older one is closed so the capture does not stall.
-  void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || current !== generation) { next.value?.close(); return; } capture.latest?.close(); capture.latest = next.value; fresh = true; } })();
+  void (async () => { for (;;) { const next = await reader.read().catch(() => ({ done: true as const, value: undefined })); if (next.done || current !== generation) { next.value?.close(); if (current === generation) ended = true; return; } capture.latest?.close(); capture.latest = next.value; fresh = true; } })();
 }
 
 ipcRenderer.on('trace-capture-start', async (_event, request: { width: number; height: number; parts: Part[] }) => {
@@ -43,6 +45,7 @@ ipcRenderer.on('trace-capture-start', async (_event, request: { width: number; h
 ipcRenderer.on('trace-capture-frame', async (_event, request: { id: number; full: boolean }) => {
   try {
     if (!canvas || !context || !captures.length) throw new Error('Not capturing.');
+    if (ended) throw new Error('The capture ended.');
     if (!request.full && !fresh) { ipcRenderer.send('trace-capture-frame', { id: request.id, rects: [] }); return; }
     fresh = false; const { width, height } = canvas;
     for (const { part, latest } of captures) if (latest) context.drawImage(latest, part.x, part.y, part.width, part.height);
