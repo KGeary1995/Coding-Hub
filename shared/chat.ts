@@ -51,7 +51,8 @@ export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent 
  * reads (Claude's plan mode, Codex's read-only sandbox).
  */
 /** The default models of a hierarchy table's Claude seats (the person can change them on its bar). */
-export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5' } as const;
+/** Each seat's model when it starts, unless changed under Models: the reviewer's too, so it does not inherit whatever Codex's own settings default to. */
+export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6-astra' } as const;
 /** A hierarchy Round Table's step (electron/services/chat/review-chain.ts). */
 export type ChainStep = 'idle' | 'planning' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */

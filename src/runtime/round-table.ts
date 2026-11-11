@@ -195,7 +195,7 @@ export async function openHierarchy(leadId: string): Promise<string | null> {
   if (tableOf(leadId) || opening.has(leadId)) return null;
   const shared = { ...(lead.config.permissions ? { permissions: lead.config.permissions } : {}), ...(lead.config.memoryKey ? { memoryKey: lead.config.memoryKey } : {}) };
   const reviewer = createSession('codex', { mode: 'independent', cwd: lead.runningCwd }); const planner = createSession('claude', { mode: 'independent', cwd: lead.runningCwd });
-  if (reviewer.config.engine === 'codex') reviewer.config = { ...reviewer.config, chat: true, ...shared };
+  if (reviewer.config.engine === 'codex') reviewer.config = { ...reviewer.config, chat: true, model: HIERARCHY_MODELS.reviewer, ...shared };
   if (planner.config.engine === 'claude') planner.config = { ...planner.config, chat: true, model: HIERARCHY_MODELS.planner, ...shared, ...(lead.config.accountProfileId ? { accountProfileId: lead.config.accountProfileId } : {}) };
   useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, reviewer, planner].map((session) => session.id === leadId ? { ...session, roundTable: { partner: reviewer.id, planner: planner.id, kind: 'hierarchy' as const, driver: 'claude' as const, rounds: 2 } } : session) }));
   opening.add(leadId);

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
 import type { ChannelEngine } from '../../shared/types';
+import { HIERARCHY_MODELS } from '../../shared/chat';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
@@ -134,6 +135,13 @@ export async function startSession(id: string) {
   if (!state.persistenceReady) return;
   const session = state.sessions.find((item) => item.id === id);
   if (!session || session.status === 'running' || session.status === 'starting') return;
+  // A hierarchy table's reviewer saved before it had a model of its own would start on whatever Codex's settings
+  // default to: it gets the table's (Models on the bar can change it while the channel is stopped).
+  if (session.config.engine === 'codex' && !session.config.model && state.sessions.some((item) => item.roundTable?.kind === 'hierarchy' && item.roundTable.partner === id)) {
+    state.updateConfig(id, { ...session.config, model: HIERARCHY_MODELS.reviewer });
+    const updated = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
+    if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);
+  }
   if (!window.codingHub) { state.setSessionError(id, 'Live sessions require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
   const cwd = session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory;
   if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository directory first.', true); return; }
