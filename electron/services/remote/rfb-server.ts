@@ -36,6 +36,17 @@ const latin1 = (text: string) => Buffer.from(text.replace(/[^\x00-\xff]/g, '?'),
  */
 const EXTENDED_CLIPBOARD = 0xc0a1e5ce | 0; const TEXT = 1;
 const CAPS = 1 << 24; const REQUEST = 1 << 25; const PEEK = 1 << 26; const NOTIFY = 1 << 27; const PROVIDE = 1 << 28;
+/** How long keys and clicks wait for text the viewer said it copied (Notify) to arrive (Provide); then they go anyway. */
+export const PASTE_WAIT = 1500;
+/**
+ * Text for the extended clipboard: CRLF line endings, UTF-8, ending in a NUL, at most `limit` bytes in all (the limit is
+ * on what is sent, not on characters, which take up to four bytes each); cut at a character boundary.
+ */
+export function clipboardBytes(text: string, limit = CLIPBOARD_LIMIT): Buffer {
+  let utf8 = Buffer.from(text.replace(/\r\n|\r|\n/g, '\r\n'), 'utf8');
+  if (utf8.length > limit - 1) { let end = limit - 1; while (end > 0 && (utf8[end] & 0xc0) === 0x80) end--; utf8 = utf8.subarray(0, end); }
+  return Buffer.concat([utf8, Buffer.from([0])]);
+}
 const u32 = (value: number) => { const buffer = Buffer.alloc(4); buffer.writeUInt32BE(value >>> 0, 0); return buffer; };
 
 /**
@@ -51,6 +62,11 @@ export class RfbSession {
   private closed = false; private clipboardTimer: ReturnType<typeof setInterval> | null = null; private lastClipboard: string | null = null;
   /** The extended clipboard: whether this side offered it, whether the viewer took it up (its own Caps), and the text copied here that the viewer was told about. */
   private extendedOffered = false; private extended = false; private offer: string | null = null;
+  /**
+   * Keys and clicks that came after the viewer said it copied text (Notify), held until the text itself arrives (Provide):
+   * a paste (Ctrl+V right after the text) would otherwise reach this computer before its clipboard has the new text.
+   */
+  private held: (() => void)[] | null = null; private heldTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
     socket.on('data', (data: Buffer) => { try { this.receive(data); } catch { this.close(); } });
@@ -64,6 +80,7 @@ export class RfbSession {
   private finish() {
     if (this.closed) return; this.closed = true;
     if (this.clipboardTimer) clearInterval(this.clipboardTimer); this.clipboardTimer = null;
+    if (this.heldTimer) clearTimeout(this.heldTimer); this.heldTimer = null; this.held = null;
     this.ended();
   }
 
@@ -112,10 +129,11 @@ export class RfbSession {
         if (!this.continuous) this.socket.write(Buffer.from([150]));
         void this.pump(); continue;
       }
-      if (type === 4) { if (this.buffer.length < 8) return; const message = this.take(8); this.input.key(message.readUInt32BE(4), message[1] === 1); continue; }
+      if (type === 4) { if (this.buffer.length < 8) return; const message = this.take(8); this.act(() => this.input.key(message.readUInt32BE(4), message[1] === 1)); continue; }
       if (type === 5) {
         if (this.buffer.length < 6) return; const message = this.take(6);
-        this.input.pointer(Math.min(message.readUInt16BE(2), this.source.width - 1), Math.min(message.readUInt16BE(4), this.source.height - 1), message[1]);
+        const x = Math.min(message.readUInt16BE(2), this.source.width - 1); const y = Math.min(message.readUInt16BE(4), this.source.height - 1); const buttons = message[1];
+        this.act(() => this.input.pointer(x, y, buttons));
         continue;
       }
       if (type === 6) {
@@ -132,23 +150,29 @@ export class RfbSession {
 
   /** Text copied on the viewer's computer, for this one's clipboard (and not sent back as a change made here). */
   private copied(text: string) { this.lastClipboard = text; this.input.clipboard(text); }
+  /** Input now, or after the text the viewer copied, in the order it came. */
+  private act(action: () => void) { if (this.held) this.held.push(action); else action(); }
+  private hold() { if (this.held) return; this.held = []; this.heldTimer = setTimeout(() => this.release(), PASTE_WAIT); }
+  private release() { const actions = this.held ?? []; this.held = null; if (this.heldTimer) clearTimeout(this.heldTimer); this.heldTimer = null; for (const action of actions) action(); }
 
   private extendedClipboard(body: Buffer) {
     if (body.length < 4) throw new Error('clipboard'); const flags = body.readUInt32BE(0); const text = (flags & TEXT) !== 0;
     if (flags & CAPS) { this.extended = true; return; }
     if (flags & PROVIDE) {
-      if (!text) return;
+      if (!text) { this.release(); return; }
       // noVNC flushes without finishing its stream; the size limit applies to the text inflated, not just what was sent.
       const data = inflateSync(body.subarray(4), { finishFlush: constants.Z_SYNC_FLUSH, maxOutputLength: CLIPBOARD_LIMIT + 5 });
       if (data.length < 4) throw new Error('clipboard'); const size = data.readUInt32BE(0); if (size > data.length - 4) throw new Error('clipboard');
       const value = data.subarray(4, 4 + size).toString('utf8'); this.copied(value.endsWith('\0') ? value.slice(0, -1) : value);
+      // The clipboard has the text now: the keys and clicks that came after it (a paste) go through.
+      this.release();
       return;
     }
-    if (flags & NOTIFY) { if (text) this.writeExtended(REQUEST | TEXT); return; }
+    if (flags & NOTIFY) { if (text) { this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
     if (flags & REQUEST) {
       if (!text || this.offer === null) return;
-      // Lines end in CRLF and the text in a NUL, as the protocol has it; then the size, all deflated.
-      const utf8 = Buffer.from(this.offer.replace(/\r\n|\r|\n/g, '\r\n') + '\0', 'utf8');
+      // The size, then the text (CRLF, NUL, within the limit in bytes), all deflated.
+      const utf8 = clipboardBytes(this.offer);
       this.writeExtended(PROVIDE | TEXT, deflateSync(Buffer.concat([u32(utf8.length), utf8])));
       return;
     }

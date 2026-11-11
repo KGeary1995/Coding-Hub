@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import net from 'node:net';
 import zlib from 'node:zlib';
-import { compactLength, RfbSession, type FrameRect, type ScreenInput } from './rfb-server';
+import { clipboardBytes, compactLength, PASTE_WAIT, RfbSession, type FrameRect, type ScreenInput } from './rfb-server';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const item of cleanup.splice(0)) item(); });
@@ -113,6 +113,41 @@ describe('the Windows screen as a VNC server', () => {
       send((1 << 25) | 1); await until(() => messages().length === 3, 'the text'); expect(messages()[2].flags).toBe((1 << 28) | 1);
       const data = zlib.inflateSync(messages()[2].payload); const length = data.readUInt32BE(0);
       expect(data.subarray(4, 4 + length).toString('utf8')).toBe(quoted + '\0');
+    });
+    it('holds a paste sent right after the copy until the copied text has arrived, keeping the order', async () => {
+      const { vnc, messages, send } = await extended();
+      const key = (down: boolean) => Buffer.from([4, down ? 1 : 0, 0, 0, 0, 0, 0, 0x76]);
+      // As LinkedScreen sends it: Notify, then V straight away; the text comes only after this side's Request.
+      send((1 << 27) | 1); vnc.viewer.write(Buffer.concat([key(true), key(false), Buffer.from([5, 0, 0, 10, 0, 20])]));
+      await until(() => messages().length === 2, 'the request'); await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(vnc.events).toEqual([]);
+      const utf8 = Buffer.from(quoted + '\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 4, 'the paste'); expect(vnc.events).toEqual([`clipboard ${quoted}`, 'key 76 true', 'key 76 false', 'pointer 10 20 0']);
+    });
+    it('lets held input go after a while when the copied text never comes', async () => {
+      const { vnc, send } = await extended();
+      send((1 << 27) | 1); vnc.viewer.write(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]));
+      await new Promise((resolve) => setTimeout(resolve, PASTE_WAIT / 2)); expect(vnc.events).toEqual([]);
+      await until(() => vnc.events.length === 1, 'the held key'); expect(vnc.events).toEqual(['key 61 true']);
+    });
+    it('keeps text sent to the viewer within 1 MB in bytes, cut between characters', () => {
+      const limit = 1024 * 1024;
+      // 400,000 three-byte characters: 1,200,000 bytes, though under the limit in characters.
+      const cjk = clipboardBytes('中'.repeat(400_000)); expect(cjk.length).toBeLessThanOrEqual(limit); expect(cjk.at(-1)).toBe(0);
+      const text = cjk.subarray(0, -1).toString('utf8'); expect(text).not.toContain('�'); expect(text).toBe('中'.repeat(text.length)); expect(cjk.length).toBeGreaterThan(limit - 3);
+      // Line endings become CRLF before the limit is applied; text that fits exactly is kept whole.
+      expect(clipboardBytes('\n'.repeat(limit)).length).toBe(limit);
+      expect(clipboardBytes('a'.repeat(limit - 1)).length).toBe(limit); expect(clipboardBytes('a'.repeat(limit)).length).toBe(limit);
+      expect(clipboardBytes('a'.repeat(limit)).subarray(0, -1).toString()).toBe('a'.repeat(limit - 1));
+      // A four-byte emoji across the cut is left out whole.
+      const emoji = clipboardBytes('a'.repeat(limit - 3) + '🙂'); expect(emoji.length).toBe(limit - 2); expect(emoji.subarray(0, -1).toString()).toBe('a'.repeat(limit - 3));
+    });
+    it('sends no more than 1 MB of text to the viewer, however many bytes each character takes', async () => {
+      const { vnc, messages, send } = await extended(); await new Promise((resolve) => setTimeout(resolve, 1100));
+      vnc.setClipboard('中'.repeat(400_000)); await until(() => messages().length === 2, 'the notify');
+      send((1 << 25) | 1); await until(() => messages().length === 3, 'the text');
+      const data = zlib.inflateSync(messages()[2].payload); expect(data.readUInt32BE(0)).toBeLessThanOrEqual(1024 * 1024); expect(data.length - 4).toBe(data.readUInt32BE(0));
     });
     it('ends the session when the text inflates past the limit', async () => {
       const { vnc, send } = await extended();
