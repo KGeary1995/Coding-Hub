@@ -75,6 +75,28 @@ describe('hierarchy Round Table', () => {
     const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: { ...saved, step: 'reviewing', stoppedAt: undefined }, findings: [] });
     expect(after.last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'reviewing', task: 'Task', plan: 'Plan' }); after.chains.continue(BUILDER); expect(after.sent.at(-1)!.runId).toBe(REVIEWER);
   });
+  it('stops when a seat says TASK BLOCKED, and sends the person\u2019s answer back to that seat in the same step', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Half done.\nTASK BLOCKED: Which database?');
+    expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'implementing', note: 'The builder needs you: Which database?' }); expect(sent.at(-1)!.runId).toBe(BUILDER);
+    chains.send(BUILDER, 'Use SQLite.', []);
+    expect(sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(sent.at(-1)!.text).toContain('[The person answers] Use SQLite.'); expect(last().chain!.step).toBe('implementing');
+    await reply(BUILDER, 'Done with SQLite.'); expect(last().chain!.step).toBe('reviewing');
+  });
+  it('saves a waiting message\u2019s images with the table, as a discussion table does', () => {
+    const { chains, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []);
+    const image = { mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' }; chains.send(BUILDER, 'See this.', [image]);
+    expect(last()).toMatchObject({ waiting: 'See this.', waitingImages: [image] });
+  });
+  it('keeps a Stop made while the files\u2019 state is still being taken', async () => {
+    const { chains, sent, reply, last } = setup(); let release: (value: string) => void = () => {};
+    (chains as unknown as { host: TableHost }).host.stateOf = () => new Promise<string>((resolve) => { release = resolve; });
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    await reply(REVIEWER, 'FINDING high a.ts:1 — bug'); const before = sent.length;
+    chains.stop(BUILDER); expect(last().chain!.step).toBe('stopped');
+    release('a'.repeat(64)); await new Promise((resolve) => setTimeout(resolve, 0)); await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(last().chain!.step).toBe('stopped'); expect(sent.length).toBe(before);
+  });
   it('reads the planner’s verdict only from its last line', () => {
     expect(verdictOf('Fine.\n**APPROVED**')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: add tests')).toEqual({ approved: false, changes: 'add tests' });
     expect(verdictOf('APPROVED\nBut should I check more?')).toBeNull(); expect(REVIEW_ROUNDS).toBe(2);

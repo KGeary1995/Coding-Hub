@@ -1,7 +1,8 @@
 import type { ChainStep, ChatEnvelope, ChatImage, RoundTableState, SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
-import type { TableHost } from './round-table';
+import { KEEP_IMAGES, type TableHost } from './round-table';
+import { taskSignal } from '../../../shared/task-signal';
 
 /** Review rounds (Codex reviews, Opus fixes) before the planner's final review. */
 export const REVIEW_ROUNDS = 2;
@@ -20,6 +21,8 @@ interface Chain {
   step: ChainStep; stoppedAt: ChainStep | null; task: string; images: ChatImage[]; plan: string; report: string; reviewRound: number; finalRound: number;
   verdict: 'approved' | 'changes' | null; note: string; findings: Finding[];
   queued: { text: string; images: ChatImage[] } | null; kept: boolean; turnStart: Promise<string | null> | null;
+  /** The seat that said TASK BLOCKED: the person's next message is its answer, in the same step. */
+  blocked: Seat | null;
 }
 const cut = (text: string) => text.length > RELAY_LIMIT ? `${text.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]` : text;
 /** The planner's verdict on the last non-empty line: APPROVED, or CHANGES NEEDED: what to change. */
@@ -63,9 +66,11 @@ export class ReviewChains {
       driver: 'claude', rounds: REVIEW_ROUNDS, round: chain.reviewRound, phase: working ? 'answering' : 'idle', agreed: chain.verdict === 'approved',
       findings: chain.findings.map((finding) => ({ ...finding })),
       chain: { step: chain.step, ...(chain.stoppedAt ? { stoppedAt: chain.stoppedAt } : {}), reviewRound: chain.reviewRound, finalRound: chain.finalRound, plan: chain.plan, verdict: chain.verdict, note: chain.note, task: chain.task, report: chain.report },
-      ...(chain.queued ? { waiting: chain.queued.text, ...(chain.kept ? { waitingKept: true } : {}) } : {}),
+      ...(chain.queued ? { waiting: chain.queued.text, ...this.keptImages(chain.queued.images), ...(chain.kept ? { waitingKept: true } : {}) } : {}),
     };
   }
+  /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64 (as at a discussion table). */
+  private keptImages(images: ChatImage[]) { if (!images.length) return {}; return images.reduce((sum, image) => sum + image.data.length, 0) <= KEEP_IMAGES ? { waitingImages: images } : { waitingImagesDropped: images.length }; }
   private publish(chain: Chain) { this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: this.state(chain) } }); }
 
   /** What a seat is told about the table, once, before its first message here. */
@@ -123,7 +128,7 @@ export class ReviewChains {
     const resumable = before && !['idle', 'plan-review', 'done', 'needs-you', 'stopped'].includes(before.step) ? before.step : null;
     const chain: Chain = { owner, cwd: runs[0].cwd, builder, reviewer, planner, step: before ? (resumable ? 'stopped' : before.step) : 'idle', stoppedAt: resumable ?? (before?.step === 'stopped' ? before.stoppedAt ?? null : null),
       task: before?.task ?? '', images: [], plan: before?.plan ?? '', report: before?.report ?? '', reviewRound: before?.reviewRound ?? 0, finalRound: before?.finalRound ?? 0, verdict: before?.verdict ?? null, note: before?.note ?? '',
-      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null };
+      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null };
     if (saved.waiting !== undefined || saved.waitingImages?.length) { chain.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) }; chain.kept = true; }
     this.chains.set(builderRunId, chain);
     this.host.setReadOnly(builder.runId, false); this.host.setReadOnly(reviewer.runId, true); this.host.setReadOnly(planner.runId, true);
@@ -135,6 +140,8 @@ export class ReviewChains {
     const chain = this.leading(leadRunId);
     if (chain.kept) throw new HubError('TABLE_KEPT', 'A message from before Trace restarted is waiting. Send it or drop it first (on the Round Table bar).');
     if (chain.step === 'plan-review') { this.plan(leadRunId, false, text); return; }
+    // A seat that asked the person (TASK BLOCKED) gets the answer and goes on with its step.
+    if (chain.step === 'stopped' && chain.blocked && chain.stoppedAt && !this.busy(chain)) { const seat = chain.blocked; chain.blocked = null; chain.note = ''; this.turn(chain, seat, chain.stoppedAt, `[The person answers] ${text}\n\nGo on with your step.`, images); return; }
     if (this.busy(chain)) {
       if (chain.queued && chain.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${chain.queued.images.length} images and a message carries at most ${MAX_IMAGES}.`);
       chain.queued = chain.queued ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images] } : { text, images };
@@ -156,6 +163,7 @@ export class ReviewChains {
   continue(leadRunId: string) {
     const chain = this.leading(leadRunId); const step = chain.stoppedAt;
     if (chain.step !== 'stopped' || !step) throw new HubError('TABLE_STEP', 'Nothing was stopped part way.');
+    chain.blocked = null;
     if (step === 'planning') this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), chain.images);
     else if (step === 'implementing') this.turn(chain, chain.builder, 'implementing', this.buildPrompt(chain), chain.images);
     else if (step === 'reviewing') this.turn(chain, chain.reviewer, 'reviewing', this.reviewPrompt(chain));
@@ -173,7 +181,7 @@ export class ReviewChains {
   }
   /** Stops the seat at work; the chain waits at its step for Continue. */
   stop(leadRunId: string) {
-    const chain = this.leading(leadRunId); if (!chain.kept) chain.queued = null;
+    const chain = this.leading(leadRunId); if (!chain.kept) chain.queued = null; chain.blocked = null;
     if (!['idle', 'plan-review', 'done', 'needs-you', 'stopped'].includes(chain.step)) { chain.stoppedAt = chain.step; chain.step = 'stopped'; }
     for (const seat of this.seats(chain)) if (seat.busy) this.host.interrupt(seat.runId);
     this.publish(chain);
@@ -197,7 +205,7 @@ export class ReviewChains {
     }
     if (event.type !== 'done' || !seat.busy) return null;
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
-    if (event.isError || chain.step === 'stopped') { if (chain.step !== 'stopped') { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.note = event.error ?? 'The agent stopped with an error.'; } this.publish(chain); return null; }
+    if (event.isError || chain.step === 'stopped' || chain.step === 'needs-you') { if (chain.step !== 'stopped') { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.note = event.error ?? 'The agent stopped with an error.'; } this.publish(chain); return null; }
     void this.advance(chain, seat).catch(() => { chain.stoppedAt = chain.step; chain.step = 'stopped'; this.publish(chain); });
     return null;
   }
@@ -205,19 +213,25 @@ export class ReviewChains {
   /** A seat finished its step: record what it said, then the next step. */
   private async advance(chain: Chain, seat: Seat) {
     const answer = seat.answer ?? '';
+    // A seat that needs the person stops the chain at its step; the person's answer goes back to it (send).
+    const signal = taskSignal(answer);
+    if (signal?.kind === 'blocked') { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.blocked = seat; chain.note = `The ${seat.role} needs you: ${signal.reason}`; this.publish(chain); return; }
+    const step = chain.step;
+    // Reads into the record, then goes on only if nobody stopped the chain meanwhile (Stop while the files' state is taken).
+    const recorded = async () => { await this.record(chain, seat); return this.chains.get(chain.builder.runId) === chain && chain.step === step; };
     if (chain.step === 'planning') { chain.plan = answer.replace(/\n?\s*PLAN READY\s*$/i, '').trim(); chain.step = chain.plan ? 'plan-review' : 'needs-you'; chain.note = chain.plan ? '' : 'The planner wrote no plan.'; this.publish(chain); return; }
     if (chain.step === 'implementing' || chain.step === 'final-fixing') {
-      chain.report = answer || chain.report; await this.record(chain, seat);
+      chain.report = answer || chain.report; if (!await recorded()) return;
       if (chain.step === 'final-fixing') { this.turn(chain, chain.planner, 'final', this.finalPrompt(chain)); return; }
       chain.reviewRound = 1; this.turn(chain, chain.reviewer, 'reviewing', this.reviewPrompt(chain)); return;
     }
     if (chain.step === 'reviewing') {
-      await this.record(chain, seat);
+      if (!await recorded()) return;
       if (chain.findings.some((finding) => finding.status === 'open')) { this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return; }
       this.turn(chain, chain.planner, 'final', this.finalPrompt(chain)); return;
     }
     if (chain.step === 'fixing') {
-      chain.report = answer || chain.report; await this.record(chain, seat);
+      chain.report = answer || chain.report; if (!await recorded()) return;
       // The planner's changes are done once the builder has had its turn at them.
       if (chain.verdict === 'changes') { chain.verdict = null; chain.note = ''; }
       if (chain.reviewRound < REVIEW_ROUNDS) { chain.reviewRound++; this.turn(chain, chain.reviewer, 'reviewing', this.reviewPrompt(chain)); return; }
