@@ -231,6 +231,16 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.getByRole('button', { name: 'Save handoff', exact: true }).click();
     await phone.locator('.note').filter({ hasText: 'From the phone' }).waitFor();
     await phone.locator('.tabbar').getByRole('button', { name: 'Channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    // A hierarchy Round Table started on the computer: the planner's reply reaches the phone, labelled, under the steps bar.
+    await openView(page, 'Workspace'); await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: 'Round Table (hierarchy)', exact: true }).click();
+    await page.locator('.chain-bar').waitFor({ timeout: 90000 });
+    const tableBox = page.getByRole('textbox', { name: 'Message to the Round Table' }); await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((area) => area.getAttribute('aria-label') === 'Message to the Round Table' && !area.disabled));
+    await tableBox.fill('Plan a footer'); await tableBox.press('Enter');
+    await page.locator('.chain-bar').filter({ hasText: 'plan is ready' }).waitFor({ timeout: 60000 });
+    await phone.locator('#channel-list button').filter({ hasText: 'Round Table' }).filter({ hasNotText: 'CH3' }).first().click();
+    await phone.locator('.phone-chat .chain-bar').filter({ hasText: 'Round Table · hierarchy' }).filter({ hasText: 'Approve plan' }).waitFor({ timeout: 30000 });
+    await phone.locator('.phone-chat .chat-author').filter({ hasText: 'Planner' }).first().waitFor({ timeout: 30000 });
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
     // The removal below is found from inside a channel, as before.
     await phone.locator('#channel-list button').filter({ hasText: 'CH1' }).first().click(); await phone.getByRole('button', { name: 'Back to channels' }).waitFor();
 
@@ -242,7 +252,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });

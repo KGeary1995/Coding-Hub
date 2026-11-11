@@ -162,6 +162,8 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const current = CHAIN_STEPS.findIndex((item) => at && item.of.includes(at));
   const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? `Stopped${chain?.note ? `: ${chain.note}` : ''}` : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
+  /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
+  const locked = [lead, planner].some((session) => session?.status === 'running' || session?.status === 'starting');
   const model = (session: Session | null | undefined, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
   const setModel = (session: Session | null | undefined, value: string) => { if (session && session.config.engine === 'claude') onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
@@ -173,9 +175,9 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     {step === 'stopped' && chain?.stoppedAt && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
     {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
     {onModel && lead && <details className="chain-models"><summary>Models</summary>
-      <label>Planner and final review<input aria-label="Planner model" defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
-      <label>Builder<input aria-label="Builder model" defaultValue={model(lead, HIERARCHY_MODELS.builder)} onBlur={(e) => setModel(lead, e.target.value)} spellCheck={false} /></label>
-      <small>Used when that seat starts again (restart the channel). The reviewer is Codex, with its own settings.</small>
+      <label>Planner and final review<input aria-label="Planner model" disabled={locked} defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
+      <label>Builder<input aria-label="Builder model" disabled={locked} defaultValue={model(lead, HIERARCHY_MODELS.builder)} onBlur={(e) => setModel(lead, e.target.value)} spellCheck={false} /></label>
+      <small>{locked ? 'A running seat keeps its model: stop this channel (which stops all three), change them here, then start it again.' : 'Used when the channel starts again. The reviewer is Codex, with its own settings.'}</small>
     </details>}
     <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}

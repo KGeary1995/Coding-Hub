@@ -40,9 +40,12 @@ async function until(page, test, minutes, label) {
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' });
     if (reviseAndModels) {
       // The planner's model, changed on the bar, is used once the table starts again.
-      await page.locator('.chain-models summary').click(); const field = page.getByLabel('Planner model'); await field.fill('claude-sonnet-5-5'); await field.press('Tab');
-      const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' }); await (await tileControl(tile, 'Stop')).click();
-      await tile.getByRole('button', { name: /^Start/ }).first().waitFor({ timeout: 60000 }); await page.waitForTimeout(1500); await tile.getByRole('button', { name: /^Start/ }).first().click();
+      // Models change while the channel is stopped (a running seat keeps its model).
+      const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' }); await (await tileControl(tile, 'Stop')).click(); await page.waitForTimeout(3000);
+      await page.locator('.chain-models summary').click(); const field = page.getByLabel('Planner model'); await field.waitFor(); await page.waitForFunction(() => !document.querySelector('[aria-label="Planner model"]')?.disabled, null, { timeout: 30000 }).catch(() => {});
+      await field.fill('claude-sonnet-5-5'); await field.press('Tab'); note('model-set', { label: await page.locator('.chain-models').innerText() });
+      // A stopped channel offers Restart in its detail row.
+      await (await tileControl(tile, 'Restart')).click();
       await page.waitForFunction(() => document.querySelector('.chain-bar .table-status')?.textContent?.includes('Give it a task'), null, { timeout: 240000 }); note('restarted', { bar: await bar(page) });
       await box.fill('Create hello.txt containing the word hello.'); await box.press('Enter');
       let r = await until(page, (text) => /plan is ready/i.test(text), 10, 'plan'); note('plan', r); await shot(page, '02-plan');
