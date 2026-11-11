@@ -1,5 +1,6 @@
 import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
-import { leadOf, partnerOf, useWorkspaceStore } from '../state/workspace-store';
+import { leadOf, partnerOf, plannerOf, useWorkspaceStore } from '../state/workspace-store';
+import type { Session } from '../../shared/types';
 import { isAgentConfig } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
@@ -17,27 +18,39 @@ export function permissionHelp(engine: 'claude' | 'codex', level: PermissionLeve
 export function withPermissions<T extends CLIEngineConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
 
 /**
+ * Every channel at the Round Table a channel leads or sits at: the lead, its partner and (at a hierarchy) its hidden
+ * planner. One table, one permission level; a channel at no table is alone.
+ */
+export function tableSeats(sessions: Session[], id: string): Session[] {
+  const lead = leadOf(sessions, id) ?? sessions.find((session) => session.id === id); if (!lead) return [];
+  const seats: Session[] = [];
+  for (const seat of [lead, partnerOf(sessions, lead.id), plannerOf(sessions, lead.id)]) if (seat && !seats.some((other) => other.id === seat.id)) seats.push(seat);
+  return seats;
+}
+
+/**
  * An agent refused a change after accepting the request (Claude answers later): its level is back to `level`. At a
- * Round Table the other agent is set back too, so one control never stands for two different levels.
+ * Round Table every other seat is set back too, so one control never stands for two different levels.
  */
 export async function permissionsRefused(sessionId: string, runId: string, level: PermissionLevel) {
   const sessions = useWorkspaceStore.getState().sessions; const self = sessions.find((session) => session.id === sessionId);
   if (!self || self.runId !== runId) return;
-  const other = partnerOf(sessions, sessionId) ?? leadOf(sessions, sessionId);
-  const ids = new Set([sessionId, ...(other ? [other.id] : [])]);
+  const others = tableSeats(sessions, sessionId).filter((seat) => seat.id !== sessionId);
+  const ids = new Set([sessionId, ...others.map((seat) => seat.id)]);
   useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.has(session.id) && isAgentConfig(session.config) ? { ...session, config: withPermissions(session.config, level) } : session) }));
-  if (other && isAgentConfig(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
+  for (const other of others) if (isAgentConfig(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
 }
 
 /**
- * Sets what a channel's agent may do without asking, and its Round Table partner's too (one table, one setting). A
+ * Sets what a channel's agent may do without asking, and every other seat's at its Round Table too: the partner and,
+ * at a hierarchy, the planner (one table, one setting). A
  * running chat changes at once (Codex from its next message); a terminal channel takes it at its next start. If a
  * running chat refuses, the channels go back to what they had, so the control never shows a level not in effect.
  * The error message, or null.
  */
 export async function setPermissions(sessionId: string, level: PermissionLevel): Promise<string | null> {
-  const state = useWorkspaceStore.getState(); const partner = partnerOf(state.sessions, sessionId);
-  const ids = new Set([sessionId, ...(partner ? [partner.id] : [])]);
+  const state = useWorkspaceStore.getState();
+  const ids = new Set([sessionId, ...tableSeats(state.sessions, sessionId).map((seat) => seat.id)]);
   const before = new Map(state.sessions.filter((session) => ids.has(session.id)).map((session) => [session.id, session.config]));
   const apply = (configs: (id: string) => ChannelConfig | undefined) => useWorkspaceStore.setState((current) => ({ sessions: current.sessions.map((session) => { const config = ids.has(session.id) ? configs(session.id) : undefined; return config && session.config.engine === config.engine ? { ...session, config } : session; }) }));
   // Allowed while running, unlike other engine settings: it is the one setting a running chat can change.
