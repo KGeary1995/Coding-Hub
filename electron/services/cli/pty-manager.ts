@@ -100,7 +100,9 @@ export class PtyManager {
     private emit: (owner: number, event: SessionEvent) => void,
     private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
-      abandonLaunch?: (session: AgentRunningSession) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
+      abandonLaunch?: (session: AgentRunningSession) => void;
+      /** Runs just seated at a Round Table without a tile of their own (partner, reviewer, planner). */
+      onSeated?: (runIds: string[]) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
       /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
       chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null } = {},
   ) {
@@ -300,6 +302,7 @@ export class PtyManager {
       return run;
     });
   }
+  private seated(runIds: string[]) { try { this.dependencies.onSeated?.(runIds); } catch { this.dependencies.onEventError?.(); } }
   /** `remote`: from a phone or linked computer, so the person's message is marked for the window to add (it did not send it). */
   private chatRequest(payload: unknown, remote: boolean, find: (reference: { sessionId: string; runId: string }) => ManagedRun) {
     const parsed = chatRequestSchema.safeParse(payload);
@@ -325,11 +328,13 @@ export class PtyManager {
       if (!request.planner) throw new HubError('TABLE_PLANNER', 'A hierarchy Round Table needs its planner chat.');
       if (find(request.partner).owner !== owner || find(request.planner).owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
       this.chains.open(owner, request.runId, request.partner.runId, request.planner.runId, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}), ...(request.chain ? { chain: request.chain } : {}) });
+      this.seated([request.partner.runId, request.planner.runId]);
     }
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
       this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
+      this.seated([request.partner.runId]);
     }
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');

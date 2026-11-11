@@ -27,12 +27,23 @@ interface Chain {
   attempt: number;
 }
 const cut = (text: string) => text.length > RELAY_LIMIT ? `${text.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]` : text;
+/** A reply's last non-empty line, without Markdown emphasis, quote marks or list dashes around it. */
+function lastLine(answer: string) {
+  const lines = answer.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean);
+  // A TASK COMPLETE after the verdict (the habit a task's own instruction teaches) does not hide it.
+  if (lines.length > 1 && /^TASK COMPLETE\.?$/i.test(lines.at(-1)!)) lines.pop();
+  return lines.at(-1) ?? '';
+}
+/**
+ * Whether a reviewer's reply is a review: findings, answers to earlier findings (VERIFIED, REOPENED), or NO FINDINGS on
+ * the last line. Anything else (an empty reply, a question) would otherwise pass as a clean review.
+ */
+export function isReview(answer: string): boolean {
+  return parseFindings(answer).length > 0 || parseAnswers(answer, 'reviewer').length > 0 || /^NO FINDINGS\.?$/i.test(lastLine(answer));
+}
 /** The planner's verdict on the last non-empty line: APPROVED, or CHANGES NEEDED: what to change. */
 export function verdictOf(answer: string): { approved: true } | { approved: false; changes: string } | null {
-  // A TASK COMPLETE after the verdict (the habit a task's own instruction teaches) does not hide it.
-  const lines = answer.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean);
-  if (lines.length > 1 && /^TASK COMPLETE\.?$/i.test(lines.at(-1)!)) lines.pop();
-  const last = lines.at(-1) ?? '';
+  const last = lastLine(answer);
   if (/^APPROVED\.?$/i.test(last)) return { approved: true };
   const changes = /^CHANGES NEEDED:?\s*(.*)$/i.exec(last); return changes ? { approved: false, changes: changes[1].trim() || 'See my review above.' } : null;
 }
@@ -82,7 +93,7 @@ export class ReviewChains {
   /** What a seat is told about the table, once, before its first message here. */
   private brief(seat: Seat) {
     const role = seat.role === 'planner'
-      ? 'You are the planner and final reviewer. You do not edit files (Trace keeps you read-only). You write the plan the builder follows, and at the end you review the finished work against your plan and the review findings.'
+      ? 'You are the planner and final reviewer. You do not edit files (Trace keeps you read-only). You write the plan the builder follows, and at the end you review the finished work against your plan and the review findings. Trace runs you in Claude\'s plan mode: write the whole plan in your reply, not in a plan file, and do not call ExitPlanMode; the person approves the plan in Trace.'
       : seat.role === 'builder'
         ? 'You are the builder: the only seat that edits files. You implement the planner\'s plan, then fix what the reviewers find. Carry out the plan without asking again whether to proceed; ask only about choices that are the person\'s, or before anything that publishes, deletes or cannot be undone.'
         : 'You are the reviewer. You do not edit files (Trace keeps you read-only). You review the builder\'s changes in the files themselves.';
@@ -231,7 +242,7 @@ export class ReviewChains {
     if (event.type !== 'done' || !seat.busy) return null;
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     if (event.isError || chain.step === 'stopped' || chain.step === 'needs-you') { if (chain.step !== 'stopped') { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.note = event.error ?? 'The agent stopped with an error.'; } this.publish(chain); return null; }
-    void this.advance(chain, seat).catch(() => { chain.stoppedAt = chain.step; chain.step = 'stopped'; this.publish(chain); });
+    void this.advance(chain, seat).catch((error: unknown) => { chain.stoppedAt = chain.step; chain.step = 'stopped'; chain.note = `Trace could not finish this step (${error instanceof Error ? error.message : String(error)}). Continue tries it again.`; this.publish(chain); });
     return null;
   }
 
@@ -252,6 +263,7 @@ export class ReviewChains {
       chain.reviewRound = 1; this.turn(chain, chain.reviewer, 'reviewing', this.reviewPrompt(chain)); return;
     }
     if (chain.step === 'reviewing') {
+      if (!isReview(answer)) { chain.stoppedAt = 'reviewing'; chain.step = 'stopped'; chain.note = 'The reviewer ended without findings or NO FINDINGS. Continue runs the review again.'; this.publish(chain); return; }
       if (!await recorded()) return;
       if (chain.findings.some((finding) => finding.status === 'open')) { this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return; }
       this.turn(chain, chain.planner, 'final', this.finalPrompt(chain)); return;

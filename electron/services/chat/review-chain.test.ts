@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
 import type { TableHost } from './round-table';
-import { FINAL_ROUNDS, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
+import { FINAL_ROUNDS, isReview, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
 import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
@@ -158,8 +158,40 @@ describe('hierarchy Round Table', () => {
     chains.send(BUILDER, 'Write the plan for page.html only.', []);
     expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('Add a footer.'); expect(sent.at(-1)!.text).toContain('The person adds: Write the plan for page.html only.'); expect(last().chain!.task).toBe('Add a footer.');
   });
+  it('tells only the planner that it writes its plan in the reply, not in a plan file', async () => {
+    const { chains, sent, reply } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []);
+    const brief = 'write the whole plan in your reply, not in a plan file, and do not call ExitPlanMode';
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain(brief);
+    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('You are the builder'); expect(sent.at(-1)!.text).not.toContain(brief);
+    await reply(BUILDER, 'Built.'); expect(sent.at(-1)!.runId).toBe(REVIEWER); expect(sent.at(-1)!.text).toContain('You are the reviewer'); expect(sent.at(-1)!.text).not.toContain(brief);
+  });
+  it('stops at the review when the reviewer ends without findings or NO FINDINGS, and Continue sends the review again', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    for (const answer of ['', 'Should I also check the tests?']) {
+      const before = sent.length; await reply(REVIEWER, answer);
+      expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'reviewing', note: 'The reviewer ended without findings or NO FINDINGS. Continue runs the review again.' }); expect(sent.length).toBe(before);
+      chains.continue(BUILDER); expect(sent.at(-1)!.runId).toBe(REVIEWER); expect(sent.at(-1)!.text).toContain('[Step: review, round 1'); expect(last().chain!.step).toBe('reviewing');
+    }
+    await reply(REVIEWER, '**NO FINDINGS**'); expect(last().chain!.step).toBe('final');
+  });
+  it('moves on from a second review that only verifies the fixes', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    await reply(REVIEWER, 'FINDING low a.ts:1 — typo'); await reply(BUILDER, 'FIXED F1: spelled it'); expect(last().chain).toMatchObject({ step: 'reviewing', reviewRound: 2 });
+    await reply(REVIEWER, 'VERIFIED F1'); expect(last().findings![0].status).toBe('verified'); expect(last().chain!.step).toBe('final'); expect(sent.at(-1)!.runId).toBe(PLANNER);
+  });
+  it('says why when Trace cannot finish a step', async () => {
+    const { chains, reply, last } = setup(); let fail = false;
+    (chains as unknown as { host: TableHost }).host.stateOf = () => { if (fail) throw new Error('git is missing'); return Promise.resolve('a'.repeat(64)); };
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    fail = true; await reply(REVIEWER, 'FINDING high a.ts:1 — bug');
+    expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'reviewing', note: 'Trace could not finish this step (git is missing). Continue tries it again.' });
+  });
   it('reads the planner’s verdict only from its last line', () => {
     expect(verdictOf('Fine.\n**APPROVED**')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: add tests')).toEqual({ approved: false, changes: 'add tests' });
     expect(verdictOf('APPROVED\nBut should I check more?')).toBeNull(); expect(REVIEW_ROUNDS).toBe(2);
+  });
+  it('counts a reply as a review only with findings, answers to findings, or NO FINDINGS on its last line', () => {
+    expect(isReview('FINDING low a.ts:1 — typo')).toBe(true); expect(isReview('VERIFIED F2')).toBe(true); expect(isReview('All fine.\n- NO FINDINGS.')).toBe(true); expect(isReview('NO FINDINGS\nTASK COMPLETE')).toBe(true);
+    expect(isReview('')).toBe(false); expect(isReview('NO FINDINGS\nWant me to look at the tests?')).toBe(false); expect(isReview('FIXED F1')).toBe(false);
   });
 });

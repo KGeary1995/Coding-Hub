@@ -1,5 +1,13 @@
 ## What's new
 
+Not released yet: handoffs stay in front of automatic summaries, and a hierarchy review has to say it found nothing:
+
+- **Your handoffs come before automatic summaries.** At launch, notes someone wrote (a handoff, a review record) are listed first, and at most two of Trace's automatic session summaries follow in the space left. Before, summaries counted the same as handoffs and could push them out.
+- **Fewer empty summaries.** A session that changed no files, made no commits and ended on a short message (under 200 characters, such as "AGREE") no longer writes a summary. The hidden agents at a Round Table (a discussion table's partner, a hierarchy table's planner and reviewer) write none of their own; the channel you see still writes one.
+- **A review must end with findings or NO FINDINGS.** At a hierarchy table, a Codex reply with neither (empty, or a question) used to count as a clean review and go straight to the final review. Now the table stops at the review and says so; **Continue** runs the review again. A second-round reply that only verifies fixes (`VERIFIED F1`) still moves on.
+- **The planner writes its plan in the chat.** Its brief now says Trace runs it in Claude's plan mode, so it writes the whole plan in its reply instead of a plan file, and does not try to leave plan mode (Trace declines that).
+- **A step that fails inside Trace says why.** The table stops with "Trace could not finish this step (…). Continue tries it again." instead of stopping without a reason.
+
 1.17.1 shows which model is at work at a hierarchy Round Table, fixes several ways a hierarchy table could go wrong, and keeps backups out of your projects (update every computer):
 
 - **See who is working.** A hierarchy table's bar lists its three seats (the planner, the builder and Codex), each with what it is doing now and its tokens today, and each step names its model: "Fable 5.2 writing the plan…", "Opus 5.5 building…". The planner's messages have their own colour (lime), so they no longer look like the builder's.

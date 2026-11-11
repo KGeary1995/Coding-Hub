@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { EngineInfo, RunningSession } from '../../../shared/ipc';
-import { AutoMemory, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
+import { AutoMemory, isSessionSummary, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
 import type { MemoryNote } from '../../../shared/hub';
 
@@ -58,6 +58,15 @@ describe('launch context', () => {
     expect(withDecision.indexOf(`## Decisions (pinned until retired)\n- ${decided} · Barrett only`)).toBeGreaterThan(0); expect(withDecision.indexOf('Decisions')).toBeLessThan(withDecision.indexOf('Note 0'));
     expect(memoryContext('app-1', [item(decided, 'Decision: Barrett only'), item(randomUUID(), 'Retired decision: Barrett only', decided)])).not.toContain('Barrett only');
     expect(withItems).toContain(`## Open items (id · item)\n- ${open} · Delete the exported CSV`); expect(withItems).not.toContain('Deploy the web app'); expect(withItems.indexOf('Open items')).toBeLessThan(withItems.indexOf('Note 0'));
+  });
+  it('lists curated notes before automatic session summaries, and at most two summaries', () => {
+    const at = (minute: number) => new Date(Date.UTC(2026, 10, 11, 4, minute)).toISOString();
+    const summary = (minute: number): MemoryNote => ({ id: randomUUID(), project: 'app-1', title: `Session summary: Codex, 2026-11-11`, content: `Automatic summary of a ${minute}-minute Codex session in /p.\n\nLast message from the agent:\nSummary ${minute}`, author: 'codex', createdAt: at(minute) });
+    const curated: MemoryNote = { id: randomUUID(), project: 'app-1', title: 'Handoff: release 1.17.1', content: 'Tagged and published.', author: 'claude', createdAt: at(1) };
+    const text = memoryContext('app-1', [summary(50), summary(40), summary(30), curated]);
+    expect(text).toContain('Handoff: release 1.17.1'); expect(text.indexOf('Handoff: release 1.17.1')).toBeLessThan(text.indexOf('Summary 50'));
+    expect(text).toContain('Summary 50'); expect(text).toContain('Summary 40'); expect(text).not.toContain('Summary 30');
+    expect(isSessionSummary(summary(1))).toBe(true); expect(isSessionSummary(curated)).toBe(false); expect(isSessionSummary({ title: 'Session summary: mine', content: 'Written by hand.' })).toBe(false);
   });
   it('adds the memory server and context to Claude and Codex launches without touching project files', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
@@ -117,6 +126,26 @@ describe('session summaries', () => {
     expect(written).toEqual([projectMemoryKey(project)]); expect(fs.existsSync(path.join(root, 'scratch', `${active.runId}.mcp.json`))).toBe(false);
     const idle = run('codex', project); auto.prepare(idle, '', info('codex'), { args: [] }); await new Promise((resolve) => setTimeout(resolve, 300));
     expect(await auto.finish(idle.runId, null)).toBeNull();
+  });
+  it('skips a session that changed nothing and ended on a short message, unless it made a commit', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') }));
+    const said = (text: string) => { const file = path.join(root, `${randomUUID()}.jsonl`); fs.writeFileSync(file, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n'); return file; };
+    const quiet = run('codex', project); auto.prepare(quiet, '', info('codex'), { args: [] }); await auto.settled();
+    expect(await auto.finish(quiet.runId, said('AGREE'))).toBeNull();
+    const long = run('claude', project); auto.prepare(long, '', info('claude'), { args: [] }); await auto.settled();
+    expect((await auto.finish(long.runId, said('x'.repeat(200))))?.content).toContain('Last message from the agent');
+    const committed = run('claude', project); auto.prepare(committed, '', info('claude'), { args: [] }); await auto.settled();
+    fs.writeFileSync(path.join(project, 'app.txt'), 'committed\n'); git(project, 'commit', '-am', 'Small fix');
+    const note = await auto.finish(committed.runId, said('Done.')); expect(note?.content).toContain('Small fix'); expect(note?.content).toContain('Done.');
+  });
+  it('writes no summary for a Round Table seat, and still writes the leading channel’s', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') }));
+    const lead = run('claude', project); const seat = run('codex', project); auto.prepare(lead, '', info('claude'), { args: [] }); auto.prepare(seat, '', info('codex'), { args: [] }); await auto.settled();
+    auto.seated([seat.runId]); fs.writeFileSync(path.join(project, 'table.txt'), 'made at the table');
+    expect(await auto.finish(seat.runId, null)).toBeNull(); expect(fs.existsSync(path.join(root, 'scratch', `${seat.runId}.mcp.json`))).toBe(false);
+    expect((await auto.finish(lead.runId, null))?.content).toContain('table.txt');
   });
   it('lets shutdown wait for summaries of sessions that just ended', async () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));

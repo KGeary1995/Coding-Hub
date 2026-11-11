@@ -345,8 +345,8 @@ describe('Chat channels', () => {
     expect(() => manager.chat(3, { action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'edits' })).not.toThrow();
   });
   it('runs a Round Table from a phone or linked computer: open, send, driver, rounds, stop and close', async () => {
-    const processes: (FakePty & { onStderr: () => void })[] = []; const chats: { owner: number; envelope: ChatEnvelope }[] = [];
-    const manager = new PtyManager(() => {}, { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (owner, envelope) => chats.push({ owner, envelope }),
+    const processes: (FakePty & { onStderr: () => void })[] = []; const chats: { owner: number; envelope: ChatEnvelope }[] = []; const seated: string[][] = [];
+    const manager = new PtyManager(() => {}, { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (owner, envelope) => chats.push({ owner, envelope }), onSeated: (runIds) => seated.push(runIds),
       spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
     managers.push(manager);
     const claude = await manager.start(1, chatRequest('lead'));
@@ -357,6 +357,8 @@ describe('Chat channels', () => {
     // A partner in another window cannot be seated from outside either.
     expect(() => manager.chatRemote({ action: 'table-open', ...lead, partner: { sessionId: other.sessionId, runId: other.runId }, driver: 'claude', rounds: 1 })).toThrow(/same window/);
     manager.chatRemote({ action: 'table-open', ...lead, partner: { sessionId: codex.sessionId, runId: codex.runId }, driver: 'claude', rounds: 1 });
+    // The hidden partner is reported as seated (it writes no session summary of its own); the refused one was not.
+    expect(seated).toEqual([[codex.runId]]);
     expect(table()).toMatchObject({ owner: 1, envelope: { sessionId: 'lead', event: { table: { driver: 'claude', rounds: 1, partner: { sessionId: 'partner' } } } } });
     const written = processes[0].write.mock.calls.length;
     manager.chatRemote({ action: 'table-send', ...lead, text: 'How should phones start channels?', images: [] });
