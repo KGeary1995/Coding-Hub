@@ -1,5 +1,5 @@
 import type { Session } from '../../shared/types';
-import { partnerOf, plannerOf, useWorkspaceStore } from './workspace-store';
+import { challengerOf, partnerOf, plannerOf, useWorkspaceStore } from './workspace-store';
 import { useChatStore } from './chat-store';
 
 const live = (session: Session | null | undefined) => session?.status === 'running' || session?.status === 'starting';
@@ -13,5 +13,7 @@ export function hierarchyDetached(leadId: string): string | null {
   if (lead?.roundTable?.kind !== 'hierarchy' || useChatStore.getState().threads[leadId]?.table) return null;
   const seats = [partnerOf(sessions, leadId), plannerOf(sessions, leadId)];
   if (seats.some((seat) => !seat)) return 'This Round Table lost its planner or reviewer. Close the table to chat with the builder alone.';
-  return seats.every(live) ? 'The Round Table is opening. Try again in a moment.' : 'The Round Table\'s planner or reviewer stopped. Press Reopen to start it again and pick up where the work stood.';
+  // A Gemini seat that stopped is started again with the others by Reopen (or left out, if agy is gone).
+  const gemini = challengerOf(sessions, leadId);
+  return seats.every(live) && (!gemini || live(gemini)) ? 'The Round Table is opening. Try again in a moment.' : 'The Round Table\'s planner, reviewer or Gemini seat stopped. Press Reopen to start it again and pick up where the work stood.';
 }

@@ -559,7 +559,7 @@ export class RemoteServer {
     const local = sessions.filter((session) => !session.seatedAt).map((session, index): RemoteChannel => {
       const run = running.get(session.id); const own = this.attention.get(session.id);
       const seat = sessions.find((item) => item.seatedAt === session.id); const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
-      const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : 'Claude'}: ${seatWaiting.message}` } : undefined;
+      const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : seat.engine === 'gemini' ? 'Gemini' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
       return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine === 'gemini' ? 'shell' : session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seat && (seat.engine === 'claude' || seat.engine === 'codex') ? { table: seat.engine } : {}), ...(session.account ? { account: session.account } : {}) };
     });

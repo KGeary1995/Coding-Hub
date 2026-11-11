@@ -36,15 +36,19 @@ export function createSession(engine: ChannelEngine, binding: WorkspaceBinding =
  */
 export function seatedIds(sessions: Session[]) {
   const ids = new Set<string>();
-  for (const session of sessions) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && sessions.some((item) => item.id === seat)) ids.add(seat);
+  for (const session of sessions) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger] : []) if (seat && seat !== session.id && sessions.some((item) => item.id === seat)) ids.add(seat);
   return ids;
 }
 /** The channels the person sees, in tile order: every session but seated partners (the same array when there are none). */
 export function channelsOf(sessions: Session[]) { const seated = seatedIds(sessions); return seated.size ? sessions.filter((session) => !seated.has(session.id)) : sessions; }
 /** The channel whose Round Table this session sits at, if it is a seated partner. */
-export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && (session.roundTable?.partner === id || session.roundTable?.planner === id)) ?? null;
+export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && (session.roundTable?.partner === id || session.roundTable?.planner === id || session.roundTable?.challenger === id)) ?? null;
 /** The hidden planner of a channel that leads a hierarchy Round Table. */
 export const plannerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable?.planner ? sessions.find((session) => session.id === lead.roundTable!.planner && session.id !== id) ?? null : null; };
+/** The hidden Gemini seat (challenger and second reviewer) of a channel that leads a hierarchy Round Table. */
+export const challengerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable?.challenger ? sessions.find((session) => session.id === lead.roundTable!.challenger && session.id !== id) ?? null : null; };
+/** Every hidden seat at the Round Table a channel leads: its partner (reviewer), planner and Gemini seat, those it has. */
+export const hiddenSeats = (sessions: Session[], id: string) => [partnerOf(sessions, id), plannerOf(sessions, id), challengerOf(sessions, id)].filter((seat): seat is Session => Boolean(seat));
 /** A session's channel number as the person sees it (a Round Table's partner goes by its lead's), or 0 for none. */
 export const channelNumber = (sessions: Session[], id: string | null) => id ? channelsOf(sessions).findIndex((session) => session.id === (leadOf(sessions, id)?.id ?? id)) + 1 : 0;
 /** The hidden partner of a channel that leads a Round Table. */
@@ -206,8 +210,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const live = (session: Session) => session.status === 'running' || session.status === 'starting';
     if (channelsOf(state.sessions).length <= 1 && !leadOf(state.sessions, id) || state.sessions.some((session) => session.id === id && live(session))) return state;
     // A lead takes its hidden partner along once that has stopped; a partner still running is kept, and shows as its own tile.
-    const seats = [partnerOf(state.sessions, id), plannerOf(state.sessions, id)]; const gone = new Set([id, ...seats.flatMap((seat) => seat && !live(seat) ? [seat.id] : [])]);
-    const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => session.roundTable && (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) ? { ...session, roundTable: undefined } : session);
+    const seats = hiddenSeats(state.sessions, id); const gone = new Set([id, ...seats.flatMap((seat) => !live(seat) ? [seat.id] : [])]);
+    const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => {
+      if (!session.roundTable) return session;
+      if (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) return { ...session, roundTable: undefined };
+      // A Gemini seat gone on its own: the table goes on without it.
+      if (session.roundTable.challenger && gone.has(session.roundTable.challenger)) { const { challenger: _gone, ...table } = session.roundTable; return { ...session, roundTable: table }; }
+      return session;
+    });
     return {
       sessions,
       tiles: arrangeTiles(sessions, state.layoutMode),

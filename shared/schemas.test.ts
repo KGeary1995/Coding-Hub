@@ -15,10 +15,11 @@ describe('engine model settings', () => {
 });
 
 describe('Gemini CLI channel settings', () => {
-  it('take only the fixed model and a permission level, and are a channel, never a chat or task engine', () => {
+  it('take only the fixed model, a permission level and chat (a hierarchy table’s Gemini seat), and are never a task engine', () => {
     expect(channelConfigSchema.safeParse({ engine: 'gemini', model: GEMINI_MODEL }).success).toBe(true);
     expect(channelConfigSchema.safeParse({ engine: 'gemini', model: GEMINI_MODEL, permissions: 'full' }).success).toBe(true);
-    for (const config of [{ engine: 'gemini', model: 'gemini-3.8-flash-high' }, { engine: 'gemini', model: '' }, { engine: 'gemini' }, { engine: 'gemini', model: GEMINI_MODEL, chat: true }, { engine: 'gemini', model: GEMINI_MODEL, resumeId: '00000000-0000-4000-8000-000000000000' }, { engine: 'gemini', model: GEMINI_MODEL, permissions: 'root' }])
+    expect(channelConfigSchema.safeParse({ engine: 'gemini', model: GEMINI_MODEL, chat: true }).success).toBe(true);
+    for (const config of [{ engine: 'gemini', model: 'gemini-3.8-flash-high' }, { engine: 'gemini', model: '' }, { engine: 'gemini' }, { engine: 'gemini', model: 'gemini-3.8-flash-high', chat: true }, { engine: 'gemini', model: GEMINI_MODEL, resumeId: '00000000-0000-4000-8000-000000000000' }, { engine: 'gemini', model: GEMINI_MODEL, permissions: 'root' }])
       expect(channelConfigSchema.safeParse(config).success).toBe(false);
     expect(engineConfigSchema.safeParse({ engine: 'gemini', model: GEMINI_MODEL }).success).toBe(false);
     expect(startSessionSchema.safeParse({ sessionId: 'g1', cwd: '/p', config: { engine: 'gemini', model: GEMINI_MODEL }, cols: 80, rows: 24 }).success).toBe(true);

@@ -47,10 +47,12 @@ export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 export interface ShellChannelConfig { engine: 'shell' }
 /**
  * Gemini CLI (`agy`) running in a terminal tile. Kept apart from CLIEngine on purpose: code written for Claude and Codex
- * often says `engine === 'claude' ? … : …` and would treat a third agent as Codex. A Gemini channel has no chat, resume,
- * usage, memory or Round Table seat; it is the real CLI in a terminal. The model is always GEMINI_MODEL (shared/gemini.ts).
+ * often says `engine === 'claude' ? … : …` and would treat a third agent as Codex. A Gemini channel has no resume,
+ * usage, memory or tasks; it is the real CLI in a terminal. The model is always GEMINI_MODEL (shared/gemini.ts).
+ * `chat`: the hidden, read-only Gemini seat of a hierarchy Round Table (from 1.20): agy's ACP server (`agy acp`), never a
+ * channel of its own. isAgentConfig stays false for it.
  */
-export interface GeminiChannelConfig { engine: 'gemini'; model: string; permissions?: PermissionLevel }
+export interface GeminiChannelConfig { engine: 'gemini'; model: string; permissions?: PermissionLevel; chat?: boolean }
 export type ChannelEngine = CLIEngine | 'gemini' | 'shell';
 export type ChannelConfig = CLIEngineConfig | GeminiChannelConfig | ShellChannelConfig;
 /** Claude Code or Codex: the channels with chat, resume, usage, memory, tasks and Round Table seats. */
@@ -62,7 +64,7 @@ export type WorkspaceBinding =
   | { mode: 'independent'; cwd: string };
 
 /** A Round Table this chat channel leads, kept with the workspace so it is opened again when both chats run after a restart. */
-export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number; /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }
+export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number; /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; /** Its hidden Gemini seat (challenger and second reviewer), when agy was found. */ challenger?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }
 export interface Session {
   roundTable?: SavedRoundTable;
   budget?: import('./productivity').SessionBudget;

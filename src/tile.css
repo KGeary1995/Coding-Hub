@@ -308,3 +308,9 @@
 .chain-seats { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font: 400 12px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .chain-seats li { display: flex; align-items: center; gap: 6px; } .chain-seats strong { font-weight: 600; } .chain-seats .working strong { color: var(--tr-fg-strong); }
 .chain-seats .seat-claude + strong { color: var(--tr-ch-claude); } .chain-seats .seat-codex + strong { color: var(--tr-ch-codex); } .chain-seats .seat-planner + strong { color: var(--tr-ch-planner); }
+/* A hierarchy table's Gemini seat (challenger and second reviewer), in Gemini's channel colour. */
+.seat-hex.seat-gemini, .table-seats .seat-gemini { background: var(--tr-ch-gemini); } .chain-seats .seat-gemini + strong { color: var(--tr-ch-gemini); }
+.chat-message.assistant.table-gemini { padding-left: 10px; border-left: 1px solid var(--tr-ch-gemini); } .table-gemini .chat-author { color: var(--tr-ch-gemini); }
+/* Gemini's challenges to the plan, with the planner's answers; a finding's source and Gemini's word on it. */
+.chain-challenges { width: 100%; text-transform: none; letter-spacing: normal; font-size: 12px; } .chain-challenges ol { margin: 4px 0 0; padding-left: 20px; } .chain-challenges li { margin: 2px 0; }
+.chain-challenges small, .finding-origin { display: block; color: var(--tr-fg-dim); } .chain-challenges .accepted small { color: var(--tr-fg-muted); }

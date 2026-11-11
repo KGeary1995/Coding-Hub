@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineInfo } from '../../../shared/ipc';
 import { startSessionSchema } from '../../../shared/schemas';
-import { buildGeminiLaunch, buildLaunch, launchedLevel } from './engine-adapter';
+import { buildGeminiChatLaunch, buildGeminiLaunch, buildLaunch, launchedLevel } from './engine-adapter';
 import { GEMINI_MODEL } from '../../../shared/gemini';
 
 const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.296', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null });
@@ -82,5 +82,17 @@ describe('Gemini CLI launch', () => {
     expect(() => buildGeminiLaunch({ ...config, model: 'gemini-3.8-flash-high' }, agy)).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_MODEL' }));
     expect(() => buildGeminiLaunch(config, { ...agy, engine: 'codex' })).toThrow(expect.objectContaining({ code: 'ENGINE_MISMATCH' }));
     expect(() => buildGeminiLaunch(config, { ...agy, available: false, error: 'not found' })).toThrow(expect.objectContaining({ code: 'ENGINE_UNAVAILABLE' }));
+  });
+});
+describe('Gemini Round Table seat launch', () => {
+  const agy: EngineInfo = { engine: 'gemini', available: true, executable: '/agy', version: '1.5.6', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsMode: true, supportsSkipPermissions: true, supportsAcp: true, error: null };
+  const config = { engine: 'gemini' as const, model: GEMINI_MODEL, chat: true };
+  it('runs agy acp with no flags (the model and plan mode are set in the protocol), never skipping permissions, at any level', () => {
+    for (const permissions of ['ask', 'edits', 'full'] as const) expect(buildGeminiChatLaunch({ ...config, permissions }, agy)).toEqual(['acp']);
+  });
+  it('refuses another model, a CLI without its ACP server, and a missing agy', () => {
+    expect(() => buildGeminiChatLaunch({ ...config, model: 'gemini-4-argon-medium' }, agy)).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_MODEL' }));
+    expect(() => buildGeminiChatLaunch(config, { ...agy, supportsAcp: false })).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_ACP' }));
+    expect(() => buildGeminiChatLaunch(config, { ...agy, available: false, error: 'not found' })).toThrow(expect.objectContaining({ code: 'ENGINE_UNAVAILABLE' }));
   });
 });

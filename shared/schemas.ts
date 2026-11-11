@@ -22,11 +22,12 @@ export const permissionLevel = (config: { permissions?: 'ask' | 'edits' | 'full'
 const permissions = permissionLevelSchema.optional();
 const chatImage = z.object({ mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), data: z.string().min(1).max(14 * 1024 * 1024).regex(/^[A-Za-z0-9+/=]+$/) }).strict();
 /** A Round Table finding as saved with its table and passed back when the table opens again (shared/findings.ts). */
-export const findingSchema = z.object({ id: z.string().regex(/^F\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), evidence: z.string().max(500), text: z.string().min(1).max(500), status: z.enum(['open', 'fixed', 'declined', 'verified']), response: z.string().max(500), check: z.string().max(500), reviewedAt: z.string().max(64).nullable(), changedAt: z.string().max(64).nullable(), filesChanged: z.boolean().optional(), round: z.number().int().min(0).max(5), at: z.iso.datetime() }).strict();
+export const findingSchema = z.object({ id: z.string().regex(/^F\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), evidence: z.string().max(500), text: z.string().min(1).max(500), status: z.enum(['open', 'fixed', 'declined', 'verified']), response: z.string().max(500), check: z.string().max(500), reviewedAt: z.string().max(64).nullable(), changedAt: z.string().max(64).nullable(), filesChanged: z.boolean().optional(), round: z.number().int().min(0).max(5), at: z.iso.datetime(), source: z.literal('gemini').optional(), gemini: z.enum(['agree', 'dispute']).optional(), geminiNote: z.string().max(500).optional(), duplicateOf: z.string().regex(/^F\d{1,3}$/).optional() }).strict();
 /** What a table keeps across restarts: its findings, and the text of a message that was waiting for the agents (images are not kept). */
-const chainStep = z.enum(['idle', 'planning', 'plan-review', 'implementing', 'reviewing', 'fixing', 'final', 'final-fixing', 'done', 'needs-you', 'stopped']);
+const chainStep = z.enum(['idle', 'planning', 'challenging', 'plan-responding', 'plan-review', 'implementing', 'second-reviewing', 'reviewing', 'comparing', 'fixing', 'final', 'final-fixing', 'done', 'needs-you', 'stopped']);
+const planChallenge = z.object({ id: z.string().regex(/^C\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), text: z.string().min(1).max(500), answer: z.enum(['accepted', 'rejected']).optional(), reason: z.string().max(500).optional() }).strict();
 /** A hierarchy table's work, saved with it (shared/chat.ts SavedChain). */
-export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer']).optional(), task: z.string().max(200_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000) }).strict();
+export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer', 'challenger']).optional(), task: z.string().max(200_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000), challenges: z.array(planChallenge).max(50).optional(), challenged: z.literal(true).optional(), geminiReviewed: z.literal(true).optional(), compared: z.literal(true).optional() }).strict();
 const tableRecord = { findings: z.array(findingSchema).max(50).optional(), waiting: z.string().max(200_000).optional(), waitingImages: z.array(chatImage).max(10).refine((images) => images.reduce((sum, image) => sum + image.data.length, 0) <= 6_000_000, 'Too much image data to keep.').optional() };
 /** A shared memory project key, as memory folders are named (memory.ts projectSchema). */
 export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
@@ -36,7 +37,7 @@ export const engineConfigSchema = z.discriminatedUnion('engine', [
   z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
 /** A Gemini CLI channel (a terminal running agy). Only in channelConfigSchema: it is not an engine for chats, tasks or tables. */
-export const geminiConfigSchema = z.object({ engine: z.literal('gemini'), model: z.literal(GEMINI_MODEL), permissions }).strict();
+export const geminiConfigSchema = z.object({ engine: z.literal('gemini'), model: z.literal(GEMINI_MODEL), permissions, chat: z.boolean().optional() }).strict();
 /** Every channel type: the agents, Gemini CLI, and a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, geminiConfigSchema, z.object({ engine: z.literal('shell') }).strict()]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
@@ -55,7 +56,7 @@ export const savedWorkspaceSchema = z.object({
     binding: z.discriminatedUnion('mode', [z.object({ mode: z.literal('workspace') }).strict(), z.object({ mode: z.literal('independent'), cwd: directory }).strict()]),
     budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
     preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
-    roundTable: z.object({ partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional(), chain: savedChainSchema.optional() }).strict().optional(),
+    roundTable: z.object({ partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional(), challenger: identifier.optional(), chain: savedChainSchema.optional() }).strict().optional(),
     createdAt: z.string().datetime(),
   }).strict()).min(1).max(MAX_CHANNELS),
   tiles: z.array(z.object({
@@ -68,7 +69,7 @@ export const savedWorkspaceSchema = z.object({
   const ids = new Set(workspace.sessions.map((session) => session.id));
   const tileIds = new Set(workspace.tiles.map((tile) => tile.sessionId));
   /** A Round Table's partner runs inside its lead's tile, so it has none (1.16.0 and 1.16.1 saved one; hydrate drops it). */
-  const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable ? [session.roundTable.partner, session.roundTable.planner].filter((id): id is string => Boolean(id) && id !== session.id && ids.has(id!)) : []));
+  const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger].filter((id): id is string => Boolean(id) && id !== session.id && ids.has(id!)) : []));
   if (ids.size !== workspace.sessions.length || tileIds.size !== workspace.tiles.length || [...tileIds].some((id) => !ids.has(id)) || [...ids].some((id) => !seated.has(id) && !tileIds.has(id))) context.addIssue({ code: 'custom', message: 'Each channel must have exactly one grid tile.' });
   if (workspace.focusedSessionId && !ids.has(workspace.focusedSessionId)) context.addIssue({ code: 'custom', message: 'The focused session does not exist.' });
   for (const tile of workspace.tiles) if (tile.x + tile.w > 12 || tile.w < tile.minW || tile.h < tile.minH) context.addIssue({ code: 'custom', message: 'Invalid grid dimensions.' });
@@ -90,9 +91,9 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
   runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), challenger: runReferenceSchema.optional(), chain: savedChainSchema.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-continue') }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-continue'), skipGemini: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']) }).strict(),

@@ -45,6 +45,8 @@ export function chatSent(sessionId: string, text: string, images: ChatImage[], b
 export function chatAnswered(sessionId: string, requestId: string, allow: boolean) {
   update(sessionId, (current) => ({ ...current, items: current.items.map((item) => item.kind === 'permission' && item.id === requestId ? { ...item, answer: allow ? 'allowed' : 'denied' } : item) }));
 }
+/** A line from Trace in a chat's thread that is not an error (a Round Table opened without its Gemini seat, say). */
+export function chatNotice(sessionId: string, text: string) { update(sessionId, (current) => ({ ...current, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text, error: false }] })); }
 export function chatFailed(sessionId: string, text: string) { update(sessionId, (current) => ({ ...current, busy: false, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text, error: true }] })); }
 
 /** Claude's side of the conversation, from the host. */

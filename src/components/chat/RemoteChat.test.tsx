@@ -25,4 +25,16 @@ describe('a hierarchy Round Table on the phone and other computers', () => {
     expect(html).not.toContain('[Step: plan]'); expect(html).toContain('Claude · Planner'); expect(html).toContain('Claude · Builder'); expect(html).toContain('Codex · Reviewer');
     expect(html).not.toContain('Models');
   });
+  it('shows the Gemini seat’s messages too, follows them, and its step on the bar', () => {
+    const withGemini: RoundTableState = { ...table, challenger: { sessionId: 'gem', runId: 'g', engine: 'gemini' }, chain: { ...table.chain!, step: 'second-reviewing' } };
+    threads = {
+      lead: { runId: 'l', items: [said('b1', 1, 'Built the footer.')], results: {}, busy: false, model: null, table: withGemini },
+      gem: { runId: 'g', items: [{ kind: 'user', id: 'u', order: 0, text: '[Step: Gemini review] …', images: [], at: '' }, said('g1', 2, 'FINDING low a.ts:1 — x')], results: {}, busy: true, model: null },
+    };
+    const follow = vi.fn(() => () => {});
+    const html = renderToStaticMarkup(<RemoteChat sessionId="lead" runId="l" engine="claude" running send={async () => {}} follow={follow} />);
+    expect(html).toContain('Gemini reviewing, before Codex…'); expect(html).toContain('Gemini · Challenger'); expect(html).toContain('FINDING low a.ts:1');
+    expect(html).not.toContain('[Step: Gemini review]'); expect(html).toContain('Gemini is working');
+  });
 });
+

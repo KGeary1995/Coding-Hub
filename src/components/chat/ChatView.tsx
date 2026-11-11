@@ -35,25 +35,30 @@ export function ChatView({ session }: { session: Session }) {
   const plannerId = table?.planner?.sessionId ?? session.roundTable?.planner ?? null;
   const plannerThread = useChatStore((state) => plannerId ? state.threads[plannerId] ?? EMPTY : EMPTY);
   const plannerSession = useWorkspaceStore((state) => plannerId ? state.sessions.find((item) => item.id === plannerId && item.id !== session.id) ?? null : null);
+  /** Its Gemini seat (challenger and second reviewer), when it has one: its messages join this thread too. */
+  const challengerId = hierarchy ? table?.challenger?.sessionId ?? session.roundTable?.challenger ?? null : null;
+  const challengerThread = useChatStore((state) => challengerId ? state.threads[challengerId] ?? EMPTY : EMPTY);
+  const challengerSession = useWorkspaceStore((state) => challengerId ? state.sessions.find((item) => item.id === challengerId && item.id !== session.id) ?? null : null);
   /** This chat sits at another channel's table: it is written to from there. */
-  const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id || thread.table?.planner?.sessionId === session.id)?.[0] ?? null);
+  const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id || thread.table?.planner?.sessionId === session.id || thread.table?.challenger?.sessionId === session.id)?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
   const engine = session.config.engine === 'codex' ? 'codex' as const : 'claude' as const;
   const permissions: PermissionLevel = isAgentConfig(session.config) ? permissionLevel(session.config) : 'ask';
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
-  const busy = chat.busy || (table !== null && (partnerThread.busy || plannerThread.busy));
+  const busy = chat.busy || (table !== null && (partnerThread.busy || plannerThread.busy || challengerThread.busy));
   const leadTokens = useHubStore((state) => channelToday(session.id, state.usage).tokens);
   const partnerTokens = useHubStore((state) => table ? channelToday(table.partner.sessionId, state.usage).tokens : 0);
   const tableTokens = table ? { lead: leadTokens, partner: partnerTokens } : undefined;
   const plannerTokens = useHubStore((state) => table?.planner ? channelToday(table.planner.sessionId, state.usage).tokens : 0);
+  // Trace records no usage for Gemini (agy reports none it can read), so its seat shows no tokens.
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState('');
   const [viewing, setViewing] = useState<string | null>(null); const [opening, setOpening] = useState(false);
   const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const input = useRef<HTMLTextAreaElement>(null); const file = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (viewing) dialog.current?.showModal(); else dialog.current?.close(); }, [viewing]);
   // Follow new content while the person is at the bottom; scrolling up to read stops that.
-  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, partnerThread, plannerThread]);
+  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, partnerThread, plannerThread, challengerThread]);
   useLayoutEffect(() => { const area = input.current; if (area) { area.style.height = 'auto'; area.style.height = Math.min(area.scrollHeight, 220) + 'px'; } }, [text]);
 
   /** At a table, the partner's replies, approvals and notices join this thread in the order they came; Trace's prompts to it stay out. */
@@ -63,9 +68,9 @@ export function ChatView({ session }: { session: Session }) {
     const own = chat.items.map((item) => ({ item, from: 'lead' as const }));
     if (!table) return own;
     // In a hierarchy Trace's prompts to the builder stay out too: the person's own messages show, at their order.
-    return [...own.filter(({ item }) => !hierarchy || item.kind !== 'user' || !item.text.startsWith('[')), ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? plannerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : [])]
+    return [...own.filter(({ item }) => !hierarchy || item.kind !== 'user' || !item.text.startsWith('[')), ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? plannerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : []), ...(hierarchy ? challengerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'challenger' as const })) : [])]
       .sort((a, b) => (a.item.order ?? 0) - (b.item.order ?? 0));
-  }, [chat.items, partnerThread.items, plannerThread.items, table, showPartner, partnerSession, hierarchy]);
+  }, [chat.items, partnerThread.items, plannerThread.items, challengerThread.items, table, showPartner, partnerSession, hierarchy]);
 
   const attach = async (files: Blob[]) => {
     setError('');
@@ -100,6 +105,7 @@ export function ChatView({ session }: { session: Session }) {
   const partnerState = partnerSession ? seatState(partnerSession, partnerThread.busy) : null;
   const partnerLive = partnerSession?.status === 'running' || partnerSession?.status === 'starting';
   const plannerLive = plannerSession?.status === 'running' || plannerSession?.status === 'starting';
+  const challengerLive = !challengerSession || challengerSession.status === 'running' || challengerSession.status === 'starting';
   /** A running hierarchy channel without its table open: why (and Reopen, when a seat can be started again). */
   const detached = running && !table && hierarchy && session.roundTable ? hierarchyDetached(session.id) : null;
   /** An open table is closed through the host, whose `closed` event forgets it (as from a phone); a saved one is forgotten here. */
@@ -111,15 +117,16 @@ export function ChatView({ session }: { session: Session }) {
     { role: 'Planner', name: plannerName, colour: 'planner', state: plannerSession ? seatState(plannerSession, plannerThread.busy) : 'not seated', tokens: plannerTokens },
     { role: 'Builder', name: builderName, colour: 'claude', state: seatState(session, chat.busy), tokens: leadTokens },
     { role: 'Reviewer', name: AGENT.codex, colour: 'codex', state: partnerSession ? seatState(partnerSession, partnerThread.busy) : 'not seated', tokens: partnerTokens },
+    ...(table.challenger ? [{ role: 'Challenger and second reviewer' as const, name: 'Gemini', colour: 'gemini' as const, state: challengerSession ? seatState(challengerSession, challengerThread.busy) : 'not seated', tokens: 0 }] : []),
   ] : undefined;
-  const workers = table ? [chat.busy ? builderName : null, partnerThread.busy ? AGENT[table.partner.engine] : null, plannerThread.busy ? plannerName : null].filter(Boolean) : [agent];
+  const workers = table ? [chat.busy ? builderName : null, partnerThread.busy ? AGENT[table.partner.engine] : null, plannerThread.busy ? plannerName : null, challengerThread.busy ? 'Gemini' : null].filter(Boolean) : [agent];
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table && hierarchy ? (table.chain?.step === 'plan-review' ? 'Say what to change in the plan, or press Approve plan' : (table.chain?.step === 'stopped' || table.chain?.step === 'needs-you') && table.chain.task ? 'Reply to go on with this task (a new task starts once it is done)' : 'Give the Round Table a task (Enter to send)') : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
     {table && hierarchy && <ChainBar table={table} busy={busy} seats={seats} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} reviewer={partnerSession} onModel={(target, model) => { if (isAgentConfig(target.config)) useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
       onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
-    {!table && hierarchy && session.roundTable && <ChainBar table={{ kind: 'hierarchy', partner: { sessionId: session.roundTable.partner, runId: '', engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, ...(session.roundTable.chain ? { chain: session.roundTable.chain } : {}), ...(session.roundTable.findings ? { findings: session.roundTable.findings } : {}) }} busy={false} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} reviewer={partnerSession} onModel={(target, model) => { if (isAgentConfig(target.config)) useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') closeTable(); }} detached={detached ? { note: detached, ...(partnerSession && plannerSession && (!partnerLive || !plannerLive) ? { onReopen: () => void reopenHierarchy(session.id).then((failure) => { if (failure) setError(failure); }) } : {}) } : undefined} />}
+    {!table && hierarchy && session.roundTable && <ChainBar table={{ kind: 'hierarchy', partner: { sessionId: session.roundTable.partner, runId: '', engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, ...(session.roundTable.chain ? { chain: session.roundTable.chain } : {}), ...(session.roundTable.findings ? { findings: session.roundTable.findings } : {}) }} busy={false} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} reviewer={partnerSession} onModel={(target, model) => { if (isAgentConfig(target.config)) useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') closeTable(); }} detached={detached ? { note: detached, ...(partnerSession && plannerSession && (!partnerLive || !plannerLive || !challengerLive) ? { onReopen: () => void reopenHierarchy(session.id).then((failure) => { if (failure) setError(failure); }) } : {}) } : undefined} />}
     {!table && !hierarchy && partnerSession && <div className="table-bar" role="group" aria-label="Round Table">
       <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${engine}`} /><i className={`seat-${partnerEngine}`} /></span>
       <strong>Round Table</strong>
@@ -136,6 +143,7 @@ export function ChatView({ session }: { session: Session }) {
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={builderName} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
         : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="planner" role="Planner" answer={answerFor(plannerSession)} view={setViewing} />
+        : from === 'challenger' ? <Item key={`challenger-${item.id}`} item={item} results={challengerThread.results} agent="Gemini" author="gemini" role="Challenger" answer={answerFor(challengerSession)} view={setViewing} />
         : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[partnerEngine]} author={partnerEngine} role={table ? (hierarchy ? 'Reviewer' : table.driver === partnerEngine ? 'driver' : 'reviewer') : undefined} answer={answerFor(partnerSession)} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
@@ -145,7 +153,7 @@ export function ChatView({ session }: { session: Session }) {
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         {!table && !seatedAt && !partnerSession && <button className="chat-icon" aria-label={`Round Table: add ${other}`} title={channels >= MAX_CHANNELS ? TABLE_FULL : `Round Table: bring ${other} into this conversation, in this channel`} disabled={!running || opening || channels >= MAX_CHANNELS} onClick={() => void openTable()}><Users size={16} /></button>}
-        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${table ? ` The same for ${AGENT[table.partner.engine]}${table.planner ? ' and the planner' : ''} at this table; ${table.planner ? 'the reviewer and planner stay' : 'the reviewer stays'} read-only.${table.planner ? ' At Full access they run commands without asking.' : ''}` : ''}`} value={permissions} onChange={(event) => void setPermissions(session.id, event.target.value as PermissionLevel).then((failure) => setError(failure ?? ''))}>
+        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${table ? ` The same for ${AGENT[table.partner.engine]}${table.planner ? ` and the planner${table.challenger ? ' and Gemini' : ''}` : ''} at this table; ${table.planner ? `the reviewer and planner${table.challenger ? ' and Gemini' : ''} stay` : 'the reviewer stays'} read-only.${table.planner ? ' At Full access they run commands without asking.' : ''}` : ''}`} value={permissions} onChange={(event) => void setPermissions(session.id, event.target.value as PermissionLevel).then((failure) => setError(failure ?? ''))}>
           {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
         </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />

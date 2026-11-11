@@ -255,6 +255,8 @@ export async function discoverGemini(env = hostEnvironment(), find: typeof findG
     info.supportsModel = advertisesFlag(help, '--model');
     info.supportsMode = advertisesFlag(help, '--mode');
     info.supportsSkipPermissions = advertisesFlag(help, '--dangerously-skip-permissions');
+    // Listed under "Available subcommands" as `  acp   Start the Agent Client Protocol (ACP) stdio server`.
+    info.supportsAcp = /^\s+acp\s/m.test(help);
     info.authentication = { state: 'unknown', checkedAt: new Date().toISOString(), message: 'Gemini CLI has no sign-in check that Trace can run; agy handles its own sign-in.' };
     info.available = true;
     return { info, executable };

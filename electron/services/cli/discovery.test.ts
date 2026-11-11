@@ -115,8 +115,8 @@ describe('Gemini CLI discovery', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'trace fake agy ')); directories.push(root);
     // A Node script stands in for agy here (the PATH lookup is tested above).
     const script = path.join(root, 'agy.cjs');
-    await writeFile(script, "if (process.argv[2] === '--version') console.log('1.5.6'); else console.error(['Usage of agy.exe:', '  --dangerously-skip-permissions  Auto-approve', '  --mode  Set the agent execution mode', '  --model  Model for the current CLI session'].join('\\n'));");
+    await writeFile(script, "if (process.argv[2] === '--version') console.log('1.5.6'); else console.error(['Usage of agy.exe:', '  --dangerously-skip-permissions  Auto-approve', '  --mode  Set the agent execution mode', '  --model  Model for the current CLI session', '', 'Available subcommands:', '  acp             Start the Agent Client Protocol (ACP) stdio server'].join('\\n'));");
     const result = await discoverGemini({ PATH: '' }, async () => ({ file: process.execPath, prefixArgs: [script], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: script }));
-    expect(result.info).toMatchObject({ engine: 'gemini', available: true, version: '1.5.6', supportsModel: true, supportsMode: true, supportsSkipPermissions: true, authentication: { state: 'unknown' } });
+    expect(result.info).toMatchObject({ engine: 'gemini', available: true, version: '1.5.6', supportsModel: true, supportsMode: true, supportsSkipPermissions: true, supportsAcp: true, authentication: { state: 'unknown' } });
   });
 });

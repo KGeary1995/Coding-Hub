@@ -53,15 +53,27 @@ export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent 
 /** The default models of a hierarchy table's Claude seats (the person can change them on its bar). */
 /** Each seat's model when it starts, unless changed under Models: the reviewer's too, so it does not inherit whatever Codex's own settings default to. */
 export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6-astra' } as const;
-/** A hierarchy Round Table's step (electron/services/chat/review-chain.ts). */
-export type ChainStep = 'idle' | 'planning' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
+/**
+ * A hierarchy Round Table's step (electron/services/chat/review-chain.ts). With a Gemini seat (from 1.20): challenging
+ * (Gemini challenges the plan), plan-responding (the planner answers the challenges), second-reviewing (Gemini reviews
+ * the build, before Codex and without its findings) and comparing (Gemini compares its findings with Codex's).
+ */
+export type ChainStep = 'idle' | 'planning' | 'challenging' | 'plan-responding' | 'plan-review' | 'implementing' | 'second-reviewing' | 'reviewing' | 'comparing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
+/** The steps Gemini works in: after each, Trace checks that the project's files did not change. */
+export const GEMINI_STEPS: readonly ChainStep[] = ['challenging', 'second-reviewing', 'comparing'];
+/** One of Gemini's challenges to a plan, and the planner's answer to it. */
+export interface PlanChallenge { id: string; severity: 'high' | 'medium' | 'low'; text: string; answer?: 'accepted' | 'rejected'; reason?: string }
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
-export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string }
+export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer' | 'challenger'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
+  /** Gemini's challenges to this task's plan, with the planner's answers; and whether Gemini already challenged, reviewed and compared for this task (once each). */
+  challenges?: PlanChallenge[]; challenged?: true; geminiReviewed?: true; compared?: true }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';
   /** The hierarchy's planner and final reviewer (a Claude chat); `partner` is its reviewer (Codex). */
   planner?: { sessionId: string; runId: string; engine: 'claude' };
+  /** The hierarchy's Gemini seat (from 1.20): challenges the plan, reviews the build before Codex, compares the findings. */
+  challenger?: { sessionId: string; runId: string; engine: 'gemini' };
   chain?: SavedChain;
   /** A hierarchy table was stopped and a seat's interrupted turn has not ended yet: Continue waits for it. */
   stopping?: boolean;
@@ -86,11 +98,11 @@ export type ChatRequest =
   /** What the agent may do without asking, from now on (this computer's window only). */
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
-  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain }
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; challenger?: { sessionId: string; runId: string }; chain?: SavedChain }
   /** A hierarchy table's plan: approve it (the builder starts), or send it back with what to change. */
   | { action: 'table-plan'; sessionId: string; runId: string; approve: boolean; note: string }
-  /** Picks a stopped hierarchy table up at its step. */
-  | { action: 'table-continue'; sessionId: string; runId: string }
+  /** Picks a stopped hierarchy table up at its step; `skipGemini`: a stopped Gemini step is passed over instead. */
+  | { action: 'table-continue'; sessionId: string; runId: string; skipGemini?: boolean }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }

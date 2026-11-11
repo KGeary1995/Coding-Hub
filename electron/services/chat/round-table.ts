@@ -7,7 +7,7 @@ type Engine = 'claude' | 'codex';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
 export interface TableHost {
   /** `permissions`: the level the person set for the run; at Full a read-only seat runs its commands without asking. */
-  run(runId: string): { sessionId: string; engine: Engine; cwd: string; owner: number; permissions?: PermissionLevel } | null;
+  run(runId: string): { sessionId: string; engine: Engine | 'gemini'; cwd: string; owner: number; permissions?: PermissionLevel } | null;
   send(runId: string, text: string, images: ChatImage[]): void;
   setReadOnly(runId: string, readOnly: boolean): void;
   answer(runId: string, requestId: string, allow: boolean): void;
@@ -80,6 +80,8 @@ export class RoundTables {
   }
   private seat(runId: string): Seat {
     const run = this.host.run(runId); if (!run) throw new HubError('TABLE_RUN', 'That chat is not running.');
+    // Gemini sits only at a hierarchy table (review-chain.ts), as its challenger and second reviewer.
+    if (run.engine === 'gemini') throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     return { runId, sessionId: run.sessionId, engine: run.engine, busy: false, text: '', answer: null, briefed: false };
   }
   private state(table: Table): RoundTableState {
@@ -297,7 +299,7 @@ export class RoundTables {
   private remember(runId: string, event: ChatEvent) {
     const line = event.type === 'user' ? `The person: ${event.text}` : event.type === 'assistant' ? event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n') : '';
     if (!line.trim()) return;
-    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? NAME[run.engine] : 'Agent'}: `;
+    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? run.engine === 'gemini' ? 'Gemini' : NAME[run.engine] : 'Agent'}: `;
     const list = this.recent.get(runId) ?? []; list.push(`${who}${line.slice(0, 2000)}`); if (list.length > RECENT * 2) list.splice(0, list.length - RECENT * 2);
     this.recent.set(runId, list);
   }
