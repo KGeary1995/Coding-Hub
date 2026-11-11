@@ -158,12 +158,12 @@ const CHAIN_STEPS: { step: string; label: string; of: string[] }[] = [
  * The bar of a hierarchy Round Table: where the task is among plan, approve, build, review, fix and final review; the
  * plan approval; Stop and Continue; each Claude seat's model (used when that seat starts); findings and a kept message.
  */
-export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead: Session; planner: Session | null; onRequest: (request: ChainAction) => void; onModel: (session: Session, model: string) => void }) {
+export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead?: Session; planner?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const current = CHAIN_STEPS.findIndex((item) => at && item.of.includes(at));
   const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? `Stopped${chain?.note ? `: ${chain.note}` : ''}` : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
-  const model = (session: Session | null, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
-  const setModel = (session: Session | null, value: string) => { if (session && session.config.engine === 'claude') onModel(session, value.trim()); };
+  const model = (session: Session | null | undefined, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
+  const setModel = (session: Session | null | undefined, value: string) => { if (session && session.config.engine === 'claude') onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-claude" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>
@@ -172,11 +172,11 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     {step === 'plan-review' && <button className="button primary" onClick={() => onRequest({ action: 'table-plan', approve: true, note: '' })}>Approve plan</button>}
     {step === 'stopped' && chain?.stoppedAt && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
     {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
-    <details className="chain-models"><summary>Models</summary>
+    {onModel && lead && <details className="chain-models"><summary>Models</summary>
       <label>Planner and final review<input aria-label="Planner model" defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
       <label>Builder<input aria-label="Builder model" defaultValue={model(lead, HIERARCHY_MODELS.builder)} onBlur={(e) => setModel(lead, e.target.value)} spellCheck={false} /></label>
       <small>Used when that seat starts again (restart the channel). The reviewer is Codex, with its own settings.</small>
-    </details>
+    </details>}
     <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
