@@ -186,6 +186,19 @@ A Round Table puts you, Claude Code and Codex in one conversation. In a **Claude
 
 - **Findings:** the reviewer reports each problem on its own line as `FINDING high|medium|low path:line — the problem`, and Trace numbers them F1, F2, …. The driver answers `FIXED F1: …` or `DECLINED F1: …`, and the reviewer checks it with `VERIFIED F1` or `REOPENED F1: …`. Each agent is told, with the other's answer, which findings wait for it. The table bar lists every finding with its evidence, answers, and the files it was reviewed and answered on (a hash of the repository, `repositoryState`). The next round waits until the record is written and the files' state is taken; a finding from a turn during which files changed is marked (the driver works while the reviewer reads). The record, and a message waiting for the agents (published as soon as it is sent, with its images up to 6,000,000 base64 characters; beyond that the bar says how many would be lost), are saved with the table and come back after a restart. A kept message waits for **Send now** or **Drop it**; a new message is refused until then, and Needs you lists it. Closing a table first saves its review record (every finding, verified ones included) as a note, and each finding not yet verified as an open item, in the channel's memory project. If memory cannot be written, the table stays open and says so; a table closed elsewhere keeps its findings with the channel, and Needs you offers **Save to memory**.
 
+### Hierarchy Round Table
+
+**+ Channel → Round Table (hierarchy)** seats three agents in the project folder, in one tile: the **builder** (this Claude chat, `claude-opus-5-5` by default, the only seat that edits files), the **planner and final reviewer** (a hidden Claude chat, `claude-fable-5-2` by default, read-only) and the **reviewer** (a hidden Codex chat, read-only). Trace runs fixed steps (`electron/services/chat/review-chain.ts`) and passes each step's output to the next:
+
+1. **Plan:** the planner reads the project and writes numbered steps, files and checks, ending with `PLAN READY`.
+2. **Approve:** the table waits for you. **Approve plan** starts the builder; anything you write instead goes back to the planner as what to change.
+3. **Build:** the builder implements the plan and reports what it changed.
+4. **Review:** Codex reviews the files and reports `FINDING` lines, or `NO FINDINGS`.
+5. **Fix:** the builder answers each finding `FIXED` or `DECLINED`; Codex checks them and looks again, for up to two review rounds.
+6. **Final review:** the planner checks the work against the task, its plan and the findings, and ends with `APPROVED`, or `CHANGES NEEDED:` and what to change. Changes go back to the builder and then to the planner again, up to twice; after that the table stops and asks you.
+
+A task given to the table (from Tasks, or typed) is done only on `APPROVED`; while the plan waits, or the table needs you, the task is marked so and Needs you lists it. A message you write during the steps goes along with the next one. **Stop** halts the seat at work and **Continue** runs that step again; an error stops it the same way, and after a restart the table comes back stopped at its step, with its plan, findings and a kept message. Each Claude seat's model is on the bar under **Models**, used when that seat starts. Reviewer edits are declined as at any table.
+
 ## Tasks
 
 **Tasks** (top bar, or G T) gives an agent a job, optionally limited to some files. **Save and send** types it into the channel.
