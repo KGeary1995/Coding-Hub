@@ -602,6 +602,9 @@ export class RemoteServer {
     // Linking the same computer again replaces its old key rather than leaving it working too.
     const all = this.devices(); const kept = all.filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId));
     const replaced = new Set(all.filter((item) => !kept.includes(item)).map((item) => item.id));
+    // Its phones (keys given here through it, relayKey `<its id>:<phone>`) move to its new id: the same computer still
+    // speaks for them, so it can remove them later, and removing the computer here takes them with it.
+    for (const item of kept) { const owner = item.relayKey?.split(':')[0]; if (owner && replaced.has(owner)) item.relayKey = `${device.id}${item.relayKey!.slice(owner.length)}`; }
     this.saveDevices([...kept, device]); this.dropped(replaced);
     return { token, device: { id: device.id, name: device.name, kind }, ...(kind === 'computer' && this.identity ? { computer: this.identity } : {}) };
   }

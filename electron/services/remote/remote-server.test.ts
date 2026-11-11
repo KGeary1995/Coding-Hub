@@ -388,6 +388,19 @@ describe('phone screen of a Windows computer', () => {
     const { key, spare, closed, open } = await relayed();
     await key('p1'); expect(await closed).toBe(true); expect(await open(spare).first).toBe('refused');
   });
+  it('a computer linked again still speaks for its phones: removing one through it closes its screen', async () => {
+    const { server, spare, closed, open } = await relayed();
+    // The same computer (same machine id) links again: a new key and a new device id.
+    const relinked = await computer(server);
+    const response = await fetch(base(server) + '/api/phone-key/revoke', { method: 'POST', headers: { Authorization: `Bearer ${relinked}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ relayKey: 'p1' }) });
+    expect(await response.json()).toEqual({ ok: true, removed: 1 }); expect(await closed).toBe(true);
+    expect(server.status().devices.some((device) => device.name === 'Relayed phone')).toBe(false); expect(await open(spare).first).toBe('refused');
+  });
+  it('removing a computer linked again takes the phones it gave keys to before', async () => {
+    const { server, closed } = await relayed(); await computer(server);
+    const id = server.status().devices.find((device) => device.kind === 'computer')!.id; server.revoke(id);
+    expect(await closed).toBe(true); expect(server.status().devices.some((device) => device.name === 'Relayed phone')).toBe(false);
+  });
   it('linking another phone or computer leaves a phone\'s open screen alone', async () => {
     const { server, closed } = await relayed();
     await paired(server); await computer(server);
