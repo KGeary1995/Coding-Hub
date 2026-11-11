@@ -1,18 +1,33 @@
 import http from 'node:http';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { z } from 'zod';
-import { load } from '../workbench/local-store';
+import { load, save } from '../workbench/local-store';
 import { RfbSession, type ScreenInput, type ScreenSource } from './rfb-server';
 import { MAX_DISPLAYS } from '../../../shared/screen';
 
 /** The screen service's switch, written by Trace's settings and read by the service, which quits when it turns off. */
 export const SHARE_FILE = 'screen-share.json';
-const shareSchema = z.object({ enabled: z.boolean() }).strict();
+/** `elevated`: the service runs as administrator (a scheduled task starts it), so it can also control apps that do. */
+const shareSchema = z.object({ enabled: z.boolean(), elevated: z.boolean().optional() }).strict();
+export type ShareSetting = z.infer<typeof shareSchema>;
+export function shareSetting(root: string): ShareSetting { try { return load(root, SHARE_FILE, shareSchema, { enabled: false }); } catch { return { enabled: false }; } }
 /** Only what the service needs from Trace's paired devices; the remote owns that file and its full shape. */
 const devicesSchema = z.array(z.object({ name: z.string(), tokenHash: z.string(), kind: z.enum(['phone', 'computer']).optional() }).passthrough()).max(20);
-export function shareEnabled(root: string) { try { return load(root, SHARE_FILE, shareSchema, { enabled: false }).enabled; } catch { return false; } }
+/**
+ * Trace's own key to the service, for a phone it has let in (the phone opens its Screen through Trace's remote, with a
+ * one-time ticket; the service never sees the phone's key). It lives in Trace's data folder, which only this user reads.
+ */
+export const LOCAL_FILE = 'screen-service-local.json';
+const localSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict();
+export function localScreenToken(root: string): string | null { try { return load(root, LOCAL_FILE, localSchema.nullable(), null)?.token ?? null; } catch { return null; } }
+/** Made by the service when it starts, if there is none yet. */
+export function ensureLocalScreenToken(root: string) { const token = localScreenToken(root); if (token) return token; const made = randomBytes(32).toString('base64url'); save(root, LOCAL_FILE, { token: made }); return made; }
+/** The name a phone is shown by, at the clock: printable, short. */
+const viewerName = (value: string | string[] | undefined) => (typeof value === 'string' ? value.replace(/[^\p{L}\p{N} .'()_-]/gu, '').trim().slice(0, 80) : '') || 'A phone';
+export function shareEnabled(root: string) { return shareSetting(root).enabled; }
+export function shareElevated(root: string) { return shareSetting(root).elevated === true; }
 /** How long a capture may take to start before the viewer is told; it waits longer (ANSWER_TIMEOUT in screen-sharing.ts). */
 export const OPEN_TIMEOUT = 20000;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -47,6 +62,8 @@ export class ScreenService {
     });
     server.on('upgrade', (request, socket, head) => void this.upgrade(request, socket, head).catch(() => socket.destroy()));
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
+    // Trace's own key, for phones it lets in, is made here once if there is none yet.
+    try { ensureLocalScreenToken(this.root); } catch { /* Then only linked computers get in. */ }
     this.server = server; return (server.address() as AddressInfo).port;
   }
   async close() { this.disconnect(); const server = this.server; this.server = null; if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }); }
@@ -70,12 +87,15 @@ export class ScreenService {
     if (request.headers.upgrade?.toLowerCase() !== 'trace-screen') return this.refuse(socket, 400, 'Not a screen connection.');
     const header = request.headers.authorization; const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
     let devices: z.infer<typeof devicesSchema> = []; try { devices = load(this.root, 'remote-devices.json', devicesSchema, []); } catch { /* Unreadable: nobody is let in. */ }
-    const device = /^[A-Za-z0-9_-]{43}$/.test(token) ? devices.find((item) => same(item.tokenHash, hash(token))) : undefined;
-    if (!device) return this.refuse(socket, 401, `${this.name()} no longer accepts this computer. Link it again in Settings → Other computers.`);
-    if (device.kind !== 'computer') return this.refuse(socket, 403, 'Only linked computers can see this screen; phones cannot.');
+    // Trace's own key: a phone Trace's remote let in with a ticket, named in X-Trace-Viewer. Phones' own keys stay refused.
+    const local = localScreenToken(this.root); const viaTrace = local !== null && /^[A-Za-z0-9_-]{43}$/.test(token) && same(token, local);
+    const device = viaTrace ? undefined : /^[A-Za-z0-9_-]{43}$/.test(token) ? devices.find((item) => same(item.tokenHash, hash(token))) : undefined;
+    if (!viaTrace && !device) return this.refuse(socket, 401, `${this.name()} no longer accepts this computer. Link it again in Settings → Other computers.`);
+    if (device && device.kind !== 'computer') return this.refuse(socket, 403, 'A phone opens this screen through Trace’s phone access (Screen in the phone app), not with its own key.');
+    const name = viaTrace ? viewerName(request.headers['x-trace-viewer']) : device!.name;
     if (!shareEnabled(this.root)) return this.refuse(socket, 403, `Screen sharing is off on ${this.name()}. There, in Trace, turn on Settings → Other computers → Share this screen.`);
     this.disconnect();
-    const viewer: NonNullable<ScreenService['viewer']> = { name: device.name, socket, session: null, capture: null }; this.viewer = viewer;
+    const viewer: NonNullable<ScreenService['viewer']> = { name, socket, session: null, capture: null }; this.viewer = viewer;
     const left = () => { if (this.viewer === viewer) this.disconnect(); }; socket.on('close', left); socket.on('end', left);
     // A capture that never starts (the hidden capture window hung, say) must not leave the viewer waiting with no reason.
     // ?display=N: one display (1 and up, from the left) rather than all of them side by side.
@@ -95,6 +115,6 @@ export class ScreenService {
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: trace-screen\r\nConnection: Upgrade\r\n${displays !== undefined ? `X-Trace-Displays: ${displays}\r\nX-Trace-Display: ${shown ?? 0}\r\n` : ''}\r\n`);
     if (head.length) socket.unshift(head);
     viewer.session = new RfbSession(socket, viewer.capture.source, viewer.capture.input, this.name(), () => { if (this.viewer === viewer) this.disconnect(); }, this.host.readClipboard);
-    this.host.viewing(device.name, () => { if (this.viewer === viewer) this.disconnect(); });
+    this.host.viewing(name, () => { if (this.viewer === viewer) this.disconnect(); });
   }
 }

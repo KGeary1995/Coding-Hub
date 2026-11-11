@@ -3,7 +3,7 @@ import path from 'node:path';
 import { app, clipboard, Menu, Notification, Tray } from 'electron';
 import { SCREEN_SERVICE_PORT } from '../shared/screen';
 import { ScreenCapture } from './services/remote/screen-capture';
-import { ScreenService, shareEnabled } from './services/remote/screen-service-server';
+import { ScreenService, shareElevated, shareEnabled } from './services/remote/screen-service-server';
 import { WindowsInput } from './services/remote/screen-input';
 
 /**
@@ -18,11 +18,18 @@ const port = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT 
 const inputLog = !app.isPackaged ? process.env.CODING_HUB_TEST_SCREEN_INPUT_LOG : undefined;
 /** A service that fails sooner than this after starting is not started again by itself. */
 const RELAUNCH_AFTER = 60_000;
+/**
+ * Started by the scheduled task that runs it as administrator (Settings: also control apps running as administrator).
+ * A service of the other kind than the setting asks for gives way: it quits, and Trace starts the right one.
+ */
+const elevatedRun = process.argv.includes('--elevated');
+const wanted = () => !!root && shareEnabled(root) && shareElevated(root) === elevatedRun;
 
 // Its own profile, so it neither shares Trace's single-instance lock nor touches Trace's window state.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'AI Coding Hub', 'screen-service'));
 app.setAppUserModelId('com.codinghub.desktop');
-if (!root || !path.isAbsolute(root) || !app.requestSingleInstanceLock()) app.exit(0);
+// Off, or the other kind is wanted: quit before taking the lock, so the right one can start.
+if (!root || !path.isAbsolute(root) || !wanted() || !app.requestSingleInstanceLock()) app.exit(0);
 else {
   // With no window open the app must keep running; the capture window comes and goes with each viewer.
   app.on('window-all-closed', () => {});
@@ -51,8 +58,8 @@ else {
       },
     });
     try { await service.listen(port); } catch { app.exit(0); return; }
-    // Turned off in Trace's settings (or the setting is gone): disconnect and quit.
-    setInterval(() => { if (!shareEnabled(root)) { void service.close().finally(() => app.exit(0)); } }, 3000);
+    // Turned off in Trace's settings (or the setting is gone), or the other kind (administrator or not) is wanted: quit.
+    setInterval(() => { if (!wanted()) { void service.close().finally(() => app.exit(0)); } }, 3000);
   });
 }
 

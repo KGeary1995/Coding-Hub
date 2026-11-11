@@ -16,6 +16,8 @@ Not released yet: handoffs stay in front of automatic summaries, a hierarchy rev
 - **Sharper text.** Once the shared screen has been still for a moment, the parts sent quickly while it changed are sent again at high quality.
 - **One display at a time.** With several displays, **Display** on the screen's bar shows one of them on its own at full size, or all of them again.
 - **The screen service starts again by itself** after an error, and Trace, while open, starts it again if it has stopped.
+- **See and control a Windows computer from the phone.** **Screen** in the phone app now works on a Windows computer that shares its screen, with no extra password: the phone's pairing lets it in. The computer shows the phone's name by the clock while it watches. Reload the phone app.
+- **Control apps running as administrator.** **Also control apps running as administrator**, under Settings → Other computers → Share this screen, runs the screen service as administrator. Windows asks permission once, and an administrator account is needed. Windows prompts and the lock screen still cannot be controlled.
 
 1.17.1 shows which model is at work at a hierarchy Round Table, fixes several ways a hierarchy table could go wrong, and keeps backups out of your projects (update every computer):
 

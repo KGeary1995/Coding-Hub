@@ -23,6 +23,10 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
   await fs.writeFile(path.join(viewerRoot, 'linked-computers.json'), JSON.stringify([{ id: PC, name: 'Test-PC', url: `http://127.0.0.1:${PORT}/`, token: TOKEN, linkedAt: new Date().toISOString() }]));
   const log = path.join(root, 'input.log');
   const base = { ...process.env }; delete base.ELECTRON_RUN_AS_NODE;
+  // The administrator kind (started by its scheduled task) gives way when the setting does not ask for it: it quits at once.
+  const wrongKind = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'wrong-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC', '--elevated'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT) }, stdio: 'ignore' });
+  const quit = await new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 20000); wrongKind.once('exit', () => { clearTimeout(timer); resolve(true); }); });
+  if (!quit) wrongKind.kill(); assert.ok(quit && !(await healthy()), 'A service of the kind the setting does not ask for quits without listening');
   const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log }, stdio: 'ignore' });
   let app;
   try {
@@ -46,12 +50,20 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     if (size[0] / size[1] > 2.5) assert.ok(halves.every((count) => count > 20), `both displays show a picture (colours per half: ${halves.join(', ')})`);
     console.log('colours per half', halves.join(', '));
     // Pictures keep coming after the first ones: each update waits for the viewer's answer to a fence (at most two on
-    // their way), so a viewer that never answered would freeze here. The viewer's own window is on the screen it shows:
-    // after the first picture and the sharp copy that follows once it is still, paint it magenta and look for that.
+    // their way), so a viewer that never answered would freeze here: after the first picture and the sharp copy that
+    // follows once it is still, several more different pictures must arrive. The viewer's own window is on the screen it
+    // shows, so painting it magenta changes the screen (and shows up, when that window is the one in view).
+    // Kept on top meanwhile: another window over it would hide the magenta from the capture.
+    await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.setAlwaysOnTop(true); window.show(); });
     await new Promise((resolve) => setTimeout(resolve, 1500));
+    const fingerprint = () => canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let sum = 0; for (let i = 0; i < data.length; i += 4 * 211) sum = (sum * 31 + data[i] + data[i + 1] * 7 + data[i + 2] * 13) >>> 0; return sum; });
+    const pictures = new Set([await fingerprint()]);
     await page.evaluate(() => { const cover = document.createElement('div'); cover.id = 'smoke-cover'; cover.style.cssText = 'position:fixed;inset:0;background:#ff00ff;z-index:99999;pointer-events:none'; document.body.append(cover); });
-    await until(() => canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let magenta = 0; for (let i = 0; i < data.length; i += 4 * 101) if (data[i] > 230 && data[i + 1] < 40 && data[i + 2] > 230) magenta++; return magenta > 200; }), 'later pictures (the viewer answering fences)');
+    try {
+      await until(async () => { pictures.add(await fingerprint()); return canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let magenta = 0; for (let i = 0; i < data.length; i += 4 * 101) if (data[i] > 230 && data[i + 1] < 40 && data[i + 2] > 230) magenta++; return magenta > 200; }) || pictures.size > 6; }, 'later pictures (the viewer answering fences)');
+    } catch (error) { console.log(`the picture changed ${pictures.size - 1} times while waiting`); throw error; }
     await page.evaluate(() => document.getElementById('smoke-cover')?.remove());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setAlwaysOnTop(false));
     // A Windows viewer of Windows needs no key swap.
     assert.equal(await panel.getByLabel('Ctrl as ⌘').count() + await panel.getByLabel('⌘ as Ctrl').count(), 0);
     await canvas.click({ position: { x: 40, y: 30 } }); await page.keyboard.press('a');

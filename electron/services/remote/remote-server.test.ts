@@ -7,6 +7,8 @@ import net from 'node:net';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
 import { HubError } from '../cli/engine-adapter';
+import { localScreenToken, ScreenService, SHARE_FILE } from './screen-service-server';
+import { openTraceScreen } from './screen-sharing';
 import { serveFailure, stopServing, TAILSCALE_DNS_SETTINGS, tailscaleEnvironment, tailscaleExecutable, tailscalePeers, tailscaleState } from './tailscale';
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -299,6 +301,31 @@ describe('phone screen', () => {
     // A ticket works once.
     const again = new WebSocket(`ws://127.0.0.1:${server.address}/api/screen?ticket=${ticket}`);
     expect(await new Promise((resolve) => { again.onopen = () => resolve('open'); again.onerror = () => resolve('refused'); })).toBe('refused');
+  });
+});
+
+describe('phone screen of a Windows computer', () => {
+  it('reaches Trace\'s screen service with Trace\'s own key, named as the phone, on paths the service\'s own does not take', async () => {
+    const { server, root } = await remote();
+    fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true })); const viewers: (string | null)[] = [];
+    const service = new ScreenService(root, () => 'Obsidian-Halo', { open: async () => ({ source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => {} }), viewing: (name) => viewers.push(name) });
+    const port = await service.listen(0); cleanup.push(() => service.close());
+    const host = (server as unknown as { host: RemoteHost }).host;
+    host.screenService = () => true; host.openScreenService = (viewer) => openTraceScreen('This computer', `http://127.0.0.1:${port}/`, localScreenToken(root)!, undefined, 0, { 'X-Trace-Viewer': viewer });
+    await server.setEnabled(true); const phone = await paired(server);
+    // The phone's own key does not open the service; only Trace's, for a phone with a ticket.
+    await expect(openTraceScreen('Obsidian-Halo', `http://127.0.0.1:${port}/`, phone)).rejects.toThrow(/through Trace/);
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}`); socket.binaryType = 'arraybuffer';
+    const greeting = await new Promise<string>((resolve, reject) => { socket.onmessage = (event) => resolve(Buffer.from(event.data as ArrayBuffer).toString()); socket.onerror = () => reject(new Error('refused')); });
+    expect(greeting).toBe('RFB 003.008\n');
+    for (let i = 0; i < 100 && !viewers.length; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(viewers).toEqual(['Test phone']); socket.close();
+  });
+  it('says how to turn sharing on when the computer shares no screen', async () => {
+    const { server } = await remote(); await server.setEnabled(true);
+    const response = await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${await paired(server)}` } });
+    expect(response.status).toBe(409); expect((await response.json() as { error: string }).error).toContain('Share this screen');
   });
 });
 

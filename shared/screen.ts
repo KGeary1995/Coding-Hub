@@ -13,7 +13,8 @@ export type ScreenKind = 'trace' | 'system';
 /** The sign-in a Mac asks for: its user name and password, saved encrypted on this computer when the person asks. */
 export interface ScreenCredentials { username: string; password: string }
 /** Whether this computer serves its screen to linked computers (Windows), and whether the service is running now. */
-export interface ScreenShareStatus { supported: boolean; enabled: boolean; running: boolean }
+/** `elevated`: the service runs as administrator, so it can also control apps that do. */
+export interface ScreenShareStatus { supported: boolean; enabled: boolean; elevated: boolean; running: boolean }
 export type ScreenRequest =
   /**
    * Connects to that computer's screen; bytes then flow with `screen-send` and `ScreenEvent`. The window names the
@@ -27,7 +28,7 @@ export type ScreenRequest =
   | { action: 'screen-forget-credentials'; id: string }
   /** This computer's own screen, served to linked computers (Windows only). */
   | { action: 'screen-share-status' }
-  | { action: 'screen-share-set'; enabled: boolean };
+  | { action: 'screen-share-set'; enabled: boolean; /** Left out: as it was. */ elevated?: boolean };
 /** `displays` and `display`: from a Trace screen service, how many displays it has and which one it shows (0 for all). */
 export interface ScreenOpened { kind: ScreenKind; displays?: number; display?: number }
 /** The most displays one can be picked from. */

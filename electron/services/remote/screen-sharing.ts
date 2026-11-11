@@ -56,13 +56,13 @@ function connected(socket: net.Socket, event: 'connect' | 'secureConnect') {
  * there and said no, as does no answer in time; anything else (Trace there is older, or the computer is a Mac) means
  * there is no such service.
  */
-export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT, display = 0): Promise<{ socket: net.Socket; head: Buffer; displays?: number; display?: number }> {
+export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT, display = 0, headers: Record<string, string> = {}): Promise<{ socket: net.Socket; head: Buffer; displays?: number; display?: number }> {
   const address = new URL(url); const secure = address.protocol === 'https:';
   const socket = secure ? tls.connect({ host: address.hostname, port: Number(address.port) || 443, servername: address.hostname }) : net.connect({ host: address.hostname, port: Number(address.port) || 80 });
   socket.on('error', () => { /* Reported below. */ });
   try {
     await connected(socket, secure ? 'secureConnect' : 'connect');
-    socket.write(`GET ${SCREEN_SERVICE_PATH}${display ? `?display=${display}` : ''} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\nConnection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
+    socket.write(`GET ${SCREEN_SERVICE_PATH}${display ? `?display=${display}` : ''} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\n${Object.entries(headers).map(([key, value]) => `${key}: ${value.replace(/[\r\n]/g, '')}\r\n`).join('')}Connection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
     const answer = await new Promise<Buffer>((resolve, reject) => {
       let received = Buffer.alloc(0); let done = false;
       const finish = (error?: Error) => { if (done) return; done = true; clearTimeout(timer); socket.off('data', data); socket.off('close', end); if (error) reject(error); else resolve(received); };

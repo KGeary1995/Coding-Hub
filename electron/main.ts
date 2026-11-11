@@ -48,9 +48,10 @@ import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, stopServing, tailscalePeers, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
-import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
+import { openTraceScreen, ScreenSharing, screenHost } from './services/remote/screen-sharing';
+import { localScreenToken, shareEnabled } from './services/remote/screen-service-server';
 import { ScreenShare } from './services/remote/screen-share';
-import { MAX_DISPLAYS, SCREEN_PORT } from '../shared/screen';
+import { MAX_DISPLAYS, SCREEN_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
 import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
@@ -260,13 +261,13 @@ const screenSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('screen-save-credentials'), id: z.uuid(), username: z.string().min(1).max(256), password: z.string().min(1).max(1024) }).strict(),
   z.object({ action: z.literal('screen-forget-credentials'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-share-status') }).strict(),
-  z.object({ action: z.literal('screen-share-set'), enabled: z.boolean() }).strict(),
+  z.object({ action: z.literal('screen-share-set'), enabled: z.boolean(), elevated: z.boolean().optional() }).strict(),
 ]);
 async function screenRequest(owner: number, payload: unknown) {
   const request = screenSchema.parse(payload);
   if (request.action === 'screen-share-status' || request.action === 'screen-share-set') {
     if (!screenShare) throw new HubError('SCREEN_UNAVAILABLE', 'Sharing this screen needs writable local storage.');
-    return request.action === 'screen-share-set' ? screenShare.set(request.enabled) : screenShare.status();
+    return request.action === 'screen-share-set' ? screenShare.set(request.enabled, request.elevated) : screenShare.status();
   }
   if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
   if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId, request.display ?? 0);
@@ -578,8 +579,13 @@ else app.whenReady().then(() => {
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
     transcript: channelTranscript,
-    // A phone's Screen reaches this Mac's own Screen Sharing on loopback; Windows has no system server for it yet.
+    // A phone's Screen reaches this Mac's own Screen Sharing on loopback, or, on Windows, Trace's screen service (when
+    // Share this screen is on), signed in with Trace's own key and named as the phone.
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
+    ...(process.platform === 'win32' ? {
+      screenService: () => shareEnabled(storageRoot),
+      openScreenService: (viewer: string) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${SCREEN_SERVICE_PORT}/`, token, undefined, 0, { 'X-Trace-Viewer': viewer }); },
+    } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
     // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
     // asks for a fresh read in the background, at most every five minutes like Usage (PlanLimitsService.refresh).

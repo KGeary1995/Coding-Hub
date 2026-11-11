@@ -201,9 +201,11 @@ function showList() {
 const SCREEN_KEYS: [string, number, string][] = [['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']];
 let viewer: RFB | null = null;
 /**
- * The computer's own screen, through its screen-sharing server (macOS Screen Sharing), carried over this remote: tap to
- * click, drag to move, and type with the phone's keyboard. The Mac asks for its user name and password, which go to
- * it, not to Trace. A locked Mac shows black here and takes no keys: macOS shows its lock screen only to Apple's viewer.
+ * The computer's own screen, carried over this remote: a Mac's through its screen-sharing server (macOS Screen Sharing),
+ * which asks for its user name and password (they go to it, not to Trace); a Windows computer's through Trace's screen
+ * service, when Share this screen is on there, which the phone's pairing lets in. Tap to click, drag to move, and type
+ * with the phone's keyboard. A locked Mac shows black here and takes no keys: macOS shows its lock screen only to Apple's
+ * viewer. (These paths are not /api/screen, which a Windows computer that shares its screen passes to that service.)
  */
 async function showScreen() {
   closeChat(); closeScreen();
@@ -222,10 +224,10 @@ async function showScreen() {
   const back = () => { viewer?.disconnect(); viewer = null; showList(); };
   app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
   try {
-    const { ticket } = await (await api('/api/screen-ticket', { method: 'POST' })).json() as { ticket: string };
+    const { ticket } = await (await api('/api/phone-screen-ticket', { method: 'POST' })).json() as { ticket: string };
     const { default: Viewer } = await import('@novnc/novnc');
     const origin = activeTarget().base || location.origin;
-    const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/screen?ticket=${encodeURIComponent(ticket)}`, { shared: true }); viewer = client;
+    const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/phone-screen?ticket=${encodeURIComponent(ticket)}`, { shared: true }); viewer = client;
     client.scaleViewport = true; client.showDotCursor = true; client.background = 'transparent';
     client.addEventListener('connect', () => { status.textContent = ''; signin.hidden = true; });
     client.addEventListener('credentialsrequired', () => { status.textContent = 'Sign in with this computer\'s user name and password.'; signin.hidden = false; user.focus(); });

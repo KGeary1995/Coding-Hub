@@ -51,7 +51,7 @@ describe('the Windows screen service', () => {
   it('refuses unknown keys, phones, and a switched-off share, saying why', async () => {
     const { url, root } = await service();
     await expect(openTraceScreen('Obsidian-Halo', url, 'x'.repeat(43))).rejects.toThrow(/no longer accepts this computer/);
-    await expect(openTraceScreen('Obsidian-Halo', url, PHONE)).rejects.toThrow(/phones cannot/);
+    await expect(openTraceScreen('Obsidian-Halo', url, PHONE)).rejects.toThrow(/through Trace’s phone access/);
     fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: false }));
     await expect(openTraceScreen('Obsidian-Halo', url, COMPUTER)).rejects.toThrow(/Screen sharing is off on Obsidian-Halo/);
   });
