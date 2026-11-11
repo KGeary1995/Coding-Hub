@@ -97,6 +97,26 @@ describe('hierarchy Round Table', () => {
     release('a'.repeat(64)); await new Promise((resolve) => setTimeout(resolve, 0)); await new Promise((resolve) => setTimeout(resolve, 0));
     expect(last().chain!.step).toBe('stopped'); expect(sent.length).toBe(before);
   });
+  it('after a restart, the answer to a blocked seat still goes to that seat in its step, not to a new task', async () => {
+    const { chains, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Original task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'TASK BLOCKED: Which database?'); const saved = last().chain!; expect(saved).toMatchObject({ step: 'stopped', stoppedAt: 'implementing', blocked: 'builder' });
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] });
+    after.chains.send(BUILDER, 'Use SQLite.', []);
+    expect(after.sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(after.sent.at(-1)!.text).toContain('[The person answers] Use SQLite.');
+    expect(after.last().chain).toMatchObject({ step: 'implementing', task: 'Original task' });
+  });
+  it('leaves an old answer behind when Stop then Continue happen while the files’ state is still being taken', async () => {
+    const { chains, sent, reply, last } = setup(); const pending: ((value: string) => void)[] = [];
+    (chains as unknown as { host: TableHost }).host.stateOf = () => new Promise<string>((resolve) => { pending.push(resolve); });
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    const flush = async () => { for (const resolve of pending.splice(0)) resolve('a'.repeat(64)); for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); };
+    await flush();
+    await reply(REVIEWER, 'FINDING high a.ts:1 — bug');
+    chains.stop(BUILDER); chains.continue(BUILDER); expect(last().chain!.step).toBe('reviewing'); const before = sent.length;
+    await flush();
+    // The old review's answer does not move the resumed review on to Fix.
+    expect(last().chain!.step).toBe('reviewing'); expect(sent.length).toBe(before); expect(sent.at(-1)!.runId).toBe(REVIEWER);
+  });
   it('reads the planner’s verdict only from its last line', () => {
     expect(verdictOf('Fine.\n**APPROVED**')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: add tests')).toEqual({ approved: false, changes: 'add tests' });
     expect(verdictOf('APPROVED\nBut should I check more?')).toBeNull(); expect(REVIEW_ROUNDS).toBe(2);

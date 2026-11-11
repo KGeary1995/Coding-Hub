@@ -25,7 +25,7 @@ export const findingSchema = z.object({ id: z.string().regex(/^F\d{1,3}$/), seve
 /** What a table keeps across restarts: its findings, and the text of a message that was waiting for the agents (images are not kept). */
 const chainStep = z.enum(['idle', 'planning', 'plan-review', 'implementing', 'reviewing', 'fixing', 'final', 'final-fixing', 'done', 'needs-you', 'stopped']);
 /** A hierarchy table's work, saved with it (shared/chat.ts SavedChain). */
-export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), task: z.string().max(200_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000) }).strict();
+export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer']).optional(), task: z.string().max(200_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000) }).strict();
 const tableRecord = { findings: z.array(findingSchema).max(50).optional(), waiting: z.string().max(200_000).optional(), waitingImages: z.array(chatImage).max(10).refine((images) => images.reduce((sum, image) => sum + image.data.length, 0) <= 6_000_000, 'Too much image data to keep.').optional() };
 /** A shared memory project key, as memory folders are named (memory.ts projectSchema). */
 export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);

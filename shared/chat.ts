@@ -55,7 +55,7 @@ export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-
 /** A hierarchy Round Table's step (electron/services/chat/review-chain.ts). */
 export type ChainStep = 'idle' | 'planning' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
-export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string }
+export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';
