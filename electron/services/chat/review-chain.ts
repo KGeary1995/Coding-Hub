@@ -155,11 +155,24 @@ export class ReviewChains {
       chain.queued = chain.queued ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images] } : { text, images };
       this.publish(chain); return;
     }
+    // While the table waits for the person (stopped, or needs you), a typed reply goes on with the same task: a new task
+    // starts only from idle or done, or when it comes from Tasks (its prompt carries the TASK COMPLETE instruction).
+    if (chain.task && (chain.step === 'stopped' || chain.step === 'needs-you') && !text.includes(SIGNAL_INSTRUCTION)) { this.reply(chain, leadRunId, text, images); return; }
     // A new task: a fresh plan and a fresh count of rounds; the findings record goes on. A task from Tasks asks to end
     // with TASK COMPLETE, which would push each step's own last line (PLAN READY, APPROVED) aside: here the planner's
     // APPROVED completes the task, and each seat's brief says when to end with TASK BLOCKED.
     chain.task = text.replace(SIGNAL_INSTRUCTION, '').trim(); chain.images = images; chain.plan = ''; chain.report = ''; chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = '';
     this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), images);
+  }
+  /**
+   * The person's reply while the table waits for them: it goes with the stopped step when it continues; with no plan
+   * yet, to the planner with the task; otherwise to the builder as changes, which the planner then reviews again.
+   */
+  private reply(chain: Chain, leadRunId: string, text: string, images: ChatImage[]) {
+    chain.note = '';
+    if (chain.step === 'stopped' && chain.stoppedAt) { chain.queued = { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false; this.continue(leadRunId); return; }
+    if (!chain.plan) { this.turn(chain, chain.planner, 'planning', `${this.planPrompt(chain)}\n\nThe person adds: ${text}`, images); return; }
+    this.turn(chain, chain.builder, 'final-fixing', `[Step: changes from the person] The task:\n\n${chain.task}\n\nThe person says:\n\n${text}\n\nMake the changes they ask for, then report what you changed.`, images);
   }
   /** The person on the plan: approve it (the builder starts), or send it back with what to change. */
   plan(leadRunId: string, approve: boolean, note = '') {
