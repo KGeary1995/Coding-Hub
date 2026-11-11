@@ -25,7 +25,9 @@ function setup() {
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
   const to = async () => { await settle(); return sent.at(-1)!; };
   const open = (saved: { chain?: SavedChain } = {}, gemini = true) => chains.open(1, BUILDER, REVIEWER, PLANNER, { findings: [], ...saved }, gemini ? GEMINI : undefined);
-  return { chains, sent, modes, answers, interrupted, reply, last, to, open, files, runs };
+  /** The last table state sent before any close (the window keeps that one). */
+  const lastOpen = () => (events.filter((e) => e.event.type === 'table' && (e.event as { table: unknown }).table).at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
+  return { chains, sent, modes, answers, interrupted, reply, last, lastOpen, to, open, files, runs };
 }
 
 describe('hierarchy Round Table with a Gemini seat', () => {
@@ -154,7 +156,7 @@ describe('hierarchy Round Table with a Gemini seat', () => {
     const { chains, sent, reply, last, to, open, files } = setup(); open(); chains.send(BUILDER, 'Task', []);
     await reply(PLANNER, 'Plan'); await to(); await reply(GEMINI, 'TASK BLOCKED: Which browsers matter?');
     expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'challenging', blocked: 'challenger', note: 'The Gemini seat needs you: Which browsers matter?' });
-    chains.send(BUILDER, 'Only Chrome.', []); expect(await to()).toMatchObject({ runId: GEMINI }); expect(sent.at(-1)!.text).toContain('[The person answers] Only Chrome.');
+    chains.send(BUILDER, 'Only Chrome.', []); expect(await to()).toMatchObject({ runId: GEMINI }); expect(sent.at(-1)!.text).toContain('[The person answers your question] Only Chrome.');
     await reply(GEMINI, 'NO CHALLENGES', { during: () => { files.state = 'e'.repeat(64); } });
     expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'challenging' });
   });
@@ -169,4 +171,66 @@ describe('hierarchy Round Table with a Gemini seat', () => {
   it('closes the table when the Gemini seat’s run ends', () => {
     const { chains, open, last } = setup(); open(); chains.ended(GEMINI); expect(last()).toBeNull();
   });
+  it('F2: checks the files when Gemini’s process ends during its step, and keeps the table stopped at that step for Reopen and Continue', async () => {
+    const { chains, reply, last, lastOpen, to, open, files } = setup(); open(); chains.send(BUILDER, 'Task', []);
+    await reply(PLANNER, 'Plan'); await to(); expect(last().chain!.step).toBe('challenging');
+    // Gemini changes a file, then its process crashes before answering.
+    files.state = 'f'.repeat(64); chains.ended(GEMINI); await settle();
+    expect(last()).toBeNull();
+    expect(lastOpen().chain).toMatchObject({ step: 'stopped', stoppedAt: 'challenging' }); expect(lastOpen().chain!.note).toContain('files changed during it');
+    // Seated again (Gemini runs again after Reopen): stopped at the step, and Continue runs it with a fresh baseline.
+    const again = setup(); again.files.state = 'f'.repeat(64); again.open({ chain: lastOpen().chain });
+    expect(again.last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'challenging' });
+    again.chains.continue(BUILDER); expect(await again.to()).toMatchObject({ runId: GEMINI });
+    // Unchanged files: the note says so. A Gemini that ends while idle closes the table as any seat does.
+    const quiet = setup(); quiet.open(); quiet.chains.send(BUILDER, 'Task', []); await quiet.reply(PLANNER, 'Plan'); await quiet.to();
+    quiet.chains.ended(GEMINI); await settle(); expect(quiet.lastOpen().chain!.note).toContain('did not change');
+    const idle = setup(); idle.open(); idle.chains.ended(GEMINI); expect(idle.last()).toBeNull(); expect(idle.lastOpen().chain!.step).toBe('idle');
+  });
+  it('F2: a crash while Trace still reads the files before the turn says Gemini never began, and nothing is published after the close', async () => {
+    const { chains, reply, lastOpen, open, files, sent } = setup(); open(); chains.send(BUILDER, 'Task', []);
+    let release: (value: string) => void = () => {}; const hold = new Promise<string>((resolve) => { release = resolve; });
+    (chains as unknown as { host: TableHost }).host.stateOf = () => hold;
+    await reply(PLANNER, 'Plan');
+    chains.ended(GEMINI); release('a'.repeat(64)); await settle();
+    expect(lastOpen().chain).toMatchObject({ step: 'stopped', stoppedAt: 'challenging' }); expect(lastOpen().chain!.note).toContain('before its step began');
+    expect(sent.some((item) => item.runId === GEMINI)).toBe(false);
+    void files;
+  });
+  it('F4: after a restart, a blocked Gemini step gets the whole step again with the person’s answer', async () => {
+    const { chains, reply, last, to, open } = setup(); open(); chains.send(BUILDER, 'Add a footer.', []);
+    await reply(PLANNER, '1. Edit page.html'); await to(); await reply(GEMINI, 'TASK BLOCKED: Which browsers?');
+    const saved = last().chain!; expect(saved).toMatchObject({ blocked: 'challenger', stoppedAt: 'challenging' });
+    const after = setup(); after.open({ chain: saved }); after.chains.send(BUILDER, 'Only Chrome.', []);
+    const prompt = (await after.to()).text;
+    expect(prompt).toContain('You are Gemini, the challenger'); expect(prompt).toContain('[Step: challenge the plan]'); expect(prompt).toContain('Add a footer.'); expect(prompt).toContain('1. Edit page.html');
+    expect(prompt).toContain('[The person answers your question] Only Chrome.');
+  });
+  it('F5: compares only this task’s findings, and never closes a new finding as a duplicate of an earlier task’s', async () => {
+    const { chains, sent, reply, last, to, open } = setup(); open();
+    // Task one: a Codex finding, fixed and verified.
+    chains.send(BUILDER, 'Task one', []); await reply(PLANNER, 'Plan'); await to(); await reply(GEMINI, 'NO CHALLENGES'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Built.'); await to(); await reply(GEMINI, 'NO FINDINGS'); await reply(REVIEWER, 'FINDING high a.ts:1 — old bug'); await to();
+    await reply(GEMINI, 'AGREE F1\nCOMPARED'); await reply(BUILDER, 'FIXED F1: done'); await reply(REVIEWER, 'VERIFIED F1\nNO FINDINGS'); await reply(PLANNER, 'APPROVED');
+    expect(last().findings![0]).toMatchObject({ id: 'F1', status: 'verified' });
+    // Task two: Gemini finds nothing; Codex finds one new problem.
+    chains.send(BUILDER, 'Task two', []); await reply(PLANNER, 'Plan'); await to(); await reply(GEMINI, 'NO CHALLENGES'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Built.'); await to(); await reply(GEMINI, 'NO FINDINGS'); await reply(REVIEWER, 'FINDING medium b.ts:2 — new bug');
+    const compare = (await to()).text; expect(compare).toContain('F2 (medium, b.ts:2): new bug'); expect(compare).not.toContain('old bug');
+    // Gemini tries to close the new finding against the old verified one, and to judge the old one: both ignored.
+    await reply(GEMINI, 'DUPLICATE F2 of F1\nDISPUTE F1 — fine now\nCOMPARED');
+    expect(last().findings).toMatchObject([{ id: 'F1', status: 'verified' }, { id: 'F2', status: 'open' }]);
+    expect(last().findings![1].duplicateOf).toBeUndefined(); expect(last().findings![0].gemini).toBe('agree');
+    expect(sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(last().chain!.step).toBe('fixing');
+  });
+  it('F5: skips the comparison when only an earlier task had Codex findings', async () => {
+    const { chains, reply, last, to, open } = setup(); open();
+    chains.send(BUILDER, 'Task one', []); await reply(PLANNER, 'Plan'); await to(); await reply(GEMINI, 'NO CHALLENGES'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Built.'); await to(); await reply(GEMINI, 'NO FINDINGS'); await reply(REVIEWER, 'FINDING high a.ts:1 — old'); await to(); await reply(GEMINI, 'COMPARED');
+    await reply(BUILDER, 'FIXED F1: x'); await reply(REVIEWER, 'VERIFIED F1\nNO FINDINGS'); await reply(PLANNER, 'APPROVED');
+    chains.send(BUILDER, 'Task two', []); await reply(PLANNER, 'Plan'); await to(); await reply(GEMINI, 'NO CHALLENGES'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Built.'); await to(); await reply(GEMINI, 'NO FINDINGS'); await reply(REVIEWER, 'NO FINDINGS');
+    expect(last().chain).toMatchObject({ step: 'final', compared: true, firstFinding: 1 });
+  });
 });
+

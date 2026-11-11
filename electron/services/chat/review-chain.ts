@@ -25,6 +25,8 @@ interface Chain {
   verdict: 'approved' | 'changes' | null; note: string; findings: Finding[];
   /** This task's challenges, and whether Gemini challenged, reviewed and compared yet (each once per task). */
   challenges: PlanChallenge[]; challenged: boolean; geminiReviewed: boolean; compared: boolean;
+  /** Where this task's findings begin in `findings`: Gemini compares only those. */
+  firstFinding: number;
   queued: { text: string; images: ChatImage[] } | null; kept: boolean; turnStart: Promise<string | null> | null;
   /** The seat that said TASK BLOCKED: the person's next message is its answer, in the same step. */
   blocked: Seat | null;
@@ -94,9 +96,11 @@ export class ReviewChains {
     if (!chain.challenger) return false;
     if (part === 'challenge') return !chain.challenged;
     if (part === 'review') return !chain.geminiReviewed;
-    // Comparing needs both reviews: Gemini's, and Codex's first, with findings of its own.
-    return chain.geminiReviewed && !chain.compared && chain.findings.some((finding) => !finding.source && finding.round === 1);
+    // Comparing needs both reviews of this task: Gemini's, and Codex's first, with findings of its own.
+    return chain.geminiReviewed && !chain.compared && this.taskFindings(chain).some((finding) => !finding.source && finding.round === 1);
   }
+  /** This task's findings: earlier tasks' (verified, declined or still open) are not Gemini's to compare or close. */
+  private taskFindings(chain: Chain) { return chain.findings.slice(chain.firstFinding); }
 
   private state(chain: Chain): RoundTableState {
     const working = !RESTING.includes(chain.step);
@@ -107,7 +111,7 @@ export class ReviewChains {
       findings: chain.findings.map((finding) => ({ ...finding })),
       ...(chain.step === 'stopped' && this.busy(chain) ? { stopping: true } : {}),
       chain: { step: chain.step, ...(chain.stoppedAt ? { stoppedAt: chain.stoppedAt } : {}), ...(chain.blocked ? { blocked: chain.blocked.role } : {}), reviewRound: chain.reviewRound, finalRound: chain.finalRound, plan: chain.plan, verdict: chain.verdict, note: chain.note, task: chain.task, report: chain.report,
-        ...(chain.challenges.length ? { challenges: chain.challenges.map((challenge) => ({ ...challenge })) } : {}), ...(chain.challenged ? { challenged: true as const } : {}), ...(chain.geminiReviewed ? { geminiReviewed: true as const } : {}), ...(chain.compared ? { compared: true as const } : {}) },
+        ...(chain.challenges.length ? { challenges: chain.challenges.map((challenge) => ({ ...challenge })) } : {}), ...(chain.challenged ? { challenged: true as const } : {}), ...(chain.geminiReviewed ? { geminiReviewed: true as const } : {}), ...(chain.compared ? { compared: true as const } : {}), ...(chain.firstFinding ? { firstFinding: chain.firstFinding } : {}) },
       ...(chain.queued ? { waiting: chain.queued.text, ...this.keptImages(chain.queued.images), ...(chain.kept ? { waitingKept: true } : {}) } : {}),
     };
   }
@@ -151,7 +155,8 @@ export class ReviewChains {
     const read = this.host.stateOf ? this.host.stateOf(chain.cwd).catch(() => null) : Promise.resolve(null);
     void read.then((before) => {
       chain.checking = false;
-      if (this.chains.get(chain.builder.runId) !== chain || chain.attempt !== attempt || chain.step !== step) { this.publish(chain); return; }
+      if (this.chains.get(chain.builder.runId) !== chain) return;
+      if (chain.attempt !== attempt || chain.step !== step) { this.publish(chain); return; }
       if (!before) { this.skipGemini(chain, step, 'Gemini was left out of this step: Trace cannot read this folder\'s files with Git, so it could not check that Gemini changed nothing.'); return; }
       chain.geminiBefore = before; this.turn(chain, seat, step, text, images);
     });
@@ -183,9 +188,12 @@ export class ReviewChains {
   }
   private comparePrompt(chain: Chain) {
     const line = (finding: Finding) => `${finding.id} (${finding.severity}${finding.evidence ? `, ${finding.evidence}` : ''}): ${finding.text}`;
-    const codex = chain.findings.filter((finding) => !finding.source && finding.round === 1 && !finding.duplicateOf); const own = chain.findings.filter((finding) => finding.source === 'gemini');
+    const task = this.taskFindings(chain);
+    const codex = task.filter((finding) => !finding.source && finding.round === 1 && !finding.duplicateOf); const own = task.filter((finding) => finding.source === 'gemini');
     return `[Step: compare the reviews] Codex reviewed the same changes after you. Its findings:\n${codex.map(line).join('\n')}\n\nYour findings:\n${own.length ? own.map(line).join('\n') : 'None.'}\n\nCheck Codex's findings in the files; change nothing. Answer each of Codex's findings on its own line as "AGREE F<n>" or "DISPUTE F<n> — why". Where two findings report the same problem, write "DUPLICATE F<n> of F<m>" (Trace closes F<n>). End with the line COMPARED.`;
   }
+  /** A Gemini step's prompt, built again from the saved task, plan, report and findings. */
+  private geminiPrompt(chain: Chain, step: ChainStep) { return step === 'challenging' ? this.challengePrompt(chain) : step === 'second-reviewing' ? this.geminiReviewPrompt(chain) : this.comparePrompt(chain); }
   private fixPrompt(chain: Chain) {
     const open = findingsFor(chain.findings, 'driver');
     const final = chain.verdict === 'changes' && chain.note ? `The planner's final review asks for changes:\n\n${chain.note}` : '';
@@ -215,7 +223,9 @@ export class ReviewChains {
     const chain: Chain = { owner, cwd: runs[0].cwd, builder, reviewer, planner, challenger, step: before ? (resumable ? 'stopped' : before.step) : 'idle', stoppedAt: resumable ?? (before?.step === 'stopped' ? before.stoppedAt ?? null : null),
       task: before?.task ?? '', images: [], plan: before?.plan ?? '', report: before?.report ?? '', reviewRound: before?.reviewRound ?? 0, finalRound: before?.finalRound ?? 0, verdict: before?.verdict ?? null, note: before?.note ?? '',
       challenges: (before?.challenges ?? []).slice(0, MAX_CHALLENGES).map((challenge) => ({ ...challenge })), challenged: before?.challenged === true, geminiReviewed: before?.geminiReviewed === true, compared: before?.compared === true,
+      firstFinding: Math.min(before?.firstFinding ?? 0, (saved.findings ?? []).length),
       findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null, attempt: 0, geminiBefore: null, checking: false };
+    chain.firstFinding = Math.min(chain.firstFinding, chain.findings.length);
     // A seat that was waiting for the person before the restart still is (Gemini only if it is seated again).
     if (before?.blocked && chain.step === 'stopped') chain.blocked = { builder, reviewer, planner, challenger }[before.blocked] ?? null;
     if (saved.waiting !== undefined || saved.waitingImages?.length) { chain.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) }; chain.kept = true; }
@@ -232,7 +242,8 @@ export class ReviewChains {
     // A seat that asked the person (TASK BLOCKED) gets the answer and goes on with its step.
     if (chain.step === 'stopped' && chain.blocked && chain.stoppedAt && !this.busy(chain)) {
       const seat = chain.blocked; chain.blocked = null; chain.note = ''; const answer = `[The person answers] ${text}\n\nGo on with your step.`;
-      if (seat.role === 'challenger') this.geminiTurn(chain, chain.stoppedAt, answer, images); else this.turn(chain, seat, chain.stoppedAt, answer, images);
+      // Gemini starts a fresh conversation after a restart, so it gets the whole step again with the answer.
+      if (seat.role === 'challenger') this.geminiTurn(chain, chain.stoppedAt, `${this.geminiPrompt(chain, chain.stoppedAt)}\n\n[The person answers your question] ${text}`, images); else this.turn(chain, seat, chain.stoppedAt, answer, images);
       return;
     }
     if (this.busy(chain)) {
@@ -247,7 +258,7 @@ export class ReviewChains {
     // with TASK COMPLETE, which would push each step's own last line (PLAN READY, APPROVED) aside: here the planner's
     // APPROVED completes the task, and each seat's brief says when to end with TASK BLOCKED.
     chain.task = text.replace(SIGNAL_INSTRUCTION, '').trim(); chain.images = images; chain.plan = ''; chain.report = ''; chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = '';
-    chain.challenges = []; chain.challenged = false; chain.geminiReviewed = false; chain.compared = false;
+    chain.challenges = []; chain.challenged = false; chain.geminiReviewed = false; chain.compared = false; chain.firstFinding = chain.findings.length;
     this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), images);
   }
   /**
@@ -311,7 +322,37 @@ export class ReviewChains {
     for (const seat of this.seats(chain)) { try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
     this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}) } });
   }
-  ended(runId: string) { const chain = this.chainOf(runId); if (chain) this.close(chain.builder.runId, false); }
+  /**
+   * A seat's process ended: the table closes until the window seats it again. Gemini's ending part way through a step
+   * (a crash) still gets the file check against the files as its step began, and the table is kept stopped at that step,
+   * so what Gemini changed before it ended is not missed and Continue picks the step up once Gemini runs again.
+   */
+  ended(runId: string) {
+    const chain = this.chainOf(runId); if (!chain) return;
+    const gemini = chain.challenger?.runId === runId ? chain.challenger : null;
+    const inStep = gemini && (gemini.busy || chain.geminiBefore !== null || chain.checking) && (GEMINI_STEPS.includes(chain.step) || (chain.step === 'stopped' && chain.stoppedAt !== null && GEMINI_STEPS.includes(chain.stoppedAt)));
+    if (!gemini || !inStep) { this.close(chain.builder.runId, false); return; }
+    const step = chain.step === 'stopped' ? chain.stoppedAt! : chain.step; const before = chain.geminiBefore;
+    // Ended while Trace was still reading the files before the turn: Gemini was never given the step.
+    const started = gemini.busy || before !== null;
+    // Out of the map at once: nothing else starts at this table; its last state still goes to the window, which keeps it.
+    this.chains.delete(chain.builder.runId);
+    gemini.busy = false; chain.checking = false; chain.geminiBefore = null; chain.blocked = null; chain.stoppedAt = step; chain.step = 'stopped';
+    chain.note = 'Gemini\'s process ended during its step. Trace is checking the project\'s files…'; this.publish(chain);
+    const check = this.host.stateOf ? this.host.stateOf(chain.cwd).catch(() => null) : Promise.resolve(null);
+    void check.then((after) => {
+      chain.note = !started
+        ? 'Gemini\'s process ended before its step began. Reopen starts Gemini again; then Continue runs the step, or Continue without Gemini.'
+        : !before || !after
+        ? 'Gemini\'s process ended during its step, and Trace could not read the project\'s files to tell whether it changed them. Check them (git status) before you go on. Reopen starts Gemini again; then Continue runs the step again, or Continue without Gemini.'
+        : before !== after
+          ? 'Gemini\'s process ended during its step, and the project\'s files changed during it; only the builder may change them. Check the changes (git status, git diff). Reopen starts Gemini again; then Continue runs the step again, or Continue without Gemini.'
+          : 'Gemini\'s process ended during its step; the project\'s files did not change. Reopen starts Gemini again; then Continue runs the step again, or Continue without Gemini.';
+      this.publish(chain);
+      for (const seat of this.seats(chain)) { if (seat.busy) { try { this.host.interrupt(seat.runId); } catch { /* Ended. */ } } try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
+      this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: null } });
+    });
+  }
 
   /** Every chat event passes here; returns a notice in place of an edit a read-only seat asked for (declined), or '' for a command allowed at Full. */
   observe(envelope: ChatEnvelope): string | null {
@@ -433,12 +474,13 @@ export class ReviewChains {
   }
   /** Gemini's comparison into the record: its agreement or dispute on Codex's findings, and duplicates closed. */
   private compare(chain: Chain, answer: string) {
-    const find = (id: string) => chain.findings.find((finding) => finding.id === id);
+    // Only this task's findings: an earlier task's finding (verified or not) is neither judged nor a duplicate's original.
+    const task = this.taskFindings(chain); const find = (id: string) => task.find((finding) => finding.id === id);
     for (const { id, verdict, of, note } of parseComparison(answer)) {
       const finding = find(id); if (!finding) continue;
       if (verdict === 'duplicate') {
         const original = of ? find(of) : undefined;
-        if (!original || original === finding || original.duplicateOf || finding.duplicateOf || finding.status !== 'open') continue;
+        if (!original || original === finding || original.duplicateOf || original.status !== 'open' || finding.duplicateOf || finding.status !== 'open') continue;
         finding.duplicateOf = original.id; finding.status = 'verified'; finding.check = `Duplicate of ${original.id} (Gemini)`; continue;
       }
       // Gemini's word is on Codex's findings; its own need none.

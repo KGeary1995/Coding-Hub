@@ -117,7 +117,11 @@ export class GeminiStream implements ChatStream {
   }
   /** Stops the turn: ACP's cancel, and any approval still open is answered "cancelled", as the protocol asks. */
   interrupt() {
-    if (!this.sessionId) return;
+    // Messages still waiting for the session to be ready are dropped, each ending as stopped, so the table's Stop holds
+    // (they would otherwise go once the session is ready) and Continue becomes available.
+    const waiting = this.queued.splice(0).length;
+    for (let index = 0; index < waiting; index++) this.emit({ type: 'done', isError: true, error: 'Stopped.' });
+    if (!this.sessionId || !this.turn.busy) return;
     this.line({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: this.sessionId } });
     for (const [requestId, pending] of this.approvals) { this.line({ jsonrpc: '2.0', id: pending.id, result: { outcome: { outcome: 'cancelled' } } }); this.emit({ type: 'permission-done', requestId }); }
     this.approvals.clear();

@@ -66,7 +66,9 @@ export interface PlanChallenge { id: string; severity: 'high' | 'medium' | 'low'
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
 export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer' | 'challenger'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
   /** Gemini's challenges to this task's plan, with the planner's answers; and whether Gemini already challenged, reviewed and compared for this task (once each). */
-  challenges?: PlanChallenge[]; challenged?: true; geminiReviewed?: true; compared?: true }
+  challenges?: PlanChallenge[]; challenged?: true; geminiReviewed?: true; compared?: true;
+  /** Where this task's findings begin in the record: Gemini compares only those (earlier tasks' findings stay out). */
+  firstFinding?: number }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';

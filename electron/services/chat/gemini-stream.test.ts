@@ -110,4 +110,15 @@ describe('Gemini seat over ACP (agy acp)', () => {
     feed({ jsonrpc: '2.0', id: 9, method: 'fs/write_text_file', params: { path: '/project/a.txt', content: 'x' } });
     expect(written.at(-1)).toMatchObject({ id: 9, error: { code: -32601 } });
   });
+  it('F3: Stop before the session is ready drops the waiting prompt and ends it as stopped, so it never runs', () => {
+    const { stream, written, events, answer, feed } = setup();
+    stream.start(); answer('initialize'); stream.send('Challenge this plan', []);
+    stream.interrupt();
+    expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'Stopped.' });
+    expect(written.some((item) => item.method === 'session/cancel')).toBe(false);
+    answer('session/new'); answer('session/set_model'); answer('session/set_mode'); for (const update of updates('config_option_update')) feed(update);
+    expect(events.some((event) => event.type === 'ready')).toBe(true);
+    expect(written.some((item) => item.method === 'session/prompt')).toBe(false);
+  });
 });
+
