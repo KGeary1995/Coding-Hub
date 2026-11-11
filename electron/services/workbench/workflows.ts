@@ -11,6 +11,7 @@ import type { RulesService } from '../hub/rules';
 import type { WorkspaceStorage } from '../storage/workspace-storage';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
+import { isAgentConfig } from '../../../shared/types';
 const label = z.object({ key: z.string().min(1).max(200), name: z.string().trim().min(1).max(100), pinned: z.boolean() }).strict();
 const check = z.object({ name: z.string().trim().min(1).max(100), steps: z.array(z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm','pnpm','yarn','python','cargo','go','dotnet']), args: z.array(z.string().max(500).refine((value) => !value.includes('\0'))).min(1).max(30) }).strict()).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300) }).strict();
 export const templateSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), description: z.string().max(1000), workspace: savedWorkspaceSchema, rules: z.string().max(50000), checks: z.array(check).max(20), createdAt: z.iso.datetime() }).strict();
@@ -46,7 +47,7 @@ export class Workflows {
   if (request.action === 'flow-template-save') {
    if (templates.length >= 50) throw new HubError('TEMPLATE_LIMIT', 'Up to 50 templates are supported.');
    const workspace = structuredClone(request.workspace);
-   for (const session of workspace.sessions) { if (session.config.engine !== 'shell') delete session.config.resumeId; delete session.preparedRequest; }
+   for (const session of workspace.sessions) { if (isAgentConfig(session.config)) delete session.config.resumeId; delete session.preparedRequest; }
    const value: ProjectTemplate = { id: randomUUID(), name: request.name, description: request.description, workspace, rules: request.includeRules ? this.rules.read([]).content : '', checks: request.includeChecks ? this.verification.data().profiles.filter((profile) => profile.directory === workspace.rootDirectory).slice(0, 20).map(({ name, steps, timeoutSeconds }) => ({ name, steps, timeoutSeconds })) : [], createdAt: new Date().toISOString() };
    templateSchema.parse(value); save(this.root, 'project-templates.json', [value, ...templates]); return value;
   }

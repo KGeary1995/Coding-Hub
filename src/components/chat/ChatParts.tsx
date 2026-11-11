@@ -4,6 +4,7 @@ import { HIERARCHY_MODELS, type ChatBlock, type ChatImage, type RoundTableState 
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
+import { isAgentConfig } from '../../../shared/types';
 
 /**
  * The parts of a chat thread shared by the desktop's chat channels and the phone: messages, tool cards, approvals and
@@ -164,8 +165,8 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
   const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner, reviewer].some((session) => session?.status === 'running' || session?.status === 'starting');
-  const model = (session: Session | null | undefined, fallback: string) => session && session.config.engine !== 'shell' ? session.config.model || fallback : fallback;
-  const setModel = (session: Session | null | undefined, value: string) => { if (session && session.config.engine !== 'shell') onModel?.(session, value.trim()); };
+  const model = (session: Session | null | undefined, fallback: string) => session && isAgentConfig(session.config) ? session.config.model || fallback : fallback;
+  const setModel = (session: Session | null | undefined, value: string) => { if (session && isAgentConfig(session.config)) onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-planner" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>

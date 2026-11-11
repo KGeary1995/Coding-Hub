@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineInfo } from '../../../shared/ipc';
 import { startSessionSchema } from '../../../shared/schemas';
-import { buildLaunch, launchedLevel } from './engine-adapter';
+import { buildGeminiLaunch, buildLaunch, launchedLevel } from './engine-adapter';
+import { GEMINI_MODEL } from '../../../shared/gemini';
 
 const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.296', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null });
 const claude = { engine: 'claude' as const, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } };
@@ -62,4 +63,24 @@ it('passes an explicitly selected catalog model and raw reasoning effort exactly
  expect(startSessionSchema.safeParse({sessionId:'custom',cwd:'/tmp',cols:80,rows:24,config}).success).toBe(true);
  expect(buildLaunch(config,info('codex')).args).toEqual(['--model','custom/provider-model','--config','model_reasoning_effort="minimal"']);
  const resumeId='11111111-1111-4111-8111-111111111111';expect(buildLaunch({...config,resumeId},{...info('codex'),supportsResume:true}).args).toEqual(['resume',resumeId,'--model','custom/provider-model','--config','model_reasoning_effort="minimal"']);
+});
+
+describe('Gemini CLI launch', () => {
+  const agy: EngineInfo = { engine: 'gemini', available: true, executable: '/agy', version: '1.5.6', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsMode: true, supportsSkipPermissions: true, error: null };
+  const config = { engine: 'gemini' as const, model: GEMINI_MODEL };
+  it('always passes the fixed model, then the level’s flag', () => {
+    expect(buildGeminiLaunch(config, agy)).toEqual(['--model', GEMINI_MODEL, '--mode', 'accept-edits']);
+    expect(buildGeminiLaunch({ ...config, permissions: 'edits' }, agy)).toEqual(['--model', GEMINI_MODEL, '--mode', 'accept-edits']);
+    expect(buildGeminiLaunch({ ...config, permissions: 'ask' }, agy)).toEqual(['--model', GEMINI_MODEL]);
+    expect(buildGeminiLaunch({ ...config, permissions: 'full' }, agy)).toEqual(['--model', GEMINI_MODEL, '--dangerously-skip-permissions']);
+  });
+  it('refuses rather than drops a flag agy does not list, another model, or another engine', () => {
+    expect(() => buildGeminiLaunch(config, { ...agy, supportsModel: false })).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_MODEL_FLAG' }));
+    expect(() => buildGeminiLaunch(config, { ...agy, supportsMode: false })).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_PERMISSIONS' }));
+    expect(() => buildGeminiLaunch({ ...config, permissions: 'full' }, { ...agy, supportsSkipPermissions: false })).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_PERMISSIONS' }));
+    expect(buildGeminiLaunch({ ...config, permissions: 'ask' }, { ...agy, supportsMode: false, supportsSkipPermissions: false })).toEqual(['--model', GEMINI_MODEL]);
+    expect(() => buildGeminiLaunch({ ...config, model: 'gemini-3.8-flash-high' }, agy)).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_MODEL' }));
+    expect(() => buildGeminiLaunch(config, { ...agy, engine: 'codex' })).toThrow(expect.objectContaining({ code: 'ENGINE_MISMATCH' }));
+    expect(() => buildGeminiLaunch(config, { ...agy, available: false, error: 'not found' })).toThrow(expect.objectContaining({ code: 'ENGINE_UNAVAILABLE' }));
+  });
 });

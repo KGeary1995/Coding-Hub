@@ -1,11 +1,17 @@
 import type { ChannelEngine } from './types';
+
+/**
+ * A channel's engine as phones and linked computers see it. A Gemini channel is listed as 'shell' (a terminal): Trace
+ * 1.18.0's linked-computers.ts only accepts claude, codex and shell in a channel list, and would refuse the whole list.
+ */
+export type RemoteEngine = Exclude<ChannelEngine, 'gemini'>;
 import type { AccountLabel } from './accounts';
 import type { ChatEnvelope, ChatEvent, ChatRequest } from './chat';
 import type { PlanLimits } from './plan-limits';
 
 /** A channel as a paired phone sees it: its place, its title, and whether its CLI is running or waiting. */
 /** `cols` and `rows` are the running CLI's terminal size, so the phone draws its screen at the same width. */
-export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: ChannelEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null;
+export interface RemoteChannel { sessionId: string; channel: number; title: string; engine: RemoteEngine; runId: string | null; running: boolean; attention: string | null; cols: number | null; rows: number | null;
   /** Set on a channel that runs on another of the person's computers and is passed on by this one (phones only). */
   computer?: { id: string; name: string };
   /** What the session is working on, from its CLI's terminal title (Claude Code's task summary). */

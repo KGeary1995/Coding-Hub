@@ -28,6 +28,9 @@ import { TaskStrip } from './tile/TaskStrip';
 import { newTaskFor } from '../state/task-store';
 import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
+import { isAgentConfig } from '../../shared/types';
+import { GEMINI_MODEL } from '../../shared/gemini';
+import { GeminiControls } from './GeminiControls';
 
 /** What "tok" counts, and the cache traffic it leaves out. */
 const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
@@ -60,14 +63,16 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const engine = session.config.engine;
   const claude = engine === 'claude';
   const shell = engine === 'shell';
-  const chat = session.config.engine !== 'shell' && session.config.chat === true;
+  // Claude Code or Codex: usage, context, tasks and coaching. Gemini CLI and Terminal channels have none of these.
+  const agent = isAgentConfig(session.config);
+  const chat = isAgentConfig(session.config) && session.config.chat === true;
   // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
   const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = seatId ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
-  const resumeId = session.config.engine === 'shell' ? undefined : session.config.resumeId;
-  const model = session.config.engine === 'shell' ? '' : session.config.model;
+  const engineName = seatId ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini CLI' : 'Codex CLI';
+  const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
+  const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
   const setupView = !cwd || /working directory|absolute.*directory/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
   const busy = session.status === 'running' || session.status === 'starting';
@@ -121,11 +126,11 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
           <svg className="tr-focus-reticle" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M8 0v3.5M8 12.5V16M0 8h3.5M12.5 8H16" /></svg>
           <span className="tr-ch-badge" style={{ ['--ch' as string]: `var(--tr-ch-${engine})` }} title={engineName}>CH{channel}<span className="tr-ch-engine">{engineName}</span></span>
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
-          {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
+          {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : session.config.engine === 'gemini' ? <span className="tr-tile-model model-name" title={`Gemini channels always run ${GEMINI_MODEL}, the highest model on your subscription. Trace passes it with --model.`}>{GEMINI_MODEL}</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
           {account && <span className="tr-profile-chip account-profile-chip" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           <span className="tr-spacer" />
-          {!shell && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
+          {agent && <><span className="tr-tile-metric tnum" title={context ? 'Context window in use' : contextUsed !== null ? 'Tokens in context after the last reply. Claude Code does not report its window size, so there is no percentage.' : 'No context report yet'}>ctx <b className={hot ? 'hot' : ''}>{context ? `${Math.round(context.used / context.limit * 100)}%` : contextUsed !== null ? compact(contextUsed) : '—'}</b></span>
           <span className="tr-tile-metric tnum" title={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'}>tok <b>{today.tokens > 0 ? compact(today.tokens) : usage ? compact(tokens(usage)) : '—'}</b></span></>}
           {action}
           <span className={`tr-state-chip ${meta.solid ? 'solid' : ''}`} style={{ ['--chip' as string]: meta.color === 'engine' ? `var(--tr-ch-${engine})` : meta.color }} role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}>
@@ -140,14 +145,15 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
           {!shell && !chat && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of session ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
           <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
-          {!shell && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
+          {agent && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
           <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessions.length >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
           <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
           <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close session ${channel}`} disabled={channelsOf(sessions).length <= 1 || session.status === 'starting' || stopping} onClick={() => void close()}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
-        {session.config.engine !== 'shell' && <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />}
+        {isAgentConfig(session.config) && <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />}
+        {session.config.engine === 'gemini' && <GeminiControls config={session.config} onChange={(config) => updateConfig(session.id, config)} />}
         <label className="binding-control">Working directory<select aria-label="Working directory" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
         {session.binding.mode === 'independent' && <label className="binding-control">Repository path<input aria-label="Repository path" value={session.binding.cwd} placeholder="Absolute directory path" onChange={(event) => updateBinding(session.id, { mode: 'independent', cwd: event.target.value })} spellCheck={false} /><button className="button secondary" type="button" onClick={() => void window.codingHub?.pickDirectory().then((directory) => { if (directory) updateBinding(session.id, { mode: 'independent', cwd: directory }); }).catch(() => useWorkspaceStore.getState().setSessionError(session.id, 'Folder picker unavailable. Use Projects to enter a path.'))}><FolderOpen size={13} />Browse repository folder</button></label>}
         <SessionPreferences session={session} />
@@ -162,8 +168,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <TerminalViewport session={session} />}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome"><span className="welcome-engine">{claude ? <Asterisk size={28} /> : shell ? <SquareChevronRight size={25} /> : <TerminalSquare size={25} />}</span><span className="welcome-eyebrow">CH{channel} · {resumeId ? 'RESUME CONVERSATION' : shell ? 'LOCAL SHELL' : 'LOCAL CLI'}</span><h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : 'OpenAI Codex'}</h3><p>{resumeId ? 'Continue your saved conversation with its original context.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : 'Codex'} as a conversation: images, formatted replies and approvals as buttons.` : 'Your account. Your tools. Your working directory.'}</p><div className="welcome-directory"><Folder size={14} /><span title={cwd ?? undefined}>{cwd ? folderName(cwd) : 'Choose a project to get started'}</span></div><div className="welcome-actions">{!cwd && <button className="quiet-button" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}>Choose project<ArrowUpRight size={13} /></button>}<button className="quiet-button" aria-label={`Configure idle session ${channel}`} onClick={() => setControlsOpen(true)}>Session settings<ArrowUpRight size={13} /></button></div><small>Press Start in the channel header{resumeId ? ' to resume' : ''}.{shell ? '' : ' CLI permissions and approvals apply.'}</small></div>}</div>
       {/* Flight Deck Lite: the context gauge, tokens and output trace sit at the foot of the tile. */}
       <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} tokens={today.tokens} contextUsed={contextUsed} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (marker at 80%)` : `Session budget ${Math.round((barRatio ?? 0) * 100)}% used (marker at 80%)`} />
-      {!shell && <TaskStrip sessionId={session.id} />}
-      {!shell && <LiveTipStrip sessionId={session.id} />}
+      {agent && <TaskStrip sessionId={session.id} />}
+      {agent && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}
     </article>
   );

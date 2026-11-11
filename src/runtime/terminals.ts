@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { Session } from '../../shared/types';
+import { isAgentConfig } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
@@ -143,14 +144,15 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   element.addEventListener('paste', (event) => {
     const data = event.clipboardData; if (!(MAC || WINDOWS) || !data || data.getData('text/plain') || ![...data.items].some((item) => item.type.startsWith('image/'))) return;
     event.preventDefault(); event.stopPropagation();
-    if (useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config.engine === 'shell') return;
+    // Only Claude Code and Codex take the image key; a terminal or Gemini CLI would get a stray key.
+    const config = useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config; if (!config || !isAgentConfig(config)) return;
     void writeTerminal(session.id, WINDOWS ? '\x1bv' : '\x16');
     if (WINDOWS) void showClipboardImage(session.id);
   }, true);
   attachDrop(session.id, element);
   attachCopy(terminal, element);
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
-  terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
+  terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', gemini: '140;156;255', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
   terminal.writeln('Choose a project, then start this session.');
   terminal.writeln('Your local CLI manages authentication and approvals.');

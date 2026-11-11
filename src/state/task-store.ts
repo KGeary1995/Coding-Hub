@@ -9,6 +9,7 @@ import { useWorkspaceStore } from './workspace-store';
 import { useActivityStore } from './activity-store';
 import { chatFailed, chatSent, useChatStore } from './chat-store';
 import { hierarchyDetached } from './hierarchy-state';
+import { isAgentConfig } from '../../shared/types';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -48,7 +49,7 @@ export async function sendTask(id: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task?.sessionId) throw new Error('Choose the channel to give this task to first.');
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
-  if (session.config.engine === 'shell') throw new Error('Give tasks to Claude Code or Codex channels, not terminals.');
+  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini CLI.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
   const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
@@ -134,7 +135,7 @@ export function startTaskAutomation() {
       // A quiet terminal (Codex, which reports no turn end here): its transcript may say TASK COMPLETE or BLOCKED. A task
       // already marked (blocked, not confirmed, quiet) is read again whenever its reply changed, at most every 30 s, so a
       // later TASK COMPLETE after the person answered is not missed.
-      if (since > 60000 && !(session.config.engine !== 'shell' && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) {
+      if (since > 60000 && !(isAgentConfig(session.config) && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) {
         const last = rechecked.get(task.id);
         if ((!task.outcome || task.outcome === 'blocked' || task.outcome === 'unconfirmed' || task.outcome === 'quiet') && (!last || Date.now() - last.at > 30000)) void lastReply(session.id, task).then((reply) => {
           const seen = rechecked.get(task.id); rechecked.set(task.id, { at: Date.now(), reply: reply ?? '' }); if (task.outcome && seen && seen.reply === (reply ?? '')) return;

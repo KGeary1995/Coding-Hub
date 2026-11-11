@@ -1,4 +1,5 @@
-import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
+import type { CLIEngineConfig, GeminiChannelConfig, PermissionLevel } from '../../../shared/types';
+import { GEMINI_MODEL } from '../../../shared/gemini';
 import type { EngineInfo } from '../../../shared/ipc';
 import { permissionLevel } from '../../../shared/schemas';
 
@@ -69,4 +70,20 @@ function permissionArgs(config: CLIEngineConfig, engine: EngineInfo): string[] {
   }
   if (config.engine === 'claude') return [...(chat || level === 'full' ? ['--allow-dangerously-skip-permissions'] : []), ...(level === 'ask' ? [] : ['--permission-mode', CLAUDE_MODE[level]])];
   return level === 'edits' ? ['--ask-for-approval', 'on-request', '--sandbox', 'workspace-write'] : ['--ask-for-approval', 'never', '--sandbox', 'danger-full-access'];
+}
+
+/**
+ * Gemini CLI's arguments: always --model with the one allowed model (no fallback to agy's default), then the permission
+ * level. edits is --mode accept-edits, full is --dangerously-skip-permissions, and ask passes neither, leaving agy's own
+ * behaviour. A flag agy does not list in --help is refused rather than dropped.
+ */
+export function buildGeminiLaunch(config: GeminiChannelConfig, engine: EngineInfo): string[] {
+  if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'Gemini CLI is unavailable.');
+  if (engine.engine !== 'gemini') throw new HubError('ENGINE_MISMATCH', 'Engine configuration does not match the installed CLI.');
+  if (config.model !== GEMINI_MODEL) throw new HubError('UNSUPPORTED_MODEL', `A Gemini channel runs only ${GEMINI_MODEL}.`);
+  if (!engine.supportsModel) throw new HubError('UNSUPPORTED_MODEL_FLAG', `This Gemini CLI does not advertise --model, so Trace cannot make sure it runs ${GEMINI_MODEL}. Update agy.`);
+  const level = permissionLevel(config);
+  if (level === 'edits' && !engine.supportsMode) throw new HubError('UNSUPPORTED_PERMISSIONS', 'This Gemini CLI does not advertise --mode. Set Permissions to Ask, or update agy.');
+  if (level === 'full' && !engine.supportsSkipPermissions) throw new HubError('UNSUPPORTED_PERMISSIONS', 'This Gemini CLI does not advertise --dangerously-skip-permissions. Set Permissions to Ask, or update agy.');
+  return ['--model', config.model, ...(level === 'edits' ? ['--mode', 'accept-edits'] : level === 'full' ? ['--dangerously-skip-permissions'] : [])];
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GEMINI_MODEL } from './gemini';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -34,8 +35,10 @@ export const engineConfigSchema = z.discriminatedUnion('engine', [
   z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), memoryKey, model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
   z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ]);
-/** Every channel type: the agents plus a plain terminal, which takes no settings. */
-export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, z.object({ engine: z.literal('shell') }).strict()]);
+/** A Gemini CLI channel (a terminal running agy). Only in channelConfigSchema: it is not an engine for chats, tasks or tables. */
+export const geminiConfigSchema = z.object({ engine: z.literal('gemini'), model: z.literal(GEMINI_MODEL), permissions }).strict();
+/** Every channel type: the agents, Gemini CLI, and a plain terminal, which takes no settings. */
+export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, geminiConfigSchema, z.object({ engine: z.literal('shell') }).strict()]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
 export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.'), config: channelConfigSchema, ...dimensions }).strict();

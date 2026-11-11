@@ -32,7 +32,7 @@ import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine, discoverGemini, findExecutable, hostEnvironment } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -61,6 +61,7 @@ import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 import { setBackupRoot } from './services/hub/file-backups';
+import { isAgentConfig } from '../shared/types';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -179,7 +180,7 @@ function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
   const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
-  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isAgentConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
 /** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
@@ -241,7 +242,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
@@ -299,7 +300,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
-  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && request.engine !== 'shell'); return null; }
+  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && (request.engine === 'claude' || request.engine === 'codex')); return null; }
   if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
   if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
   if (request.action === 'linked-update') return linked.update(request.id);
@@ -318,14 +319,14 @@ async function linkedRequest(payload: unknown) {
  */
 function channelTranscript(sessionId: string): ChannelTranscript {
   const config = storage?.load()?.sessions.find((session) => session.id === sessionId)?.config;
-  if (!config || config.engine === 'shell' || !config.resumeId) return null;
+  if (!config || !isAgentConfig(config) || !config.resumeId) return null;
   const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined);
   return file ? chatHistory(config.engine, file) : null;
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
+function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && (engine === 'claude' || engine === 'codex') ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
 /**
  * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
  * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
@@ -565,7 +566,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals.');
+      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -809,7 +810,7 @@ else app.whenReady().then(() => {
   // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
   handle(IPC_CHANNELS.screen, screenRequest);
   handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
-  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
+  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex'), discoverGemini()])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
     // The manager validates the complete request. This guard also covers pending

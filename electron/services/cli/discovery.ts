@@ -8,6 +8,7 @@ import type { CLIEngine } from '../../../shared/types';
 import type { EngineInfo } from '../../../shared/ipc';
 import { classifyAuthentication, type ProbeResult } from './auth-status';
 import { HubError } from './engine-adapter';
+import { GEMINI_COMMAND } from '../../../shared/gemini';
 
 export interface Executable { file: string; prefixArgs: string[]; extraEnv: Record<string, string>; displayPath: string }
 export interface DiscoveredEngine { info: EngineInfo; executable: Executable | null }
@@ -217,6 +218,48 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
     return { info, executable };
   } catch (error) {
     info.error = error instanceof HubError ? error.message : 'CLI discovery failed. Check the local installation.';
+    return { info, executable: null };
+  }
+}
+
+/**
+ * Gemini CLI (agy) on PATH. It is a native program (agy.exe on Windows), never an npm shim, so only executables are
+ * taken: .exe and .com on Windows, an executable file elsewhere.
+ */
+export async function findGeminiExecutable(env = hostEnvironment()): Promise<Executable> {
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+  const extensions = process.platform === 'win32' ? ['.exe', '.com'] : [''];
+  for (const directory of (env[pathKey] ?? '').split(path.delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = path.join(directory.replace(/^"|"$/g, ''), GEMINI_COMMAND + extension);
+      try {
+        await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+        if ((await stat(candidate)).isFile()) return { file: candidate, prefixArgs: [], extraEnv: {}, displayPath: candidate };
+      } catch { /* Keep looking. */ }
+    }
+  }
+  throw new HubError('CLI_NOT_FOUND', 'Gemini CLI (agy) was not found on PATH. Install it, sign in to it, then refresh Local engines.');
+}
+
+/**
+ * Gemini CLI's version and the flags a Gemini channel uses. agy lists no login status command, so authentication stays
+ * unknown and agy handles its own sign-in.
+ */
+export async function discoverGemini(env = hostEnvironment(), find: typeof findGeminiExecutable = findGeminiExecutable): Promise<DiscoveredEngine> {
+  const info: EngineInfo = { engine: 'gemini', available: false, executable: null, version: null, supportsModel: false, supportsConfig: false, supportsNoDaemon: false, error: null, checkedAt: new Date().toISOString() };
+  try {
+    const executable = await find(env);
+    info.executable = executable.displayPath;
+    const [version, help] = await Promise.all([probe(executable, '--version', env), probe(executable, '--help', env)]);
+    info.version = version.trim().split(/\r?\n/)[0]?.trim().slice(0, 120) || null;
+    info.supportsModel = advertisesFlag(help, '--model');
+    info.supportsMode = advertisesFlag(help, '--mode');
+    info.supportsSkipPermissions = advertisesFlag(help, '--dangerously-skip-permissions');
+    info.authentication = { state: 'unknown', checkedAt: new Date().toISOString(), message: 'Gemini CLI has no sign-in check that Trace can run; agy handles its own sign-in.' };
+    info.available = true;
+    return { info, executable };
+  } catch (error) {
+    info.error = error instanceof HubError ? error.message : 'Gemini CLI discovery failed. Check the local installation.';
     return { info, executable: null };
   }
 }

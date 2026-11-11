@@ -1,5 +1,6 @@
 import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { leadOf, partnerOf, useWorkspaceStore } from '../state/workspace-store';
+import { isAgentConfig } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
@@ -24,8 +25,8 @@ export async function permissionsRefused(sessionId: string, runId: string, level
   if (!self || self.runId !== runId) return;
   const other = partnerOf(sessions, sessionId) ?? leadOf(sessions, sessionId);
   const ids = new Set([sessionId, ...(other ? [other.id] : [])]);
-  useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.has(session.id) && session.config.engine !== 'shell' ? { ...session, config: withPermissions(session.config, level) } : session) }));
-  if (other && other.config.engine !== 'shell' && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
+  useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.has(session.id) && isAgentConfig(session.config) ? { ...session, config: withPermissions(session.config, level) } : session) }));
+  if (other && isAgentConfig(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
 }
 
 /**
@@ -40,12 +41,12 @@ export async function setPermissions(sessionId: string, level: PermissionLevel):
   const before = new Map(state.sessions.filter((session) => ids.has(session.id)).map((session) => [session.id, session.config]));
   const apply = (configs: (id: string) => ChannelConfig | undefined) => useWorkspaceStore.setState((current) => ({ sessions: current.sessions.map((session) => { const config = ids.has(session.id) ? configs(session.id) : undefined; return config && session.config.engine === config.engine ? { ...session, config } : session; }) }));
   // Allowed while running, unlike other engine settings: it is the one setting a running chat can change.
-  apply((id) => { const config = before.get(id); return config && config.engine !== 'shell' ? withPermissions(config, level) : undefined; });
+  apply((id) => { const config = before.get(id); return config && isAgentConfig(config) ? withPermissions(config, level) : undefined; });
   const changed: { id: string; runId: string; old: PermissionLevel }[] = [];
   for (const session of useWorkspaceStore.getState().sessions) {
-    if (!ids.has(session.id) || session.config.engine === 'shell' || !session.config.chat || session.status !== 'running' || !session.runId || !window.codingHub) continue;
+    if (!ids.has(session.id) || !isAgentConfig(session.config) || !session.config.chat || session.status !== 'running' || !session.runId || !window.codingHub) continue;
     const result = await window.codingHub.chat({ action: 'permissions', sessionId: session.id, runId: session.runId, level }).catch(() => null);
-    const old = before.get(session.id); const oldLevel = old && old.engine !== 'shell' ? old.permissions ?? 'edits' : 'edits';
+    const old = before.get(session.id); const oldLevel = old && isAgentConfig(old) ? old.permissions ?? 'edits' : 'edits';
     if (!result?.ok) {
       // Undo: the configs as they were, and any chat already switched back to its old level.
       apply((id) => before.get(id));

@@ -48,8 +48,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   const channelMenu: MenuItem[] = other
-    ? (['claude', 'codex', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', shell: 'Terminal' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
-    : [{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }, { label: 'Terminal', onSelect: () => addSession('shell') },
+    ? (['claude', 'codex', 'gemini', 'shell'] as const).map((engine) => ({ label: { claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI', shell: 'Terminal' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
+    : [{ label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex CLI', onSelect: () => addSession('codex') }, { label: 'Gemini CLI', onSelect: () => addSession('gemini') }, { label: 'Terminal', onSelect: () => addSession('shell') },
       ...(sessions.length <= MAX_CHANNELS - 3 ? [{ label: 'Round Table (hierarchy)', onSelect: () => void startHierarchyTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : []),
       ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : [])];
   return <header className="tr-topbar">

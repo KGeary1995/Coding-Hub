@@ -37,6 +37,13 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
       await writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
     } else await writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
   }
+  // A stand-in for Gemini CLI (agy): it prints the arguments it was started with and stays open. agy is a native
+  // program and Trace takes only agy.exe on Windows, so there the Gemini channel is added but not started.
+  if (process.platform !== 'win32') await writeFile(path.join(bin, 'agy'), `#!/usr/bin/env node
+if (process.argv[2] === '--version') { console.log('1.5.6'); process.exit(0); }
+if (process.argv[2] === '--help') { console.error('Usage of agy:\\n  --dangerously-skip-permissions  Auto-approve\\n  --mode  Set the mode\\n  --model  Model'); process.exit(0); }
+console.log('FAKE-AGY ' + process.argv.slice(2).join(' ')); setInterval(() => {}, 1000);
+`, { mode: 0o755 });
   const env = { ...process.env };
   env.CODING_HUB_STORAGE_DIR = path.join(root, 'storage');
   env.CLAUDE_CONFIG_DIR = path.join(root, 'claude-config');
@@ -364,6 +371,23 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
     await page.getByRole('button', { name: 'Back to sessions', exact: true }).click();
+    // + Channel → Gemini CLI adds a Gemini tile showing its fixed model; started (not on Windows), it runs agy with that
+    // model and the default permission level's flag. It is closed again so the rest sees the two channels as before.
+    await addChannel(page, 'Gemini CLI');
+    const gemini = page.locator('.session-tile.gemini');
+    await gemini.waitFor();
+    assert.equal(await gemini.locator('.tr-ch-engine').textContent(), 'Gemini CLI');
+    assert.equal(await gemini.locator('.tr-tile-model').textContent(), 'gemini-4-argon-high');
+    if (process.platform !== 'win32') {
+      await gemini.getByRole('button', { name: 'Start session', exact: true }).click();
+      await page.waitForFunction(() => window.testEvents.some((event) => event.type === 'started' && event.engine === 'gemini'));
+      pids.push(await page.evaluate(() => window.testEvents.find((event) => event.type === 'started' && event.engine === 'gemini').pid));
+      await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('FAKE-AGY --model gemini-4-argon-high --mode accept-edits'));
+      await (await tileControl(gemini, 'Stop')).click();
+      await page.waitForFunction(() => { const run = window.testEvents.find((event) => event.type === 'started' && event.engine === 'gemini'); return window.testEvents.some((event) => event.type === 'exit' && event.runId === run.runId); });
+    }
+    await (await tileControl(gemini, 'Close session 3')).click();
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 2);
     // Deliberately close immediately after a layout change; the host requests a final snapshot.
     await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click();
     assert.deepEqual(errors, []);

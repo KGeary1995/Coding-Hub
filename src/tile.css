@@ -35,6 +35,7 @@
 .tr-action.start { background: var(--tr-ch-codex); }
 .claude .tr-action.start { background: var(--tr-ch-claude); }
 .shell .tr-action.start { background: var(--tr-ch-shell); }
+.gemini .tr-action.start { background: var(--tr-ch-gemini); }
 .tr-action.waiting { background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
 .tr-action.retry { background: var(--tr-fg); }
 .tr-action.limit { background: var(--tr-st-limit); }
@@ -231,6 +232,7 @@
 .session-tile.tr-tile.claude { --bracket: var(--tr-ch-claude); }
 .session-tile.tr-tile.codex { --bracket: var(--tr-ch-codex); }
 .session-tile.tr-tile.shell { --bracket: var(--tr-ch-shell); }
+.session-tile.tr-tile.gemini { --bracket: var(--tr-ch-gemini); }
 .session-tile.tr-tile.state-waiting { --bracket: var(--tr-st-waiting); box-shadow: var(--tr-glow-waiting); }
 .session-tile.tr-tile.state-failed { --bracket: var(--tr-st-failed); }
 .tr-tile .tr-tile-name { text-transform: uppercase; letter-spacing: .04em; font-size: 14px; }
