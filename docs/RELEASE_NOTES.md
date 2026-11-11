@@ -1,6 +1,6 @@
 ## What's new
 
-Unreleased (on `feat/gemini-hierarchy-seat`, not yet a version):
+1.20.0 seats Gemini at the hierarchy Round Table and stops Full access from asking there (update every computer and reload the phone app):
 
 - **Gemini joins the hierarchy Round Table.** When Gemini CLI (`agy`) is installed, a hierarchy table seats it as a fourth, hidden, read-only agent. Once per task it challenges the planner's plan before you see it (the planner answers each challenge and rewrites the plan; the bar lists them at Approve), reviews the build before Codex without seeing Codex's findings, then compares the two reviews (agree, dispute, or duplicate). Codex alone checks the fixes, and the planner still gives the final review. It always runs Gemini 4 Argon (High) and stops if agy does not confirm it. Without agy, or with no room for a fourth agent, the table opens with three and says why.
 - **Gemini changing files stops the table.** Gemini CLI writes files without asking even in plan mode (seen with agy 1.5.6), so Trace compares the project's files before and after each Gemini step and stops the table if they changed. **Continue** runs the step again; **Continue without Gemini** passes it over.
