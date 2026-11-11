@@ -2,7 +2,7 @@ import type { ChainStep, ChatEnvelope, ChatImage, RoundTableState, SavedChain } 
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
 import { KEEP_IMAGES, type TableHost } from './round-table';
-import { taskSignal } from '../../../shared/task-signal';
+import { BLOCKED_LINE, SIGNAL_INSTRUCTION, taskSignal } from '../../../shared/task-signal';
 
 /** Review rounds (Codex reviews, Opus fixes) before the planner's final review. */
 export const REVIEW_ROUNDS = 2;
@@ -29,7 +29,10 @@ interface Chain {
 const cut = (text: string) => text.length > RELAY_LIMIT ? `${text.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]` : text;
 /** The planner's verdict on the last non-empty line: APPROVED, or CHANGES NEEDED: what to change. */
 export function verdictOf(answer: string): { approved: true } | { approved: false; changes: string } | null {
-  const last = answer.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean).at(-1) ?? '';
+  // A TASK COMPLETE after the verdict (the habit a task's own instruction teaches) does not hide it.
+  const lines = answer.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean);
+  if (lines.length > 1 && /^TASK COMPLETE\.?$/i.test(lines.at(-1)!)) lines.pop();
+  const last = lines.at(-1) ?? '';
   if (/^APPROVED\.?$/i.test(last)) return { approved: true };
   const changes = /^CHANGES NEEDED:?\s*(.*)$/i.exec(last); return changes ? { approved: false, changes: changes[1].trim() || 'See my review above.' } : null;
 }
@@ -67,6 +70,7 @@ export class ReviewChains {
       kind: 'hierarchy', partner: { sessionId: chain.reviewer.sessionId, runId: chain.reviewer.runId, engine: 'codex' }, planner: { sessionId: chain.planner.sessionId, runId: chain.planner.runId, engine: 'claude' },
       driver: 'claude', rounds: REVIEW_ROUNDS, round: chain.reviewRound, phase: working ? 'answering' : 'idle', agreed: chain.verdict === 'approved',
       findings: chain.findings.map((finding) => ({ ...finding })),
+      ...(chain.step === 'stopped' && this.busy(chain) ? { stopping: true } : {}),
       chain: { step: chain.step, ...(chain.stoppedAt ? { stoppedAt: chain.stoppedAt } : {}), ...(chain.blocked ? { blocked: chain.blocked.role } : {}), reviewRound: chain.reviewRound, finalRound: chain.finalRound, plan: chain.plan, verdict: chain.verdict, note: chain.note, task: chain.task, report: chain.report },
       ...(chain.queued ? { waiting: chain.queued.text, ...this.keptImages(chain.queued.images), ...(chain.kept ? { waitingKept: true } : {}) } : {}),
     };
@@ -82,7 +86,7 @@ export class ReviewChains {
       : seat.role === 'builder'
         ? 'You are the builder: the only seat that edits files. You implement the planner\'s plan, then fix what the reviewers find. Carry out the plan without asking again whether to proceed; ask only about choices that are the person\'s, or before anything that publishes, deletes or cannot be undone.'
         : 'You are the reviewer. You do not edit files (Trace keeps you read-only). You review the builder\'s changes in the files themselves.';
-    return `[Trace Round Table · hierarchy] Steps: the planner plans, the person approves the plan, the builder implements, the reviewer reviews, the builder fixes, and the planner gives the final review. Trace passes each step's output to the next. ${role}`;
+    return `[Trace Round Table · hierarchy] Steps: the planner plans, the person approves the plan, the builder implements, the reviewer reviews, the builder fixes, and the planner gives the final review. Trace passes each step's output to the next. ${role} End each reply as your step asks. Only if you need the person first (a question, an approval, a choice that is theirs), end instead with the line ${BLOCKED_LINE} and what you need.`;
   }
   /** One step: a turn for one seat. A message the person sent meanwhile goes along with it. */
   private turn(chain: Chain, seat: Seat, step: ChainStep, text: string, images: ChatImage[] = []) {
@@ -151,9 +155,24 @@ export class ReviewChains {
       chain.queued = chain.queued ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images] } : { text, images };
       this.publish(chain); return;
     }
-    // A new task: a fresh plan and a fresh count of rounds; the findings record goes on.
-    chain.task = text; chain.images = images; chain.plan = ''; chain.report = ''; chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = '';
+    // While the table waits for the person (stopped, or needs you), a typed reply goes on with the same task: a new task
+    // starts only from idle or done, or when it comes from Tasks (its prompt carries the TASK COMPLETE instruction).
+    if (chain.task && (chain.step === 'stopped' || chain.step === 'needs-you') && !text.includes(SIGNAL_INSTRUCTION)) { this.reply(chain, leadRunId, text, images); return; }
+    // A new task: a fresh plan and a fresh count of rounds; the findings record goes on. A task from Tasks asks to end
+    // with TASK COMPLETE, which would push each step's own last line (PLAN READY, APPROVED) aside: here the planner's
+    // APPROVED completes the task, and each seat's brief says when to end with TASK BLOCKED.
+    chain.task = text.replace(SIGNAL_INSTRUCTION, '').trim(); chain.images = images; chain.plan = ''; chain.report = ''; chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = '';
     this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), images);
+  }
+  /**
+   * The person's reply while the table waits for them: it goes with the stopped step when it continues; with no plan
+   * yet, to the planner with the task; otherwise to the builder as changes, which the planner then reviews again.
+   */
+  private reply(chain: Chain, leadRunId: string, text: string, images: ChatImage[]) {
+    chain.note = '';
+    if (chain.step === 'stopped' && chain.stoppedAt) { chain.queued = { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false; this.continue(leadRunId); return; }
+    if (!chain.plan) { this.turn(chain, chain.planner, 'planning', `${this.planPrompt(chain)}\n\nThe person adds: ${text}`, images); return; }
+    this.turn(chain, chain.builder, 'final-fixing', `[Step: changes from the person] The task:\n\n${chain.task}\n\nThe person says:\n\n${text}\n\nMake the changes they ask for, then report what you changed.`, images);
   }
   /** The person on the plan: approve it (the builder starts), or send it back with what to change. */
   plan(leadRunId: string, approve: boolean, note = '') {
@@ -167,6 +186,8 @@ export class ReviewChains {
   continue(leadRunId: string) {
     const chain = this.leading(leadRunId); const step = chain.stoppedAt;
     if (chain.step !== 'stopped' || !step) throw new HubError('TABLE_STEP', 'Nothing was stopped part way.');
+    // A stopped seat's turn ends with a late `done`; a new turn begun before it would take that `done` as its own end.
+    if (this.busy(chain)) throw new HubError('TABLE_STOPPING', 'The agent is still stopping. Continue once it has stopped.');
     chain.blocked = null;
     if (step === 'planning') this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), chain.images);
     else if (step === 'implementing') this.turn(chain, chain.builder, 'implementing', this.buildPrompt(chain), chain.images);

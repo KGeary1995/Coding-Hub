@@ -298,3 +298,11 @@
 .chain-steps li { padding: 2px 6px; border: 1px solid var(--tr-line); color: var(--tr-fg-dim); }
 .chain-steps li.past { color: var(--tr-fg-muted); } .chain-steps li.current { color: var(--tr-fg-strong); border-color: var(--tr-st-waiting); }
 .chain-models { text-transform: none; letter-spacing: normal; } .chain-models label { display: inline-flex; gap: 6px; align-items: center; margin-right: 10px; } .chain-models input { width: 16ch; }
+
+/* A hierarchy table's planner: its own colour, so its messages and seat read apart from the builder (both Claude). */
+.seat-hex.seat-planner, .table-seats .seat-planner { background: var(--tr-ch-planner); }
+.chat-message.assistant.table-planner { padding-left: 10px; border-left: 1px solid var(--tr-ch-planner); } .table-planner .chat-author { color: var(--tr-ch-planner); }
+/* Who sits at a hierarchy table and what each is doing now. */
+.chain-seats { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font: 400 12px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.chain-seats li { display: flex; align-items: center; gap: 6px; } .chain-seats strong { font-weight: 600; } .chain-seats .working strong { color: var(--tr-fg-strong); }
+.chain-seats .seat-claude + strong { color: var(--tr-ch-claude); } .chain-seats .seat-codex + strong { color: var(--tr-ch-codex); } .chain-seats .seat-planner + strong { color: var(--tr-ch-planner); }

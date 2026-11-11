@@ -8,6 +8,7 @@ import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
 import { useActivityStore } from './activity-store';
 import { chatFailed, chatSent, useChatStore } from './chat-store';
+import { hierarchyDetached } from './hierarchy-state';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -48,6 +49,8 @@ export async function sendTask(id: string) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
   if (session.config.engine === 'shell') throw new Error('Give tasks to Claude Code or Codex channels, not terminals.');
+  // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
+  const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
   let sent: boolean;
   if (session.config.chat && window.codingHub) {

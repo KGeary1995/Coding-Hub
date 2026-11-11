@@ -21,7 +21,7 @@ function chatTurnDone(sessionId: string, failed: boolean) {
   const sessions = useWorkspaceStore.getState().sessions; const lead = leadOf(sessions, sessionId) ?? sessions.find((session) => session.id === sessionId);
   const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
   // A hierarchy's task is done on the planner's APPROVED (chainTasks), never when a seat's turn ends.
-  if (table?.kind === 'hierarchy') return;
+  if (table?.kind === 'hierarchy' || lead?.roundTable?.kind === 'hierarchy') return;
   if (lead && table && seat && seat.config.engine !== table.driver) return;
   void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
 }
@@ -224,11 +224,11 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): s
 export async function remoteControl(id: string, control: ChannelControl): Promise<string | undefined> {
   const current = () => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const session = current(); if (!session) return 'That channel is no longer on this computer.';
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
-  if (control !== 'start' && (session.status === 'running' || partner?.status === 'running')) {
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
+  if (control !== 'start' && [session, partner, planner].some((seat) => seat?.status === 'running')) {
     if (!(await stopSession(id))) return current()?.error ?? 'The channel could not be stopped.';
-    // The exit events (a Round Table's partner's too) can arrive just after the stop requests return.
-    await settled([id, partner?.id]);
+    // The exit events (a Round Table's partner's and planner's too) can arrive just after the stop requests return.
+    await settled([id, partner?.id, planner?.id]);
   }
   if (control === 'stop') return undefined;
   if (control === 'close') {
