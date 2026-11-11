@@ -3,7 +3,7 @@ import tls from 'node:tls';
 import { z } from 'zod';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
-import { SCREEN_SERVICE_PATH, type ScreenCredentials, type ScreenEvent, type ScreenKind } from '../../../shared/screen';
+import { MAX_DISPLAYS, SCREEN_SERVICE_PATH, type ScreenCredentials, type ScreenEvent, type ScreenKind, type ScreenOpened } from '../../../shared/screen';
 
 const FILE = 'screen-sharing.json';
 const MAX_STREAMS = 4;
@@ -56,13 +56,13 @@ function connected(socket: net.Socket, event: 'connect' | 'secureConnect') {
  * there and said no, as does no answer in time; anything else (Trace there is older, or the computer is a Mac) means
  * there is no such service.
  */
-export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT): Promise<{ socket: net.Socket; head: Buffer }> {
+export async function openTraceScreen(name: string, url: string, token: string, answerTimeout = ANSWER_TIMEOUT, display = 0): Promise<{ socket: net.Socket; head: Buffer; displays?: number; display?: number }> {
   const address = new URL(url); const secure = address.protocol === 'https:';
   const socket = secure ? tls.connect({ host: address.hostname, port: Number(address.port) || 443, servername: address.hostname }) : net.connect({ host: address.hostname, port: Number(address.port) || 80 });
   socket.on('error', () => { /* Reported below. */ });
   try {
     await connected(socket, secure ? 'secureConnect' : 'connect');
-    socket.write(`GET ${SCREEN_SERVICE_PATH} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\nConnection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
+    socket.write(`GET ${SCREEN_SERVICE_PATH}${display ? `?display=${display}` : ''} HTTP/1.1\r\nHost: ${address.host}\r\nAuthorization: Bearer ${token}\r\nConnection: Upgrade\r\nUpgrade: trace-screen\r\n\r\n`);
     const answer = await new Promise<Buffer>((resolve, reject) => {
       let received = Buffer.alloc(0); let done = false;
       const finish = (error?: Error) => { if (done) return; done = true; clearTimeout(timer); socket.off('data', data); socket.off('close', end); if (error) reject(error); else resolve(received); };
@@ -80,7 +80,12 @@ export async function openTraceScreen(name: string, url: string, token: string, 
       socket.on('data', data); socket.once('close', end);
     });
     const split = answer.indexOf('\r\n\r\n'); const status = split < 0 ? 0 : Number(/^HTTP\/1\.1 (\d{3})/.exec(answer.toString('latin1', 0, split))?.[1]);
-    if (status === 101) return { socket, head: answer.subarray(split + 4) };
+    if (status === 101) {
+      // A service that can show one display says how many it has and which it shows; an older one says neither.
+      const header = (field: string) => { const value = Number(answer.toString('latin1', 0, split).split('\r\n').find((line) => line.toLowerCase().startsWith(`${field}:`))?.slice(field.length + 1).trim()); return Number.isInteger(value) && value >= 0 && value <= MAX_DISPLAYS ? value : undefined; };
+      const displays = header('x-trace-displays'); const shown = header('x-trace-display');
+      return { socket, head: answer.subarray(split + 4), ...(displays !== undefined ? { displays } : {}), ...(shown !== undefined ? { display: shown } : {}) };
+    }
     if (status === 401 || status === 403 || status === 503) {
       let message = `${name} refused to share its screen.`;
       try { message = (JSON.parse(answer.subarray(split + 4).toString('utf8')) as { error?: string }).error || message; } catch { /* Not JSON. */ }
@@ -98,18 +103,18 @@ export class ScreenSharing {
   private streams = new Map<string, Stream>();
   constructor(private root: string, private target: (id: string) => ScreenTarget | null, private emit: (owner: number, event: ScreenEvent) => void, private cipher: SecretCipher, private answerTimeout = ANSWER_TIMEOUT) {}
 
-  async open(owner: number, id: string, streamId: string): Promise<{ kind: ScreenKind }> {
+  async open(owner: number, id: string, streamId: string, display = 0): Promise<ScreenOpened> {
     const target = this.target(id);
     if (!target || (!target.trace && !target.system)) throw new HubError('SCREEN_UNKNOWN', 'That computer is not linked, or has no Tailscale address. Open Settings → Other computers.');
     if (this.streams.has(streamId)) throw new HubError('SCREEN_STREAM', 'That screen connection is already open.');
     if (this.streams.size >= MAX_STREAMS) throw new HubError('SCREEN_LIMIT', 'Close another screen before opening this one.');
     const stream: Stream = { socket: new net.Socket(), owner, name: target.name, closing: false, ready: false }; this.streams.set(streamId, stream);
-    let kind: ScreenKind = 'trace'; let head: Buffer = Buffer.alloc(0);
+    let kind: ScreenKind = 'trace'; let head: Buffer = Buffer.alloc(0); let chosen: { displays?: number; display?: number } = {};
     try {
       // Trace's own screen service first (Windows). Where there is none (a Mac), its own Screen Sharing.
-      let opened: { socket: net.Socket; head: Buffer } | null = null;
-      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token, this.answerTimeout); } catch (error) { if (error instanceof Refused || !target.system) throw error; }
-      if (opened) { stream.socket = opened.socket; head = opened.head; }
+      let opened: Awaited<ReturnType<typeof openTraceScreen>> | null = null;
+      if (target.trace) try { opened = await openTraceScreen(target.name, target.trace.url, target.trace.token, this.answerTimeout, display); } catch (error) { if (error instanceof Refused || !target.system) throw error; }
+      if (opened) { stream.socket = opened.socket; head = opened.head; chosen = { ...(opened.displays !== undefined ? { displays: opened.displays } : {}), ...(opened.display !== undefined ? { display: opened.display } : {}) }; }
       else { kind = 'system'; stream.socket = net.connect({ host: target.system!.host, port: target.system!.port }); await connected(stream.socket, 'connect'); }
       if (this.streams.get(streamId) !== stream) throw new HubError('SCREEN_CLOSED', 'That screen connection has closed.');
     } catch (error) {
@@ -126,7 +131,7 @@ export class ScreenSharing {
       this.emit(owner, stream.closing ? { type: 'closed', streamId } : { type: 'closed', streamId, error: hadError ? `The connection to ${target.name}'s screen was lost.` : `${target.name} ended screen sharing.` });
     });
     stream.ready = true;
-    return { kind };
+    return { kind, ...chosen };
   }
 
   send(owner: number, streamId: string, data: Uint8Array) {

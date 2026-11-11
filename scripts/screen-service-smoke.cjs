@@ -45,8 +45,15 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     const halves = await canvas.evaluate((element) => [0, 1].map((half) => { const { width, height } = element; const data = element.getContext('2d').getImageData(half * (width >> 1), 0, width >> 1, height).data; const colours = new Set(); for (let i = 0; i < data.length; i += 4 * 499) colours.add(data[i] << 16 | data[i + 1] << 8 | data[i + 2]); return colours.size; }));
     if (size[0] / size[1] > 2.5) assert.ok(halves.every((count) => count > 20), `both displays show a picture (colours per half: ${halves.join(', ')})`);
     console.log('colours per half', halves.join(', '));
+    // Pictures keep coming after the first ones: each update waits for the viewer's answer to a fence (at most two on
+    // their way), so a viewer that never answered would freeze here. The viewer's own window is on the screen it shows:
+    // after the first picture and the sharp copy that follows once it is still, paint it magenta and look for that.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await page.evaluate(() => { const cover = document.createElement('div'); cover.id = 'smoke-cover'; cover.style.cssText = 'position:fixed;inset:0;background:#ff00ff;z-index:99999;pointer-events:none'; document.body.append(cover); });
+    await until(() => canvas.evaluate((element) => { const data = element.getContext('2d').getImageData(0, 0, element.width, element.height).data; let magenta = 0; for (let i = 0; i < data.length; i += 4 * 101) if (data[i] > 230 && data[i + 1] < 40 && data[i + 2] > 230) magenta++; return magenta > 200; }), 'later pictures (the viewer answering fences)');
+    await page.evaluate(() => document.getElementById('smoke-cover')?.remove());
     // A Windows viewer of Windows needs no key swap.
-    assert.equal(await panel.locator('.linked-screen-toggle').count(), 0);
+    assert.equal(await panel.getByLabel('Ctrl as ⌘').count() + await panel.getByLabel('⌘ as Ctrl').count(), 0);
     await canvas.click({ position: { x: 40, y: 30 } }); await page.keyboard.press('a');
     await until(async () => /key 97 0/.test(await fs.readFile(log, 'utf8').catch(() => '')), 'the key press in the log');
     const lines = (await fs.readFile(log, 'utf8')).split('\n');
@@ -58,6 +65,15 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     await until(async () => /key 118 0/.test(await fs.readFile(log, 'utf8')), 'the pasted V');
     const after = (await fs.readFile(log, 'utf8')).split('\n'); const copied = after.indexOf(`clipboard ${pasted}`); const pressed = after.indexOf('key 118 1');
     assert.ok(copied >= 0, `The text arrived intact (log: ${after.filter((line) => line.startsWith('clipboard')).join(' | ')})`); assert.ok(copied < pressed, 'The text reached the clipboard before V was pressed');
+    // With several displays: one of them on its own, at the size one display gets, then all of them again.
+    const picker = panel.getByLabel('Display');
+    if (await picker.count()) {
+      await picker.selectOption('2'); await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+      await until(() => canvas.evaluate((element) => element.width > 0 && element.width <= 1920 && element.height <= 1200), 'one display\'s picture');
+      console.log('display 2 at', (await canvas.evaluate((element) => [element.width, element.height])).join('×'));
+      await picker.selectOption('0'); await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+      await until(async () => (await canvas.evaluate((element) => element.width)) === size[0], 'all displays again');
+    } else console.log('one display here: the display choice is not checked');
     // Back to the channels: the service lets go of the viewer.
     await page.getByRole('button', { name: 'Channels', exact: true }).click();
     await until(async () => (await fs.readFile(log, 'utf8')).includes('close'), 'the viewer to leave');

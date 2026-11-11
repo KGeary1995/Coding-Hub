@@ -50,7 +50,7 @@ import { serveFailure, serveRemote, stopServing, tailscalePeers, tailscaleRunner
 import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
 import { ScreenSharing, screenHost } from './services/remote/screen-sharing';
 import { ScreenShare } from './services/remote/screen-share';
-import { SCREEN_PORT } from '../shared/screen';
+import { MAX_DISPLAYS, SCREEN_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
 import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
@@ -253,7 +253,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-fit'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300).optional(), rows: z.number().int().min(6).max(200).optional() }).strict(),
 ]);
 const screenSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('screen-open'), id: z.uuid(), streamId: z.uuid() }).strict(),
+  z.object({ action: z.literal('screen-open'), id: z.uuid(), streamId: z.uuid(), display: z.number().int().min(0).max(MAX_DISPLAYS).optional() }).strict(),
   z.object({ action: z.literal('screen-send'), streamId: z.uuid(), data: z.instanceof(Uint8Array).refine((data) => data.byteLength > 0 && data.byteLength <= 1024 * 1024) }).strict(),
   z.object({ action: z.literal('screen-close'), streamId: z.uuid() }).strict(),
   z.object({ action: z.literal('screen-credentials'), id: z.uuid() }).strict(),
@@ -269,7 +269,7 @@ async function screenRequest(owner: number, payload: unknown) {
     return request.action === 'screen-share-set' ? screenShare.set(request.enabled) : screenShare.status();
   }
   if (!screens) throw new HubError('SCREEN_UNAVAILABLE', 'Screen sharing needs linked computers, which need writable local storage.');
-  if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId);
+  if (request.action === 'screen-open') return screens.open(owner, request.id, request.streamId, request.display ?? 0);
   if (request.action === 'screen-send') return screens.send(owner, request.streamId, request.data);
   if (request.action === 'screen-close') return screens.close(owner, request.streamId);
   if (request.action === 'screen-save-credentials') return screens.saveCredentials(request.id, { username: request.username, password: request.password });
@@ -600,7 +600,7 @@ else app.whenReady().then(() => {
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
   screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);
-  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed'));
+  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed')); screenShare.watch();
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;

@@ -20,6 +20,14 @@ const TIGHT = 7; const CONTINUOUS = -313; const CLIPBOARD_LIMIT = 1024 * 1024;
 const IDLE_POLL = 15;
 /** Updates wait while this much is still unsent, so the viewer sees the newest screen rather than a queue of old ones. */
 const SEND_LIMIT = 64 * 1024;
+/**
+ * The local socket says nothing about the link beyond it (`tailscale serve`, then the network): a slow link fills up
+ * further on, and the viewer falls behind. A viewer that takes fences (noVNC does) answers each one only after drawing
+ * everything sent before it, so at most this many updates are on their way at once, and a slow link gets fewer,
+ * newer pictures rather than a queue of old ones.
+ */
+const FENCE = -312; export const IN_FLIGHT = 2;
+const FENCE_REQUEST = 0x80000000; const FENCE_BLOCKS = 0b11;
 
 /** Tight's "compact" length: 7 bits per byte, at most three bytes. */
 export function compactLength(length: number): Buffer {
@@ -67,6 +75,8 @@ export class RfbSession {
    * a paste (Ctrl+V right after the text) would otherwise reach this computer before its clipboard has the new text.
    */
   private held: (() => void)[] | null = null; private heldTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Updates sent and not yet answered by the viewer's fence, and the pump waiting for one. */
+  private inFlight = 0; private fenced: (() => void) | null = null; private fenceId = 0;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
     socket.on('data', (data: Buffer) => { try { this.receive(data); } catch { this.close(); } });
@@ -81,6 +91,7 @@ export class RfbSession {
     if (this.closed) return; this.closed = true;
     if (this.clipboardTimer) clearInterval(this.clipboardTimer); this.clipboardTimer = null;
     if (this.heldTimer) clearTimeout(this.heldTimer); this.heldTimer = null; this.held = null;
+    this.fenced?.(); this.fenced = null;
     this.ended();
   }
 
@@ -144,6 +155,14 @@ export class RfbSession {
         if (signed >= 0) this.copied(body.toString('latin1')); else this.extendedClipboard(body);
         continue;
       }
+      if (type === 248) {
+        // ClientFence: the answer to one of ours (the viewer has drawn what came before it), or a request to answer.
+        if (this.buffer.length < 9) return; const length = this.buffer[8]; if (length > 64) throw new Error('fence'); if (this.buffer.length < 9 + length) return;
+        const message = this.take(9 + length); const flags = message.readUInt32BE(4);
+        if (flags & FENCE_REQUEST) this.socket.write(this.fence(flags & FENCE_BLOCKS, message.subarray(9)));
+        else { this.inFlight = Math.max(0, this.inFlight - 1); const go = this.fenced; this.fenced = null; go?.(); }
+        continue;
+      }
       throw new Error('message ' + type);
     }
   }
@@ -183,6 +202,9 @@ export class RfbSession {
     this.socket.write(Buffer.concat([header, u32(flags), payload]));
   }
 
+  /** ServerFence: flags, then up to 64 bytes the viewer sends back unchanged. */
+  private fence(flags: number, payload: Buffer) { const header = Buffer.alloc(9); header[0] = 248; header.writeUInt32BE(flags >>> 0, 4); header[8] = payload.length; return Buffer.concat([header, payload]); }
+
   private take(length: number) { const part = this.buffer.subarray(0, length); this.buffer = this.buffer.subarray(length); return part; }
 
   /** Sends what changed, while the viewer has asked for an update or takes them continuously; waits while nothing has. */
@@ -193,6 +215,7 @@ export class RfbSession {
         // Only Tight carries JPEG; every viewer Trace ships (noVNC) asks for it.
         if (!this.encodings.has(TIGHT)) { this.close(); return; }
         if (this.socket.writableLength > SEND_LIMIT) { await new Promise((resolve) => { this.socket.once('drain', resolve); this.socket.once('close', resolve); }); continue; }
+        if (this.encodings.has(FENCE) && this.inFlight >= IN_FLIGHT) { await new Promise<void>((resolve) => { this.fenced = resolve; }); continue; }
         const full = this.request ? !this.request.incremental : false; const rects = await this.source.frame(full);
         if (this.closed) return;
         if (!rects.length) { await new Promise((resolve) => setTimeout(resolve, IDLE_POLL)); continue; }
@@ -202,6 +225,8 @@ export class RfbSession {
           const header = Buffer.alloc(12); header.writeUInt16BE(rect.x, 0); header.writeUInt16BE(rect.y, 2); header.writeUInt16BE(rect.width, 4); header.writeUInt16BE(rect.height, 6); header.writeInt32BE(TIGHT, 8);
           parts.push(header, Buffer.from([0x90]), compactLength(rect.jpeg.byteLength), Buffer.from(rect.jpeg.buffer, rect.jpeg.byteOffset, rect.jpeg.byteLength));
         }
+        // A fence after each update: its answer says the viewer has drawn it.
+        if (this.encodings.has(FENCE)) { parts.push(this.fence(FENCE_REQUEST, Buffer.from([++this.fenceId & 0xff]))); this.inFlight++; }
         this.socket.write(Buffer.concat(parts));
       }
     // A capture that fails (stopped, ended, the displays changed) ends the session, so the viewer connects again to a

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { keyAction } from './keysyms';
 import type { ScreenInput } from './rfb-server';
+import { WHOLE_DESKTOP, type PictureRegion } from './screen-layout';
 
 /**
  * Presses keys and moves the mouse on Windows for a linked computer's viewer, with SendInput, through Windows
@@ -47,8 +48,9 @@ const MOVE = 0x0001; const ABSOLUTE = 0x8000 | 0x4000; const WHEEL = 0x0800; con
 const BUTTONS: [number, number, number][] = [[1, 0x0002, 0x0004], [2, 0x0020, 0x0040], [4, 0x0008, 0x0010]];
 
 /** The commands for one VNC pointer event, given the buttons held before it (pure, for tests). */
-export function pointerCommands(x: number, y: number, buttons: number, before: number, width: number, height: number): string[] {
-  const ax = Math.round(x * 65535 / Math.max(1, width - 1)); const ay = Math.round(y * 65535 / Math.max(1, height - 1));
+export function pointerCommands(x: number, y: number, buttons: number, before: number, width: number, height: number, region: PictureRegion = WHOLE_DESKTOP): string[] {
+  // A point in the picture, placed in the part of the desktop the picture shows (all of it, or one display).
+  const ax = Math.round(65535 * (region.left + x / Math.max(1, width - 1) * region.width)); const ay = Math.round(65535 * (region.top + y / Math.max(1, height - 1) * region.height));
   const commands = [`m ${ax} ${ay} ${MOVE | ABSOLUTE} 0`];
   for (const [bit, down, up] of BUTTONS) if ((buttons & bit) !== (before & bit)) commands.push(`m ${ax} ${ay} ${ABSOLUTE | (buttons & bit ? down : up)} 0`);
   // Wheel "buttons" are pressed and released for each notch; act on the press.
@@ -69,9 +71,9 @@ export function keyCommand(keysym: number, down: boolean): string | null {
  */
 export class WindowsInput implements ScreenInput {
   private helper: ChildProcessWithoutNullStreams | null = null; private buttons = 0; private held = new Set<number>();
-  constructor(private width: number, private height: number, private setClipboard: (text: string) => void, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true })) { this.start(); }
+  constructor(private width: number, private height: number, private setClipboard: (text: string) => void, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true }), private region: PictureRegion = WHOLE_DESKTOP) { this.start(); }
 
-  pointer(x: number, y: number, buttons: number) { for (const command of pointerCommands(x, y, buttons, this.buttons, this.width, this.height)) this.send(command); this.buttons = buttons; }
+  pointer(x: number, y: number, buttons: number) { for (const command of pointerCommands(x, y, buttons, this.buttons, this.width, this.height, this.region)) this.send(command); this.buttons = buttons; }
   key(keysym: number, down: boolean) {
     const command = keyCommand(keysym, down); if (!command) return;
     if (down) this.held.add(keysym); else this.held.delete(keysym);

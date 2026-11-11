@@ -11,6 +11,11 @@ Not released yet: handoffs stay in front of automatic summaries, a hierarchy rev
 - **A shared Windows screen no longer freezes without a word.** When its capture failed or stopped, the last picture stayed up and nothing more was sent; now the session ends and the viewer reconnects. Plugging in or removing a display, or changing resolution or scaling, does the same, so the picture and clicks match the new layout.
 - **The first clicks and keys on a shared Windows screen go through at once.** The helper that presses them starts when you connect, not on your first click.
 - **Copied text keeps every character.** Between Trace's viewer and a shared Windows screen, curly quotes, long dashes and emoji no longer turn into "?".
+- **No more strip that never updates.** When the picture of a shared Windows screen was not a multiple of 64 pixels wide (common with two displays of different sizes), changes reaching its right-hand edge were never sent.
+- **Less lag on a slow link.** A shared Windows screen keeps at most two pictures on their way to the viewer, so a slow connection shows fewer, newer pictures instead of falling further and further behind.
+- **Sharper text.** Once the shared screen has been still for a moment, the parts sent quickly while it changed are sent again at high quality.
+- **One display at a time.** With several displays, **Display** on the screen's bar shows one of them on its own at full size, or all of them again.
+- **The screen service starts again by itself** after an error, and Trace, while open, starts it again if it has stopped.
 
 1.17.1 shows which model is at work at a hierarchy Round Table, fixes several ways a hierarchy table could go wrong, and keeps backups out of your projects (update every computer):
 

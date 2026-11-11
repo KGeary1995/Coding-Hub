@@ -7,6 +7,8 @@ import { ipcRenderer } from 'electron';
  */
 declare class MediaStreamTrackProcessor { constructor(init: { track: MediaStreamTrack }); readable: ReadableStream<VideoFrame> }
 const TILE = 64; const QUALITY = 0.7;
+/** Once the screen has been still this long, the parts last sent at QUALITY go again at SHARP, so text that stays put is crisp. */
+const SETTLE_MS = 400; const SHARP = 0.95;
 interface Part { sourceId: string; x: number; y: number; width: number; height: number }
 /** One capture per display, each keeping its newest frame, drawn into its place in the one picture. */
 let captures: { part: Part; track: MediaStreamTrack; latest: VideoFrame | null }[] = []; let previous: Uint32Array | null = null;
@@ -14,9 +16,11 @@ let captures: { part: Part; track: MediaStreamTrack; latest: VideoFrame | null }
 let fresh = false; let generation = 0;
 /** A display's capture stopped by itself (unplugged, the session locked, the driver reset): the picture is stale from then on. */
 let ended = false;
+/** Tiles sent at QUALITY since their last sharp copy, and when a tile last changed. */
+let blurred = new Set<number>(); let changedAt = 0;
 let canvas: OffscreenCanvas | null = null; let context: OffscreenCanvasRenderingContext2D | null = null;
 
-function stop() { generation++; ended = false; for (const capture of captures) { capture.track.stop(); capture.latest?.close(); } captures = []; previous = null; canvas = null; context = null; }
+function stop() { generation++; ended = false; blurred = new Set(); changedAt = 0; for (const capture of captures) { capture.track.stop(); capture.latest?.close(); } captures = []; previous = null; canvas = null; context = null; }
 
 async function open(part: Part, current: number) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: part.sourceId, maxWidth: part.width, maxHeight: part.height, maxFrameRate: 30 } } } as unknown as MediaStreamConstraints);
@@ -46,27 +50,47 @@ ipcRenderer.on('trace-capture-frame', async (_event, request: { id: number; full
   try {
     if (!canvas || !context || !captures.length) throw new Error('Not capturing.');
     if (ended) throw new Error('The capture ended.');
-    if (!request.full && !fresh) { ipcRenderer.send('trace-capture-frame', { id: request.id, rects: [] }); return; }
-    fresh = false; const { width, height } = canvas;
-    for (const { part, latest } of captures) if (latest) context.drawImage(latest, part.x, part.y, part.width, part.height);
-    const pixels = new Uint32Array(context.getImageData(0, 0, width, height).data.buffer); const before = request.full ? null : previous; previous = pixels;
-    const rects: { x: number; y: number; width: number; height: number; jpeg: Uint8Array }[] = [];
-    for (let ty = 0; ty < height; ty += TILE) {
-      const rows = Math.min(TILE, height - ty); let start = -1;
-      for (let tx = 0; tx <= width; tx += TILE) {
-        const changed = tx < width && (!before || tileChanged(pixels, before, width, tx, ty, Math.min(TILE, width - tx), rows));
-        if (changed && start < 0) start = tx;
-        if (!changed && start >= 0) { rects.push({ x: start, y: ty, width: tx - start, height: rows, jpeg: new Uint8Array() }); start = -1; }
+    const { width, height } = canvas; const columns = Math.ceil(width / TILE);
+    if (request.full || fresh) {
+      fresh = false;
+      for (const { part, latest } of captures) if (latest) context.drawImage(latest, part.x, part.y, part.width, part.height);
+      const pixels = new Uint32Array(context.getImageData(0, 0, width, height).data.buffer); const before = request.full ? null : previous; previous = pixels;
+      const changed = new Set<number>();
+      for (let ty = 0, row = 0; ty < height; ty += TILE, row++) for (let tx = 0, column = 0; tx < width; tx += TILE, column++) {
+        if (!before || tileChanged(pixels, before, width, tx, ty, Math.min(TILE, width - tx), Math.min(TILE, height - ty))) changed.add(row * columns + column);
       }
+      if (changed.size) { for (const tile of changed) blurred.add(tile); changedAt = Date.now(); ipcRenderer.send('trace-capture-frame', { id: request.id, rects: await encode(tileRuns(changed, width, height), QUALITY) }); return; }
     }
-    // Encoded side by side: the browser compresses each part off this thread.
-    await Promise.all(rects.map(async (rect) => {
-      const part = new OffscreenCanvas(rect.width, rect.height); part.getContext('2d')!.drawImage(canvas!, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
-      rect.jpeg = new Uint8Array(await (await part.convertToBlob({ type: 'image/jpeg', quality: QUALITY })).arrayBuffer());
-    }));
-    ipcRenderer.send('trace-capture-frame', { id: request.id, rects });
+    // Still for a moment: what went out blurred (fast, while it was changing) goes again sharp.
+    if (blurred.size && Date.now() - changedAt >= SETTLE_MS) { const sharp = blurred; blurred = new Set(); ipcRenderer.send('trace-capture-frame', { id: request.id, rects: await encode(tileRuns(sharp, width, height), SHARP) }); return; }
+    ipcRenderer.send('trace-capture-frame', { id: request.id, rects: [] });
   } catch (error) { ipcRenderer.send('trace-capture-frame', { id: request.id, error: (error as Error).message }); }
 });
+
+/** The picture's parts as JPEG, encoded side by side: the browser compresses each off this thread. */
+async function encode(rects: { x: number; y: number; width: number; height: number }[], quality: number) {
+  return Promise.all(rects.map(async (rect) => {
+    const part = new OffscreenCanvas(rect.width, rect.height); part.getContext('2d')!.drawImage(canvas!, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    return { ...rect, jpeg: new Uint8Array(await (await part.convertToBlob({ type: 'image/jpeg', quality })).arrayBuffer()) };
+  }));
+}
+
+/**
+ * Each row's runs of the given tiles (numbered across, then down), as rectangles. A run reaching the right edge ends
+ * there, at the picture's width (which need not be a multiple of the tile size).
+ */
+export function tileRuns(tiles: Set<number>, width: number, height: number) {
+  const columns = Math.ceil(width / TILE); const rects: { x: number; y: number; width: number; height: number }[] = [];
+  for (let ty = 0, row = 0; ty < height; ty += TILE, row++) {
+    const rows = Math.min(TILE, height - ty); let start = -1;
+    for (let column = 0; column <= columns; column++) {
+      const on = column < columns && tiles.has(row * columns + column);
+      if (on && start < 0) start = column * TILE;
+      if (!on && start >= 0) { rects.push({ x: start, y: ty, width: Math.min(column * TILE, width) - start, height: rows }); start = -1; }
+    }
+  }
+  return rects;
+}
 
 ipcRenderer.on('trace-capture-stop', () => stop());
 

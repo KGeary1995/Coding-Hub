@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream';
 import { z } from 'zod';
 import { load } from '../workbench/local-store';
 import { RfbSession, type ScreenInput, type ScreenSource } from './rfb-server';
+import { MAX_DISPLAYS } from '../../../shared/screen';
 
 /** The screen service's switch, written by Trace's settings and read by the service, which quits when it turns off. */
 export const SHARE_FILE = 'screen-share.json';
@@ -17,10 +18,12 @@ export const OPEN_TIMEOUT = 20000;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-export interface ScreenCaptureSession { source: ScreenSource; input: ScreenInput & { close(): void }; stop(): void }
+/** `displays`: how many this computer has; `display`: the one shown, 1 and up from the left, or 0 for all. */
+export interface ScreenCaptureSession { source: ScreenSource; input: ScreenInput & { close(): void }; stop(): void; displays?: number; display?: number }
 /** What the service needs from Electron: the capture and the input for one viewer, the clipboard, and a way to show who watches. */
 export interface ScreenServiceHost {
-  open(): Promise<ScreenCaptureSession>;
+  /** `display`: what the viewer asked to see, 0 for every display. */
+  open(display: number): Promise<ScreenCaptureSession>;
   readClipboard?(): Promise<string>;
   /** Someone started (a name, with a way to disconnect them) or stopped (null) watching. */
   viewing(name: string | null, disconnect: () => void): void;
@@ -75,7 +78,9 @@ export class ScreenService {
     const viewer: NonNullable<ScreenService['viewer']> = { name: device.name, socket, session: null, capture: null }; this.viewer = viewer;
     const left = () => { if (this.viewer === viewer) this.disconnect(); }; socket.on('close', left); socket.on('end', left);
     // A capture that never starts (the hidden capture window hung, say) must not leave the viewer waiting with no reason.
-    const opening = this.host.open(); let timer: ReturnType<typeof setTimeout> | undefined;
+    // ?display=N: one display (1 and up, from the left) rather than all of them side by side.
+    const asked = Number(new URL(request.url ?? '/', 'http://localhost').searchParams.get('display') ?? 0); const display = Number.isInteger(asked) && asked >= 0 && asked <= MAX_DISPLAYS ? asked : 0;
+    const opening = this.host.open(display); let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('it did not start in time. Try Reconnect; if it keeps happening, turn Share this screen off and on again there')), this.openTimeout); });
     try { viewer.capture = await Promise.race([opening, late]); }
     catch (error) {
@@ -85,7 +90,9 @@ export class ScreenService {
       return this.refuse(socket, 503, `${this.name()} could not capture its screen: ${(error as Error).message}`);
     } finally { clearTimeout(timer); }
     if (this.viewer !== viewer || socket.destroyed) { viewer.capture.input.close(); viewer.capture.stop(); return; }
-    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: trace-screen\r\nConnection: Upgrade\r\n\r\n');
+    // Which display it shows, and how many there are, so the viewer can offer the others.
+    const { displays, display: shown } = viewer.capture;
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: trace-screen\r\nConnection: Upgrade\r\n${displays !== undefined ? `X-Trace-Displays: ${displays}\r\nX-Trace-Display: ${shown ?? 0}\r\n` : ''}\r\n`);
     if (head.length) socket.unshift(head);
     viewer.session = new RfbSession(socket, viewer.capture.source, viewer.capture.input, this.name(), () => { if (this.viewer === viewer) this.disconnect(); }, this.host.readClipboard);
     this.host.viewing(device.name, () => { if (this.viewer === viewer) this.disconnect(); });

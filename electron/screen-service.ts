@@ -16,6 +16,8 @@ const root = argument('storage'); const computer = argument('name') || 'this com
 // Source runs only: a test service on its own port, and input written to a file instead of pressed.
 const port = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT) : SCREEN_SERVICE_PORT;
 const inputLog = !app.isPackaged ? process.env.CODING_HUB_TEST_SCREEN_INPUT_LOG : undefined;
+/** A service that fails sooner than this after starting is not started again by itself. */
+const RELAUNCH_AFTER = 60_000;
 
 // Its own profile, so it neither shares Trace's single-instance lock nor touches Trace's window state.
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'AI Coding Hub', 'screen-service'));
@@ -26,14 +28,18 @@ else {
   app.on('window-all-closed', () => {});
   // One viewer's failure (a capture or clipboard call nothing waited for) must not take the service down for the next.
   process.on('unhandledRejection', () => {});
+  // An error nothing caught leaves the service in an unknown state: start it again, unless it failed this soon after
+  // starting (it would only fail again, over and over). Trace, while open, also starts it again when it is gone.
+  const startedAt = Date.now();
+  process.on('uncaughtException', () => { if (Date.now() - startedAt > RELAUNCH_AFTER) app.relaunch(); app.exit(1); });
   void app.whenReady().then(async () => {
     let tray: Tray | null = null; const icon = await app.getFileIcon(process.execPath, { size: 'small' });
     const service = new ScreenService(root, () => computer, {
-      open: async () => {
-        const capture = await ScreenCapture.start(path.join(app.getAppPath(), 'dist', 'capture.html'));
+      open: async (display) => {
+        const capture = await ScreenCapture.start(path.join(app.getAppPath(), 'dist', 'capture.html'), display);
         const write = (text: string) => void Promise.resolve(clipboard.writeText(text)).catch(() => {});
-        const input = inputLog ? testInput(inputLog) : new WindowsInput(capture.width, capture.height, write);
-        return { source: capture, input, stop: () => capture.stop() };
+        const input = inputLog ? testInput(inputLog) : new WindowsInput(capture.width, capture.height, write, undefined, capture.region);
+        return { source: capture, input, stop: () => capture.stop(), displays: capture.displays, display: capture.display };
       },
       readClipboard: async () => String(await clipboard.readText()),
       viewing: (name, disconnect) => {

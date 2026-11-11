@@ -9,6 +9,8 @@ import type { RunTailscale } from './tailscale';
 
 /** The name of the sign-in entry (Settings → Apps → Startup lists it). */
 const LOGIN_NAME = 'Trace screen sharing';
+/** How often Trace, while open, checks that the service it shares the screen with is still running. */
+const WATCH_MS = 60_000;
 
 /**
  * Settings → Other computers → Share this screen, on Windows: starts the screen service (Trace with --screen-service),
@@ -33,6 +35,19 @@ export class ScreenShare {
   async ensure() {
     if (!this.supported || !shareEnabled(this.root)) return;
     this.login(true); await this.serve().catch(() => {}); await this.start();
+  }
+
+  /**
+   * While Trace is open: starts the service again if it has gone (a crash it could not restart itself from, or someone
+   * ended it), so sharing that is on stays on. Returns a function that stops watching.
+   */
+  watch(every = WATCH_MS) {
+    let checking = false;
+    const timer = setInterval(() => {
+      if (checking || !this.supported || !shareEnabled(this.root)) return; checking = true;
+      void this.start().catch(() => {}).finally(() => { checking = false; });
+    }, every);
+    timer.unref?.(); return () => clearInterval(timer);
   }
 
   private running() {

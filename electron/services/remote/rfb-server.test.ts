@@ -72,6 +72,24 @@ describe('the Windows screen as a VNC server', () => {
     const message = vnc.bytes().subarray(18 + 37); expect(message[0]).toBe(3); expect(message.subarray(8).toString('latin1')).toBe('copied here');
   });
 
+  it('keeps at most two updates on their way to a viewer that answers fences, whatever the local socket says', async () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]); const rect = (x: number) => [{ x, y: 0, width: 64, height: 64, jpeg }];
+    const vnc = await session([rect(0), rect(64), rect(128), rect(192)]);
+    vnc.viewer.write('RFB 003.008\n'); vnc.viewer.write(Buffer.from([1, 1])); await until(() => vnc.bytes().length >= 18 + 37, 'the server init');
+    vnc.viewer.write(Buffer.concat([encodings(7, -313, -312), request(false)])); await until(() => vnc.bytes().length >= 18 + 37 + 1 + 32, 'the first update and its fence');
+    vnc.viewer.write(Buffer.from([150, 1, 0, 0, 0, 0, 2, 128, 1, 224]));
+    // Each update (22 bytes) is followed by a fence asking for an answer (248, the request flag, one byte to send back).
+    const start = 18 + 37 + 1; await until(() => vnc.bytes().length >= start + 64, 'the second update');
+    await new Promise((resolve) => setTimeout(resolve, 200)); expect(vnc.bytes().length).toBe(start + 64);
+    const fence = vnc.bytes().subarray(start + 22, start + 32); expect(fence[0]).toBe(248); expect(fence.readUInt32BE(4)).toBe(0x80000000); expect(fence[8]).toBe(1);
+    // The viewer has drawn the first: one more goes.
+    vnc.viewer.write(Buffer.from([248, 0, 0, 0, 0, 0, 0, 0, 1, fence[9]])); await until(() => vnc.bytes().length >= start + 96, 'the third update');
+    expect(vnc.bytes().readUInt16BE(start + 64 + 4)).toBe(128);
+    // A fence the viewer asks for is answered with its flags (but the request) and payload.
+    const before = vnc.bytes().length; vnc.viewer.write(Buffer.from([248, 0, 0, 0, 0x80, 0, 0, 3, 2, 9, 9]));
+    await until(() => vnc.bytes().length >= before + 11, 'the answer'); expect([...vnc.bytes().subarray(before, before + 11)]).toEqual([248, 0, 0, 0, 0, 0, 0, 3, 2, 9, 9]);
+  });
+
   it('ends the session when the capture fails, rather than leaving the last picture up', async () => {
     let calls = 0; const vnc = await session([], async () => { if (++calls === 1) return [{ x: 0, y: 0, width: 64, height: 64, jpeg: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }]; throw new Error('The capture ended.'); });
     let closed = false; vnc.viewer.on('close', () => { closed = true; });

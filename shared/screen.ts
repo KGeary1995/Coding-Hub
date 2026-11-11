@@ -19,7 +19,7 @@ export type ScreenRequest =
    * Connects to that computer's screen; bytes then flow with `screen-send` and `ScreenEvent`. The window names the
    * stream, so it is listening before the server's first bytes (sent as soon as it connects) arrive.
    */
-  | { action: 'screen-open'; id: string; streamId: string }
+  | { action: 'screen-open'; id: string; streamId: string; /** A Trace screen service (Windows): 0 or none for every display, 1 and up for one of them (left to right). */ display?: number }
   | { action: 'screen-send'; streamId: string; data: Uint8Array }
   | { action: 'screen-close'; streamId: string }
   | { action: 'screen-credentials'; id: string }
@@ -28,7 +28,11 @@ export type ScreenRequest =
   /** This computer's own screen, served to linked computers (Windows only). */
   | { action: 'screen-share-status' }
   | { action: 'screen-share-set'; enabled: boolean };
-export type ScreenResponse = { kind: ScreenKind } | ScreenCredentials | ScreenShareStatus | null;
+/** `displays` and `display`: from a Trace screen service, how many displays it has and which one it shows (0 for all). */
+export interface ScreenOpened { kind: ScreenKind; displays?: number; display?: number }
+/** The most displays one can be picked from. */
+export const MAX_DISPLAYS = 16;
+export type ScreenResponse = ScreenOpened | ScreenCredentials | ScreenShareStatus | null;
 export type ScreenEvent =
   | { type: 'data'; streamId: string; data: Uint8Array }
   /** `error` says why, in words the person can act on; a close the window asked for has none. */

@@ -38,6 +38,8 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   const view = useRef<HTMLDivElement>(null); const pasteTarget = useRef<HTMLTextAreaElement>(null); const rfb = useRef<RFB | null>(null);
   const [attempt, setAttempt] = useState(0); const [status, setStatus] = useState<Status>('connecting'); const [message, setMessage] = useState('');
   const [control, setControl] = useState(true);
+  /** A Trace screen service's displays: how many, which is shown (0: all), and which to ask for next (kept through reconnects). */
+  const [displays, setDisplays] = useState<number | undefined>(undefined); const [shownDisplay, setShownDisplay] = useState(0); const wantDisplay = useRef(0);
   const [kind, setKind] = useState<ScreenKind | null>(null); const [command, setCommand] = useState(true); const swap = swapFor(kind);
   const [types, setTypes] = useState<string[]>([]); const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [remember, setRemember] = useState(true);
   /** Saved sign-in is skipped on the next try once the computer refused it. */
@@ -63,13 +65,13 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       const { default: Viewer } = await import('@novnc/novnc');
       const saved = await savedCredentials(computer.id).catch(() => null); setHasSaved(Boolean(saved)); savedLogin.current = saved && saved.username !== '-' ? saved.password : null;
       if (cancelled) return;
-      const channel = new ScreenChannel(computer.id);
+      const channel = new ScreenChannel(computer.id, wantDisplay.current);
       client = new Viewer(target, channel, saved && useSaved.current ? { credentials: saved, shared: true } : { shared: true }); rfb.current = client;
       // A dot marks the pointer here at once when the other computer draws its own cursor into the picture (Trace's
       // Windows service), which arrives a moment later.
       client.scaleViewport = true; client.viewOnly = !control; client.background = 'transparent'; client.showDotCursor = true;
       client.addEventListener('connect', () => {
-        setStatus('connected'); setKind(channel.kind); useSaved.current = true; connectedAt.current = Date.now();
+        setStatus('connected'); setKind(channel.kind); setDisplays(channel.displays); setShownDisplay(channel.display); wantDisplay.current = channel.display; useSaved.current = true; connectedAt.current = Date.now();
         const credentials = toSave.current; toSave.current = null;
         if (credentials) void screen({ action: 'screen-save-credentials', id: computer.id, ...credentials }).then(() => setHasSaved(true), (error: Error) => setMessage(error.message));
       });
@@ -155,6 +157,8 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
     } finally { setUnlocking(false); client.focus(); }
   };
   const retry = () => { cancelRetry(); retries.current = 0; setMessage(''); setStatus('connecting'); setAttempt((value) => value + 1); };
+  /** Another display (or all of them): the service captures that one at full size, so it connects again. */
+  const showDisplay = (value: number) => { wantDisplay.current = value; setShownDisplay(value); retry(); };
   const named = types.includes('username');
   const lockUnknown = status === 'connected' && kind === 'system' && locked === null;
   const showUnlock = status === 'connected' && kind === 'system' && (locked === true || (lockUnknown && unlockOpen));
@@ -168,6 +172,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <span className="tr-spacer" />
       <button className="tr-detail-button" aria-pressed={control} title={control ? 'Mouse and keyboard reach the other computer' : 'Only watching: nothing is sent'} onClick={() => setControl((value) => !value)}><MousePointer2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">{control ? 'Control' : 'View only'}</span></button>
       {lockUnknown && <button className="tr-detail-button" aria-pressed={unlockOpen} title={`Wake ${computer.name} and type your password at its lock screen`} onClick={() => setUnlockOpen((value) => !value)}><LockKeyhole size={13} className="tr-detail-icon" /><span className="tr-detail-label">Unlock</span></button>}
+      {displays !== undefined && displays > 1 && <label className="linked-screen-toggle" title="All displays side by side, or one of them at full size"><select aria-label="Display" value={shownDisplay} onChange={(event) => showDisplay(Number(event.target.value))}><option value={0}>All displays</option>{Array.from({ length: displays }, (_, index) => <option key={index + 1} value={index + 1}>Display {index + 1}</option>)}</select></label>}
       {swap && <label className="linked-screen-toggle" title={swap.title}><input type="checkbox" checked={command} onChange={(event) => setCommand(event.target.checked)} /> {swap.label}</label>}
       {hasSaved && <button className="tr-detail-button" title={`Forget the password saved for ${computer.name}`} onClick={forget}><span className="tr-detail-label">Forget password</span></button>}
       <button className="tr-detail-button" onClick={retry}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Reconnect</span></button>
