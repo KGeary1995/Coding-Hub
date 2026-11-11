@@ -74,7 +74,7 @@ export function ChatView({ session }: { session: Session }) {
     // At a table a message may be written while the agents work: it goes to both once they finish their turn.
     if (!running || seatedAt || (chat.busy && !table) || (!text.trim() && !images.length) || !window.codingHub) return;
     const message = text.trim(); const attached = images;
-    chatSent(session.id, message, attached); setText(''); setImages([]); pinned.current = true;
+    chatSent(session.id, message, attached, !hierarchy); setText(''); setImages([]); pinned.current = true;
     // A message that was not taken goes back in the box (unless something new was written meanwhile), so nothing is lost.
     const restore = () => { setText((current) => current || message); setImages((current) => current.length ? current : attached); };
     if (table) { const failure = await tableRequest(session.id, { action: 'table-send', text: message, images: attached }); if (failure) { chatFailed(session.id, failure); restore(); } return; }
@@ -107,6 +107,7 @@ export function ChatView({ session }: { session: Session }) {
     {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
       onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {!table && partnerSession && <div className="table-bar" role="group" aria-label="Round Table">
+      {hierarchy && <strong>Hierarchy</strong>}
       <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${engine}`} /><i className={`seat-${partnerEngine}`} /></span>
       <strong>Round Table</strong>
       <span className="table-partner" title={partnerSession.error ?? undefined}><b className={`seat-text-${partnerEngine}`}>{AGENT[partnerEngine]}</b> {partnerState}</span>

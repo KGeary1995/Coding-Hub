@@ -5,7 +5,7 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, leadOf, partnerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, leadOf, partnerOf, plannerOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
@@ -151,8 +151,10 @@ export async function startSession(id: string) {
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
   // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
-  if (partner && lead?.status === 'running' && partner.status !== 'running' && partner.status !== 'starting') await startSession(partner.id);
+  // A hierarchy table's planner too: its hidden seats start together.
+  const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
+  const seats = [partnerOf(useWorkspaceStore.getState().sessions, id), plannerOf(useWorkspaceStore.getState().sessions, id)];
+  await Promise.all(seats.map((seat) => seat && lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
 }
 
 /** Waits (up to `ms`) until none of these sessions is running, or only until they are past starting. */
@@ -163,16 +165,16 @@ export async function settled(ids: (string | undefined)[], past: 'running' | 'st
 
 /** Stops a channel, and the hidden partner of a Round Table it leads with it (that has no Stop of its own). */
 export async function stopSession(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
-  const [own, seat] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true]);
-  return own && seat;
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
+  const [own, seat, plan] = await Promise.all([stopRun(id), partner ? stopRun(partner.id) : true, planner ? stopRun(planner.id) : true]);
+  return own && seat && plan;
 }
 /** Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped. */
 export async function closeChannel(id: string): Promise<boolean> {
-  const partner = partnerOf(useWorkspaceStore.getState().sessions, id);
+  const partner = partnerOf(useWorkspaceStore.getState().sessions, id); const planner = plannerOf(useWorkspaceStore.getState().sessions, id);
   if (!(await stopSession(id))) return false;
   // The exit events can arrive just after the stop requests return; a session still running is never removed.
-  await settled([id, partner?.id]);
+  await settled([id, partner?.id, planner?.id]);
   useWorkspaceStore.getState().removeSession(id);
   return !useWorkspaceStore.getState().sessions.some((session) => session.id === id);
 }

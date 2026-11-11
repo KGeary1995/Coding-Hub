@@ -51,7 +51,8 @@ export async function sendTask(id: string) {
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
   let sent: boolean;
   if (session.config.chat && window.codingHub) {
-    chatSent(session.id, prompt, []);
+    const hierarchy = useChatStore.getState().threads[session.id]?.table?.kind === 'hierarchy';
+    chatSent(session.id, prompt, [], !hierarchy);
     // A chat leading a Round Table passes the task to both agents, as a message typed there would.
     const table = Boolean(useChatStore.getState().threads[session.id]?.table);
     const result = await window.codingHub.chat(table ? { action: 'table-send', sessionId: session.id, runId: session.runId, text: prompt, images: [] } : { action: 'send', sessionId: session.id, runId: session.runId, text: prompt, images: [] }).catch(() => null);
