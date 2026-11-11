@@ -346,6 +346,39 @@ describe('phone screen of a Windows computer', () => {
     const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
     server.setCanRun(id, false); expect(await closed).toBe(true);
   });
+  it('removing the phone closes its open screen and drops its unused tickets', async () => {
+    const { server, id, ticket, open } = await windows(); server.setCanRun(id, true);
+    const { ticket: watching } = await (await ticket()).json() as { ticket: string }; const { ticket: spare } = await (await ticket()).json() as { ticket: string };
+    const { socket, first } = open(watching); expect(await first).toBe('RFB 003.008\n');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    server.revoke(id); expect(await closed).toBe(true);
+    expect(await open(spare).first).toBe('refused');
+  });
+  it('removing the phone while its screen is still connecting passes nothing on, and lets the service go', async () => {
+    const { server, root } = await remote(); fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true }));
+    let answer: (value: { socket: net.Socket; head: Buffer }) => void = () => {}; let asked = false;
+    const host = (server as unknown as { host: RemoteHost }).host; host.screenService = () => true;
+    host.openScreenService = () => { asked = true; return new Promise((resolve) => { answer = resolve; }); };
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id; server.setCanRun(id, true);
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}`); cleanup.push(() => socket.close());
+    const outcome = new Promise<string>((resolve) => { socket.onopen = () => resolve('open'); socket.onerror = () => resolve('refused'); });
+    for (let i = 0; i < 100 && !asked; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    server.revoke(id);
+    const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) });
+    expect(await outcome).toBe('refused'); expect(service.destroyed).toBe(true);
+  });
+  it('removing the phone also closes a Mac screen it has open', async () => {
+    const vnc = net.createServer((client) => { client.write('RFB 003.889\n'); client.on('error', () => {}); });
+    await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { vnc.close(() => resolve()); vnc.unref(); }));
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: (vnc.address() as net.AddressInfo).port });
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id;
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}`); cleanup.push(() => socket.close());
+    expect(await new Promise((resolve) => { socket.onmessage = () => resolve('data'); socket.onerror = () => resolve('refused'); })).toBe('data');
+    const closed = new Promise<boolean>((resolve) => { socket.onclose = () => resolve(true); setTimeout(() => resolve(false), 3000); });
+    server.revoke(id); expect(await closed).toBe(true);
+  });
   it('leaves a Mac\'s own Screen Sharing to its password: no setting needed there', async () => {
     const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: 5900 });
     await server.setEnabled(true);

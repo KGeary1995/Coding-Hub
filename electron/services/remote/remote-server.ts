@@ -168,8 +168,11 @@ export class RemoteServer {
   private server: http.Server | null = null; private error: string | null = null;
   private streams = new Set<Stream>();
   private screenTickets = new Map<string, { device: string; expires: number }>(); private screens = new Set<Duplex>();
-  /** The phone each open screen from Trace's screen service belongs to, so taking its setting away closes it. */
-  private serviceScreens = new Map<Duplex, string>();
+  /**
+   * The phone each screen connection belongs to, open or still connecting, and whether it comes from Trace's screen
+   * service: removing the phone closes all of its own, and taking its setting away closes those from the service.
+   */
+  private screenOwners = new Map<Duplex, { device: string; service: boolean }>();
   private replay = new Map<string, ScreenMirror>();
   /** Chat channels' recent events, kept whether or not phone access is on, so a phone opening a chat sees its thread. */
   private chats = new ChatReplayBuffer();
@@ -272,7 +275,7 @@ export class RemoteServer {
   async stop() {
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
-    for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.serviceScreens.clear(); this.screenTickets.clear();
+    for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenOwners.clear(); this.screenTickets.clear();
     for (const id of [...this.replay.keys()]) this.forget(id);
     const server = this.server; this.server = null; this.pairing = null;
     if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
@@ -297,10 +300,10 @@ export class RemoteServer {
     // The setting is read again here: it may have been turned off since the ticket was given.
     if (service) { const now = this.devices().find((device) => device.id === ticket.device); if (!now || !this.me(now).canRun) return refuse(403, 'Forbidden'); }
     if (this.screens.size >= MAX_SCREENS) return refuse(429, 'Too Many Requests');
-    this.screens.add(socket);
+    this.screens.add(socket); this.screenOwners.set(socket, { device: ticket.device, service: Boolean(service) });
     // The phone's WebSocket carries the VNC bytes both ways, once the server is there.
     const pipe = (server: Duplex, first: Buffer) => {
-      const end = () => { this.screens.delete(socket); this.serviceScreens.delete(socket); server.destroy(); socket.destroy(); };
+      const end = () => { this.screens.delete(socket); this.screenOwners.delete(socket); server.destroy(); socket.destroy(); };
       const protocol = String(request.headers['sec-websocket-protocol'] ?? '').split(',')[0].trim();
       socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptKey(key)}\r\n${protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : ''}\r\n`);
       if (first.length) socket.write(frame(first));
@@ -321,15 +324,14 @@ export class RemoteServer {
     };
     if (service) {
       const phone = this.devices().find((device) => device.id === ticket.device)?.name ?? 'A phone';
-      this.serviceScreens.set(socket, ticket.device);
       // Taken away (or the phone gone) while the service was answering: nothing is passed on.
-      try { const opened = await service(phone); if (socket.destroyed || !this.serviceScreens.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.serviceScreens.delete(socket); socket.destroy(); return; } pipe(opened.socket, opened.head); }
-      catch { this.screens.delete(socket); this.serviceScreens.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
+      try { const opened = await service(phone); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } pipe(opened.socket, opened.head); }
+      catch { this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
       return;
     }
     const server = net.connect(target!.port, target!.host);
-    const failed = () => { this.screens.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); server.destroy(); socket.destroy(); };
-    server.once('error', failed); server.once('connect', () => { server.off('error', failed); pipe(server, Buffer.alloc(0)); });
+    const failed = () => { this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); server.destroy(); socket.destroy(); };
+    server.once('error', failed); server.once('connect', () => { server.off('error', failed); if (!this.screenOwners.has(socket)) { server.destroy(); return; } pipe(server, Buffer.alloc(0)); });
   }
   get address() { return this.server ? (this.server.address() as AddressInfo).port : null; }
 
@@ -346,12 +348,18 @@ export class RemoteServer {
     return this.status();
   }
   cancelPairing() { this.pairing = null; return this.status(); }
+  /** Closes the phones' screen connections that match, open or still connecting (a pending one sees it is gone). */
+  private closeScreens(matches: (owner: { device: string; service: boolean }) => boolean) {
+    for (const [socket, owner] of [...this.screenOwners]) if (matches(owner)) { this.screenOwners.delete(socket); this.screens.delete(socket); socket.destroy(); }
+  }
   revoke(id: string) {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
     // A linked computer's phones were given keys here through it (relayKey `<its id>:<phone>`): they go with it.
     const removed = new Set([id, ...devices.filter((item) => item.relayKey?.startsWith(id + ':')).map((item) => item.id)]);
     this.saveDevices(devices.filter((item) => !removed.has(item.id)));
     for (const stream of this.streams) if (removed.has(stream.device)) { stream.response.end(); this.streams.delete(stream); }
+    // Its screens close too, open or still connecting, and its unused tickets go: removing it locks it out at once.
+    this.closeScreens((owner) => removed.has(owner.device)); for (const [value, ticket] of [...this.screenTickets]) if (removed.has(ticket.device)) this.screenTickets.delete(value);
     // A phone of this computer was given keys on linked computers through this one: ask them to forget those too.
     if (!device.kind || device.kind === 'phone') void this.relay?.revokePhone?.(id).catch(() => {});
     return this.status();
@@ -362,7 +370,7 @@ export class RemoteServer {
     if (device.kind === 'computer') throw new HubError('REMOTE_COMPUTER', 'A linked computer can always start and stop channels. Remove it under Other computers to stop that.');
     if (canRun) device.canRun = true; else delete device.canRun; this.saveDevices(devices);
     // Taken away: its open screens from Trace's screen service close (a Mac's own Screen Sharing asks its own password).
-    if (!canRun) for (const [socket, owner] of [...this.serviceScreens]) if (owner === id) { this.serviceScreens.delete(socket); this.screens.delete(socket); socket.destroy(); }
+    if (!canRun) this.closeScreens((owner) => owner.device === id && owner.service);
     const payload = `event: me\ndata: ${eventJSON(this.me(device))}\n\n`; for (const stream of this.streams) if (stream.device === id) this.write(stream, payload);
     return this.status();
   }
