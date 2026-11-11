@@ -26,7 +26,7 @@ const VIEWS = ['Changes', 'Projects', 'Usage', 'Session history', 'Files', 'More
     await app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [process.cwd()] }); });
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     await page.waitForSelector('.session-tile');
-    for (const engine of ['Claude chat', 'Terminal']) await addChannel(page, engine);
+    for (const engine of ['Claude Code', 'Terminal']) await addChannel(page, engine);
     await page.getByRole('button', { name: 'Arrange in grid', exact: true }).click();
     await shot(page, '01-workspace');
     await page.locator('.session-tile').first().click({ position: { x: 200, y: 12 } }).catch(() => {});

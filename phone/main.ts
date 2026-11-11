@@ -176,10 +176,9 @@ async function openTableHere(channel: RemoteChannel): Promise<string | null> {
 /** A short message in the page's live region (the phone has no toast). */
 function alertText(text: string) { const line = document.getElementById('phone-alert'); if (line) { line.textContent = text; setTimeout(() => { if (line.textContent === text) line.textContent = ''; }, 6000); } }
 
-/** + Channel on the phone: the same kinds as the computer's, added there. Shown when this phone may start agents. */
+/** + Channel on the phone: the same kinds as the computer's (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
 function addMenu() {
   const kinds: { label: string; engine: 'claude' | 'codex' | 'shell'; chat: boolean }[] = [
-    { label: 'Claude chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true },
     { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex CLI', engine: 'codex', chat: false }, { label: 'Terminal', engine: 'shell', chat: false }];
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
     ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
