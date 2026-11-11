@@ -51,6 +51,13 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     await until(async () => /key 97 0/.test(await fs.readFile(log, 'utf8').catch(() => '')), 'the key press in the log');
     const lines = (await fs.readFile(log, 'utf8')).split('\n');
     assert.ok(lines.some((line) => /^pointer \d+ \d+ 1$/.test(line)), 'The click reached the service');
+    // A paste, as the viewer sends it: the text (the extended clipboard's Notify, then Request and Provide), then V at once.
+    // The text must reach this computer's clipboard intact, and before the V that pastes it.
+    const pasted = '“quoted” — text 🙂';
+    await panel.locator('.linked-screen-paste').evaluate((field, text) => { const data = new DataTransfer(); data.setData('text/plain', text); field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); }, pasted);
+    await until(async () => /key 118 0/.test(await fs.readFile(log, 'utf8')), 'the pasted V');
+    const after = (await fs.readFile(log, 'utf8')).split('\n'); const copied = after.indexOf(`clipboard ${pasted}`); const pressed = after.indexOf('key 118 1');
+    assert.ok(copied >= 0, `The text arrived intact (log: ${after.filter((line) => line.startsWith('clipboard')).join(' | ')})`); assert.ok(copied < pressed, 'The text reached the clipboard before V was pressed');
     // Back to the channels: the service lets go of the viewer.
     await page.getByRole('button', { name: 'Channels', exact: true }).click();
     await until(async () => (await fs.readFile(log, 'utf8')).includes('close'), 'the viewer to leave');

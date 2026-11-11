@@ -36,8 +36,8 @@ const latin1 = (text: string) => Buffer.from(text.replace(/[^\x00-\xff]/g, '?'),
  */
 const EXTENDED_CLIPBOARD = 0xc0a1e5ce | 0; const TEXT = 1;
 const CAPS = 1 << 24; const REQUEST = 1 << 25; const PEEK = 1 << 26; const NOTIFY = 1 << 27; const PROVIDE = 1 << 28;
-/** How long keys and clicks wait for text the viewer said it copied (Notify) to arrive (Provide); then they go anyway. */
-export const PASTE_WAIT = 1500;
+/** How long keys and clicks wait for text the viewer said it copied (Notify) to arrive (Provide), then go anyway: long enough for the round trip over a slow relayed link, since a paste let go early pastes the old text. */
+export const PASTE_WAIT = 5000;
 /**
  * Text for the extended clipboard: CRLF line endings, UTF-8, ending in a NUL, at most `limit` bytes in all (the limit is
  * on what is sent, not on characters, which take up to four bytes each); cut at a character boundary.

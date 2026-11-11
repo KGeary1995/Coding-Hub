@@ -128,9 +128,10 @@ describe('the Windows screen as a VNC server', () => {
     it('lets held input go after a while when the copied text never comes', async () => {
       const { vnc, send } = await extended();
       send((1 << 27) | 1); vnc.viewer.write(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]));
-      await new Promise((resolve) => setTimeout(resolve, PASTE_WAIT / 2)); expect(vnc.events).toEqual([]);
+      // Still held well past a slow link's round trip; then it goes.
+      await new Promise((resolve) => setTimeout(resolve, PASTE_WAIT - 1000)); expect(vnc.events).toEqual([]);
       await until(() => vnc.events.length === 1, 'the held key'); expect(vnc.events).toEqual(['key 61 true']);
-    });
+    }, PASTE_WAIT + 5000);
     it('keeps text sent to the viewer within 1 MB in bytes, cut between characters', () => {
       const limit = 1024 * 1024;
       // 400,000 three-byte characters: 1,200,000 bytes, though under the limit in characters.
