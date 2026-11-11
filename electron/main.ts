@@ -59,6 +59,7 @@ import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
+import { setBackupRoot } from './services/hub/file-backups';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -66,6 +67,8 @@ const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.en
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'AI Coding Hub'));
 const profileRoot = app.commandLine.getSwitchValue('user-data-dir') || app.getPath('userData');
 const storageRoot = resolveStorageRoot(storageBase, profileRoot);
+// Backups of configuration and instruction files Trace edits go here, never beside the file.
+setBackupRoot(storageRoot);
 let hostHealth: HostHealth | null = null;
 process.on('uncaughtExceptionMonitor', (_error, origin) => hostHealth?.record('host-uncaught-exception', origin));
 app.on('child-process-gone', (_event, details) => { if (details.reason !== 'clean-exit') hostHealth?.record('child-process-gone', `${details.type}: ${details.reason}`, details.exitCode); });

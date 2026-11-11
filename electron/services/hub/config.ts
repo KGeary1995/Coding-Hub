@@ -6,6 +6,7 @@ import TOML from '@iarna/toml';
 import { HubError } from '../cli/engine-adapter';
 import type { ConfigInventory, HubRequest } from '../../../shared/hub';
 import type { CLIEngine, MCPConfig } from '../../../shared/types';
+import { keepBackup } from './file-backups';
 
 type ObjectMap = Record<string, any>;
 interface Source { file: string; engine: CLIEngine; scope: 'user' | 'project'; directory: string | null; slot: string; hash: string; kind: 'server' | 'skill' | 'plugin'; local?: boolean }
@@ -38,14 +39,14 @@ export function readConfig(file: string): { data: ObjectMap; hash: string; text:
   try { const data = text.trim() ? (file.endsWith('.toml') ? TOML.parse(text) : JSON.parse(text)) : {}; if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(); return { data, hash: digest(text), text }; }
   catch { throw new HubError('CONFIG_PARSE', `Cannot parse ${file}. Existing configuration was preserved.`); }
 }
-/** Compare before replacement; keep private backups and unknown settings. TOML comments normalize. */
+/** Compare before replacement; keep a private backup (in Trace's data, file-backups.ts) and unknown settings. TOML comments normalize. */
 export function updateConfig(file: string, expectedHash: string | null, edit: (data: ObjectMap) => void) {
   const before = readConfig(file);
   if (expectedHash !== null && before.hash !== expectedHash) throw new HubError('CONFIG_CHANGED', 'Configuration changed since inspection. Refresh before editing.');
   edit(before.data);
   const next = file.endsWith('.toml') ? TOML.stringify(before.data as TOML.JsonMap) : JSON.stringify(before.data, null, 2) + '\n';
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); checkFile(file);
-  if (before.text) fs.writeFileSync(file + '.coding-hub-backup-' + randomUUID(), before.text, { mode: 0o600, flag: 'wx' });
+  if (before.text) keepBackup(file, before.text);
   const temp = file + '.coding-hub-' + randomUUID();
   try { fs.writeFileSync(temp, next, { flag: 'wx', mode: 0o600 }); if (readConfig(file).hash !== before.hash) throw new HubError('CONFIG_CHANGED', 'Configuration changed during save. Refresh and retry.'); fs.renameSync(temp, file); }
   finally { try { fs.unlinkSync(temp); } catch { /* Renamed or absent. */ } }

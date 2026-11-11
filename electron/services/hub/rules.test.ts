@@ -4,13 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { RulesService, replaceRules } from './rules';
 import { hubRequestSchema } from './service';
+import { backupFolder } from './file-backups';
 const roots: string[] = [];
 const setup = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-rules-')); roots.push(root); const project = path.join(root, 'project'); fs.mkdirSync(project); return { root, project, rules: new RulesService(root) }; };
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { force: true, recursive: true }); });
 describe('one shared rules source for both engine instructions', () => {
   it('preserves existing instructions and memory, updates only its section, and survives restart', () => {
     const { root, project, rules } = setup(); const old = '# Existing\r\nKeep this convention.\r\n<!-- coding-hub-memory:start -->\r\nHandoff instruction\r\n<!-- coding-hub-memory:end -->\r\n'; fs.writeFileSync(path.join(project, 'CLAUDE.md'), old); fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Codex instructions\n');
-    const initial = rules.read([project]); const saved = rules.save('Run relevant tests.\nPreserve Unicode: 🧪', initial.revision, initial.targets); expect(saved.targets[0].applied).toBe(true); const claude = fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8'); const codex = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8'); expect(claude.startsWith(old)).toBe(true); expect(codex.startsWith('# Codex instructions\n')).toBe(true); expect(claude).toContain('Run relevant tests.\nPreserve Unicode: 🧪'); expect(codex).toContain('Run relevant tests.\nPreserve Unicode: 🧪'); expect(fs.readdirSync(project).some((f) => f.includes('backup'))).toBe(true);
+    const initial = rules.read([project]); const saved = rules.save('Run relevant tests.\nPreserve Unicode: 🧪', initial.revision, initial.targets); expect(saved.targets[0].applied).toBe(true); const claude = fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8'); const codex = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8'); expect(claude.startsWith(old)).toBe(true); expect(codex.startsWith('# Codex instructions\n')).toBe(true); expect(claude).toContain('Run relevant tests.\nPreserve Unicode: 🧪'); expect(codex).toContain('Run relevant tests.\nPreserve Unicode: 🧪'); expect(fs.readdirSync(project).some((f) => f.includes('backup'))).toBe(false); expect(fs.readdirSync(backupFolder(path.join(project, 'CLAUDE.md'))).length).toBeGreaterThan(1);
     const changed = rules.save('New shared instructions', saved.revision, saved.targets); for (const file of ['CLAUDE.md', 'AGENTS.md']) { const text = fs.readFileSync(path.join(project, file), 'utf8'); expect(text.match(/coding-hub-rules:start/g)).toHaveLength(1); expect(text).not.toContain('Run relevant tests.'); expect(text).toContain('New shared instructions'); } expect(new RulesService(root).read([project]).content).toBe(changed.content);
   });
   it('blocks launches in unconfigured or externally changed projects and allows both after apply', () => {
