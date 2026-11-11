@@ -194,6 +194,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
     // the same request (linked computers and older phone apps send it), so the chat checks below use that.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
+    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini'], 'the phone\'s + Channel order');
     assert.equal(await phone.getByRole('menuitem', { name: /chat/i }).count(), 0, 'no Claude chat or Codex chat on the phone\'s + Channel');
     await phone.locator('#add-channel').click();
     assert.equal(await phone.evaluate(async () => (await fetch('/api/channel-add', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'claude', chat: true }) })).status), 200);

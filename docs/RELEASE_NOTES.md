@@ -2,7 +2,8 @@
 
 Not released yet:
 
-- **Gemini CLI channels.** **+ Channel → Gemini CLI**, on the computer, on another computer's tab and on the phone, adds a channel that runs Google's Gemini CLI (`agy`) in a terminal. It always uses Gemini 4 Argon (High), the highest model on your subscription, and its **Permissions** setting works as for the other agents. Install agy and sign in to it first; Local engines shows whether Trace found it. A Gemini channel is the CLI in a terminal: it has no chat, usage tracking, shared memory, tasks or Round Table seat, and phones and other computers list it as a terminal. Update every computer: one with an older Trace cannot add a Gemini channel.
+- **Gemini CLI channels.** **+ Channel → Gemini**, on the computer, on another computer's tab and on the phone, adds a channel that runs Google's Gemini CLI (`agy`) in a terminal. It always uses Gemini 4 Argon (High), the highest model on your subscription, and its **Permissions** setting works as for the other agents. Install agy and sign in to it first; Local engines shows whether Trace found it. A Gemini channel is the CLI in a terminal: it has no chat, usage tracking, shared memory, tasks or Round Table seat, and phones and other computers list it as a terminal. Update every computer: one with an older Trace cannot add a Gemini channel.
+- **+ Channel in a new order.** It now lists Terminal, Claude Code, Codex and Gemini, then Round Table and Round Table (hierarchy), on the computer, on another computer's tab and on the phone (without the Round Tables there). Codex CLI and Gemini CLI are called Codex and Gemini in the menu.
 
 1.18.0 makes screen sharing steadier, lets you see and control a Windows computer from the phone, and tightens the hierarchy Round Table and shared memory (update every computer and reload the phone app):
 

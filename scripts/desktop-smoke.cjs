@@ -371,9 +371,13 @@ console.log('FAKE-AGY ' + process.argv.slice(2).join(' ')); setInterval(() => {}
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
     await page.getByRole('button', { name: 'Back to sessions', exact: true }).click();
-    // + Channel → Gemini CLI adds a Gemini tile showing its fixed model; started (not on Windows), it runs agy with that
+    // + Channel → Gemini adds a Gemini tile showing its fixed model; started (not on Windows), it runs agy with that
     // model and the default permission level's flag. It is closed again so the rest sees the two channels as before.
-    await addChannel(page, 'Gemini CLI');
+    // + Channel lists Terminal, Claude Code, Codex, Gemini, then both Round Tables (two channels are open, so both fit).
+    await page.getByRole('button', { name: 'New channel', exact: true }).click();
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini', 'Round Table', 'Round Table (hierarchy)']);
+    await page.keyboard.press('Escape');
+    await addChannel(page, 'Gemini');
     const gemini = page.locator('.session-tile.gemini');
     await gemini.waitFor();
     assert.equal(await gemini.locator('.tr-ch-engine').textContent(), 'Gemini CLI');
