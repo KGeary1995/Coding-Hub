@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Task, TaskOutcome, TaskSent, TaskWatch } from '../../shared/workbench';
 import type { ChannelTranscript } from '../../shared/remote';
-import type { ChatBlock } from '../../shared/chat';
+import type { ChatBlock, RoundTableState } from '../../shared/chat';
 import { replyToTask, taskSignal } from '../../shared/task-signal';
 import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
@@ -103,6 +103,20 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
  */
 /** When each quiet terminal task's reply was last read, and what it said: read again only when it may have changed. */
 const rechecked = new Map<string, { at: number; reply: string }>();
+/**
+ * A hierarchy Round Table's verdict moves the task given to its channel: APPROVED by the planner sends it to Ready for
+ * review; a table that needs the person, or was stopped, marks it so. The builder's own turn ends say nothing here.
+ */
+export function chainTasks(leadId: string, table: RoundTableState) {
+  if (table.kind !== 'hierarchy' || !table.chain) return;
+  const task = useTaskStore.getState().tasks.find((item) => item.sessionId === leadId && item.status === 'active' && item.sentAt); if (!task) return;
+  const { step, verdict, note } = table.chain;
+  if (step === 'done' && verdict === 'approved') void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
+  else if (step === 'needs-you' && (task.outcome !== 'blocked' || task.outcomeNote !== note)) void setTaskStatus(task.id, 'active', 'blocked', note.slice(0, 500) || 'The Round Table needs you.').catch(() => {});
+  else if (step === 'plan-review' && task.outcome !== 'blocked') void setTaskStatus(task.id, 'active', 'blocked', 'The plan is waiting for your approval.').catch(() => {});
+  else if (step === 'stopped' && task.outcome !== 'stopped') void setTaskStatus(task.id, 'active', 'stopped').catch(() => {});
+  else if (!['done', 'needs-you', 'plan-review', 'stopped', 'idle'].includes(step) && task.outcome && task.outcome !== 'finished') void setTaskStatus(task.id, 'active').catch(() => {});
+}
 export function startTaskAutomation() {
   let ticks = 0;
   const tick = () => {

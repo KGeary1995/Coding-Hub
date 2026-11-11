@@ -50,7 +50,18 @@ export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent 
  * the other's answer for up to `rounds` rounds, ending sooner when both agree. The driver edits files; the reviewer
  * reads (Claude's plan mode, Codex's read-only sandbox).
  */
+/** The default models of a hierarchy table's Claude seats (the person can change them on its bar). */
+export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5' } as const;
+/** A hierarchy Round Table's step (electron/services/chat/review-chain.ts). */
+export type ChainStep = 'idle' | 'planning' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
+/** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
+export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string }
 export interface RoundTableState {
+  /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
+  kind?: 'hierarchy';
+  /** The hierarchy's planner and final reviewer (a Claude chat); `partner` is its reviewer (Codex). */
+  planner?: { sessionId: string; runId: string; engine: 'claude' };
+  chain?: SavedChain;
   partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' };
   driver: 'claude' | 'codex'; rounds: number; round: number;
   /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */
@@ -72,7 +83,11 @@ export type ChatRequest =
   /** What the agent may do without asking, from now on (this computer's window only). */
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
-  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[] }
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain }
+  /** A hierarchy table's plan: approve it (the builder starts), or send it back with what to change. */
+  | { action: 'table-plan'; sessionId: string; runId: string; approve: boolean; note: string }
+  /** Picks a stopped hierarchy table up at its step. */
+  | { action: 'table-continue'; sessionId: string; runId: string }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }

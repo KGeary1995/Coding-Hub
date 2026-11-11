@@ -12,7 +12,7 @@ import { startSession } from '../../runtime/use-native-host';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
 import type { PermissionLevel } from '../../../shared/types';
 import { permissionLevel } from '../../../shared/schemas';
-import { AGENT, EMPTY, Item, readImage, seatState, TableBar } from './ChatParts';
+import { AGENT, ChainBar, EMPTY, Item, modelName, readImage, seatState, TableBar } from './ChatParts';
 
 /**
  * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
@@ -29,14 +29,19 @@ export function ChatView({ session }: { session: Session }) {
   const partnerThread = useChatStore((state) => partnerId ? state.threads[partnerId] ?? EMPTY : EMPTY);
   const partnerSession = useWorkspaceStore((state) => partnerId ? state.sessions.find((item) => item.id === partnerId && item.id !== session.id) ?? null : null);
   const [showPartner, setShowPartner] = useState(false);
+  /** A hierarchy table's planner (and final reviewer): a third, hidden seat, whose messages join this thread too. */
+  const hierarchy = table?.kind === 'hierarchy' || session.roundTable?.kind === 'hierarchy';
+  const plannerId = table?.planner?.sessionId ?? session.roundTable?.planner ?? null;
+  const plannerThread = useChatStore((state) => plannerId ? state.threads[plannerId] ?? EMPTY : EMPTY);
+  const plannerSession = useWorkspaceStore((state) => plannerId ? state.sessions.find((item) => item.id === plannerId && item.id !== session.id) ?? null : null);
   /** This chat sits at another channel's table: it is written to from there. */
-  const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id)?.[0] ?? null);
+  const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id || thread.table?.planner?.sessionId === session.id)?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
   const engine = session.config.engine === 'codex' ? 'codex' as const : 'claude' as const;
   const permissions: PermissionLevel = session.config.engine !== 'shell' ? permissionLevel(session.config) : 'ask';
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
-  const busy = chat.busy || (table !== null && partnerThread.busy);
+  const busy = chat.busy || (table !== null && (partnerThread.busy || plannerThread.busy));
   const leadTokens = useHubStore((state) => channelToday(session.id, state.usage).tokens);
   const partnerTokens = useHubStore((state) => table ? channelToday(table.partner.sessionId, state.usage).tokens : 0);
   const tableTokens = table ? { lead: leadTokens, partner: partnerTokens } : undefined;
@@ -46,7 +51,7 @@ export function ChatView({ session }: { session: Session }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (viewing) dialog.current?.showModal(); else dialog.current?.close(); }, [viewing]);
   // Follow new content while the person is at the bottom; scrolling up to read stops that.
-  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, partnerThread]);
+  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, partnerThread, plannerThread]);
   useLayoutEffect(() => { const area = input.current; if (area) { area.style.height = 'auto'; area.style.height = Math.min(area.scrollHeight, 220) + 'px'; } }, [text]);
 
   /** At a table, the partner's replies, approvals and notices join this thread in the order they came; Trace's prompts to it stay out. */
@@ -55,9 +60,10 @@ export function ChatView({ session }: { session: Session }) {
     if (showPartner && partnerSession) return partnerThread.items.map((item) => ({ item, from: 'partner' as const }));
     const own = chat.items.map((item) => ({ item, from: 'lead' as const }));
     if (!table) return own;
-    return [...own, ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const }))]
+    // In a hierarchy Trace's prompts to the builder stay out too: the person's own messages show, at their order.
+    return [...own.filter(({ item }) => !hierarchy || item.kind !== 'user' || !item.text.startsWith('[')), ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? plannerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : [])]
       .sort((a, b) => (a.item.order ?? 0) - (b.item.order ?? 0));
-  }, [chat.items, partnerThread.items, table, showPartner, partnerSession]);
+  }, [chat.items, partnerThread.items, plannerThread.items, table, showPartner, partnerSession, hierarchy]);
 
   const attach = async (files: Blob[]) => {
     setError('');
@@ -92,11 +98,13 @@ export function ChatView({ session }: { session: Session }) {
   /** An open table is closed through the host, whose `closed` event forgets it (as from a phone); a saved one is forgotten here. */
   // The findings are saved to shared memory first; if that fails the table stays open, so nothing is lost.
   const closeTable = () => { void (async () => { const unsaved = await archiveFindings(session.id); if (unsaved) { setError(`${unsaved} The Round Table stays open; try Close again.`); return; } setShowPartner(false); const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
-  const workers = table ? [chat.busy ? agent : null, partnerThread.busy ? AGENT[table.partner.engine] : null].filter(Boolean) : [agent];
-  const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
+  const builderName = hierarchy ? modelName(session.config.engine !== 'shell' ? session.config.model : '') : agent; const plannerName = modelName(plannerSession && plannerSession.config.engine !== 'shell' ? plannerSession.config.model : '');
+  const workers = table ? [chat.busy ? builderName : null, partnerThread.busy ? AGENT[table.partner.engine] : null, plannerThread.busy ? plannerName : null].filter(Boolean) : [agent];
+  const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table && hierarchy ? (table.chain?.step === 'plan-review' ? 'Say what to change in the plan, or press Approve plan' : 'Give the Round Table a task (Enter to send)') : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
-    {table && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
+    {table && hierarchy && <ChainBar table={table} busy={busy} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
+    {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
       onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {!table && partnerSession && <div className="table-bar" role="group" aria-label="Round Table">
       <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${engine}`} /><i className={`seat-${partnerEngine}`} /></span>
@@ -112,8 +120,9 @@ export function ChatView({ session }: { session: Session }) {
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
       {items.map(({ item, from }) => from === 'lead'
-        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[partnerEngine]} author={partnerEngine} role={table ? (table.driver === partnerEngine ? 'driver' : 'reviewer') : undefined} answer={answerFor(partnerSession)} view={setViewing} />)}
+        ? <Item key={item.id} item={item} results={chat.results} agent={builderName} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
+        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="claude" role="Planner" answer={answerFor(plannerSession)} view={setViewing} />
+        : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[partnerEngine]} author={partnerEngine} role={table ? (hierarchy ? 'Reviewer' : table.driver === partnerEngine ? 'driver' : 'reviewer') : undefined} answer={answerFor(partnerSession)} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
     <div className="chat-composer">

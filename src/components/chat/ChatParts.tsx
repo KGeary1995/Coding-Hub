@@ -1,6 +1,6 @@
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
-import type { ChatBlock, ChatImage, RoundTableState } from '../../../shared/chat';
+import { HIERARCHY_MODELS, type ChatBlock, type ChatImage, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
@@ -82,14 +82,14 @@ const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
 /** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say YOU. */
-export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: 'driver' | 'reviewer' }) {
+export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
   if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
     {author && <p className="chat-author"><i className="seat-hex seat-you" aria-hidden="true" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
     {item.text && <p className="chat-user-text">{item.text}</p>}
   </div>;
   if (item.kind === 'assistant') return <div className={`chat-message assistant ${author ? `table-${author}` : ''}`}>
-    {author && <p className="chat-author"><i className={`seat-hex seat-${author}`} aria-hidden="true" />{agent}{role ? ` · ${role === 'driver' ? 'Driver' : 'Review'}` : ''}</p>}
+    {author && <p className="chat-author"><i className={`seat-hex seat-${author}`} aria-hidden="true" />{agent}{role ? ` · ${role === 'driver' ? 'Driver' : role === 'reviewer' ? 'Review' : role}` : ''}</p>}
     {item.blocks.map((block, index) => block.type === 'text' ? <Markdown key={index} text={block.text} />
       : block.type === 'thinking' ? <details key={index} className="chat-thinking"><summary>Thinking</summary><p>{block.text}</p></details>
         : <ToolCard key={block.id} block={block} result={results[block.id]} />)}
@@ -144,3 +144,42 @@ function FindingsList({ findings }: { findings: Finding[] }) {
   </details>;
 }
 
+
+/** A Claude model as people call it: claude-fable-5-2 is Fable 5.2; anything else is shown as given, or as Claude. */
+export function modelName(model: string) {
+  const known = /^claude-(fable|opus|sonnet|haiku)-(\d+)-(\d+)/.exec(model.trim());
+  return known ? `${known[1][0].toUpperCase()}${known[1].slice(1)} ${known[2]}.${known[3]}` : model.trim() || 'Claude';
+}
+const CHAIN_STEPS: { step: string; label: string; of: string[] }[] = [
+  { step: 'plan', label: 'Plan', of: ['planning'] }, { step: 'approve', label: 'Approve', of: ['plan-review'] }, { step: 'build', label: 'Build', of: ['implementing'] },
+  { step: 'review', label: 'Review', of: ['reviewing'] }, { step: 'fix', label: 'Fix', of: ['fixing'] }, { step: 'final', label: 'Final review', of: ['final', 'final-fixing'] },
+];
+/**
+ * The bar of a hierarchy Round Table: where the task is among plan, approve, build, review, fix and final review; the
+ * plan approval; Stop and Continue; each Claude seat's model (used when that seat starts); findings and a kept message.
+ */
+export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead: Session; planner: Session | null; onRequest: (request: ChainAction) => void; onModel: (session: Session, model: string) => void }) {
+  const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
+  const current = CHAIN_STEPS.findIndex((item) => at && item.of.includes(at));
+  const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? `Stopped${chain?.note ? `: ${chain.note}` : ''}` : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
+  const model = (session: Session | null, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
+  const setModel = (session: Session | null, value: string) => { if (session && session.config.engine === 'claude') onModel(session, value.trim()); };
+  return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
+    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-claude" /><i className="seat-claude" /><i className="seat-codex" /></span>
+    <strong>Round Table · hierarchy</strong>
+    <ol className="chain-steps" aria-label="Steps">{CHAIN_STEPS.map((item, index) => <li key={item.step} className={index === current ? 'current' : index < current || step === 'done' ? 'past' : ''} aria-current={index === current ? 'step' : undefined}>{item.label}</li>)}</ol>
+    <span className="table-status" aria-live="polite">{status}</span>
+    {step === 'plan-review' && <button className="button primary" onClick={() => onRequest({ action: 'table-plan', approve: true, note: '' })}>Approve plan</button>}
+    {step === 'stopped' && chain?.stoppedAt && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
+    {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
+    <details className="chain-models"><summary>Models</summary>
+      <label>Planner and final review<input aria-label="Planner model" defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
+      <label>Builder<input aria-label="Builder model" defaultValue={model(lead, HIERARCHY_MODELS.builder)} onBlur={(e) => setModel(lead, e.target.value)} spellCheck={false} /></label>
+      <small>Used when that seat starts again (restart the channel). The reviewer is Codex, with its own settings.</small>
+    </details>
+    <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
+    {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
+    {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
+  </div>;
+}
+export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue' } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean };

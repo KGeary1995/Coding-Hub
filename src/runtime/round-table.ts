@@ -1,10 +1,11 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ChatImage, RoundTableState } from '../../shared/chat';
 import type { Session } from '../../shared/types';
-import { createSession, partnerOf, useWorkspaceStore } from '../state/workspace-store';
+import { createSession, partnerOf, plannerOf, useWorkspaceStore } from '../state/workspace-store';
 import { useChatStore } from '../state/chat-store';
 import { hubCall } from '../state/hub-store';
 import { itemTitle } from '../../shared/memory-items';
+import { HIERARCHY_MODELS } from '../../shared/chat';
 import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
 
@@ -94,10 +95,10 @@ async function retire(leadId: string): Promise<string | null> {
   if (retiring.has(leadId)) return null; retiring.add(leadId);
   try {
     const failure = await archiveFindings(leadId);
-    const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId);
-    if (partner && live(partner)) { await settled([partner.id], 'starting'); await stopSession(partner.id); await settled([partner.id]); }
+    const partner = partnerOf(useWorkspaceStore.getState().sessions, leadId); const planner = plannerOf(useWorkspaceStore.getState().sessions, leadId);
+    for (const seat of [partner, planner]) if (seat && live(seat)) { await settled([seat.id], 'starting'); await stopSession(seat.id); await settled([seat.id]); }
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions
-      .filter((session) => session.id !== partner?.id || live(session))
+      .filter((session) => (session.id !== partner?.id && session.id !== planner?.id) || live(session))
       .map((session) => session.id === leadId && session.roundTable && !failure ? { ...session, roundTable: undefined } : session) }));
     return failure;
   } finally { retiring.delete(leadId); }
@@ -105,7 +106,7 @@ async function retire(leadId: string): Promise<string | null> {
 /** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */
 const retiring = new Set<string>();
 
-type TableRequest = { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
+type TableRequest = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue' } | { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 /** A request to the table a running chat channel leads; the error message, or null. */
 export async function tableRequest(leadId: string, request: TableRequest): Promise<string | null> {
   const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
@@ -117,7 +118,7 @@ export async function tableRequest(leadId: string, request: TableRequest): Promi
 /** The leading channel remembers its table (partner, driver, rounds) whenever the table changes. */
 export function rememberTable(leadId: string, table: RoundTableState) {
   // The review record and a waiting message are kept with it, so a restart loses neither.
-  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting !== undefined ? { waiting: table.waiting } : {}), ...(table.waitingImages?.length ? { waitingImages: table.waitingImages } : {}) };
+  const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.kind === 'hierarchy' ? { kind: 'hierarchy' as const, ...(table.planner ? { planner: table.planner.sessionId } : {}), ...(table.chain ? { chain: table.chain } : {}) } : {}), ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting !== undefined ? { waiting: table.waiting } : {}), ...(table.waitingImages?.length ? { waitingImages: table.waitingImages } : {}) };
   useWorkspaceStore.setState((state) => {
     const lead = state.sessions.find((session) => session.id === leadId);
     if (!lead || (lead.roundTable && JSON.stringify(lead.roundTable) === JSON.stringify(saved))) return {};
@@ -139,8 +140,11 @@ export function restoreTables() {
     if (!lead.roundTable || lead.status !== 'running' || !lead.runId || tableOf(lead.id) || opening.has(lead.id)) continue;
     const partner = sessions.find((session) => session.id === lead.roundTable!.partner);
     if (!partner || partner.status !== 'running' || !partner.runId) continue;
-    const pair = `${lead.runId}:${partner.runId}`; if (reopened.has(pair)) continue; reopened.add(pair);
-    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds, ...(lead.roundTable.findings?.length ? { findings: lead.roundTable.findings } : {}), ...(lead.roundTable.waiting !== undefined ? { waiting: lead.roundTable.waiting } : {}), ...(lead.roundTable.waitingImages?.length ? { waitingImages: lead.roundTable.waitingImages } : {}) }).catch(() => {});
+    // A hierarchy table opens again once its planner runs too, picking up where its work stood.
+    const planner = lead.roundTable.kind === 'hierarchy' ? sessions.find((session) => session.id === lead.roundTable!.planner) : null;
+    if (lead.roundTable.kind === 'hierarchy' && (!planner || planner.status !== 'running' || !planner.runId)) continue;
+    const pair = `${lead.runId}:${partner.runId}${planner ? `:${planner.runId}` : ''}`; if (reopened.has(pair)) continue; reopened.add(pair);
+    void window.codingHub?.chat({ action: 'table-open', sessionId: lead.id, runId: lead.runId, partner: { sessionId: partner.id, runId: partner.runId }, driver: lead.roundTable.driver, rounds: lead.roundTable.rounds, ...(planner?.runId ? { kind: 'hierarchy' as const, planner: { sessionId: planner.id, runId: planner.runId }, ...(lead.roundTable.chain ? { chain: lead.roundTable.chain } : {}) } : {}), ...(lead.roundTable.findings?.length ? { findings: lead.roundTable.findings } : {}), ...(lead.roundTable.waiting !== undefined ? { waiting: lead.roundTable.waiting } : {}), ...(lead.roundTable.waitingImages?.length ? { waitingImages: lead.roundTable.waitingImages } : {}) }).catch(() => {});
   }
 }
 
@@ -158,4 +162,44 @@ export async function startRoundTable(): Promise<string | null> {
   const started = useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id);
   if (started?.status !== 'running') return started?.error ?? 'Claude could not be started.';
   return openRoundTable(lead.id);
+}
+
+/**
+ * + Channel → Round Table (hierarchy): a Claude chat that builds (Opus 5.5 by default), with a hidden Claude planner and
+ * final reviewer (Fable 5.2 by default) and a hidden Codex reviewer, all in the project folder, in one tile. Three CLIs:
+ * the table counts as three of the eight channels. The error message, or null.
+ */
+export async function startHierarchyTable(): Promise<string | null> {
+  const before = new Set(useWorkspaceStore.getState().sessions.map((session) => session.id));
+  if (before.size > MAX_CHANNELS - 3) return 'A hierarchy Round Table runs three agents, and Trace runs at most eight. Close a channel first.';
+  useWorkspaceStore.getState().addChatSession('claude');
+  const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
+  if (!lead || lead.config.engine !== 'claude') return 'The Round Table could not be added.';
+  useWorkspaceStore.getState().updateConfig(lead.id, { ...lead.config, model: HIERARCHY_MODELS.builder });
+  await startSession(lead.id);
+  const started = useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id);
+  if (started?.status !== 'running') return started?.error ?? 'Claude could not be started.';
+  return openHierarchy(lead.id);
+}
+/** Seats a reviewer (Codex) and a planner (Claude) at a running Claude chat's hierarchy table. The error message, or null. */
+export async function openHierarchy(leadId: string): Promise<string | null> {
+  const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
+  if (!lead || lead.config.engine !== 'claude' || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
+  if (tableOf(leadId) || opening.has(leadId)) return null;
+  const shared = { ...(lead.config.permissions ? { permissions: lead.config.permissions } : {}), ...(lead.config.memoryKey ? { memoryKey: lead.config.memoryKey } : {}) };
+  const reviewer = createSession('codex', { mode: 'independent', cwd: lead.runningCwd }); const planner = createSession('claude', { mode: 'independent', cwd: lead.runningCwd });
+  if (reviewer.config.engine === 'codex') reviewer.config = { ...reviewer.config, chat: true, ...shared };
+  if (planner.config.engine === 'claude') planner.config = { ...planner.config, chat: true, model: HIERARCHY_MODELS.planner, ...shared, ...(lead.config.accountProfileId ? { accountProfileId: lead.config.accountProfileId } : {}) };
+  useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, reviewer, planner].map((session) => session.id === leadId ? { ...session, roundTable: { partner: reviewer.id, planner: planner.id, kind: 'hierarchy' as const, driver: 'claude' as const, rounds: 2 } } : session) }));
+  opening.add(leadId);
+  try {
+    await Promise.all([startSession(reviewer.id), startSession(planner.id)]);
+    const now = useWorkspaceStore.getState().sessions; const seat = (id: string) => now.find((session) => session.id === id);
+    const r = seat(reviewer.id); const p = seat(planner.id); const l = seat(leadId);
+    for (const [s, name] of [[r, 'Codex'], [p, 'The planner']] as const) if (!s || s.status !== 'running' || !s.runId) { const why = s?.error ?? `${name} could not be started.`; await retire(leadId); return why; }
+    if (!l?.runId || l.status !== 'running') { await retire(leadId); return 'This chat stopped before the Round Table opened.'; }
+    const result = await window.codingHub?.chat({ action: 'table-open', sessionId: leadId, runId: l.runId, partner: { sessionId: r!.id, runId: r!.runId! }, planner: { sessionId: p!.id, runId: p!.runId! }, kind: 'hierarchy', driver: 'claude', rounds: 2 }).catch(() => null);
+    if (result?.ok) return null;
+    await retire(leadId); return result?.error.message ?? 'The Round Table could not be opened.';
+  } finally { opening.delete(leadId); }
 }

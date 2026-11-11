@@ -174,7 +174,7 @@ const manager = new PtyManager((owner, event) => {
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
-  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) if (session.roundTable && session.roundTable.partner !== session.id && saved!.sessions.some((item) => item.id === session.roundTable!.partner)) seats.set(session.roundTable.partner, session.id);
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(session.config.engine !== 'shell' && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
