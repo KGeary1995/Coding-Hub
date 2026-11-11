@@ -286,9 +286,18 @@ export class RemoteServer {
    * it, not to Trace), or from Trace's screen service (Windows, which the ticket alone lets in).
    */
   private async upgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer) {
+    // Node takes its own error handler off an upgraded socket: without one, a phone dropping the connection while the
+    // screen is still being reached (the service starting, or the Mac's port connecting) is an uncaught error in Trace's
+    // main process. A close before the stream is passed on lets go of its place, so whatever was opening for it is dropped.
+    socket.on('error', () => { /* It closes; handled there. */ });
+    socket.once('close', () => { this.screens.delete(socket); this.screenOwners.delete(socket); });
     const refuse = (status: number, text: string) => { socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); };
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (url.pathname !== '/api/screen' && url.pathname !== '/api/phone-screen') return refuse(404, 'Not Found');
+    // Another computer asking for a Trace screen service here: there is none (on Windows with Share this screen on,
+    // `tailscale serve` sends /api/screen to the service, not here). Not a refusal, so it tries the computer's own
+    // screen sharing (a Mac's) instead of reporting that this computer refused.
+    if (request.headers.upgrade?.toLowerCase() === 'trace-screen') return refuse(404, 'Not Found');
     if (!this.allowedHost(request.headers.host) || request.headers['tailscale-funnel-request'] !== undefined) return refuse(403, 'Forbidden');
     const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return refuse(403, 'Forbidden');
     const ticket = this.screenTickets.get(url.searchParams.get('ticket') ?? ''); this.screenTickets.delete(url.searchParams.get('ticket') ?? '');

@@ -1,5 +1,6 @@
 import type { Duplex } from 'node:stream';
 import { constants, deflateSync, inflateSync } from 'node:zlib';
+import { SCREEN_CLIPBOARD_LIMIT } from '../../../shared/screen';
 
 /** A changed part of the screen, as JPEG (sent with Tight encoding, which noVNC draws natively). */
 export interface FrameRect { x: number; y: number; width: number; height: number; jpeg: Uint8Array }
@@ -15,7 +16,7 @@ export interface ScreenInput {
   /** The viewer's copied text, for this computer's clipboard. It may finish later (Electron's write does): a paste waits for it. */
   clipboard(text: string): void | Promise<void>;
 }
-const TIGHT = 7; const CONTINUOUS = -313; const CLIPBOARD_LIMIT = 1024 * 1024;
+const TIGHT = 7; const CONTINUOUS = -313; const CLIPBOARD_LIMIT = SCREEN_CLIPBOARD_LIMIT;
 /** How often an unchanged screen is looked at again; cheap, as the capture skips frames it has already compared. */
 const IDLE_POLL = 15;
 /** Updates wait while this much is still unsent, so the viewer sees the newest screen rather than a queue of old ones. */

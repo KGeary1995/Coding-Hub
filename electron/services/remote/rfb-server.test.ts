@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import net from 'node:net';
 import zlib from 'node:zlib';
+import { fitPaste } from '../../../shared/screen';
 import { clipboardBytes, compactLength, PASTE_WAIT, RfbSession, type FrameRect, type ScreenInput } from './rfb-server';
 
 const cleanup: (() => void)[] = [];
@@ -197,6 +198,23 @@ describe('the Windows screen as a VNC server', () => {
       vnc.setClipboard('中'.repeat(400_000)); await until(() => messages().length === 2, 'the notify');
       send((1 << 25) | 1); await until(() => messages().length === 3, 'the text');
       const data = zlib.inflateSync(messages()[2].payload); expect(data.readUInt32BE(0)).toBeLessThanOrEqual(1024 * 1024); expect(data.length - 4).toBe(data.readUInt32BE(0));
+    });
+    it('a long paste, shortened by the viewer, arrives whole instead of ending the session', async () => {
+      const { vnc, send } = await extended();
+      // 1.5 MB of lines and three-byte characters: over the limit as noVNC would send it.
+      const long = 'a line of text\n中'.repeat(100_000); const fitted = fitPaste(long);
+      expect(fitted.length).toBeLessThan(long.length); expect(long.startsWith(fitted)).toBe(true);
+      const utf8 = Buffer.from(fitted.replace(/\r\n|\r|\n/g, '\r\n') + '\0', 'utf8'); expect(utf8.length).toBeLessThanOrEqual(1024 * 1024); expect(utf8.length).toBeGreaterThan(1024 * 1024 - 20);
+      const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 1, 'the clipboard'); expect(vnc.ended()).toBe(false);
+      expect(vnc.events[0]).toBe(`clipboard ${fitted.replace(/\r\n|\r|\n/g, '\r\n')}`);
+    });
+    it('cuts a paste between characters, and leaves one that fits alone', () => {
+      expect(fitPaste('short\ntext')).toBe('short\ntext');
+      // 4-byte emoji: the cut never splits one; line ends count as two bytes.
+      const emoji = fitPaste('🙂'.repeat(300_000)); expect(Array.from(emoji).every((character) => character === '🙂')).toBe(true); expect(emoji.length / 2 * 4 + 1).toBeLessThanOrEqual(1024 * 1024);
+      expect(fitPaste('\n'.repeat(600_000)).length).toBe((1024 * 1024 - 1) / 2 | 0);
     });
     it('ends the session when the text inflates past the limit', async () => {
       const { vnc, send } = await extended();

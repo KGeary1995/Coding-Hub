@@ -406,6 +406,28 @@ describe('phone screen of a Windows computer', () => {
     await paired(server); await computer(server);
     expect(await closed).toBe(false);
   });
+  it('survives a phone dropping its connection while the screen is still being reached, and lets that go', async () => {
+    const { server, root } = await remote(); fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true }));
+    let answer: (value: { socket: net.Socket; head: Buffer }) => void = () => {}; let asked = false;
+    const host = (server as unknown as { host: RemoteHost }).host; host.screenService = () => true;
+    host.openScreenService = () => { asked = true; return new Promise((resolve) => { answer = resolve; }); };
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id; server.setCanRun(id, true);
+    const { ticket } = await (await fetch(base(server) + '/api/phone-screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${phone}` } })).json() as { ticket: string };
+    const uncaught: unknown[] = []; const catcher = (error: unknown) => uncaught.push(error); process.on('uncaughtException', catcher); cleanup.push(() => { process.off('uncaughtException', catcher); });
+    // A raw connection that asks for the screen, then resets (as a phone losing its network does) before it is reached.
+    const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {});
+    await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+    client.write(`GET /api/phone-screen?ticket=${ticket} HTTP/1.1\r\nHost: 127.0.0.1:${server.address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString('base64')}\r\n\r\n`);
+    for (let i = 0; i < 100 && !asked; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(asked).toBe(true); client.resetAndDestroy(); await new Promise((resolve) => setTimeout(resolve, 200));
+    const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) }); await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(uncaught).toEqual([]); expect(service.destroyed).toBe(true);
+  });
+  it('tells another computer there is no Trace screen service here, so it tries the computer\'s own (a Mac\'s) instead of reporting a refusal', async () => {
+    const { server } = await remote(); (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: 5900 });
+    await server.setEnabled(true); const linked = await computer(server);
+    await expect(openTraceScreen('MacBook', `http://127.0.0.1:${server.address}/`, linked, 5000)).rejects.toThrow('No screen service (404).');
+  });
   it('removing the phone also closes a Mac screen it has open', async () => {
     const vnc = net.createServer((client) => { client.write('RFB 003.889\n'); client.on('error', () => {}); });
     await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { vnc.close(() => resolve()); vnc.unref(); }));

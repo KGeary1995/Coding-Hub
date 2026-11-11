@@ -33,6 +33,19 @@ export type ScreenRequest =
 export interface ScreenOpened { kind: ScreenKind; displays?: number; display?: number }
 /** The most displays one can be picked from. */
 export const MAX_DISPLAYS = 16;
+/** The most clipboard text Trace's screen service takes in one message, in bytes as it travels (CRLF, UTF-8, a closing NUL). */
+export const SCREEN_CLIPBOARD_LIMIT = 1024 * 1024;
+/**
+ * A paste cut to what the screen service takes (between characters), so a long one is pasted shortened rather than
+ * ending the session. Counted as noVNC sends it: line ends as CRLF, then UTF-8, then a NUL.
+ */
+export function fitPaste(text: string, limit = SCREEN_CLIPBOARD_LIMIT): string {
+  const encoder = new TextEncoder(); const size = (value: string) => encoder.encode(value.replace(/\r\n|\r|\n/g, '\r\n')).length + 1;
+  if (size(text) <= limit) return text;
+  const characters = Array.from(text); let fits = 0; let over = characters.length;
+  while (over - fits > 1) { const middle = (fits + over) >> 1; if (size(characters.slice(0, middle).join('')) <= limit) fits = middle; else over = middle; }
+  return characters.slice(0, fits).join('');
+}
 export type ScreenResponse = ScreenOpened | ScreenCredentials | ScreenShareStatus | null;
 export type ScreenEvent =
   | { type: 'data'; streamId: string; data: Uint8Array }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { LockKeyhole, MousePointer2, RotateCcw, X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
 import type { LinkedComputer, LinkedScreenState } from '../../../shared/remote';
-import type { ScreenKind } from '../../../shared/screen';
+import { fitPaste, type ScreenKind } from '../../../shared/screen';
 import { savedCredentials, screen, ScreenChannel, unlockKeys, WAKE_KEYS, type KeyStroke } from '../../runtime/screen-channel';
 import { workbench } from '../../runtime/workbench';
 
@@ -132,7 +132,10 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
 
   const pasted = (text: string) => {
     const client = rfb.current; if (!client) return;
-    if (text) client.clipboardPasteFrom(text);
+    // Trace's screen service takes 1 MB of text at a time: more would end the session, so a longer paste goes shortened.
+    const sent = kind === 'trace' ? fitPaste(text) : text;
+    if (sent.length < text.length) setMessage(`Only the first ${Math.round(sent.length / 1024)} K characters were pasted: ${computer.name} takes up to 1 MB of text at a time.`);
+    if (sent) client.clipboardPasteFrom(sent);
     client.sendKey(XK_V, 'KeyV', true); client.sendKey(XK_V, 'KeyV', false); client.focus();
   };
   const signIn = (event: FormEvent) => {
