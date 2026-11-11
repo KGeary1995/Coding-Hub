@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutDisplays, orderDisplays, pictureRegion, WHOLE_DESKTOP } from './screen-layout';
+import { layoutDisplays, mainDisplayFallback, orderDisplays, pictureRegion, WHOLE_DESKTOP } from './screen-layout';
 import { pointerCommands } from './screen-input';
 
 describe('the shared Windows screen covers every display', () => {
@@ -45,5 +45,17 @@ describe('one display of several, at full size', () => {
     expect(pointerCommands(1919, 1079, 0, 0, picture.width, picture.height, region)[0]).toBe('m 65535 65535 49153 0');
     // The left display, lower down: its top is 360 of the desktop's 1440 rows.
     const low = pictureRegion([main, left], [left]); expect(pointerCommands(0, 0, 0, 0, 1920, 1080, low)[0]).toBe(`m 0 ${Math.round(65535 * 360 / 1439)} 49153 0`);
+  });
+});
+
+describe('the fallback when no capture source names its display', () => {
+  it('shows the main display at its physical size, with clicks on it alone', () => {
+    // The main display at 125%: 1536 × 864 in Windows' logical pixels, 1920 × 1080 physical; a second display to its right.
+    const main = { id: '1', x: 0, y: 0, width: 1920, height: 1080 }; const right = { id: '2', x: 1920, y: 0, width: 2560, height: 1440 };
+    const { layout, region } = mainDisplayFallback([main, right], main);
+    expect(layout).toMatchObject({ width: 1920, height: 1080 });
+    // Its corners are the main display's corners on the desktop (0 to 4479 across, 0 to 1439 down), not the desktop's.
+    expect(pointerCommands(0, 0, 0, 0, layout.width, layout.height, region)[0]).toBe('m 0 0 49153 0');
+    expect(pointerCommands(1919, 1079, 0, 0, layout.width, layout.height, region)[0]).toBe(`m ${Math.round(65535 * 1919 / 4479)} ${Math.round(65535 * 1079 / 1439)} 49153 0`);
   });
 });

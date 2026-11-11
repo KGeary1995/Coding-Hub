@@ -21,13 +21,13 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
   await fs.writeFile(path.join(serviceRoot, 'remote-devices.json'), JSON.stringify([{ id: '5a9e3c3e-2f7e-4c1b-9d55-0c2f8e9b1a01', name: 'Test-Mac', tokenHash: createHash('sha256').update(TOKEN).digest('hex'), createdAt: new Date().toISOString(), lastSeen: null, kind: 'computer' }]));
   // The viewer: linked to the PC, whose address is the service itself here (Tailscale would pass /api/screen to it).
   await fs.writeFile(path.join(viewerRoot, 'linked-computers.json'), JSON.stringify([{ id: PC, name: 'Test-PC', url: `http://127.0.0.1:${PORT}/`, token: TOKEN, linkedAt: new Date().toISOString() }]));
-  const log = path.join(root, 'input.log');
+  const log = path.join(root, 'input.log'); const crash = path.join(root, 'crash');
   const base = { ...process.env }; delete base.ELECTRON_RUN_AS_NODE;
   // The administrator kind (started by its scheduled task) gives way when the setting does not ask for it: it quits at once.
   const wrongKind = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'wrong-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC', '--elevated'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT) }, stdio: 'ignore' });
   const quit = await new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 20000); wrongKind.once('exit', () => { clearTimeout(timer); resolve(true); }); });
   if (!quit) wrongKind.kill(); assert.ok(quit && !(await healthy()), 'A service of the kind the setting does not ask for quits without listening');
-  const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log }, stdio: 'ignore' });
+  const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log, CODING_HUB_TEST_RELAUNCH_AFTER: '1000', CODING_HUB_TEST_SCREEN_SERVICE_CRASH: crash }, stdio: 'ignore' });
   let app;
   try {
     await until(healthy, 'the screen service to listen');
@@ -89,6 +89,17 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     // Back to the channels: the service lets go of the viewer.
     await page.getByRole('button', { name: 'Channels', exact: true }).click();
     await until(async () => (await fs.readFile(log, 'utf8')).includes('close'), 'the viewer to leave');
+    // An error nothing caught, five times: each time the service starts itself again (it has run longer than the test's
+    // 1 s), and answers again within 15 s. The relaunched one must get past the single-instance lock the old one held.
+    const restarts = [];
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const begun = Date.now(); await fs.writeFile(crash, '');
+      await until(async () => !(await healthy()), 'the service to fail', 100);
+      await until(healthy, 'the service to start again', 150);
+      restarts.push(Date.now() - begun);
+    }
+    console.log('restarted after', restarts.join(', '), 'ms');
     // Turning sharing off stops the service.
     await fs.writeFile(path.join(serviceRoot, 'screen-share.json'), JSON.stringify({ enabled: false }));
     await until(async () => !(await healthy()), 'the service to quit', 100);

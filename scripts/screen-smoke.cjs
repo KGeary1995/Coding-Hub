@@ -156,6 +156,17 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
       await new Promise((resolve) => setTimeout(resolve, 1500)); assert.equal(vnc.connections() - before, 2, 'No more tries after Disconnected');
       vnc.state.refuse = false; await panel.getByRole('button', { name: 'Reconnect', exact: true }).click();
       await panel.getByRole('status').filter({ hasText: 'Controlling' }).waitFor();
+
+      // No saved password: the screen drops, the retry asks for the sign-in, and the computer closes the connection while
+      // the form waits. The viewer stops there (Disconnected, and why) rather than retrying and hiding the form.
+      await panel.getByRole('button', { name: 'Forget password', exact: true }).click();
+      await panel.getByRole('button', { name: 'Forget password', exact: true }).waitFor({ state: 'detached' });
+      const tries = vnc.connections(); vnc.sockets.at(-1).end();
+      await panel.getByLabel('Password', { exact: true }).waitFor(); assert.equal(vnc.connections() - tries, 1, 'One retry, which asks for the sign-in');
+      vnc.sockets.at(-1).end();
+      await panel.getByRole('status').filter({ hasText: 'Disconnected' }).waitFor();
+      await panel.getByRole('alert').filter({ hasText: 'closed the connection while waiting for the sign-in' }).waitFor();
+      await new Promise((resolve) => setTimeout(resolve, 7000)); assert.equal(vnc.connections() - tries, 1, 'No retry after the sign-in was lost');
     }
 
     // Back to the channels: the screen connection closes.

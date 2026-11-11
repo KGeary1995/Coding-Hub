@@ -56,6 +56,8 @@ export function clipboardBytes(text: string, limit = CLIPBOARD_LIMIT): Buffer {
   if (utf8.length > limit - 1) { let end = limit - 1; while (end > 0 && (utf8[end] & 0xc0) === 0x80) end--; utf8 = utf8.subarray(0, end); }
   return Buffer.concat([utf8, Buffer.from([0])]);
 }
+/** Two clipboard texts that differ only in their line ends (CRLF, CR or LF). */
+const sameText = (a: string, b: string) => a === b || a.replace(/\r\n|\r/g, '\n') === b.replace(/\r\n|\r/g, '\n');
 const u32 = (value: number) => { const buffer = Buffer.alloc(4); buffer.writeUInt32BE(value >>> 0, 0); return buffer; };
 
 /**
@@ -79,6 +81,8 @@ export class RfbSession {
   /** Updates sent and not yet answered by the viewer's fence, and the pump waiting for one. */
   /** Notify messages with text so far: a finished write lets held input go only if no newer copy was announced since. */
   private notified = 0;
+  /** Text Requests sent and not yet answered with text; when input was first held; a hold never lasts past twice PASTE_WAIT. */
+  private awaiting = 0; private heldSince = 0;
   private inFlight = 0; private fenced: (() => void) | null = null; private fenceId = 0;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
@@ -184,14 +188,25 @@ export class RfbSession {
   }
   /** Input now, or after the text the viewer copied, in the order it came. */
   private act(action: () => void) { if (this.held) this.held.push(action); else action(); }
-  private hold() { if (this.held) return; this.held = []; this.heldTimer = setTimeout(() => this.release(), PASTE_WAIT); }
+  /**
+   * Holds input, or keeps holding it: each new wait (another copy announced, a write under way) gets PASTE_WAIT again, but
+   * the hold ends at most twice PASTE_WAIT after it began, so a viewer that keeps announcing text cannot hold input forever.
+   */
+  private hold() {
+    if (!this.held) { this.held = []; this.heldSince = Date.now(); }
+    if (this.heldTimer) clearTimeout(this.heldTimer);
+    const wait = Math.max(0, Math.min(PASTE_WAIT, this.heldSince + 2 * PASTE_WAIT - Date.now()));
+    this.heldTimer = setTimeout(() => { this.awaiting = 0; this.release(); }, wait);
+  }
   private release() { const actions = this.held ?? []; this.held = null; if (this.heldTimer) clearTimeout(this.heldTimer); this.heldTimer = null; for (const action of actions) action(); }
 
   private extendedClipboard(body: Buffer) {
     if (body.length < 4) throw new Error('clipboard'); const flags = body.readUInt32BE(0); const text = (flags & TEXT) !== 0;
     if (flags & CAPS) { this.extended = true; return; }
     if (flags & PROVIDE) {
-      if (!text) { this.release(); return; }
+      // No text in it: held input goes only if no text this side asked for is still to come.
+      if (!text) { if (this.awaiting === 0) this.release(); return; }
+      this.awaiting = Math.max(0, this.awaiting - 1);
       // noVNC flushes without finishing its stream; the size limit applies to the text inflated, not just what was sent.
       const data = inflateSync(body.subarray(4), { finishFlush: constants.Z_SYNC_FLUSH, maxOutputLength: CLIPBOARD_LIMIT + 5 });
       if (data.length < 4) throw new Error('clipboard'); const size = data.readUInt32BE(0); if (size > data.length - 4) throw new Error('clipboard');
@@ -199,7 +214,7 @@ export class RfbSession {
       const value = data.subarray(4, 4 + size).toString('utf8'); this.copied(value.endsWith('\0') ? value.slice(0, -1) : value);
       return;
     }
-    if (flags & NOTIFY) { if (text) { this.notified++; this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
+    if (flags & NOTIFY) { if (text) { this.notified++; this.awaiting++; this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
     if (flags & REQUEST) {
       if (!text || this.offer === null) return;
       // The size, then the text (CRLF, NUL, within the limit in bytes), all deflated.
@@ -251,7 +266,8 @@ export class RfbSession {
     if (this.closed || !this.readClipboard) return;
     const text = (await this.readClipboard().catch(() => '')).slice(0, CLIPBOARD_LIMIT);
     if (this.lastClipboard === null) { this.lastClipboard = text; return; }
-    if (text === this.lastClipboard || this.closed) return; this.lastClipboard = text;
+    // The same text with other line ends (pasted here as CRLF, read back as LF) is not a new copy to send back.
+    if (sameText(text, this.lastClipboard) || this.closed) return; this.lastClipboard = text;
     // A viewer with the extended clipboard is told there is text, and asks for it (Request, answered above).
     if (this.extended) { this.offer = text; this.writeExtended(NOTIFY | TEXT); return; }
     const body = latin1(text); const header = Buffer.alloc(8); header[0] = 3; header.writeUInt32BE(body.length, 4);

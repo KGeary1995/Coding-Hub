@@ -21,6 +21,14 @@ export function pictureRegion(all: DisplayRect[], shown: DisplayRect[]): Picture
   return { left: (part.left - desk.left) / across, top: (part.top - desk.top) / down, width: Math.max(0, part.width - 1) / across, height: Math.max(0, part.height - 1) / down };
 }
 
+/**
+ * When no capture source says which display it is: the main display alone, in physical pixels like the others, at the
+ * size one display gets, with clicks placed on that display (not spread over the whole desktop).
+ */
+export function mainDisplayFallback(all: DisplayRect[], main: DisplayRect): { layout: ScreenLayout; region: PictureRegion } {
+  return { layout: layoutDisplays([{ ...main, id: '' }]), region: pictureRegion(all.length ? all : [main], [main]) };
+}
+
 /** One display keeps the old limit; several share a larger one, so two side by side stay full size. */
 const ONE = { width: 1920, height: 1200, area: Infinity };
 const SEVERAL = { width: 3840, height: 2400, area: 1920 * 1200 * 2 };

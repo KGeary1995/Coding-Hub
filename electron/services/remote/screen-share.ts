@@ -23,8 +23,12 @@ const runProgram: RunProgram = (file, args) => new Promise((resolve) => execFile
 
 /** A PowerShell single-quoted string. */
 const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
-/** One Windows command line from arguments, each in double quotes (paths may have spaces; none has quotes). */
-export const commandLine = (args: string[]) => args.map((arg) => `"${arg.replace(/"/g, '')}"`).join(' ');
+/**
+ * One Windows command line from arguments, each in double quotes (paths may have spaces; none has quotes). Backslashes
+ * right before the closing quote are doubled, as Windows reads arguments: `"D:\"` would escape the quote and run into the
+ * next argument, so a data folder at a drive root lost --elevated.
+ */
+export const commandLine = (args: string[]) => args.map((arg) => `"${arg.replace(/"/g, '').replace(/(\\+)$/, '$1$1')}"`).join(' ');
 const encode = (script: string) => Buffer.from(script, 'utf16le').toString('base64');
 
 /**

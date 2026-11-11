@@ -95,6 +95,20 @@ describe('screen sharing with a linked computer', () => {
     expect(server.sockets).toHaveLength(0);
   });
 
+  it('closes a connection still waiting for the screen service at once, tries nothing else, and says closed once', async () => {
+    // A screen service that takes the request and never answers (one starting slowly), and a Mac port that records tries.
+    const waiting: net.Socket[] = []; let closedAt = 0;
+    const slow = net.createServer((socket) => { waiting.push(socket); socket.resume(); socket.on('close', () => { closedAt = Date.now(); }); socket.on('error', () => {}); });
+    await new Promise<void>((resolve) => slow.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { for (const socket of waiting) socket.destroy(); slow.close(() => resolve()); }));
+    const vnc = await vncServer();
+    const { screens, events } = sharing(vnc.port, { trace: `http://127.0.0.1:${(slow.address() as net.AddressInfo).port}/` });
+    const opening = screens.open(1, MAC, STREAM).catch((error: Error) => error);
+    await until(() => waiting.length === 1, 'the request');
+    const closed = Date.now(); screens.close(1, STREAM);
+    await until(() => closedAt > 0, 'the connection to close'); expect(closedAt - closed).toBeLessThan(200);
+    expect(await opening).toBeInstanceOf(Error); await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(events.filter((item) => item.event.type === 'closed')).toHaveLength(1); expect(vnc.sockets).toHaveLength(0);
+  });
   it('refuses computers that are not linked, and a second stream of the same name', async () => {
     const server = await vncServer();
     await expect(sharing(server.port, { linked: false }).screens.open(1, MAC, STREAM)).rejects.toMatchObject({ code: 'SCREEN_UNKNOWN' });

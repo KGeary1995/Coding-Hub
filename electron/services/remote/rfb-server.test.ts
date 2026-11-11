@@ -162,6 +162,44 @@ describe('the Windows screen as a VNC server', () => {
       // Nothing is held any more.
       vnc.viewer.write(Buffer.from([4, 0, 0, 0, 0, 0, 0, 0x61])); await until(() => vnc.events.length === 5, 'the next key'); expect(vnc.events.at(-1)).toBe('key 61 false');
     });
+    it('waits again for a second copy announced while it holds, but never past twice the wait', async () => {
+      const table = await extended(); const { vnc } = table; const start = Date.now(); const at = (ms: number) => new Promise((resolve) => setTimeout(resolve, Math.max(0, start + ms - Date.now())));
+      table.send((1 << 27) | 1); vnc.viewer.write(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]));
+      // A second copy at 4 s: the key stays held past the first wait's end (5 s).
+      await at(PASTE_WAIT - 1000); table.send((1 << 27) | 1);
+      await at(PASTE_WAIT + 500); expect(vnc.events).toEqual([]);
+      // A third at 8 s would wait to 13 s; the hold ends at 10 s all the same.
+      await at(2 * PASTE_WAIT - 2000); table.send((1 << 27) | 1);
+      await at(2 * PASTE_WAIT - 500); expect(vnc.events).toEqual([]);
+      await until(() => vnc.events.length === 1, 'the cap'); expect(Date.now() - start).toBeLessThan(2 * PASTE_WAIT + 1000); expect(vnc.events).toEqual(['key 61 true']);
+    }, 3 * PASTE_WAIT);
+    it('keeps holding when the viewer sends no text while the text it announced is still to come', async () => {
+      const table = await extended(); const { vnc } = table;
+      table.send((1 << 27) | 1); vnc.viewer.write(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x76]));
+      table.send(1 << 28); await new Promise((resolve) => setTimeout(resolve, 150)); expect(vnc.events).toEqual([]);
+      const utf8 = Buffer.from('text\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 2, 'the paste'); expect(vnc.events).toEqual(['clipboard text', 'key 76 true']);
+    });
+    it('does not send text it was given back as a new copy when the clipboard reads it with other line ends', async () => {
+      const table = await extended(); const { vnc, messages } = table;
+      const utf8 = Buffer.from('one\r\ntwo\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      table.send((1 << 27) | 1); table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 1, 'the clipboard'); const sent = messages().length;
+      // This computer's clipboard reads the same text back with LF line ends.
+      vnc.setClipboard('one\ntwo'); await new Promise((resolve) => setTimeout(resolve, 2200));
+      expect(messages().length).toBe(sent);
+      // A real change still goes.
+      vnc.setClipboard('three'); await until(() => messages().length === sent + 1, 'the new copy');
+    });
+    it('pastes several lines with every line intact', async () => {
+      const table = await extended(); const { vnc } = table; const lines = 'first line\nsecond — line\n\nfourth 🙂';
+      // noVNC sends line ends as CRLF; they reach this computer's clipboard that way.
+      const utf8 = Buffer.from(lines.replace(/\n/g, '\r\n') + '\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      table.send((1 << 27) | 1); table.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+      await until(() => vnc.events.length === 1, 'the clipboard'); expect(vnc.events[0]).toBe(`clipboard ${lines.replace(/\n/g, '\r\n')}`);
+      expect(vnc.events[0].slice('clipboard '.length).split('\r\n')).toEqual(['first line', 'second — line', '', 'fourth 🙂']);
+    });
     it('lets the paste go when the clipboard write fails', async () => {
       const table = await extended(() => Promise.reject(new Error('The clipboard is busy.'))); const { vnc } = table;
       paste(table, quoted); await until(() => vnc.events.length === 3, 'the paste'); expect(vnc.events).toEqual([`clipboard ${quoted}`, 'key 76 true', 'key 76 false']);

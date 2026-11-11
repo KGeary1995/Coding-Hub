@@ -18,6 +18,8 @@ Not released yet: handoffs stay in front of automatic summaries, a hierarchy rev
 - **One display at a time.** With several displays, **Display** on the screen's bar shows one of them on its own at full size, or all of them again.
 - **Viewing a Mac while Trace is open on it now works.** Trace on that Mac answered the screen request as a refusal ("…refused to share its screen"), so Screen Sharing was never tried.
 - **A phone dropping its connection while its screen opened could crash Trace.** It is now handled.
+- **A Mac's sign-in form stays up.** When a screen reconnected by itself and the Mac then closed the connection while you were typing its password, Trace tried again and the form disappeared. It now stops, says the Mac closed the connection while waiting for the sign-in, and waits for **Reconnect**.
+- **When Windows does not say which display a capture is,** the shared screen now shows the main display at its full resolution, and clicks land on it rather than being spread across every display.
 - **Long pastes are shortened instead of ending the session.** Trace's screen service takes up to 1 MB of text at a time; the viewer pastes the first part and says so.
 - **The screen service starts again by itself** after an error, and Trace, while open, starts it again if it has stopped.
 - **See and control a Windows computer from the phone.** **Screen** in the phone app now works on a Windows computer that shares its screen, for a phone with **Can start and stop agents** turned on (Settings → Phone access; off by default). There is no extra password, and turning the setting off closes the phone's screen at once. The computer shows the phone's name by the clock while it watches. Reload the phone app.

@@ -17,7 +17,9 @@ const root = argument('storage'); const computer = argument('name') || 'this com
 const port = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT) : SCREEN_SERVICE_PORT;
 const inputLog = !app.isPackaged ? process.env.CODING_HUB_TEST_SCREEN_INPUT_LOG : undefined;
 /** A service that fails sooner than this after starting is not started again by itself. */
-const RELAUNCH_AFTER = 60_000;
+const RELAUNCH_AFTER = !app.isPackaged && process.env.CODING_HUB_TEST_RELAUNCH_AFTER ? Number(process.env.CODING_HUB_TEST_RELAUNCH_AFTER) : 60_000;
+/** Source runs only: the screen service smoke test makes the service fail on purpose by creating this file. */
+const crashFile = !app.isPackaged ? process.env.CODING_HUB_TEST_SCREEN_SERVICE_CRASH : undefined;
 /**
  * Started by the scheduled task that runs it as administrator (Settings: also control apps running as administrator).
  * A service of the other kind than the setting asks for gives way: it quits, and Trace starts the right one.
@@ -59,6 +61,8 @@ else {
       },
     });
     try { await service.listen(port); } catch { app.exit(0); return; }
+    // The file goes first, so the service started again does not fail at once too.
+    if (crashFile) setInterval(() => { if (fs.existsSync(crashFile)) { fs.rmSync(crashFile, { force: true }); setTimeout(() => { throw new Error('Failing on purpose for the smoke test.'); }); } }, 200);
     // Turned off in Trace's settings (or the setting is gone), or the other kind (administrator or not) is wanted: quit.
     setInterval(() => { if (!wanted()) { void service.close().finally(() => app.exit(0)); } }, 3000);
   });

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { BrowserWindow, desktopCapturer, screen, session } from 'electron';
 import type { FrameRect, ScreenSource } from './rfb-server';
-import { layoutDisplays, orderDisplays, pictureRegion, WHOLE_DESKTOP, type DisplayRect, type PictureRegion } from './screen-layout';
+import { layoutDisplays, mainDisplayFallback, orderDisplays, pictureRegion, WHOLE_DESKTOP, type DisplayRect, type PictureRegion } from './screen-layout';
 
 const PARTITION = 'trace-screen-capture';
 
@@ -46,7 +46,12 @@ export class ScreenCapture implements ScreenSource {
       let parts = layout.parts.flatMap((part) => { const source = sources.find((item) => item.display_id === part.id); return source ? [{ ...part, sourceId: source.id }] : []; });
       let size = { width: layout.width, height: layout.height };
       instance.displays = displays.length; instance.display = one ? display : 0; instance.region = one ? pictureRegion(displays, [one]) : WHOLE_DESKTOP;
-      if (!parts.length) { const main = layoutDisplays([{ id: '', x: 0, y: 0, ...screen.getPrimaryDisplay().size }]); size = main; parts = [{ ...main.parts[0], sourceId: sources[0].id }]; instance.displays = 1; instance.display = 0; instance.region = WHOLE_DESKTOP; }
+      // No source names its display: the first source, taken as the main display (in physical pixels, clicks on it alone).
+      if (!parts.length) {
+        const primary = String(screen.getPrimaryDisplay().id); const main = displays.find((item) => item.id === primary) ?? displays[0];
+        const fallback = main ? mainDisplayFallback(displays, main) : { layout: layoutDisplays([{ id: '', x: 0, y: 0, ...screen.getPrimaryDisplay().size }]), region: WHOLE_DESKTOP };
+        size = { width: fallback.layout.width, height: fallback.layout.height }; parts = [{ ...fallback.layout.parts[0], sourceId: sources[0].id }]; instance.displays = 1; instance.display = 0; instance.region = fallback.region;
+      }
       const started = await new Promise<{ width?: number; height?: number; error?: string }>((resolve) => {
         const timer = setTimeout(() => resolve({ error: 'The capture did not start.' }), 15000);
         window!.webContents.ipc.once('trace-capture-started', (_event, value) => { clearTimeout(timer); resolve(value); });

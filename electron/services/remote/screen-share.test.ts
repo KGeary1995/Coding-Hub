@@ -40,11 +40,21 @@ describe('sharing the screen as administrator', () => {
     expect(script).toContain('-ExecutionTimeLimit ([TimeSpan]::Zero)'); expect(script).toContain('-RestartCount 3');
     expect(script).toContain(`-TaskName '${TASK_NAME}'`); expect(removeTaskScript()).toContain(`Unregister-ScheduledTask -TaskName '${TASK_NAME}'`);
     expect(commandLine(['a b', 'c'])).toBe('"a b" "c"');
+    // A data folder at a drive root: its backslash is doubled so it does not escape the closing quote.
+    expect(commandLine(['--storage=D:\\', '--elevated'])).toBe('"--storage=D:\\\\" "--elevated"'); expect(commandLine(['C:\\x\\y'])).toBe('"C:\\x\\y"');
     // Run as administrator: Windows asks; the inner script goes encoded, so nothing in it needs quoting again.
     const outer = elevatedScript('Write-Output 1'); expect(outer).toContain('-Verb RunAs'); expect(outer).toContain('exit $process.ExitCode');
     expect(Buffer.from(/'-EncodedCommand','([^']+)'/.exec(outer)![1], 'base64').toString('utf16le')).toBe('Write-Output 1');
   });
 
+  it.runIf(process.platform === 'win32')('builds a command line Windows splits back into the same arguments, even after a drive root', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'argv-')); cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const script = path.join(dir, 'argv.js'); fs.writeFileSync(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
+    const args = ['--screen-service', '--storage=D:\\', '--name=Obsidian Halo', '--storage=C:\\Users\\a b\\data', '--elevated'];
+    // Verbatim: the arguments go to Windows exactly as commandLine wrote them (argv0 without the space in Program Files).
+    const out = execFileSync(process.execPath, [`"${script}"`, commandLine(args)], { encoding: 'utf8', windowsVerbatimArguments: true, argv0: 'node' });
+    expect(JSON.parse(out)).toEqual(args);
+  });
   it.runIf(process.platform === 'win32')('writes scripts PowerShell can read (parsed only, not run)', () => {
     for (const script of [registerTaskScript('C:\\Trace\\Trace.exe', ['--screen-service', '--storage=C:\\x y'], 'PC\\me'), removeTaskScript(), elevatedScript(removeTaskScript())]) {
       const check = `$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${Buffer.from(script, 'utf16le').toString('base64')}')), [ref]$null, [ref]$errors); $errors.Count`;
@@ -71,6 +81,23 @@ describe('sharing the screen as administrator', () => {
     expect(JSON.parse(fs.readFileSync(path.join(root, SHARE_FILE), 'utf8'))).toEqual({ enabled: true }); expect(calls.some((call) => call.file === 'schtasks.exe')).toBe(false);
   });
 
+  it('turning only the administrator option off, with sharing on, removes the task and the ordinary service takes over', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-share-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true, elevated: true }));
+    const port = await freePort(); const calls: { file: string; args: string[] }[] = [];
+    const health = () => { const server = http.createServer((_request, response) => { response.writeHead(200); response.end('{}'); }); server.listen(port, '127.0.0.1'); return server; };
+    // The administrator service runs; removing its task makes it quit (it sees the setting), and the ordinary one starts.
+    let running: http.Server | null = health(); cleanup.push(() => { running?.close(); });
+    const run = async (file: string, args: string[]) => {
+      calls.push({ file, args });
+      if (file === 'powershell.exe') { running?.close(); running = null; setTimeout(() => { running = health(); }, 300); }
+      return { code: 0, output: '' };
+    };
+    const screen = new ScreenShare(root, () => 'Obsidian-Halo', async () => '', port, run); Object.defineProperty(screen, 'supported', { get: () => true });
+    expect(await screen.set(true, false)).toMatchObject({ enabled: true, elevated: false, running: true });
+    expect(calls).toHaveLength(1); expect(Buffer.from(/'-EncodedCommand','([^']+)'/.exec(decode(calls[0].args))![1], 'base64').toString('utf16le')).toContain('Unregister-ScheduledTask');
+    expect(JSON.parse(fs.readFileSync(path.join(root, SHARE_FILE), 'utf8'))).toEqual({ enabled: true }); expect(login.at(-1)!.openAtLogin).toBe(true);
+  }, 20000);
   it('turning it off removes the task with permission and brings back the ordinary sign-in entry', async () => {
     const { screen, calls, root, setting } = await share();
     fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: false, elevated: true }));

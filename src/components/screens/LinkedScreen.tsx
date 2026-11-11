@@ -52,6 +52,8 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   const [unlockOpen, setUnlockOpen] = useState(false);
   /** Why the computer refused the sign-in, kept for the disconnect that follows; other notes give way to it. */
   const refusal = useRef('');
+  /** This attempt asked for a sign-in: if it then closes without having connected, the person is waiting at the form, so it is not retried. */
+  const askedSignIn = useRef(false);
   /** Automatic reconnects since the screen last stayed up; when it last connected; the wait before the next try. */
   const retries = useRef(0); const connectedAt = useRef<number | null>(null); const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelRetry = () => { if (retryTimer.current) clearTimeout(retryTimer.current); retryTimer.current = null; };
@@ -59,7 +61,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
 
   useEffect(() => {
     const target = view.current; if (!target) return; let cancelled = false; let client: RFB | null = null;
-    setStatus((current) => current === 'reconnecting' ? current : 'connecting'); setMessage(''); refusal.current = '';
+    setStatus((current) => current === 'reconnecting' ? current : 'connecting'); setMessage(''); refusal.current = ''; askedSignIn.current = false;
     void (async () => {
       // Loaded only when a screen is opened: the viewer is large and most sessions never use it.
       const { default: Viewer } = await import('@novnc/novnc');
@@ -76,7 +78,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
         if (credentials) void screen({ action: 'screen-save-credentials', id: computer.id, ...credentials }).then(() => setHasSaved(true), (error: Error) => setMessage(error.message));
       });
       // A Mac asks for a user name and password; a server set up with only a VNC password asks for that alone.
-      client.addEventListener('credentialsrequired', (event) => { setTypes((event as CustomEvent<{ types: string[] }>).detail.types); setUsername((value) => value || saved?.username || ''); setStatus('signin'); });
+      client.addEventListener('credentialsrequired', (event) => { setTypes((event as CustomEvent<{ types: string[] }>).detail.types); setUsername((value) => value || saved?.username || ''); askedSignIn.current = true; setStatus('signin'); });
       client.addEventListener('securityfailure', (event) => {
         useSaved.current = false; toSave.current = null;
         const reason = (event as CustomEvent<{ reason?: string }>).detail.reason;
@@ -88,12 +90,14 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
         if (cancelled) return;
         const since = connectedAt.current; connectedAt.current = null; if (since !== null && Date.now() - since >= RETRY_RESET_MS) retries.current = 0;
         // A screen that was showing, or a try to bring one back, goes on by itself; a refused sign-in or a first try that failed does not.
-        if ((since !== null || retries.current > 0) && !refusal.current && retries.current < RETRY_DELAYS.length) {
+        // Closed while it waited for the sign-in (the computer gave up on the form): say so and wait for Reconnect.
+        const signInLost = askedSignIn.current && since === null && !refusal.current;
+        if (!signInLost && (since !== null || retries.current > 0) && !refusal.current && retries.current < RETRY_DELAYS.length) {
           const delay = RETRY_DELAYS[retries.current++]; setStatus('reconnecting'); setMessage('');
           cancelRetry(); retryTimer.current = setTimeout(() => { retryTimer.current = null; setAttempt((value) => value + 1); }, delay);
           return;
         }
-        setStatus('ended'); setMessage(refusal.current || channel.error || ((event as CustomEvent<{ clean: boolean }>).detail.clean ? 'Screen sharing ended.' : `The connection to ${computer.name}'s screen closed.`));
+        setStatus('ended'); setMessage(refusal.current || (signInLost ? `${computer.name} closed the connection while waiting for the sign-in. Press Reconnect to try again.` : '') || channel.error || ((event as CustomEvent<{ clean: boolean }>).detail.clean ? 'Screen sharing ended.' : `The connection to ${computer.name}'s screen closed.`));
       });
       // What is copied there lands on this computer's clipboard too.
       client.addEventListener('clipboard', (event) => { const text = (event as CustomEvent<{ text: string }>).detail.text; if (text) void window.codingHub?.copyText(text.slice(0, 1024 * 1024)); });
