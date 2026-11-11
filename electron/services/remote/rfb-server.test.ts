@@ -8,9 +8,10 @@ afterEach(() => { for (const item of cleanup.splice(0)) item(); });
 const until = async (check: () => boolean, what: string) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10)); if (!check()) throw new Error('Timed out waiting for ' + what); };
 
 /** A session on one end of a loopback connection; the test is the viewer on the other end. */
-async function session(frames: FrameRect[][], frame?: (full: boolean) => Promise<FrameRect[]>) {
+/** `write`: how this computer's clipboard write finishes (at once when left out). */
+async function session(frames: FrameRect[][], frame?: (full: boolean) => Promise<FrameRect[]>, write?: (text: string) => Promise<void>) {
   const events: string[] = []; const received: Buffer[] = []; let ended = 0; const asked: boolean[] = []; let clipboard = 'before';
-  const input: ScreenInput = { pointer: (x, y, buttons) => events.push(`pointer ${x} ${y} ${buttons}`), key: (keysym, down) => events.push(`key ${keysym.toString(16)} ${down}`), clipboard: (text) => events.push(`clipboard ${text}`) };
+  const input: ScreenInput = { pointer: (x, y, buttons) => events.push(`pointer ${x} ${y} ${buttons}`), key: (keysym, down) => events.push(`key ${keysym.toString(16)} ${down}`), clipboard: (text) => { events.push(`clipboard ${text}`); return write?.(text); } };
   const server = net.createServer((socket) => { new RfbSession(socket, { width: 640, height: 480, frame: frame ?? (async (full) => { asked.push(full); return frames.shift() ?? []; }) }, input, 'Obsidian-Halo', () => { ended++; }, async () => clipboard); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const viewer = net.connect((server.address() as net.AddressInfo).port, '127.0.0.1'); viewer.on('data', (data) => received.push(data));
@@ -102,8 +103,8 @@ describe('the Windows screen as a VNC server', () => {
   describe('the clipboard', () => {
     const quoted = '“quoted” — text 🙂';
     /** Plays noVNC: lists the extended clipboard, and reads the server's clipboard messages (the only ones sent here). */
-    async function extended() {
-      const vnc = await session([]);
+    async function extended(write?: (text: string) => Promise<void>) {
+      const vnc = await session([], undefined, write);
       vnc.viewer.write('RFB 003.008\n'); vnc.viewer.write(Buffer.from([1, 1])); await until(() => vnc.bytes().length >= 18 + 37, 'the server init');
       vnc.viewer.write(encodings(7, 0xc0a1e5ce | 0));
       const messages = () => { const out: { flags: number; payload: Buffer }[] = []; let at = 18 + 37; const all = vnc.bytes(); while (at + 8 <= all.length) { const length = -all.readInt32BE(at + 4); if (all[at] !== 3 || length < 4 || at + 8 + length > all.length) break; out.push({ flags: all.readUInt32BE(at + 8), payload: all.subarray(at + 12, at + 8 + length) }); at += 8 + length; } return out; };
@@ -142,6 +143,35 @@ describe('the Windows screen as a VNC server', () => {
       const utf8 = Buffer.from(quoted + '\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
       send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
       await until(() => vnc.events.length === 4, 'the paste'); expect(vnc.events).toEqual([`clipboard ${quoted}`, 'key 76 true', 'key 76 false', 'pointer 10 20 0']);
+    });
+    /** Notify, V at once, then the text (Provide) as noVNC sends it. */
+    const paste = (vnc: Awaited<ReturnType<typeof extended>>, text: string) => {
+      const key = (down: boolean) => Buffer.from([4, down ? 1 : 0, 0, 0, 0, 0, 0, 0x76]);
+      vnc.send((1 << 27) | 1); vnc.vnc.viewer.write(Buffer.concat([key(true), key(false)]));
+      const utf8 = Buffer.from(text + '\0', 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(utf8.length);
+      vnc.send((1 << 28) | 1, zlib.deflateSync(Buffer.concat([size, utf8]), { finishFlush: zlib.constants.Z_FULL_FLUSH }));
+    };
+    it('holds the paste until this computer\'s clipboard write has finished, keeping later keys in order', async () => {
+      let finish: () => void = () => {}; const table = await extended(() => new Promise<void>((resolve) => { finish = resolve; })); const { vnc } = table;
+      paste(table, quoted); await until(() => vnc.events.length === 1, 'the write to start'); expect(vnc.events).toEqual([`clipboard ${quoted}`]);
+      // Keys typed while the write is still going wait behind the V.
+      vnc.viewer.write(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61])); await new Promise((resolve) => setTimeout(resolve, 150)); expect(vnc.events).toEqual([`clipboard ${quoted}`]);
+      finish(); await until(() => vnc.events.length === 4, 'the paste');
+      expect(vnc.events).toEqual([`clipboard ${quoted}`, 'key 76 true', 'key 76 false', 'key 61 true']);
+      // Nothing is held any more.
+      vnc.viewer.write(Buffer.from([4, 0, 0, 0, 0, 0, 0, 0x61])); await until(() => vnc.events.length === 5, 'the next key'); expect(vnc.events.at(-1)).toBe('key 61 false');
+    });
+    it('lets the paste go when the clipboard write fails', async () => {
+      const table = await extended(() => Promise.reject(new Error('The clipboard is busy.'))); const { vnc } = table;
+      paste(table, quoted); await until(() => vnc.events.length === 3, 'the paste'); expect(vnc.events).toEqual([`clipboard ${quoted}`, 'key 76 true', 'key 76 false']);
+    });
+    it('waits for the clipboard write after a Latin-1 copy too', async () => {
+      let finish: () => void = () => {}; const vnc = await session([], undefined, () => new Promise<void>((resolve) => { finish = resolve; }));
+      vnc.viewer.write('RFB 003.008\n'); vnc.viewer.write(Buffer.from([1, 1])); await until(() => vnc.bytes().length >= 18 + 37, 'the server init');
+      const text = Buffer.from('hi'); const cut = Buffer.alloc(8); cut[0] = 6; cut.writeUInt32BE(text.length, 4);
+      vnc.viewer.write(Buffer.concat([cut, text, Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x76])])); await until(() => vnc.events.length === 1, 'the write to start');
+      await new Promise((resolve) => setTimeout(resolve, 150)); expect(vnc.events).toEqual(['clipboard hi']);
+      finish(); await until(() => vnc.events.length === 2, 'the V'); expect(vnc.events).toEqual(['clipboard hi', 'key 76 true']);
     });
     it('lets held input go after a while when the copied text never comes', async () => {
       const { vnc, send } = await extended();

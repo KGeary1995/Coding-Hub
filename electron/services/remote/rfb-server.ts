@@ -12,8 +12,8 @@ export interface ScreenInput {
   /** `x`, `y` in screen pixels; `buttons` is the VNC mask (1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right). */
   pointer(x: number, y: number, buttons: number): void;
   key(keysym: number, down: boolean): void;
-  /** The viewer's copied text, for this computer's clipboard. */
-  clipboard(text: string): void;
+  /** The viewer's copied text, for this computer's clipboard. It may finish later (Electron's write does): a paste waits for it. */
+  clipboard(text: string): void | Promise<void>;
 }
 const TIGHT = 7; const CONTINUOUS = -313; const CLIPBOARD_LIMIT = 1024 * 1024;
 /** How often an unchanged screen is looked at again; cheap, as the capture skips frames it has already compared. */
@@ -76,6 +76,8 @@ export class RfbSession {
    */
   private held: (() => void)[] | null = null; private heldTimer: ReturnType<typeof setTimeout> | null = null;
   /** Updates sent and not yet answered by the viewer's fence, and the pump waiting for one. */
+  /** Notify messages with text so far: a finished write lets held input go only if no newer copy was announced since. */
+  private notified = 0;
   private inFlight = 0; private fenced: (() => void) | null = null; private fenceId = 0;
 
   constructor(private socket: Duplex, private source: ScreenSource, private input: ScreenInput, private name: string, private ended: () => void, private readClipboard?: () => Promise<string>) {
@@ -167,8 +169,18 @@ export class RfbSession {
     }
   }
 
-  /** Text copied on the viewer's computer, for this one's clipboard (and not sent back as a change made here). */
-  private copied(text: string) { this.lastClipboard = text; this.input.clipboard(text); }
+  /**
+   * Text copied on the viewer's computer, for this one's clipboard (and not sent back as a change made here). The keys and
+   * clicks that came after it (a paste) are held until the write has finished, done or failed: Electron's write finishes
+   * later, and a V let go before it pastes the old text. PASTE_WAIT stays the limit. Should the viewer have said it copied
+   * something newer meanwhile (another Notify), that text's arrival lets them go instead.
+   */
+  private copied(text: string) {
+    this.lastClipboard = text; const notice = this.notified; const written = this.input.clipboard(text);
+    if (!(written instanceof Promise)) { if (this.notified === notice) this.release(); return; }
+    this.hold();
+    void written.then(() => {}, () => {}).then(() => { if (!this.closed && this.notified === notice) this.release(); });
+  }
   /** Input now, or after the text the viewer copied, in the order it came. */
   private act(action: () => void) { if (this.held) this.held.push(action); else action(); }
   private hold() { if (this.held) return; this.held = []; this.heldTimer = setTimeout(() => this.release(), PASTE_WAIT); }
@@ -182,12 +194,11 @@ export class RfbSession {
       // noVNC flushes without finishing its stream; the size limit applies to the text inflated, not just what was sent.
       const data = inflateSync(body.subarray(4), { finishFlush: constants.Z_SYNC_FLUSH, maxOutputLength: CLIPBOARD_LIMIT + 5 });
       if (data.length < 4) throw new Error('clipboard'); const size = data.readUInt32BE(0); if (size > data.length - 4) throw new Error('clipboard');
+      // On the clipboard; what was held behind it goes once the write has finished (copied).
       const value = data.subarray(4, 4 + size).toString('utf8'); this.copied(value.endsWith('\0') ? value.slice(0, -1) : value);
-      // The clipboard has the text now: the keys and clicks that came after it (a paste) go through.
-      this.release();
       return;
     }
-    if (flags & NOTIFY) { if (text) { this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
+    if (flags & NOTIFY) { if (text) { this.notified++; this.hold(); this.writeExtended(REQUEST | TEXT); } return; }
     if (flags & REQUEST) {
       if (!text || this.offer === null) return;
       // The size, then the text (CRLF, NUL, within the limit in bytes), all deflated.

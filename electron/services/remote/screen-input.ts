@@ -71,7 +71,7 @@ export function keyCommand(keysym: number, down: boolean): string | null {
  */
 export class WindowsInput implements ScreenInput {
   private helper: ChildProcessWithoutNullStreams | null = null; private buttons = 0; private held = new Set<number>();
-  constructor(private width: number, private height: number, private setClipboard: (text: string) => void, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true }), private region: PictureRegion = WHOLE_DESKTOP) { this.start(); }
+  constructor(private width: number, private height: number, private setClipboard: (text: string) => void | Promise<void>, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true }), private region: PictureRegion = WHOLE_DESKTOP) { this.start(); }
 
   pointer(x: number, y: number, buttons: number) { for (const command of pointerCommands(x, y, buttons, this.buttons, this.width, this.height, this.region)) this.send(command); this.buttons = buttons; }
   key(keysym: number, down: boolean) {
@@ -79,7 +79,7 @@ export class WindowsInput implements ScreenInput {
     if (down) this.held.add(keysym); else this.held.delete(keysym);
     this.send(command);
   }
-  clipboard(text: string) { this.setClipboard(text); }
+  clipboard(text: string) { return this.setClipboard(text); }
   close() {
     for (const keysym of this.held) { const command = keyCommand(keysym, false); if (command) this.send(command); } this.held.clear();
     if (this.buttons) this.pointer(0, 0, 0);

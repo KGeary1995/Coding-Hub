@@ -44,7 +44,8 @@ else {
     const service = new ScreenService(root, () => computer, {
       open: async (display) => {
         const capture = await ScreenCapture.start(path.join(app.getAppPath(), 'dist', 'capture.html'), display);
-        const write = (text: string) => void Promise.resolve(clipboard.writeText(text)).catch(() => {});
+        // Returned, so a paste waits for the text to be on the clipboard (writeText finishes later); a failure is swallowed.
+        const write = (text: string) => Promise.resolve(clipboard.writeText(text)).catch(() => {});
         const input = inputLog ? testInput(inputLog) : new WindowsInput(capture.width, capture.height, write, undefined, capture.region);
         return { source: capture, input, stop: () => capture.stop(), displays: capture.displays, display: capture.display };
       },
