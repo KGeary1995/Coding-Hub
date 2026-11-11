@@ -135,7 +135,7 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
 - **Config edits** (`hub/config.ts` `updateConfig`):
   - check a hash of what was inspected
   - keep unknown fields
-  - write a private `.coding-hub-backup-<uuid>` and replace the file atomically
+  - keep a private copy of the old text under `config-backups/` in the storage root (one folder per file, the newest 20; `hub/file-backups.ts`), never beside the file, and replace the file atomically
   - TOML comments may be normalized
 - **Loopback listeners:**
   - attention endpoint: random port, per-run secret
@@ -199,6 +199,7 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
 | `memory/<key>/<uuid>.json`, `auto-memory/` | Handoff notes; per-run `--mcp-config` scratch files |
 | `preferences.json`, `shared-rules.json`, `updates.json`, `host-health.json` | Preferences, the rules source, update checks, lifecycle events |
 | `machine.json`, `device-sync.json`, `linked-computers.json`, `remote*.json` | Sync identity and state, linked computers, phone server, devices, push keys |
+| `config-backups/<folder>_<file>-<hash>/` | Earlier versions of configuration and instruction files Trace edited (`.mcp.json`, `config.toml`, `CLAUDE.md`, `AGENTS.md`, `.claude.json`, the rules source), the newest 20 each, with `original-path.txt` naming the file. Not in backups |
 | `worktrees.json`, `worktrees/`, `coaching/`, `tasks.json`, `verification.json`, `experiments.json`, `backups/`, `restores/`, `crash-dumps/` | Feature data |
 | `designs/`, `design-annotations.json` | Left by the removed Design workspace: no longer read or written, still backed up, never deleted |
 | `claude-profiles/` | Named Claude profiles (labels; credentials stay with Claude Code) |

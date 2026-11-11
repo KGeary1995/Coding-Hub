@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { SharedRules, RulesTargetReference } from '../../../shared/hub';
 import { HubError } from '../cli/engine-adapter';
+import { keepBackup } from './file-backups';
 
 const START = '<!-- coding-hub-rules:start -->';
 const END = '<!-- coding-hub-rules:end -->';
@@ -104,13 +105,13 @@ export class RulesService {
     try {
       for (const write of writes) {
         if (this.readFile(write.before.file).fingerprint !== write.before.fingerprint) throw new HubError('RULES_CHANGED', 'A file changed during save. Reload and retry.');
-        if (write.before.text !== null) fs.writeFileSync(write.before.file + '.coding-hub-backup-' + randomUUID(), write.before.text, { mode: 0o600, flag: 'wx' });
+        if (write.before.text !== null) keepBackup(write.before.file, write.before.text);
         this.replace(write.before.file, write.after, write.before.mode); completed.push(write);
       }
     } catch (error) {
       let incomplete = false;
       for (const write of [...completed].reverse()) try { if (this.readFile(write.before.file).fingerprint !== hash(write.after)) { incomplete = true; continue; } if (write.before.text === null) fs.unlinkSync(write.before.file); else this.replace(write.before.file, write.before.text, write.before.mode); } catch { incomplete = true; }
-      if (incomplete) throw new HubError('RULES_RESTORE', 'Save failed; another change or file lock prevented full restoration. Review the instruction files and their private backups.');
+      if (incomplete) throw new HubError('RULES_RESTORE', 'Save failed; another change or file lock prevented full restoration. Review the instruction files; earlier versions are kept under config-backups in the Trace data folder.');
       if (error instanceof HubError) throw error;
       throw new HubError('RULES_SAVE', 'Rules could not be saved. Changes from this save were restored. Check file permissions and retry.');
     }
@@ -126,7 +127,7 @@ export class RulesService {
     replaceRules('', content);
     const { source, state } = this.state(); if (state.content === content) return;
     if (this.readFile(this.file).fingerprint !== source.fingerprint) throw new HubError('RULES_CHANGED', 'Shared rules changed during sync. It will retry.');
-    if (source.text !== null) fs.writeFileSync(this.file + '.coding-hub-backup-' + randomUUID(), source.text, { mode: 0o600, flag: 'wx' });
+    if (source.text !== null) keepBackup(this.file, source.text);
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     this.replace(this.file, JSON.stringify({ version: 1, content, directories: state.directories }, null, 2) + '\n', source.mode);
   }

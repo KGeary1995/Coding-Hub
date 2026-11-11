@@ -11,6 +11,7 @@ import { memoryContext } from './auto-memory';
 import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
 import { parseUsage, repriced, TelemetryService, totalTokens, usageCost } from './telemetry';
 import { hubRequestSchema } from './service';
+import { backupFolder } from './file-backups';
 const roots: string[] = [];
 function setup() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-integrations-')); roots.push(root); const project = path.join(root, 'project'); fs.mkdirSync(project); return { root, project }; }
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -18,7 +19,7 @@ describe('native configuration management', () => {
   it('redacts environment/header credentials, preserves unknown TOML fields, toggles and backs up', () => {
     const { root, project } = setup(); fs.mkdirSync(path.join(root, '.codex')); const file = path.join(root, '.codex', 'config.toml'); fs.writeFileSync(file, 'model="custom"\n[mcp_servers.private]\ncommand="server"\nargs=["--token", "credential-value"]\nenv={API_KEY="credential-value"}\nenv_vars=["OTHER_KEY"]\ncustom_field=42\n');
     const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); const server = inventory.servers[0]; expect(JSON.stringify(inventory)).not.toContain('credential-value'); expect(server.transport.type === 'stdio' && server.transport.envVariableNames).toEqual(['API_KEY', 'OTHER_KEY']);
-    service.mutate({ action: 'toggle-server', id: server.id, enabled: false }); const data = readConfig(file).data; expect(data.model).toBe('custom'); expect(data.mcp_servers.private.custom_field).toBe(42); expect(data.mcp_servers.private.env.API_KEY).toBe('credential-value'); expect(data.mcp_servers.private.enabled).toBe(false); expect(fs.readdirSync(path.dirname(file)).some((n) => n.includes('backup'))).toBe(true);
+    service.mutate({ action: 'toggle-server', id: server.id, enabled: false }); const data = readConfig(file).data; expect(data.model).toBe('custom'); expect(data.mcp_servers.private.custom_field).toBe(42); expect(data.mcp_servers.private.env.API_KEY).toBe('credential-value'); expect(data.mcp_servers.private.enabled).toBe(false); expect(fs.readdirSync(path.dirname(file)).some((n) => n.includes('backup'))).toBe(false); expect(fs.readdirSync(backupFolder(file)).length).toBeGreaterThan(1);
   });
   it('rejects stale inspection instead of overwriting CLI changes', () => {
     const { root, project } = setup(); const file = path.join(project, '.mcp.json'); fs.writeFileSync(file, '{"mcpServers":{"server":{"command":"old"}}}'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const server = service.inventory(project).servers[0]; fs.writeFileSync(file, '{"mcpServers":{"server":{"command":"new"}}}'); expect(() => service.mutate({ action: 'remove-server', id: server.id })).toThrow('changed'); expect(readConfig(file).data.mcpServers.server.command).toBe('new');

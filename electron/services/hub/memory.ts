@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { MemoryNote } from '../../../shared/hub';
 import { HubError } from '../cli/engine-adapter';
 import { readConfig, updateConfig } from './config';
+import { keepBackup } from './file-backups';
 
 export const projectSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
 export const noteSchema = z.object({ id: z.uuid(), project: projectSchema, title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), createdAt: z.iso.datetime(), supersedes: z.uuid().optional() }).loose();
@@ -64,7 +65,7 @@ export class MemoryService {
     const replace = (file: string, text: string) => { const temp = file + '.coding-hub-' + randomUUID(); try { fs.writeFileSync(temp, text, { mode: 0o600, flag: 'wx' }); fs.renameSync(temp, file); } finally { try { fs.unlinkSync(temp); } catch { /* Already renamed. */ } } };
     try {
       for (const file of targets) { const inspected = readConfig(file); if (inspected.text !== unmarked(file)) throw new HubError('CONFIG_CHANGED', 'Configuration changed during installation.'); updateConfig(file, inspected.hash, (data) => { const key = file.endsWith('.toml') ? 'mcp_servers' : 'mcpServers'; data[key] ??= {}; data[key]['coding-hub-memory'] = { command: executable, args, env: { ELECTRON_RUN_AS_NODE: '1' } }; }); written.set(file, fs.readFileSync(file, 'utf8')); }
-      for (const name of ['AGENTS.md', 'CLAUDE.md']) { const file = path.join(directory, name); const existing = originals.get(file) ?? ''; if (!existing.includes('<!-- coding-hub-memory:start -->')) { if ((fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '') !== existing) throw new HubError('CONFIG_CHANGED', 'Instructions changed during installation.'); if (existing) fs.writeFileSync(file + '.coding-hub-backup-' + randomUUID(), existing, { flag: 'wx', mode: 0o600 }); replace(file, existing + instruction); written.set(file, existing + instruction); } }
+      for (const name of ['AGENTS.md', 'CLAUDE.md']) { const file = path.join(directory, name); const existing = originals.get(file) ?? ''; if (!existing.includes('<!-- coding-hub-memory:start -->')) { if ((fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '') !== existing) throw new HubError('CONFIG_CHANGED', 'Instructions changed during installation.'); if (existing) keepBackup(file, existing); replace(file, existing + instruction); written.set(file, existing + instruction); } }
     } catch {
       let incomplete = false;
       for (const [file, text] of [...written].reverse()) try { if (fs.readFileSync(file, 'utf8') !== text) { incomplete = true; continue; } const original = originals.get(file); if (original === null) fs.unlinkSync(file); else replace(file, original!); } catch { incomplete = true; }
