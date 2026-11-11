@@ -32,6 +32,7 @@
   --tr-ch-codex: #5fe1ff;
   --tr-ch-shell: #a9c6bd;      /* Terminal channels: a plain shell, kept quieter than the agents */
   --tr-you: #d0c4ff;
+  --tr-ch-planner: #c6f26b;    /* a hierarchy Round Table's planner (a second Claude seat), told apart from the builder's amber */
 
   /* Flight Deck intensity (35 of 100): how strong the grid, corner brackets and glows are. */
   --tr-grid: rgba(95,225,255,.04);

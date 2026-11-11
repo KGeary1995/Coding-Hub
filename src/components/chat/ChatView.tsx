@@ -12,7 +12,7 @@ import { startSession } from '../../runtime/use-native-host';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
 import type { PermissionLevel } from '../../../shared/types';
 import { permissionLevel } from '../../../shared/schemas';
-import { AGENT, ChainBar, EMPTY, Item, modelName, readImage, seatState, TableBar } from './ChatParts';
+import { AGENT, ChainBar, type ChainSeat, EMPTY, Item, modelName, readImage, seatState, TableBar } from './ChatParts';
 
 /**
  * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
@@ -45,6 +45,7 @@ export function ChatView({ session }: { session: Session }) {
   const leadTokens = useHubStore((state) => channelToday(session.id, state.usage).tokens);
   const partnerTokens = useHubStore((state) => table ? channelToday(table.partner.sessionId, state.usage).tokens : 0);
   const tableTokens = table ? { lead: leadTokens, partner: partnerTokens } : undefined;
+  const plannerTokens = useHubStore((state) => table?.planner ? channelToday(table.planner.sessionId, state.usage).tokens : 0);
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState('');
   const [viewing, setViewing] = useState<string | null>(null); const [opening, setOpening] = useState(false);
   const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const input = useRef<HTMLTextAreaElement>(null); const file = useRef<HTMLInputElement>(null);
@@ -104,11 +105,17 @@ export function ChatView({ session }: { session: Session }) {
   // The findings are saved to shared memory first; if that fails the table stays open, so nothing is lost.
   const closeTable = () => { void (async () => { const unsaved = await archiveFindings(session.id); if (unsaved) { setError(`${unsaved} The Round Table stays open; try Close again.`); return; } setShowPartner(false); const failure = table ? await tableRequest(session.id, { action: 'table-close' }) : null; if (!table || failure) await forgetTable(session.id); })(); };
   const builderName = hierarchy ? modelName(session.config.engine !== 'shell' ? session.config.model : '') : agent; const plannerName = modelName(plannerSession && plannerSession.config.engine !== 'shell' ? plannerSession.config.model : '');
+  /** Who sits at a hierarchy table and what each is doing, so the bar shows all three at work, not only the builder's tile. */
+  const seats: ChainSeat[] | undefined = table && hierarchy ? [
+    { role: 'Planner', name: plannerName, colour: 'planner', state: plannerSession ? seatState(plannerSession, plannerThread.busy) : 'not seated', tokens: plannerTokens },
+    { role: 'Builder', name: builderName, colour: 'claude', state: seatState(session, chat.busy), tokens: leadTokens },
+    { role: 'Reviewer', name: AGENT.codex, colour: 'codex', state: partnerSession ? seatState(partnerSession, partnerThread.busy) : 'not seated', tokens: partnerTokens },
+  ] : undefined;
   const workers = table ? [chat.busy ? builderName : null, partnerThread.busy ? AGENT[table.partner.engine] : null, plannerThread.busy ? plannerName : null].filter(Boolean) : [agent];
   const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table && hierarchy ? (table.chain?.step === 'plan-review' ? 'Say what to change in the plan, or press Approve plan' : (table.chain?.step === 'stopped' || table.chain?.step === 'needs-you') && table.chain.task ? 'Reply to go on with this task (a new task starts once it is done)' : 'Give the Round Table a task (Enter to send)') : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
-    {table && hierarchy && <ChainBar table={table} busy={busy} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
+    {table && hierarchy && <ChainBar table={table} busy={busy} seats={seats} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} tokens={tableTokens} partnerState={partnerState ?? undefined} showing={showPartner} onShow={partnerSession ? () => setShowPartner(!showPartner) : undefined}
       onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
     {!table && hierarchy && session.roundTable && <ChainBar table={{ kind: 'hierarchy', partner: { sessionId: session.roundTable.partner, runId: '', engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, ...(session.roundTable.chain ? { chain: session.roundTable.chain } : {}), ...(session.roundTable.findings ? { findings: session.roundTable.findings } : {}) }} busy={false} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} onModel={(target, model) => { if (target.config.engine === 'claude') useWorkspaceStore.getState().updateConfig(target.id, { ...target.config, model }); }} onRequest={(request) => { if (request.action === 'table-close') closeTable(); }} detached={detached ? { note: detached, ...(partnerSession && plannerSession && (!partnerLive || !plannerLive) ? { onReopen: () => void reopenHierarchy(session.id).then((failure) => { if (failure) setError(failure); }) } : {}) } : undefined} />}
@@ -127,7 +134,7 @@ export function ChatView({ session }: { session: Session }) {
       {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={builderName} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerFor(session)} view={setViewing} />
-        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="claude" role="Planner" answer={answerFor(plannerSession)} view={setViewing} />
+        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="planner" role="Planner" answer={answerFor(plannerSession)} view={setViewing} />
         : <Item key={`partner-${item.id}`} item={item} results={partnerThread.results} agent={AGENT[partnerEngine]} author={partnerEngine} role={table ? (hierarchy ? 'Reviewer' : table.driver === partnerEngine ? 'driver' : 'reviewer') : undefined} answer={answerFor(partnerSession)} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>

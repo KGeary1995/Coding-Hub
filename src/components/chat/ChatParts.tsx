@@ -82,7 +82,7 @@ const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
 /** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say YOU. */
-export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
+export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
   if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
     {author && <p className="chat-author"><i className="seat-hex seat-you" aria-hidden="true" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
@@ -158,16 +158,16 @@ const CHAIN_STEPS: { step: string; label: string; of: string[] }[] = [
  * The bar of a hierarchy Round Table: where the task is among plan, approve, build, review, fix and final review; the
  * plan approval; Stop and Continue; each Claude seat's model (used when that seat starts); findings and a kept message.
  */
-export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel, detached }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; lead?: Session; planner?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
+export function ChainBar({ table, busy, plannerName, builderName, lead, planner, onRequest, onModel, detached, seats }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; /** Each seat: who, its role, what it is doing now, and its tokens today. */ seats?: ChainSeat[]; lead?: Session; planner?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const current = CHAIN_STEPS.findIndex((item) => at && item.of.includes(at));
-  const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
+  const status = step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${CHAIN_STEPS[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner].some((session) => session?.status === 'running' || session?.status === 'starting');
   const model = (session: Session | null | undefined, fallback: string) => session && session.config.engine === 'claude' ? session.config.model || fallback : fallback;
   const setModel = (session: Session | null | undefined, value: string) => { if (session && session.config.engine === 'claude') onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
-    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-claude" /><i className="seat-claude" /><i className="seat-codex" /></span>
+    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-planner" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>
     <ol className="chain-steps" aria-label="Steps">{CHAIN_STEPS.map((item, index) => <li key={item.step} className={index === current ? 'current' : index < current || step === 'done' ? 'past' : ''} aria-current={index === current ? 'step' : undefined}>{item.label}</li>)}</ol>
     <span className="table-status" aria-live="polite">{detached ? detached.note : status}</span>
@@ -182,7 +182,10 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     </details>}
     <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
+    {seats && <ul className="chain-seats" aria-label="Seats">{seats.map((seat) => <li key={seat.role} className={seat.state === 'working' ? 'working' : ''}><i className={`seat-hex seat-${seat.colour}`} aria-hidden="true" /><strong>{seat.name}</strong>{seat.role} · {seat.state}{seat.tokens ? ` · ${short(seat.tokens)} tok today` : ''}</li>)}</ul>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;
 }
+/** One seat at a hierarchy table, for its bar. */
+export interface ChainSeat { role: 'Planner' | 'Builder' | 'Reviewer'; name: string; colour: 'planner' | 'claude' | 'codex'; state: string; tokens: number }
 export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue' } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean };
