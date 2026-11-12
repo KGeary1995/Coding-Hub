@@ -62,8 +62,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run test:pty
-      # With the Developer ID secrets (docs/windows-releases.md), the apps are signed and notarized, and the zips and
-      # latest-mac.yml that installed Macs update themselves from are built too. Without them, ad-hoc disk images only.
+      # With the Developer ID secrets (docs/windows-releases.md), the apps are signed and notarized, and installed Macs
+      # update themselves from the zips in latest-mac.yml. Without them the apps are ad-hoc signed; the zips are still
+      # built and listed, for Trace 1.21.0's update from another computer.
       - name: Sign with the Developer ID
         env:
           MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}

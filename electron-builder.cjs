@@ -41,9 +41,10 @@ module.exports = {
   },
   mac: {
     // One disk image per processor: Apple silicon (arm64) and Intel (x64). Each keeps its own node-pty binding.
-    // A Developer ID build also makes the zips and latest-mac.yml that installed Macs update themselves from; macOS
-    // installs an update only when it is signed by the same developer, so ad-hoc builds have no use for them.
-    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, ...(macIdentity ? [{ target: 'zip', arch: ['arm64', 'x64'] }] : [])],
+    // Every build also makes the update zips, listed with their checksums in latest-mac.yml: a signed Mac updates
+    // itself from them, and Trace 1.21.0's update from another computer installs only a listed zip (a Mac on 1.21.0
+    // has no other way to the next version). An ad-hoc build still never updates itself (no traceMacUpdates below).
+    target: [{ target: 'dmg', arch: ['arm64', 'x64'] }, { target: 'zip', arch: ['arm64', 'x64'] }],
     icon: 'assets/icon.png',
     category: 'public.app-category.developer-tools',
     // The update zips' names (the disk images name theirs under dmg); electron-builder has no top-level zip section.
