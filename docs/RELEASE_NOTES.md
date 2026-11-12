@@ -1,5 +1,14 @@
 ## What's new
 
+Unreleased: Gemini is gone, and Codex challenges the plan:
+
+- **Gemini channels and the Gemini seat are removed.** + Channel no longer offers Gemini (on the computer, another computer's tab or the phone), Local engines no longer looks for Gemini CLI (`agy`), and the hierarchy Round Table seats three agents again.
+- **Saved Gemini channels are dropped on load.** A workspace saved by 1.19 or 1.20 still opens: its Gemini channels and a hierarchy table's hidden Gemini seat are removed, and a notice says so. A table saved at Gemini's review or comparison comes back stopped at Codex's review. Findings Gemini marked keep their text; the marks are no longer shown.
+- **Codex challenges the plan.** At a hierarchy table, once per task, the Codex reviewer challenges the planner's plan before you see it (`CHALLENGE` lines or `NO CHALLENGES`), and the planner answers each and writes the plan again. This works in any folder, Git or not. **Continue without the challenge** shows you the plan when the challenge stopped.
+- **A table that will not open again says why.** After a restart, a hierarchy table the host refused to seat (for example, its seats in different folders) says why in the thread and on the bar, instead of staying closed without a word.
+- **The builder restarts in its table's folder.** A hierarchy table's builder started again after the workspace folder changed now starts in the folder its planner and reviewer run in, so the table can open again.
+- **Not tried yet:** the app itself with a real task at the changed table, a phone, and a Mac. Checked with the unit tests and the desktop and remote smoke tests on Windows.
+
 1.20.0 seats Gemini at the hierarchy Round Table and stops Full access from asking there (update every computer and reload the phone app):
 
 - **Gemini joins the hierarchy Round Table.** When Gemini CLI (`agy`) is installed, a hierarchy table seats it as a fourth, hidden, read-only agent. Once per task it challenges the planner's plan before you see it (the planner answers each challenge and rewrites the plan; the bar lists them at Approve), reviews the build before Codex without seeing Codex's findings, then compares the two reviews (agree, dispute, or duplicate). Codex alone checks the fixes, and the planner still gives the final review. It always runs Gemini 4 Argon (High) and stops if agy does not confirm it. Without agy, or with no room for a fourth agent, the table opens with three and says why.

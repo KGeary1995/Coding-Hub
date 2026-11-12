@@ -1,4 +1,4 @@
-import type { ChannelConfig, CLIEngineConfig, GeminiChannelConfig, PermissionLevel } from '../../shared/types';
+import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store';
 import type { Session } from '../../shared/types';
 import { isAgentConfig } from '../../shared/types';
@@ -15,13 +15,13 @@ export function permissionHelp(engine: 'claude' | 'codex', level: PermissionLeve
 }
 
 /** The config with this level, always written out: no setting means the default (Allow edits), not Ask. */
-export function withPermissions<T extends CLIEngineConfig | GeminiChannelConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
-/** A chat whose level a table's control sets: Claude Code or Codex, or a hierarchy table's Gemini seat. */
-const tableChat = (config: ChannelConfig): config is CLIEngineConfig | GeminiChannelConfig => isAgentConfig(config) || (config.engine === 'gemini' && config.chat === true);
+export function withPermissions<T extends CLIEngineConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
+/** A channel whose level a table's control sets: Claude Code or Codex. */
+const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isAgentConfig(config);
 
 /**
  * Every channel at the Round Table a channel leads or sits at: the lead, its partner and (at a hierarchy) its hidden
- * planner and Gemini seat. One table, one permission level; a channel at no table is alone.
+ * planner. One table, one permission level; a channel at no table is alone.
  */
 export function tableSeats(sessions: Session[], id: string): Session[] {
   const lead = leadOf(sessions, id) ?? sessions.find((session) => session.id === id); if (!lead) return [];
@@ -43,7 +43,7 @@ export async function permissionsRefused(sessionId: string, runId: string, level
 
 /**
  * Sets what a channel's agent may do without asking, and every other seat's at its Round Table too: the partner and,
- * at a hierarchy, the planner and Gemini seat (one table, one setting). A
+ * at a hierarchy, the planner (one table, one setting). A
  * running chat changes at once (Codex from its next message); a terminal channel takes it at its next start. If a
  * running chat refuses, the channels go back to what they had, so the control never shows a level not in effect.
  * The error message, or null.

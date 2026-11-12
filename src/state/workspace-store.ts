@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { ChannelEngine, CLIEngineConfig, GeminiChannelConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
+import type { ChannelEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
-import { MAX_CHANNELS } from '../../shared/schemas';
+import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
 import { isAgentConfig } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
-import { GEMINI_MODEL } from '../../shared/gemini';
+import { migrateWorkspace } from '../../shared/workspace-migration';
 
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -15,7 +15,7 @@ export function createSession(engine: ChannelEngine, binding: WorkspaceBinding =
     title: DEFAULT_TITLES[engine],
     config: engine === 'claude'
       ? { engine, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : engine === 'gemini' ? { engine, model: GEMINI_MODEL } : { engine },
+      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : { engine },
     binding,
     status: 'idle',
     pid: null,
@@ -36,23 +36,31 @@ export function createSession(engine: ChannelEngine, binding: WorkspaceBinding =
  */
 export function seatedIds(sessions: Session[]) {
   const ids = new Set<string>();
-  for (const session of sessions) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger] : []) if (seat && seat !== session.id && sessions.some((item) => item.id === seat)) ids.add(seat);
+  for (const session of sessions) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && sessions.some((item) => item.id === seat)) ids.add(seat);
   return ids;
 }
 /** The channels the person sees, in tile order: every session but seated partners (the same array when there are none). */
 export function channelsOf(sessions: Session[]) { const seated = seatedIds(sessions); return seated.size ? sessions.filter((session) => !seated.has(session.id)) : sessions; }
 /** The channel whose Round Table this session sits at, if it is a seated partner. */
-export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && (session.roundTable?.partner === id || session.roundTable?.planner === id || session.roundTable?.challenger === id)) ?? null;
+export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && (session.roundTable?.partner === id || session.roundTable?.planner === id)) ?? null;
 /** The hidden planner of a channel that leads a hierarchy Round Table. */
 export const plannerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable?.planner ? sessions.find((session) => session.id === lead.roundTable!.planner && session.id !== id) ?? null : null; };
-/** The hidden Gemini seat (challenger and second reviewer) of a channel that leads a hierarchy Round Table. */
-export const challengerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable?.challenger ? sessions.find((session) => session.id === lead.roundTable!.challenger && session.id !== id) ?? null : null; };
-/** Every hidden seat at the Round Table a channel leads: its partner (reviewer), planner and Gemini seat, those it has. */
-export const hiddenSeats = (sessions: Session[], id: string) => [partnerOf(sessions, id), plannerOf(sessions, id), challengerOf(sessions, id)].filter((seat): seat is Session => Boolean(seat));
+/** Every hidden seat at the Round Table a channel leads: its partner (reviewer) and planner, those it has. */
+export const hiddenSeats = (sessions: Session[], id: string) => [partnerOf(sessions, id), plannerOf(sessions, id)].filter((seat): seat is Session => Boolean(seat));
 /** A session's channel number as the person sees it (a Round Table's partner goes by its lead's), or 0 for none. */
 export const channelNumber = (sessions: Session[], id: string | null) => id ? channelsOf(sessions).findIndex((session) => session.id === (leadOf(sessions, id)?.id ?? id)) + 1 : 0;
 /** The hidden partner of a channel that leads a Round Table. */
 export const partnerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable ? sessions.find((session) => session.id === lead.roundTable!.partner && session.id !== id) ?? null : null; };
+/**
+ * The folder a Round Table's lead must start in: its partner's, when the partner has a folder of its own. Hidden seats
+ * keep the folder they were seated in; a lead that follows the workspace root would otherwise start elsewhere after the
+ * root changed, and the host refuses to seat agents in different folders. Null for anything else.
+ */
+export function tableDirectory(sessions: Session[], session: Session): string | null {
+  if (!session.roundTable) return null;
+  const partner = partnerOf(sessions, session.id);
+  return partner?.binding.mode === 'independent' ? partner.binding.cwd : null;
+}
 /**
  * Why no channel can be added: every session counts toward the eight, a hidden Round Table partner too (it is a running
  * CLI), so the message says so when one is why the person sees fewer than eight tiles.
@@ -97,7 +105,13 @@ interface WorkspaceState {
   persistenceError: string | null;
   logError: string | null;
   storageInfo: StorageInfo | null;
-  hydrate: (workspace: SavedWorkspace | null, info: StorageInfo) => void;
+  /**
+   * Takes a saved workspace in. One saved by 1.19 or 1.20 can hold Gemini channels, which are dropped (migrateWorkspace)
+   * before anything is stored; `removedChannels`: those the host already dropped. Either way `loadNotice` says so.
+   */
+  hydrate: (workspace: SavedWorkspace | LegacySavedWorkspace | null, info: StorageInfo, removedChannels?: number, rootDirectory?: string) => void;
+  /** A line about what loading the workspace changed (Gemini channels removed), until the person dismisses it. */
+  loadNotice: string | null;
   rootDirectory: string | null;
   sessions: Session[];
   tiles: GridTile[];
@@ -132,7 +146,7 @@ interface WorkspaceState {
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
   addChatSession: (engine: 'claude' | 'codex') => void;
   removeSession: (id: string) => void;
-  updateConfig: (id: string, config: CLIEngineConfig | GeminiChannelConfig) => void;
+  updateConfig: (id: string, config: CLIEngineConfig) => void;
   resetCodexConfig: (id: string) => void;
   updateBinding: (id: string, binding: WorkspaceBinding) => void;
   setTiles: (tiles: GridTile[]) => void;
@@ -148,13 +162,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   persistenceError: null,
   logError: null,
   storageInfo: null,
-  hydrate: (workspace, storageInfo) => {
+  loadNotice: null,
+  hydrate: (saved, storageInfo, removedByHost = 0, keptRoot) => {
+    const migrated = saved ? migrateWorkspace(saved) : { workspace: null, removedChannels: 0, rootDirectory: keptRoot ?? null };
+    const removed = removedByHost + migrated.removedChannels;
+    const loadNotice = removed ? `${removed === 1 ? 'A Gemini channel was' : `${removed} Gemini channels were`} removed from this workspace: Trace no longer runs Gemini.` : null;
+    // Nothing but Gemini channels was saved (here, or already dropped by the host): the default channels, in the saved folder.
+    const workspace = migrated.workspace;
+    if (!workspace && migrated.rootDirectory) { set({ rootDirectory: migrated.rootDirectory, loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null }); return; }
     const sessions = workspace?.sessions.map((session): Session => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));
     // A workspace from 1.16 gave a Round Table's partner its own tile: laid out again without it.
     const seated = sessions ? seatedIds(sessions) : new Set<string>();
     const tiles = workspace && sessions && workspace.tiles.some((tile) => seated.has(tile.sessionId)) ? arrangeTiles(sessions, workspace.layoutMode) : workspace?.tiles;
     const focused = workspace?.focusedSessionId && seated.has(workspace.focusedSessionId) ? null : workspace?.focusedSessionId ?? null;
-    set({ ...(workspace && sessions && tiles ? { ...workspace, sessions, tiles, focusedSessionId: focused } : {}), storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null });
+    set({ ...(workspace && sessions && tiles ? { ...workspace, sessions, tiles, focusedSessionId: focused } : {}), loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null });
   },
   rootDirectory: null,
   sessions: initialSessions,
@@ -214,8 +235,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => {
       if (!session.roundTable) return session;
       if (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) return { ...session, roundTable: undefined };
-      // A Gemini seat gone on its own: the table goes on without it.
-      if (session.roundTable.challenger && gone.has(session.roundTable.challenger)) { const { challenger: _gone, ...table } = session.roundTable; return { ...session, roundTable: table }; }
       return session;
     });
     return {

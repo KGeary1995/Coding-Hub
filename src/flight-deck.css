@@ -49,7 +49,6 @@
 
 /* A Terminal channel's Start is in the shell's colour, like its CH badge. */
 .shell .tr-action.start { border-color: var(--tr-ch-shell); background: color-mix(in srgb, var(--tr-ch-shell) 12%, transparent); color: var(--tr-ch-shell); }
-.gemini .tr-action.start { border-color: var(--tr-ch-gemini); background: color-mix(in srgb, var(--tr-ch-gemini) 12%, transparent); color: var(--tr-ch-gemini); }
 
 /* Usage: the title like the other pages; the plan-limits heading and every stat label as mono labels; segments tracked. */
 .tr-usage-head h1 { text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }

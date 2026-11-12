@@ -1,10 +1,7 @@
 import type { ChannelEngine } from './types';
 
-/**
- * A channel's engine as phones and linked computers see it. A Gemini channel is listed as 'shell' (a terminal): Trace
- * 1.18.0's linked-computers.ts only accepts claude, codex and shell in a channel list, and would refuse the whole list.
- */
-export type RemoteEngine = Exclude<ChannelEngine, 'gemini'>;
+/** A channel's engine as phones and linked computers see it. */
+export type RemoteEngine = ChannelEngine;
 import type { AccountLabel } from './accounts';
 import type { ChatEnvelope, ChatEvent, ChatRequest } from './chat';
 import type { PlanLimits } from './plan-limits';

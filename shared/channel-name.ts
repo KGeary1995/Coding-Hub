@@ -1,7 +1,7 @@
 import type { ChannelEngine } from './types';
 
 /** The names new channels start with. A channel still called this is named after its folder instead. */
-export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', shell: 'Terminal' };
+export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' };
 
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
@@ -19,7 +19,7 @@ export function channelName(channel: { engine: ChannelEngine; title: string; cwd
  * status symbols in front are dropped. Shell titles (user@host:path) are not topics.
  */
 export function sessionTopic(raw: string, engine: ChannelEngine, name: string): string | null {
-  if (engine === 'shell' || engine === 'gemini') return null;
+  if (engine === 'shell') return null;
   // Spinners (braille, ✳ ✢ · *), other symbols and spaces in front; letters, digits and common punctuation stay.
   const text = raw.replace(/[\x00-\x1f\x7f]/g, '').replace(/^[^\p{L}\p{N}"'(\[]+/u, '').trim().slice(0, 80);
   if (!text) return null;

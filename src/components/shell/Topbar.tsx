@@ -46,11 +46,11 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
-  // The order is the person's: Terminal, Claude Code, Codex, Gemini, then the Round Tables (on the phone too).
+  // The order is the person's: Terminal, Claude Code, Codex, then the Round Tables (on the phone too).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   const channelMenu: MenuItem[] = other
-    ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => ({ label: { shell: 'Terminal', claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
-    : [{ label: 'Terminal', onSelect: () => addSession('shell') }, { label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex', onSelect: () => addSession('codex') }, { label: 'Gemini', onSelect: () => addSession('gemini') },
+    ? (['shell', 'claude', 'codex'] as const).map((engine) => ({ label: { shell: 'Terminal', claude: 'Claude Code', codex: 'Codex' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
+    : [{ label: 'Terminal', onSelect: () => addSession('shell') }, { label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex', onSelect: () => addSession('codex') },
       ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : []),
       ...(sessions.length <= MAX_CHANNELS - 3 ? [{ label: 'Round Table (hierarchy)', onSelect: () => void startHierarchyTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : [])];
   return <header className="tr-topbar">

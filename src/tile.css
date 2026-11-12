@@ -35,7 +35,6 @@
 .tr-action.start { background: var(--tr-ch-codex); }
 .claude .tr-action.start { background: var(--tr-ch-claude); }
 .shell .tr-action.start { background: var(--tr-ch-shell); }
-.gemini .tr-action.start { background: var(--tr-ch-gemini); }
 .tr-action.waiting { background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
 .tr-action.retry { background: var(--tr-fg); }
 .tr-action.limit { background: var(--tr-st-limit); }
@@ -232,7 +231,6 @@
 .session-tile.tr-tile.claude { --bracket: var(--tr-ch-claude); }
 .session-tile.tr-tile.codex { --bracket: var(--tr-ch-codex); }
 .session-tile.tr-tile.shell { --bracket: var(--tr-ch-shell); }
-.session-tile.tr-tile.gemini { --bracket: var(--tr-ch-gemini); }
 .session-tile.tr-tile.state-waiting { --bracket: var(--tr-st-waiting); box-shadow: var(--tr-glow-waiting); }
 .session-tile.tr-tile.state-failed { --bracket: var(--tr-st-failed); }
 .tr-tile .tr-tile-name { text-transform: uppercase; letter-spacing: .04em; font-size: 14px; }
@@ -308,9 +306,6 @@
 .chain-seats { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font: 400 12px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .chain-seats li { display: flex; align-items: center; gap: 6px; } .chain-seats strong { font-weight: 600; } .chain-seats .working strong { color: var(--tr-fg-strong); }
 .chain-seats .seat-claude + strong { color: var(--tr-ch-claude); } .chain-seats .seat-codex + strong { color: var(--tr-ch-codex); } .chain-seats .seat-planner + strong { color: var(--tr-ch-planner); }
-/* A hierarchy table's Gemini seat (challenger and second reviewer), in Gemini's channel colour. */
-.seat-hex.seat-gemini, .table-seats .seat-gemini { background: var(--tr-ch-gemini); } .chain-seats .seat-gemini + strong { color: var(--tr-ch-gemini); }
-.chat-message.assistant.table-gemini { padding-left: 10px; border-left: 1px solid var(--tr-ch-gemini); } .table-gemini .chat-author { color: var(--tr-ch-gemini); }
-/* Gemini's challenges to the plan, with the planner's answers; a finding's source and Gemini's word on it. */
+/* Codex's challenges to the plan, with the planner's answers. */
 .chain-challenges { width: 100%; text-transform: none; letter-spacing: normal; font-size: 12px; } .chain-challenges ol { margin: 4px 0 0; padding-left: 20px; } .chain-challenges li { margin: 2px 0; }
-.chain-challenges small, .finding-origin { display: block; color: var(--tr-fg-dim); } .chain-challenges .accepted small { color: var(--tr-fg-muted); }
+.chain-challenges small { display: block; color: var(--tr-fg-dim); } .chain-challenges .accepted small { color: var(--tr-fg-muted); }

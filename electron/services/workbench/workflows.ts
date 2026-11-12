@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { savedWorkspaceSchema } from '../../../shared/schemas';
+import { legacyWorkspaceSchema, savedWorkspaceSchema } from '../../../shared/schemas';
+import { migrateWorkspace } from '../../../shared/workspace-migration';
 import type { ConversationLabel, ProjectTemplate, SearchHit, SearchResults } from '../../../shared/productivity';
 import type { SavedWorkspace } from '../../../shared/types';
 import type { NativeSessions } from './native-sessions';
@@ -15,6 +16,8 @@ import { isAgentConfig } from '../../../shared/types';
 const label = z.object({ key: z.string().min(1).max(200), name: z.string().trim().min(1).max(100), pinned: z.boolean() }).strict();
 const check = z.object({ name: z.string().trim().min(1).max(100), steps: z.array(z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm','pnpm','yarn','python','cargo','go','dotnet']), args: z.array(z.string().max(500).refine((value) => !value.includes('\0'))).min(1).max(30) }).strict()).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300) }).strict();
 export const templateSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), description: z.string().max(1000), workspace: savedWorkspaceSchema, rules: z.string().max(50000), checks: z.array(check).max(20), createdAt: z.iso.datetime() }).strict();
+/** Templates as saved: one from 1.19 or 1.20 can hold Gemini channels, which are dropped when it is applied. */
+const storedTemplateSchema = templateSchema.extend({ workspace: legacyWorkspaceSchema });
 const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-conversations') }).strict(), label.extend({ action: z.literal('flow-conversation-save') }).strict(),
  z.object({ action: z.literal('flow-failures') }).strict(),
@@ -29,7 +32,7 @@ export class Workflows {
  get running() { return this.busy; }
  constructor(private root: string, private native: NativeSessions, private verification: Verification, private rules: RulesService, private storage: WorkspaceStorage, private confirm: (title: string, detail: string) => Promise<boolean>) {}
  labels(): ConversationLabel[] { return load(this.root, 'conversation-labels.json', z.array(label).max(500), []); }
- templates(): ProjectTemplate[] { return load(this.root, 'project-templates.json', z.array(templateSchema).max(50), []); }
+ templates(): ProjectTemplate[] { return load(this.root, 'project-templates.json', z.array(storedTemplateSchema).max(50), []) as ProjectTemplate[]; }
  async execute(input: unknown) {
   const request = schema.parse(input);
   if (request.action === 'flow-conversations') return this.labels();
@@ -53,7 +56,11 @@ export class Workflows {
   }
   if (this.busy) throw new HubError('TEMPLATE_BUSY', 'A template operation is already running.');
   const selected = templates.find((item) => item.id === request.id); if (!selected) throw new HubError('TEMPLATE_MISSING', 'Select an available template.');
-  const cwd = directory(request.directory); this.busy = true;
+  const cwd = directory(request.directory);
+  // Checked before anything is written: a template of Gemini channels only (1.19, 1.20) leaves nothing to apply.
+  const workspace = migrateWorkspace(structuredClone(selected.workspace)).workspace;
+  if (!workspace) throw new HubError('TEMPLATE_EMPTY', 'This template has only Gemini channels, which Trace no longer runs.');
+  this.busy = true;
   try {
    const instructions = this.rules.read([cwd]);
    const checks = request.applyChecks ? selected.checks : [];
@@ -63,7 +70,7 @@ export class Workflows {
    if (JSON.stringify(this.templates().find((item) => item.id === selected.id)) !== JSON.stringify(selected)) throw new HubError('TEMPLATE_CHANGED', 'The template changed after review.');
    this.rules.save(request.applyRules ? selected.rules : instructions.content, instructions.revision, instructions.targets);
    for (const item of checks) await this.verification.execute({ action: 'verification-save', ...item, directory: cwd });
-   const workspace = structuredClone(selected.workspace); workspace.rootDirectory = cwd; workspace.focusedSessionId = null;
+   workspace.rootDirectory = cwd; workspace.focusedSessionId = null;
    const ids = new Map<string, string>();
    workspace.sessions = workspace.sessions.map((session) => { const id = randomUUID(); ids.set(session.id, id); return { ...session, id, binding: session.binding.mode === 'workspace' ? { mode: 'workspace' as const } : { mode: 'independent' as const, cwd }, createdAt: new Date().toISOString() }; });
    workspace.tiles = workspace.tiles.map((tile) => ({ ...tile, sessionId: ids.get(tile.sessionId)! })); return savedWorkspaceSchema.parse(workspace) as SavedWorkspace;

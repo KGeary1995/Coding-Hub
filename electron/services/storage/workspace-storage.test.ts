@@ -36,6 +36,18 @@ afterEach(() => {
   directories.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
 
+describe('a workspace saved with Gemini (1.19, 1.20)', () => {
+  it('keeps the project folder when only Gemini channels were saved', () => {
+    const { root, storage } = open(); storage.close(); databases.splice(databases.indexOf(storage), 1);
+    const at = new Date().toISOString();
+    const gemini = { version: 1, rootDirectory: '/projects/root', layoutMode: 'columns', focusedSessionId: null, sessions: [{ id: 'gem', title: 'Gemini', config: { engine: 'gemini', model: 'gemini-4-argon-high' }, binding: { mode: 'workspace' }, createdAt: at }], tiles: [{ sessionId: 'gem', x: 0, y: 0, w: 12, h: 12, minW: 3, minH: 10 }] };
+    const database = new DatabaseSync(path.join(root, 'storage.db')); database.prepare('INSERT INTO workspace(id,snapshot) VALUES(1,?)').run(JSON.stringify(gemini)); database.close();
+    const reopened = new WorkspaceStorage(root); databases.push(reopened);
+    expect(reopened.loadMigrated()).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/projects/root' });
+    expect(reopened.load()).toBeNull();
+  });
+});
+
 describe('local workspace storage', () => {
   it('restores exact settings and resized layout from a reopened SQLite database', () => {
     const { root, storage } = open();

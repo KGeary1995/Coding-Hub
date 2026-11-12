@@ -32,7 +32,7 @@ import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine, discoverGemini, findExecutable, hostEnvironment } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -179,7 +179,7 @@ const manager = new PtyManager((owner, event) => {
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
-  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isAgentConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
@@ -242,7 +242,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
@@ -566,7 +566,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
+      if (run.engine === 'shell') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -768,9 +768,10 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.gitDiff, (owner, payload) => repositoryGit.diff(owner, payload));
   handle(IPC_CHANNELS.loadWorkspace, () => {
     const database = localStorage();
-    const workspace = database.load();
+    const { workspace, removedChannels, rootDirectory } = database.loadMigrated();
     workspaceLoaded = true;
-    return { workspace, info: database.info };
+    // Only Gemini channels were saved: no workspace is left, but its project folder is kept.
+    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}) };
   });
   handle(IPC_CHANNELS.saveWorkspace, (_owner, payload) => {
     if (!workspaceLoaded) throw new HubError('WORKSPACE_NOT_LOADED', 'Load the saved workspace before saving changes.');
@@ -810,7 +811,7 @@ else app.whenReady().then(() => {
   // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
   handle(IPC_CHANNELS.screen, screenRequest);
   handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
-  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex'), discoverGemini()])).map((engine) => engine.info));
+  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
     // The manager validates the complete request. This guard also covers pending

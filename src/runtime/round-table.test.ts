@@ -2,12 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HIERARCHY_MODELS, type RoundTableState } from '../../shared/chat';
 import type { Session } from '../../shared/types';
 import { savedWorkspaceSchema } from '../../shared/schemas';
-import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
-import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, reopenHierarchy, rememberTable, restoreTables } from './round-table';
-import { GEMINI_MODEL } from '../../shared/gemini';
-import type { EngineInfo } from '../../shared/ipc';
+import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, rememberTable, restoreTables } from './round-table';
 import { closeChannel, startSession, stopSession } from './use-native-host';
 
 // Chat channels draw no terminal; the real module needs a DOM.
@@ -200,57 +198,56 @@ describe('Round Table tiles and seats that come and go', () => {
   });
 });
 
-describe('A hierarchy table’s Gemini seat', () => {
-  const agy = (extra: Partial<EngineInfo> = {}) => ({ engine: 'gemini', available: true, executable: '/agy', version: '1.5.6', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsMode: true, supportsSkipPermissions: true, supportsAcp: true, error: null, ...extra }) as EngineInfo;
-  const gemini = () => useWorkspaceStore.getState().sessions.find((session) => session.config.engine === 'gemini');
-  const tableOpen = (chats: { action: string }[]) => chats.filter((request) => request.action === 'table-open').at(-1) as unknown as { challenger?: { sessionId: string } };
+describe('A hierarchy table: three seats, and opening again after a restart', () => {
+  const tableOpen = (chats: { action: string }[]) => chats.filter((request) => request.action === 'table-open').at(-1) as unknown as Record<string, unknown> | undefined;
   const notices = (id: string) => (useChatStore.getState().threads[id]?.items ?? []).filter((item) => item.kind === 'notice').map((item) => (item as { text: string }).text);
-  it('seats Gemini as a fourth, hidden, read-only chat with the fixed model and the table’s permissions, started and stopped with the table', async () => {
-    const { codingHub, chats, stops } = host(); useWorkspaceStore.setState({ engines: [agy()] });
-    const lead = await runningLead(); useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === lead.id && session.config.engine === 'claude' ? { ...session, config: { ...session.config, permissions: 'full' as const } } : session) }));
-    expect(await openHierarchy(lead.id)).toBeNull();
-    const seat = gemini()!;
-    expect(seat.config).toEqual({ engine: 'gemini', model: GEMINI_MODEL, chat: true, permissions: 'full' });
-    expect(find(lead.id)!.roundTable).toMatchObject({ kind: 'hierarchy', challenger: seat.id });
-    expect(codingHub.startSession.mock.calls.some(([request]) => (request as { sessionId: string }).sessionId === seat.id)).toBe(true);
-    expect(tableOpen(chats).challenger).toMatchObject({ sessionId: seat.id });
-    // Hidden: no tile, no channel number; the saved workspace stays valid.
-    expect(channelsOf(useWorkspaceStore.getState().sessions).map((session) => session.id)).toEqual([lead.id]);
-    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
-    await stopSession(lead.id); expect(stops).toContain(seat.id);
+  const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+  /** A hierarchy table whose three seats run again, as after a restart, with its table not open yet. */
+  let restarts = 10;
+  async function restarted() {
+    restarts++; const hosted = host(); const lead = await runningLead(); await openHierarchy(lead.id); const table = find(lead.id)!.roundTable!;
+    useChatStore.setState({ threads: {} }); hosted.chats.length = 0;
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session, index) => session.id === lead.id || session.id === table.partner || session.id === table.planner ? { ...session, status: 'running' as const, runId: `0000${restarts}${index}-2222-4222-8222-222222222222`.padStart(36, '0') } : session) }));
+    return { ...hosted, lead: find(lead.id)!, table };
+  }
+  it('seats the planner and the Codex reviewer only, and names no Gemini seat', async () => {
+    const { chats } = host(); const lead = await runningLead(); await openHierarchy(lead.id);
+    expect(useWorkspaceStore.getState().sessions.map((session) => session.config.engine).sort()).toEqual(['claude', 'claude', 'codex']);
+    expect(find(lead.id)!.roundTable).not.toHaveProperty('challenger'); expect(tableOpen(chats)).not.toHaveProperty('challenger');
   });
-  it('opens with three seats and says why when agy is not found, has no ACP server, or there is no room for a fourth', async () => {
-    for (const [engines, others, why] of [[[agy({ available: false, error: 'not on PATH' })], 0, 'was not found'], [[agy({ supportsAcp: false })], 0, 'ACP server'], [[agy()], 5, 'at most 8']] as const) {
-      const { chats } = host(); useWorkspaceStore.setState({ engines: [...engines] });
-      const extra = Array.from({ length: others }, () => ({ ...createSession('shell'), id: `shell-${Math.random().toString(36).slice(2)}` }));
-      const lead = await runningLead(extra); expect(await openHierarchy(lead.id)).toBeNull();
-      expect(gemini()).toBeUndefined(); expect(find(lead.id)!.roundTable?.challenger).toBeUndefined(); expect(tableOpen(chats).challenger).toBeUndefined();
-      expect(notices(lead.id).at(-1)).toContain(why);
-      useChatStore.setState({ threads: {} });
-    }
+  it('says in the thread and on the channel why a saved table would not open again', async () => {
+    const { codingHub, chats, lead } = await restarted();
+    codingHub.chat.mockImplementation(async (request: { action: string }) => { chats.push(request); return { ok: false, error: { message: 'All the agents must work in the same folder.' } }; });
+    restoreTables(); await settle();
+    expect(tableOpen(chats)).toBeDefined();
+    expect(notices(lead.id).at(-1)).toBe('The Round Table could not open again: All the agents must work in the same folder.');
+    expect(hierarchyDetached(lead.id)).toBe('The Round Table could not open again: All the agents must work in the same folder. Stop this channel and start it again, or close the table.');
+    // Tried once per set of runs: not again for the same runs.
+    chats.length = 0; restoreTables(); await settle(); expect(tableOpen(chats)).toBeUndefined();
+    // A new run of the builder is still opening, until the host answers.
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === lead.id ? { ...session, runId: '0000000f-3333-4333-8333-333333333333' } : session) }));
+    expect(hierarchyDetached(lead.id)).toMatch(/opening/);
   });
-  it('removes a Gemini seat that does not start, and opens the table with three', async () => {
-    const { codingHub, chats } = host(); useWorkspaceStore.setState({ engines: [agy()] });
-    const start = codingHub.startSession.getMockImplementation()!;
-    codingHub.startSession.mockImplementation(async (request) => find(request.sessionId)?.config.engine === 'gemini' ? { ok: false, error: { message: 'agy crashed' } } as never : start(request));
-    const lead = await runningLead(); expect(await openHierarchy(lead.id)).toBeNull();
-    expect(gemini()).toBeUndefined(); expect(find(lead.id)!.roundTable?.challenger).toBeUndefined(); expect(tableOpen(chats).challenger).toBeUndefined();
-    expect(notices(lead.id).at(-1)).toContain('opened without Gemini: agy crashed');
+  it('says why when the request to open it fails outright', async () => {
+    const { codingHub, lead } = await restarted();
+    codingHub.chat.mockImplementation(async () => { throw new Error('The host closed.'); });
+    restoreTables(); await settle();
+    expect(notices(lead.id).at(-1)).toBe('The Round Table could not open again: The host closed.');
+    expect(hierarchyDetached(lead.id)).toMatch(/^The Round Table could not open again: The host closed\./);
   });
-  it('seats Gemini again after a restart once it runs, opens without it when it could not start, and Reopen starts it', async () => {
-    const { chats } = host(); useWorkspaceStore.setState({ engines: [agy()] });
-    const lead = await runningLead(); await openHierarchy(lead.id); const seat = gemini()!; const table = find(lead.id)!.roundTable!;
-    // As after a restart: the table is not open, all four seats run again.
-    useChatStore.setState({ threads: {} }); chats.length = 0;
-    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === lead.id || session.id === table.partner || session.id === table.planner || session.id === seat.id ? { ...session, status: 'running' as const, runId: `${session.id.slice(0, 8)}-0000-4000-8000-000000000001`.replace(/[^0-9a-f-]/g, 'a') } : session) }));
-    restoreTables(); expect(tableOpen(chats).challenger).toMatchObject({ sessionId: seat.id });
-    // Gemini could not start this time: the table opens with three, and the thread says so.
-    chats.length = 0; useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === seat.id ? { ...session, status: 'error' as const, runId: null, error: 'agy not found' } : session.id === lead.id ? { ...session, runId: 'bbbbbbbb-0000-4000-8000-000000000002' } : session) }));
-    restoreTables(); expect(tableOpen(chats)).toBeDefined(); expect(tableOpen(chats).challenger).toBeUndefined();
-    expect(notices(lead.id).at(-1)).toContain('without its Gemini seat (agy not found)');
-    // Until the host reports the table open, a stopped Gemini seat is named, and Reopen starts it with the others.
-    expect(hierarchyDetached(lead.id)).toMatch(/Gemini seat stopped/);
-    expect(await reopenHierarchy(lead.id)).toBeNull(); expect(find(seat.id)!.status).toBe('running');
+  it('starts the builder in its table\'s folder when the workspace folder changed since', async () => {
+    const { codingHub } = host(); const lead = await runningLead(); await openHierarchy(lead.id);
+    const table = find(lead.id)!.roundTable!; const folder = (find(table.partner)!.binding as { cwd: string }).cwd;
+    expect(folder).toBe('/project');
+    expect(tableDirectory(useWorkspaceStore.getState().sessions, find(lead.id)!)).toBe('/project');
+    expect(tableDirectory(useWorkspaceStore.getState().sessions, find(table.partner)!)).toBeNull();
+    // Stopped, the workspace moved to another folder, then started again: the builder joins its seats, not the new root.
+    await stopSession(lead.id); await new Promise((resolve) => setTimeout(resolve, 20));
+    useWorkspaceStore.getState().setRootDirectory('/elsewhere');
+    await startSession(lead.id);
+    const starts = codingHub.startSession.mock.calls.map(([request]) => request as unknown as { sessionId: string; cwd: string });
+    expect(starts.filter((request) => request.sessionId === lead.id).at(-1)!.cwd).toBe('/project');
+    expect(starts.filter((request) => request.sessionId === table.partner).at(-1)!.cwd).toBe('/project');
   });
 });
 

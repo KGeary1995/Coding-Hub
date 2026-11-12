@@ -9,7 +9,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DiscoveredEngine } from './discovery';
-import { GEMINI_MODEL } from '../../../shared/gemini';
 
 class FakePty {
   pid = 99999999;
@@ -398,62 +397,3 @@ describe('Chat channels', () => {
   });
 });
 
-describe('Gemini CLI channels', () => {
-  const gemini = (overrides: Partial<DiscoveredEngine['info']> = {}): DiscoveredEngine => ({ info: { engine: 'gemini', available: true, executable: '/agy', version: '1.5.6', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsMode: true, supportsSkipPermissions: true, supportsAcp: true, error: null, ...overrides }, executable: { file: '/fixture/agy', prefixArgs: [], extraEnv: {}, displayPath: '/fixture/agy' } });
-  function geminiFixture(found = gemini()) {
-    const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine)); const discoverGemini = vi.fn(async () => found);
-    const prepareLaunch = vi.fn(); const onStarted = vi.fn(); const events: SessionEvent[] = [];
-    const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
-    const manager = new PtyManager((_owner, event) => events.push(event), { spawn, discover, discoverGemini, prepareLaunch, onStarted, environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } });
-    managers.push(manager);
-    return { manager, spawn, discover, prepareLaunch, onStarted, events };
-  }
-  it('run agy in a terminal with the fixed model and the permission flags, without the Claude and Codex launch pipeline', async () => {
-    const { manager, spawn, discover, prepareLaunch, onStarted, events } = geminiFixture();
-    const session = await manager.start(1, { sessionId: 'gemini-one', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL }, cols: 80, rows: 24 });
-    expect(session).toMatchObject({ engine: 'gemini', cwd: fs.realpathSync(process.cwd()) });
-    const [file, args, options] = spawn.mock.calls[0];
-    expect(file).toBe('/fixture/agy'); expect(args).toEqual(['--model', GEMINI_MODEL, '--mode', 'accept-edits']);
-    expect(options).toMatchObject({ cwd: fs.realpathSync(process.cwd()), env: { PATH: '/bin', TERM: 'xterm-256color' } });
-    expect(discover).not.toHaveBeenCalled(); expect(prepareLaunch).not.toHaveBeenCalled(); expect(onStarted).not.toHaveBeenCalled();
-    expect(events[0]).toMatchObject({ type: 'started', engine: 'gemini' });
-    await manager.start(1, { sessionId: 'gemini-two', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL, permissions: 'full' }, cols: 80, rows: 24 });
-    expect(spawn.mock.calls[1][1]).toEqual(['--model', GEMINI_MODEL, '--dangerously-skip-permissions']);
-  });
-  it('refuse another model, a missing agy (for a terminal or a Round Table seat), before anything starts', async () => {
-    const { manager, spawn } = geminiFixture(gemini({ available: false, error: 'Gemini CLI (agy) was not found on PATH.' }));
-    await expect(manager.start(1, { sessionId: 'g-model', cwd: process.cwd(), config: { engine: 'gemini', model: 'gemini-3.8-flash-high' }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
-    await expect(manager.start(1, { sessionId: 'g-chat', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL, chat: true }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'ENGINE_UNAVAILABLE' });
-    await expect(manager.start(1, { sessionId: 'g-missing', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'ENGINE_UNAVAILABLE', message: 'Gemini CLI (agy) was not found on PATH.' });
-    expect(spawn).not.toHaveBeenCalled();
-  });
-  it('run a Round Table seat as agy acp in plan mode with the fixed model, seated at a hierarchy table, without the launch pipeline', async () => {
-    const processes: (FakePty & { onStderr: () => void })[] = []; const launched: { file: string; args: string[] }[] = []; const prepareLaunch = vi.fn(); const onStarted = vi.fn(); const chats: ChatEnvelope[] = [];
-    const permitting = (engine: 'claude' | 'codex') => { const found = engines(engine); found.info.supportsPermissions = true; return found; };
-    const manager = new PtyManager(() => {}, { discover: async (engine) => permitting(engine as 'claude' | 'codex'), discoverGemini: async () => gemini(), prepareLaunch, onStarted, environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
-      spawnChat: (file, args) => { launched.push({ file, args }); const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
-    managers.push(manager);
-    const seat = await manager.start(1, { sessionId: 'gemini-seat', cwd: process.cwd(), config: { engine: 'gemini', model: GEMINI_MODEL, chat: true, permissions: 'full' }, cols: 80, rows: 24 });
-    expect(launched[0]).toEqual({ file: '/fixture/agy', args: ['acp'] }); expect(prepareLaunch).not.toHaveBeenCalled(); expect(onStarted).not.toHaveBeenCalled();
-    const writes = () => processes[0].write.mock.calls.map((call) => JSON.parse(String(call[0])) as { id?: number; method?: string; params?: Record<string, unknown> });
-    expect(writes()[0]).toMatchObject({ method: 'initialize' });
-    const answer = (method: string, result: Record<string, unknown>) => processes[0].data(JSON.stringify({ jsonrpc: '2.0', id: writes().find((item) => item.method === method)!.id, result }) + '\n');
-    answer('initialize', { protocolVersion: 1 }); answer('session/new', { sessionId: 'acp-1', models: { availableModels: [{ modelId: GEMINI_MODEL }], currentModelId: 'gemini-4-argon-medium' } });
-    expect(writes().at(-1)).toMatchObject({ method: 'session/set_model', params: { sessionId: 'acp-1', modelId: GEMINI_MODEL } });
-    answer('session/set_model', {}); answer('session/set_mode', {});
-    processes[0].data(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'acp-1', update: { sessionUpdate: 'config_option_update', configOptions: [{ id: 'model', currentValue: 'gemini-4-argon' }, { id: 'thought_level', currentValue: 'high' }, { id: 'mode', currentValue: 'plan' }] } } }) + '\n');
-    expect(chats.find((chat) => chat.event.type === 'ready')).toMatchObject({ sessionId: 'gemini-seat', event: { model: GEMINI_MODEL } });
-    const claude = (sessionId: string) => ({ sessionId, cwd: process.cwd(), config: { engine: 'claude' as const, chat: true, model: '', permissions: 'full' as const, thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, cols: 80, rows: 24 });
-    const builder = await manager.start(1, claude('builder')); const planner = await manager.start(1, claude('planner'));
-    const reviewer = await manager.start(1, { sessionId: 'reviewer', cwd: process.cwd(), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null, permissions: 'full' as const }, cols: 80, rows: 24 });
-    // A discussion table does not seat Gemini.
-    expect(() => manager.chat(1, { action: 'table-open', sessionId: builder.sessionId, runId: builder.runId, partner: { sessionId: seat.sessionId, runId: seat.runId }, driver: 'claude', rounds: 1 })).toThrow(/Claude Code and Codex/);
-    manager.chat(1, { action: 'table-open', kind: 'hierarchy', sessionId: builder.sessionId, runId: builder.runId, partner: { sessionId: reviewer.sessionId, runId: reviewer.runId }, planner: { sessionId: planner.sessionId, runId: planner.runId }, challenger: { sessionId: seat.sessionId, runId: seat.runId }, driver: 'claude', rounds: 2 });
-    expect(chats.filter((chat) => chat.event.type === 'table').at(-1)!.event).toMatchObject({ table: { kind: 'hierarchy', challenger: { sessionId: 'gemini-seat', engine: 'gemini' } } });
-    // Its commands at Full access go through without a card; its file changes are declined.
-    processes[0].data(JSON.stringify({ jsonrpc: '2.0', id: 'p1', method: 'session/request_permission', params: { sessionId: 'acp-1', toolCall: { toolCallId: 't1', kind: 'execute', title: 'git status' }, options: [{ optionId: 'allow', kind: 'allow_once' }, { optionId: 'deny', kind: 'reject_once' }] } }) + '\n');
-    processes[0].data(JSON.stringify({ jsonrpc: '2.0', id: 'p2', method: 'session/request_permission', params: { sessionId: 'acp-1', toolCall: { toolCallId: 't2', kind: 'edit', title: 'a.ts' }, options: [{ optionId: 'allow', kind: 'allow_once' }, { optionId: 'deny', kind: 'reject_once' }] } }) + '\n');
-    expect(writes().filter((item) => typeof item.id === 'string').map((item) => [item.id, (item as unknown as { result: { outcome: { optionId: string } } }).result.outcome.optionId])).toEqual([['p1', 'allow'], ['p2', 'deny']]);
-    expect(chats.some((chat) => chat.event.type === 'permission')).toBe(false); expect(chats.some((chat) => chat.event.type === 'notice' && chat.event.text.includes('only the builder edits'))).toBe(true);
-  });
-});

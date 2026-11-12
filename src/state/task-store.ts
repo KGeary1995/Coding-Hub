@@ -49,7 +49,7 @@ export async function sendTask(id: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task?.sessionId) throw new Error('Choose the channel to give this task to first.');
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
-  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini CLI.');
+  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
   const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });

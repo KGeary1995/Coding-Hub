@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
+import { arrangeTiles, createSession, savedWorkspace, tableDirectory, useWorkspaceStore } from './workspace-store';
 import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
 import type { CLIEngineConfig, CodexCLIEngineConfig } from '../../shared/types';
-import { GEMINI_MODEL } from '../../shared/gemini';
+import { workspace120 } from '../../shared/workspace-120.fixture';
 
 beforeEach(() => {
   const sessions = [createSession('claude'), createSession('codex')];
@@ -169,19 +169,46 @@ it('closes a Round Table lead with its stopped partner, but never drops a partne
   expect(useWorkspaceStore.getState().tiles.map((tile) => tile.sessionId)).toEqual([partner.id, shell.id]);
 });
 
-describe('Gemini CLI channels', () => {
-  it('are added as "Gemini" with the fixed model, are saved and restored, and keep a permission change', () => {
-    useWorkspaceStore.getState().addSession('gemini');
-    const added = useWorkspaceStore.getState().sessions.at(-1)!;
-    expect(added).toMatchObject({ title: 'Gemini', config: { engine: 'gemini', model: GEMINI_MODEL } });
-    useWorkspaceStore.getState().updateConfig(added.id, { engine: 'gemini', model: GEMINI_MODEL, permissions: 'ask' });
-    const saved = savedWorkspace();
-    expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true);
-    expect(saved.sessions.at(-1)!.config).toEqual({ engine: 'gemini', model: GEMINI_MODEL, permissions: 'ask' });
+describe('a workspace saved with Gemini (1.19, 1.20)', () => {
+  const info = { databasePath: '/local/storage.db', logsDirectory: '/local/logs', maxLogBytes: 5242880, maxCompletedRuns: 100, retentionDays: 30 };
+  it('loads without its Gemini channel and seat, the table at reviewing, and says why the tile is gone', () => {
+    useWorkspaceStore.setState({ loadNotice: null });
+    useWorkspaceStore.getState().hydrate(workspace120() as never, info);
+    const state = useWorkspaceStore.getState();
+    expect(state.sessions.map((session) => session.id)).toEqual(['lead', 'rev', 'plan']);
+    expect(state.sessions.some((session) => (session.config.engine as string) === 'gemini')).toBe(false);
+    expect(state.tiles.map((tile) => tile.sessionId)).toEqual(['lead']); expect(state.focusedSessionId).toBeNull();
+    expect(state.sessions[0].roundTable).not.toHaveProperty('challenger'); expect(state.sessions[0].roundTable!.chain).toMatchObject({ step: 'stopped', stoppedAt: 'reviewing' });
+    expect(state.loadNotice).toBe('A Gemini channel was removed from this workspace: Trace no longer runs Gemini.');
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
   });
-  it('cannot be turned into a chat', () => {
-    useWorkspaceStore.getState().addChatSession('codex');
-    useWorkspaceStore.getState().addSession('gemini');
-    expect(useWorkspaceStore.getState().sessions.at(-1)!.config).toEqual({ engine: 'gemini', model: GEMINI_MODEL });
+  it('says so for channels the host already dropped, and says nothing for a workspace without Gemini', () => {
+    const plain = savedWorkspace();
+    useWorkspaceStore.getState().hydrate(plain, info, 2); expect(useWorkspaceStore.getState().loadNotice).toBe('2 Gemini channels were removed from this workspace: Trace no longer runs Gemini.');
+    useWorkspaceStore.getState().hydrate(plain, info); expect(useWorkspaceStore.getState().loadNotice).toBeNull();
+  });
+  it('keeps the folder when only Gemini channels were saved', () => {
+    const only = { ...workspace120(), rootDirectory: '/only', sessions: [workspace120().sessions[4]], tiles: [{ ...workspace120().tiles[1], x: 0 }], focusedSessionId: null };
+    const before = useWorkspaceStore.getState().sessions;
+    useWorkspaceStore.getState().hydrate(only as never, info);
+    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/only', sessions: before, persistenceReady: true }); expect(useWorkspaceStore.getState().loadNotice).toContain('A Gemini channel was removed');
+  });
+  it('keeps the folder the host sends when the host already dropped every channel', () => {
+    useWorkspaceStore.setState({ rootDirectory: null });
+    const before = useWorkspaceStore.getState().sessions;
+    useWorkspaceStore.getState().hydrate(null, info, 1, '/kept');
+    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/kept', sessions: before, persistenceReady: true, loadNotice: 'A Gemini channel was removed from this workspace: Trace no longer runs Gemini.' });
+    useWorkspaceStore.getState().hydrate(null, info); expect(useWorkspaceStore.getState().loadNotice).toBeNull();
+  });
+});
+
+describe('a Round Table\'s folder', () => {
+  it('is its partner\'s own folder, for its lead only', () => {
+    const lead = createSession('claude'); const partner = createSession('codex', { mode: 'independent', cwd: '/table' }); const workspaceSeat = createSession('codex');
+    const withTable = { ...lead, roundTable: { partner: partner.id, driver: 'claude' as const, rounds: 2 } };
+    expect(tableDirectory([withTable, partner], withTable)).toBe('/table');
+    expect(tableDirectory([withTable, partner], partner)).toBeNull(); expect(tableDirectory([lead, partner], lead)).toBeNull();
+    const following = { ...lead, roundTable: { partner: workspaceSeat.id, driver: 'claude' as const, rounds: 2 } };
+    expect(tableDirectory([following, workspaceSeat], following)).toBeNull();
   });
 });
