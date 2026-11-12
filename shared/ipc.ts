@@ -15,8 +15,7 @@ import type { HubRequest, HubResponse, UsageRecord } from './hub';
 export interface HostError { code: string; message: string }
 export type HostResult<T> = { ok: true; value: T } | { ok: false; error: HostError };
 export interface EngineInfo {
-  /** 'gemini' is Gemini CLI (agy), discovered for its own terminal channels only (discoverGemini); it never reaches buildLaunch. */
-  engine: CLIEngine | 'gemini';
+  engine: CLIEngine;
   available: boolean;
   executable: string | null;
   version: string | null;
@@ -32,11 +31,6 @@ export interface EngineInfo {
   supportsPermissions?: boolean;
   /** Claude's --chrome (Claude in Chrome). */
   supportsChrome?: boolean;
-  /** Gemini CLI's --mode (accept-edits) and --dangerously-skip-permissions. */
-  supportsMode?: boolean;
-  supportsSkipPermissions?: boolean;
-  /** Gemini CLI lists its ACP server (`agy acp`), which a hierarchy Round Table's Gemini seat runs. */
-  supportsAcp?: boolean;
   authentication?: { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string };
   checkedAt?: string;
   error: string | null;
@@ -87,7 +81,9 @@ export interface CodingHubHost {
   readFile(request: { repositoryId: string; path: string }): Promise<HostResult<FilePreview>>;
   gitStatus(request: { repositoryId: string }): Promise<HostResult<GitStatus>>;
   gitDiff(request: { repositoryId: string; path: string; area: DiffArea }): Promise<HostResult<GitFileDiff>>;
-  loadWorkspace(): Promise<HostResult<{ workspace: SavedWorkspace | null; info: StorageInfo }>>;
+  /** `removedChannels`: Gemini channels a workspace saved by 1.19 or 1.20 had, dropped on load (Trace runs no Gemini now). */
+  /** `rootDirectory`: the saved project folder when nothing but Gemini channels was saved (`workspace` is null then). */
+  loadWorkspace(): Promise<HostResult<{ workspace: SavedWorkspace | null; info: StorageInfo; removedChannels?: number; rootDirectory?: string }>>;
   saveWorkspace(workspace: SavedWorkspace): Promise<HostResult<null>>;
   listHistory(): Promise<HostResult<SessionHistoryRun[]>>;
   readRunLog(request: { runId: string }): Promise<HostResult<RunLog>>;

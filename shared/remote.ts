@@ -1,10 +1,7 @@
 import type { ChannelEngine } from './types';
 
-/**
- * A channel's engine as phones and linked computers see it. A Gemini channel is listed as 'shell' (a terminal): Trace
- * 1.18.0's linked-computers.ts only accepts claude, codex and shell in a channel list, and would refuse the whole list.
- */
-export type RemoteEngine = Exclude<ChannelEngine, 'gemini'>;
+/** A channel's engine as phones and linked computers see it. */
+export type RemoteEngine = ChannelEngine;
 import type { AccountLabel } from './accounts';
 import type { ChatEnvelope, ChatEvent, ChatRequest } from './chat';
 import type { PlanLimits } from './plan-limits';
@@ -34,7 +31,7 @@ export interface RemoteDevice { id: string; name: string; createdAt: string; las
 /** `computer`: this computer's sync identity, so a phone can tell its channels from those passed on by linked computers. */
 export interface RemoteMe { id: string; name: string; kind: RemoteDeviceKind; canRun: boolean; computer: string | null }
 /**
- * A chat channel's recent events (GET /api/chat-history, and the stream's `chat-replay` event): its current run's last
+ * A chat channel's recent events (the stream's `chat-replay` event): its current run's last
  * 300 events or 2 MB, streamed text folded into its finished message. `runId` is null when nothing was kept.
  */
 export interface ChatReplay { sessionId: string; runId: string | null; events: ChatEvent[] }

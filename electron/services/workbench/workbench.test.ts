@@ -103,6 +103,11 @@ describe('native history and task scope', () => {
     const sent = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(sent.task.status).toBe('active'); expect(sent.prompt).toContain('src/**');
     expect(sent.task.sendId).toMatch(/^t-[0-9a-f]{8}$/); expect(sent.prompt.startsWith(`Task ${sent.task.sendId}: Settings.`)).toBe(true);
     const again = await tasks.execute({ action: 'task-send', id: saved.id }) as any; expect(again.task.sendId).not.toBe(sent.task.sendId); expect(again.prompt).toContain(again.task.sendId);
+    // A task saved while a send waits for git status is kept: the send writes back the list as it is then.
+    const sending = tasks.execute({ action: 'task-send', id: saved.id });
+    const meanwhile = await tasks.execute({ action: 'task-save', title: 'Saved meanwhile', directory: root, sessionId: null, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as any;
+    await sending; expect(tasks.list().map((item) => item.id).sort()).toEqual([saved.id, meanwhile.id].sort());
+    await tasks.execute({ action: 'task-remove', id: meanwhile.id });
     expect(await tasks.execute({ action: 'task-watch' })).toEqual({ changed: { [saved.id]: [] }, warnings: [] });
     // The agent changes its file, and one outside its task.
     fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'changed'); fs.writeFileSync(path.join(root, 'package.json'), '{}');

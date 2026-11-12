@@ -25,7 +25,7 @@ const pastedLabel = () => `Pasted ${new Date().toLocaleTimeString([], { hour: 'n
  */
 async function showClipboardImage(id: string) {
   if (!terminals.get(id)?.run || !window.codingHub) return;
-  // Only Claude Code and Codex read the clipboard image; in a terminal or Gemini CLI it would show as attached and sent
+  // Only Claude Code and Codex read the clipboard image; in a terminal it would show as attached and sent
   // without ever reaching the CLI.
   const config = useWorkspaceStore.getState().sessions.find((item) => item.id === id)?.config; if (!config || !isAgentConfig(config)) return;
   try { const result = await window.codingHub.clipboardImage(); if (result.ok && result.value) addPastedImage(id, { label: pastedLabel(), thumbnail: result.value.thumbnail, full: result.value.full }); }
@@ -147,7 +147,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   element.addEventListener('paste', (event) => {
     const data = event.clipboardData; if (!(MAC || WINDOWS) || !data || data.getData('text/plain') || ![...data.items].some((item) => item.type.startsWith('image/'))) return;
     event.preventDefault(); event.stopPropagation();
-    // Only Claude Code and Codex take the image key; a terminal or Gemini CLI would get a stray key.
+    // Only Claude Code and Codex take the image key; a terminal would get a stray key.
     const config = useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config; if (!config || !isAgentConfig(config)) return;
     void writeTerminal(session.id, WINDOWS ? '\x1bv' : '\x16');
     if (WINDOWS) void showClipboardImage(session.id);
@@ -155,7 +155,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   attachDrop(session.id, element);
   attachCopy(terminal, element);
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
-  terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', gemini: '140;156;255', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
+  terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
   terminal.writeln('Choose a project, then start this session.');
   terminal.writeln('Your local CLI manages authentication and approvals.');
@@ -216,6 +216,13 @@ function acknowledge(sessionId: string, runId: string, bytes: number) {
 export function routeTerminalEvent(event: SessionEvent) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
   if (!session || session.runId !== event.runId) { if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length); return; }
+  // A chat channel (and a Round Table's hidden seats) draws no terminal: none is made for it, with its 5,000 lines of
+  // scrollback. Its run still starts clean.
+  if (isAgentConfig(session.config) && session.config.chat) {
+    if (event.type === 'started') { forgetActivity(event.sessionId); clearPastedImages(event.sessionId); clearTerminalTitle(event.sessionId); }
+    if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length);
+    return;
+  }
   const entry = getTerminal(session);
   if (event.type === 'started') {
     entry.terminal.reset();

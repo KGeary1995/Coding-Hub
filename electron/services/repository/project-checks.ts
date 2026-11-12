@@ -4,7 +4,7 @@ import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import { HubError } from '../cli/engine-adapter';
 import type { CheckName, CheckResult, ProjectAudit } from '../../../shared/project-checks';
-import { hostEnvironment } from '../cli/discovery';
+import { CLEAR_RUN_AS_NODE, hostEnvironment } from '../cli/discovery';
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('inspect'), directory: z.string().max(4096) }).strict(), z.object({ action: z.literal('run'), directory: z.string().max(4096), script: z.enum(['test', 'typecheck', 'lint']) }).strict()]);
 export class ProjectChecks {
   private child: ChildProcess | null = null;
@@ -52,7 +52,8 @@ export class ProjectChecks {
     if (this.running) throw new HubError('CHECK_BUSY', 'A project check is already running.');
     const npm = this.npmCLI();
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [npm, 'run', request.script], { cwd: report.directory, env: { ...hostEnvironment(), ELECTRON_RUN_AS_NODE: '1' }, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); this.child = child;
+      // CLEAR_RUN_AS_NODE: npm runs as Node, but an Electron app its script starts must not inherit that.
+      const child = spawn(process.execPath, [CLEAR_RUN_AS_NODE, npm, 'run', request.script], { cwd: report.directory, env: { ...hostEnvironment(), ELECTRON_RUN_AS_NODE: '1' }, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); this.child = child;
       let output = ''; let truncated = false; let timedOut = false;
       const append = (value: Buffer) => { const text = value.toString(); if (output.length + text.length > 512000) truncated = true; output = (output + text).slice(0, 512000); };
       child.stdout?.on('data', append); child.stderr?.on('data', append);

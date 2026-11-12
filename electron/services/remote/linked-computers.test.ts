@@ -365,7 +365,8 @@ describe('linked computers', () => {
 
   it('passes a linked computer’s chat channels to this window’s tab and this computer’s phones, and their requests back', async () => {
     const RUN = '33333333-3333-4333-8333-333333333333'; const chats: unknown[] = [];
-    const host: RemoteHost = { sessions: () => [{ id: 'pc-chat', title: 'Claude Code', engine: 'claude', chat: true }], running: () => [{ sessionId: 'pc-chat', runId: RUN, pid: 1, cwd: '/p', engine: 'claude' }], write: () => {}, chat: (request) => { chats.push(request); } };
+    // pc-chat leads a Round Table with Codex seated at it (pc-seat).
+    const host: RemoteHost = { sessions: () => [{ id: 'pc-chat', title: 'Claude Code', engine: 'claude', chat: true }, { id: 'pc-seat', title: 'Codex', engine: 'codex', chat: true, seatedAt: 'pc-chat' }], running: () => [{ sessionId: 'pc-chat', runId: RUN, pid: 1, cwd: '/p', engine: 'claude' }], write: () => {}, chat: (request) => { chats.push(request); } };
     const pc = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => pc.stop()); pc.identity = { id: PC, name: 'Obsidian-Halo' }; await pc.setEnabled(true);
     pc.onChat({ sessionId: 'pc-chat', runId: RUN, event: { type: 'user', text: 'before the link', images: 0 } });
     // This computer's own remote, which its phones use; it passes on the linked computer's chats.
@@ -382,10 +383,13 @@ describe('linked computers', () => {
     await until(() => tab.length === 2, 'the live chat event');
     expect(tab[1]).toEqual({ type: 'chat', id: PC, envelope: { sessionId: 'pc-chat', runId: RUN, event: { type: 'delta', messageId: 'm1', text: 'Hello' } } });
     expect(mac.chatHistory(PC, 'pc-chat').events).toHaveLength(2);
+    // Its Round Table reaches this computer's phones as one, not as a plain chat.
+    await until(() => here.channels('phone').some((channel) => channel.sessionId === 'pc-chat'), 'the linked channel');
+    expect(here.channels('phone').find((channel) => channel.sessionId === 'pc-chat')).toMatchObject({ chat: true, table: 'codex' });
 
     // A phone of this computer reads the thread, and its messages reach the run there; it cannot seat a partner there.
     const token = await phoneToken(here); const call = (pathname: string, body?: unknown) => fetch(`http://127.0.0.1:${here.address}${pathname}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    expect(await (await call('/api/chat-history?sessionId=pc-chat')).json()).toMatchObject({ sessionId: 'pc-chat', runId: RUN, events: [{ type: 'user' }, { type: 'delta', text: 'Hello' }] });
+    expect((here as unknown as { chatReplay(sessionId: string, kind: 'phone'): unknown }).chatReplay('pc-chat', 'phone')).toMatchObject({ sessionId: 'pc-chat', runId: RUN, events: [{ type: 'user' }, { type: 'delta', text: 'Hello' }] });
     const send = { action: 'send', sessionId: 'pc-chat', runId: RUN, text: 'from the phone', images: [] };
     expect((await call('/api/chat', send)).status).toBe(200); expect(chats).toEqual([send]);
     here.setCanRun(here.status().devices[0].id, true);

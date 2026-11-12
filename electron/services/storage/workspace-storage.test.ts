@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -34,6 +34,18 @@ function run(storage: WorkspaceStorage) {
 afterEach(() => {
   databases.splice(0).forEach((database) => database.close());
   directories.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+});
+
+describe('a workspace saved with Gemini (1.19, 1.20)', () => {
+  it('keeps the project folder when only Gemini channels were saved', () => {
+    const { root, storage } = open(); storage.close(); databases.splice(databases.indexOf(storage), 1);
+    const at = new Date().toISOString();
+    const gemini = { version: 1, rootDirectory: '/projects/root', layoutMode: 'columns', focusedSessionId: null, sessions: [{ id: 'gem', title: 'Gemini', config: { engine: 'gemini', model: 'gemini-4-argon-high' }, binding: { mode: 'workspace' }, createdAt: at }], tiles: [{ sessionId: 'gem', x: 0, y: 0, w: 12, h: 12, minW: 3, minH: 10 }] };
+    const database = new DatabaseSync(path.join(root, 'storage.db')); database.prepare('INSERT INTO workspace(id,snapshot) VALUES(1,?)').run(JSON.stringify(gemini)); database.close();
+    const reopened = new WorkspaceStorage(root); databases.push(reopened);
+    expect(reopened.loadMigrated()).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/projects/root' });
+    expect(reopened.load()).toBeNull();
+  });
 });
 
 describe('local workspace storage', () => {
@@ -94,6 +106,17 @@ describe('local workspace storage', () => {
     expect(storage.history().map((item) => item.runId).sort()).toEqual([active, second].sort());
     expect(() => storage.readLog({ runId: first })).toThrow('no longer available');
     expect(storage.readLog({ runId: active }).text).toBe('active');
+  });
+
+  it('skips an old log it cannot delete, instead of turning storage off for the launch', () => {
+    const { root, storage } = open(); const snapshot = workspace(); storage.save(snapshot);
+    const old = run(storage); storage.append(old, 'old'); storage.endRun(old, 0); storage.close(); databases.splice(databases.indexOf(storage), 1);
+    // The log is something that cannot be unlinked (a folder stands in for a locked file).
+    const log = path.join(root, 'logs', `${old}.log`); rmSync(log); mkdirSync(log);
+    const reopened = new WorkspaceStorage(root, undefined, { maxCompletedRuns: 0 }); databases.push(reopened);
+    expect(reopened.load()).toEqual(snapshot);
+    // Kept, with its record, to be tried again later.
+    expect(reopened.history().map((item) => item.runId)).toEqual([old]);
   });
 
   it('returns only a bounded tail for a large log', () => {

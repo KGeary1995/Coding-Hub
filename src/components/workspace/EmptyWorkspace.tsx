@@ -60,8 +60,6 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
     return () => window.removeEventListener('keydown', onKey);
   });
   const github = engines?.find((item) => item.provider === 'github');
-  // Gemini CLI has no sign-in check (Accounts does not cover it); its row comes from Local engines discovery.
-  const gemini = useWorkspaceStore((state) => state.engines.find((item) => item.engine === 'gemini'));
   const githubReady = github?.state === 'authenticated';
   return <section className="tr-empty" aria-labelledby="tr-empty-title">
     <div className="tr-nosignal" aria-hidden="true"><span className="tr-nosignal-line" /><span className="tr-nosignal-tag">CH— · no signal</span><span className="tr-nosignal-hint">open a project to arm a channel</span></div>
@@ -84,7 +82,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
         {engines ? <ul className="tr-rows">{engines.map((item) => <li key={item.provider} className="tr-engine-row">
           <span><strong>{ENGINE_NAMES[item.provider]}</strong><span className="tr-row-path">{item.installed ? item.version ?? 'installed' : 'not installed'}</span></span>
           {item.state === 'authenticated' ? <span className="tr-ok">✓ signed in</span> : <button className="tr-signin" onClick={() => setView('accounts')} aria-label={`Sign in to ${ENGINE_NAMES[item.provider]}`}>{item.installed ? 'Sign in' : 'Set up'}</button>}
-        </li>)}{gemini && <li className="tr-engine-row"><span><strong>Gemini CLI</strong><span className="tr-row-path">{gemini.available ? gemini.version ?? 'installed' : 'not installed'}</span></span>{gemini.available && <span className="tr-row-path" title="agy handles its own sign-in; Trace does not check it">sign-in not checked</span>}</li>}</ul> : <p className="tr-empty-note">{window.codingHub ? 'Checking local CLIs…' : 'The desktop app checks local CLIs.'}</p>}
+        </li>)}</ul> : <p className="tr-empty-note">{window.codingHub ? 'Checking local CLIs…' : 'The desktop app checks local CLIs.'}</p>}
       </section>
     </div>
     <button className="quiet-button tr-empty-skip" onClick={onSkip}>Use channels without a project</button>

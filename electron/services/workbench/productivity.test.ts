@@ -53,6 +53,17 @@ describe('durable workflow records and bounded search',()=>{
    expect(item.workspace.sessions[1].config.resumeId).toBeUndefined();expect(item.workspace.sessions[0].preparedRequest).toBeUndefined();const applied=await service.execute({action:'flow-template-apply',id:item.id,directory:target,applyRules:false,applyChecks:true}) as SavedWorkspace;expect(applied.rootDirectory).toBe(target);expect(applied.sessions[0].id).not.toBe(original.sessions[0].id);expect(applied.sessions[0].budget?.tokens).toBe(100);expect(new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>false).templates()).toHaveLength(1);
   }finally{storage.close();}
  });
+ it('refuses a template of Gemini channels only (saved by 1.19 or 1.20) before it writes any rules or checks',async()=>{
+  const data=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);let asked=false;const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>{asked=true;return true;});
+   const id=randomUUID();const at=new Date().toISOString();
+   const gemini={version:1,rootDirectory:null,layoutMode:'columns',focusedSessionId:null,sessions:[{id:'gem',title:'Gemini',config:{engine:'gemini',model:'gemini-4-argon-high'},binding:{mode:'workspace'},createdAt:at}],tiles:[{sessionId:'gem',x:0,y:0,w:12,h:12,minW:3,minH:10}]};
+   fs.writeFileSync(path.join(data,'project-templates.json'),JSON.stringify([{id,name:'Old Gemini',description:'',workspace:gemini,rules:'template rules',checks:[{name:'Check',steps:[{label:'Pass',tool:'python',args:['-c','print(1)']}],timeoutSeconds:10}],createdAt:at}]));
+   expect(service.templates().map((item)=>item.id)).toEqual([id]);
+   const before=rules.read([]).content;
+   await expect(service.execute({action:'flow-template-apply',id,directory:target,applyRules:true,applyChecks:true})).rejects.toMatchObject({code:'TEMPLATE_EMPTY'});
+   expect(asked).toBe(false);expect(rules.read([]).content).toBe(before);expect(checks.data().profiles).toHaveLength(0);
+  }finally{storage.close();}
+ });
  it('searches files, memory and rules (not the removed design annotations) while skipping credential paths and symlink escapes',async()=>{
   const data=root();const project=root();const outside=root();fs.writeFileSync(path.join(project,'source.ts'),'needle source');fs.writeFileSync(path.join(project,'.env'),'needle secret');fs.writeFileSync(path.join(outside,'escape.ts'),'needle escaped');if(process.platform!=='win32')fs.symlinkSync(outside,path.join(project,'linked'));
   fs.mkdirSync(path.join(data,'memory','demo'),{recursive:true});fs.writeFileSync(path.join(data,'memory','demo','note.json'),JSON.stringify({title:'Note',project:'demo',content:'needle handoff'}));fs.writeFileSync(path.join(data,'design-annotations.json'),JSON.stringify([{snapshotId:randomUUID(),text:'needle annotation'}]));const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const current=rules.read([]);rules.save('needle rules',current.revision,[]);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),new Verification(data,async()=>false),rules,storage,async()=>false);const result=await service.execute({action:'flow-search',query:'needle',directory:project,includeOutput:false}) as any;

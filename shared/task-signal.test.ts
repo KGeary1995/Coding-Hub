@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { promptMark, replyToTask, taskSignal } from './task-signal';
+import { promptMark, replyToTask, SIGNAL_INSTRUCTION, taskSignal } from './task-signal';
 
 describe('the reply that belongs to one send of a task', () => {
   it('finds a send by its id, so the same title sent again, or another task with that title, never counts', () => {
@@ -9,6 +9,32 @@ describe('the reply that belongs to one send of a task', () => {
     // The new send's prompt is not in the transcript yet: no reply for it, though the old one said TASK COMPLETE.
     expect(replyToTask(before, now)).toBeNull();
     expect(replyToTask([...before, { role: 'user', text: `${promptMark(now)} Do it.` }, { role: 'assistant', text: 'Done.\nTASK COMPLETE' }], now)).toBe('Done.\nTASK COMPLETE');
+  });
+  it('stops where the next task was sent, so a later task’s TASK COMPLETE never counts for an earlier one', () => {
+    const first = { title: 'Fix it', sendId: 't-aaaaaaaa' }; const second = { title: 'Write the docs', sendId: 't-bbbbbbbb' };
+    const messages = [
+      { role: 'user' as const, text: `${promptMark(first)} ${SIGNAL_INSTRUCTION}` }, { role: 'assistant' as const, text: 'Which file?' },
+      { role: 'user' as const, text: 'the one in src' }, { role: 'assistant' as const, text: 'Still looking.' },
+      { role: 'user' as const, text: `${promptMark(second)} ${SIGNAL_INSTRUCTION}` }, { role: 'assistant' as const, text: 'Docs written.\nTASK COMPLETE' },
+    ];
+    expect(replyToTask(messages, first)).toBe('Still looking.');
+    expect(replyToTask(messages, second)).toBe('Docs written.\nTASK COMPLETE');
+  });
+});
+
+describe('a later task recorded without its instruction', () => {
+  it('still ends the earlier task’s reply, so its TASK COMPLETE never counts for the earlier one', () => {
+    const first = { title: 'Fix it', sendId: 't-cccccccc' }; const second = { title: 'Write the docs', sendId: 't-dddddddd' };
+    // The transcript kept only the start of the second prompt (its first line), not the instruction at its end.
+    const messages = [
+      { role: 'user' as const, text: `${promptMark(first)} ${SIGNAL_INSTRUCTION}` }, { role: 'assistant' as const, text: 'Which file?' },
+      { role: 'user' as const, text: `${promptMark(second)} In the README.` }, { role: 'assistant' as const, text: 'Docs written.\nTASK COMPLETE' },
+    ];
+    expect(replyToTask(messages, first)).toBe('Which file?');
+    expect(replyToTask(messages, second)).toBe('Docs written.\nTASK COMPLETE');
+    // The same task sent again is a new start for it, not another task's prompt.
+    const again = { ...first, sendId: 't-eeeeeeee' };
+    expect(replyToTask([...messages, { role: 'user', text: `${promptMark(again)} ${SIGNAL_INSTRUCTION}` }, { role: 'assistant', text: 'Fixed.\nTASK COMPLETE' }], again)).toBe('Fixed.\nTASK COMPLETE');
   });
 });
 

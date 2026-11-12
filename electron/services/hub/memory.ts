@@ -6,11 +6,17 @@ import type { MemoryNote } from '../../../shared/hub';
 import { HubError } from '../cli/engine-adapter';
 import { readConfig, updateConfig } from './config';
 import { keepBackup } from './file-backups';
+import { isItemNote } from '../../../shared/memory-items';
 
+/** Notes a project keeps listed; past it, the oldest handoffs move to its archive folder. */
+export const MAX_NOTES = 5000;
+const ARCHIVE = 'archive';
+const NOTE_FILE = /^[0-9a-f-]{36}\.json$/;
 export const projectSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
 export const noteSchema = z.object({ id: z.uuid(), project: projectSchema, title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), createdAt: z.iso.datetime(), supersedes: z.uuid().optional() }).loose();
 export class MemoryService {
-  constructor(readonly root: string) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.checkRoot(); }
+  /** `limit`: notes a project keeps listed (MAX_NOTES; smaller in tests). */
+  constructor(readonly root: string, private readonly limit = MAX_NOTES) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.checkRoot(); }
   private checkRoot() { if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real directory, not a symbolic link.'); }
   directory(project: string) { this.checkRoot(); projectSchema.parse(project); const target = path.join(this.root, project); if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory project cannot be a symbolic link.'); return target; }
   /** The memory projects with notes, newest first: key, how many notes, and when the newest was written. */
@@ -22,17 +28,45 @@ export class MemoryService {
     }
     return out.sort((a, b) => b.latest.localeCompare(a.latest)).slice(0, 200);
   }
+  /**
+   * A project's notes by id, with each file's size, archived ones included: from the folder listings and file sizes
+   * alone (no note is read).
+   */
+  sizes(project: string): Map<string, number> {
+    const dir = this.directory(project); const sizes = new Map<string, number>();
+    for (const folder of [dir, path.join(dir, ARCHIVE)]) {
+      if (!fs.existsSync(folder)) continue;
+      for (const e of fs.readdirSync(folder, { withFileTypes: true })) if (e.isFile() && NOTE_FILE.test(e.name)) sizes.set(e.name.slice(0, -5), fs.statSync(path.join(folder, e.name)).size);
+    }
+    return sizes;
+  }
+  /** The ids of a project's archived notes (moved aside to keep it under the limit; kept, but no longer listed). */
+  archived(project: string): Set<string> {
+    const folder = path.join(this.directory(project), ARCHIVE); if (!fs.existsSync(folder)) return new Set();
+    return new Set(fs.readdirSync(folder, { withFileTypes: true }).filter((e) => e.isFile() && NOTE_FILE.test(e.name)).map((e) => e.name.slice(0, -5)));
+  }
+  /**
+   * Room for one more note in a full project: the oldest handoff or summary (never an open item or decision, which stay
+   * in effect until resolved or retired) moves to the project's archive folder. Nothing is deleted.
+   */
+  private makeRoom(project: string, dir: string) {
+    const oldest = this.list(project).filter((note) => !isItemNote(note)).at(-1);
+    if (!oldest) throw new HubError('MEMORY_LIMIT', `This project holds ${this.limit.toLocaleString('en-US')} notes and none can move to its archive: they are open items, decisions or files Trace cannot read. Resolve or retire some open items before adding more.`);
+    fs.mkdirSync(path.join(dir, ARCHIVE), { recursive: true, mode: 0o700 });
+    fs.renameSync(path.join(dir, oldest.id + '.json'), path.join(dir, ARCHIVE, oldest.id + '.json'));
+  }
   list(project: string): MemoryNote[] {
     const dir = this.directory(project); if (!fs.existsSync(dir)) return [];
     const files = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && /^[0-9a-f-]{36}\.json$/.test(e.name));
-    if (files.length > 5000) throw new HubError('MEMORY_LIMIT', 'This project exceeds 5,000 handoffs. Archive older notes before syncing.');
+    if (files.length > this.limit) throw new HubError('MEMORY_LIMIT', `This project exceeds ${this.limit.toLocaleString('en-US')} notes.`);
     const notes: MemoryNote[] = [];
     for (const file of files) { const target = path.join(dir, file.name); if (fs.statSync(target).size > 512000) continue; try { const note = noteSchema.parse(JSON.parse(fs.readFileSync(target, 'utf8'))); if (note.project === project && note.id + '.json' === file.name) notes.push(note); } catch { /* Invalid records are preserved, never executed. */ } }
     return notes.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
   }
   import(input: unknown): boolean {
     const note = noteSchema.parse(input); const dir = this.directory(note.project); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (!fs.existsSync(path.join(dir, note.id + '.json')) && fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && /^[0-9a-f-]{36}\.json$/.test(entry.name)).length >= 5000) throw new HubError('MEMORY_LIMIT', 'This project already contains 5,000 handoffs. Archive older notes before adding more.');
+    // Full: the oldest handoff moves to the archive (kept), so new notes, the automatic summaries among them, still land.
+    if (!fs.existsSync(path.join(dir, note.id + '.json')) && fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && NOTE_FILE.test(entry.name)).length >= this.limit) this.makeRoom(note.project, dir);
     // Write a temporary file and rename it into place so a crash never leaves a truncated note behind
     // (a partial file would block Drive sync for that ID forever). Notes are immutable, so never replace one.
     const target = path.join(dir, note.id + '.json'); const temporary = path.join(dir, `.${randomUUID()}.tmp`);

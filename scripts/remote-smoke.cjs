@@ -194,7 +194,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
     // the same request (linked computers and older phone apps send it), so the chat checks below use that.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
-    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini'], 'the phone\'s + Channel order');
+    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex'], 'the phone\'s + Channel order');
     assert.equal(await phone.getByRole('menuitem', { name: /chat/i }).count(), 0, 'no Claude chat or Codex chat on the phone\'s + Channel');
     await phone.locator('#add-channel').click();
     assert.equal(await phone.evaluate(async () => (await fetch('/api/channel-add', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'claude', chat: true }) })).status), 200);
@@ -242,7 +242,10 @@ else if (args.startsWith('serve --bg --https=443')) {
     await page.locator('.chain-bar').waitFor({ timeout: 90000 });
     const tableBox = page.getByRole('textbox', { name: 'Message to the Round Table' }); await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((area) => area.getAttribute('aria-label') === 'Message to the Round Table' && !area.disabled));
     await tableBox.fill('Plan a footer'); await tableBox.press('Enter');
-    await page.locator('.chain-bar').filter({ hasText: 'plan is ready' }).waitFor({ timeout: 60000 });
+    // Codex challenges the plan next; the stand-in Codex cannot answer, so the challenge stops and is left out.
+    const leaveOut = page.locator('.chain-bar').getByRole('button', { name: 'Continue without the challenge', exact: true });
+    await leaveOut.waitFor({ timeout: 60000 }); await leaveOut.click();
+    await page.locator('.chain-bar').filter({ hasText: 'plan is ready' }).filter({ hasText: 'The challenge was left out at your request.' }).waitFor({ timeout: 60000 });
     await phone.locator('#channel-list button').filter({ hasText: 'Round Table' }).filter({ hasNotText: 'CH3' }).first().click();
     await phone.locator('.phone-chat .chain-bar').filter({ hasText: 'Round Table · hierarchy' }).filter({ hasText: 'Approve plan' }).waitFor({ timeout: 30000 });
     await phone.locator('.phone-chat .chat-author').filter({ hasText: 'Planner' }).first().waitFor({ timeout: 30000 });

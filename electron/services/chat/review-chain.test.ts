@@ -15,9 +15,12 @@ function setup() {
   const reply = async (runId: string, text: string, isError = false) => {
     const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; chains.observe({ sessionId: runs[runId].sessionId, runId, event });
     chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError, error: isError ? 'crashed' : null } }); await new Promise((resolve) => setTimeout(resolve, 0));
+    // The reviewer challenges each task's plan once (review-chain-challenge.test.ts); here it has none.
+    if (challenges.auto && runId === PLANNER && last().chain?.step === 'challenging') await reply(REVIEWER, 'NO CHALLENGES');
   };
+  const challenges = { auto: true };
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
-  return { chains, sent, modes, answers, interrupted, reply, last, runs };
+  return { chains, sent, modes, answers, interrupted, reply, last, runs, challenges };
 }
 
 describe('hierarchy Round Table', () => {
@@ -28,7 +31,7 @@ describe('hierarchy Round Table', () => {
     chains.send(BUILDER, 'Add a footer.', []);
     expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('You are the planner'); expect(sent.at(-1)!.text).toContain('Add a footer.');
     await reply(PLANNER, '1. Edit page.html\n2. Check it\nPLAN READY');
-    expect(last().chain).toMatchObject({ step: 'plan-review', plan: '1. Edit page.html\n2. Check it' }); expect(sent).toHaveLength(1);
+    expect(last().chain).toMatchObject({ step: 'plan-review', plan: '1. Edit page.html\n2. Check it' }); expect(sent.map((item) => item.runId)).toEqual([PLANNER, REVIEWER]);
     chains.plan(BUILDER, true);
     expect(sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(sent.at(-1)!.text).toContain('1. Edit page.html'); expect(last().chain!.step).toBe('implementing');
     await reply(BUILDER, 'Changed page.html.');
@@ -173,8 +176,11 @@ describe('hierarchy Round Table', () => {
     const { chains, sent, reply } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []);
     const brief = 'write the whole plan in your reply, not in a plan file, and do not call ExitPlanMode';
     expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain(brief);
-    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('You are the builder'); expect(sent.at(-1)!.text).not.toContain(brief);
-    await reply(BUILDER, 'Built.'); expect(sent.at(-1)!.runId).toBe(REVIEWER); expect(sent.at(-1)!.text).toContain('You are the reviewer'); expect(sent.at(-1)!.text).not.toContain(brief);
+    // The reviewer is briefed at its first turn: the challenge to the plan.
+    const toReviewer = sent.length;
+    await reply(PLANNER, 'Plan'); expect(sent[toReviewer].runId).toBe(REVIEWER); expect(sent[toReviewer].text).toContain('You are the reviewer'); expect(sent[toReviewer].text).not.toContain(brief);
+    chains.plan(BUILDER, true); expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('You are the builder'); expect(sent.at(-1)!.text).not.toContain(brief);
+    await reply(BUILDER, 'Built.'); expect(sent.at(-1)!.runId).toBe(REVIEWER); expect(sent.at(-1)!.text).not.toContain('You are the reviewer'); expect(sent.at(-1)!.text).not.toContain(brief);
   });
   it('stops at the review when the reviewer ends without findings or NO FINDINGS, and Continue sends the review again', async () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');

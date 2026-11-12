@@ -26,7 +26,7 @@ export function Toasts() {
   useEffect(() => { setDismissed((current) => { const kept = current.filter((key) => activeKeys.split('\n').includes(key)); return kept.length === current.length ? current : kept; }); }, [activeKeys]);
   const keyed = active.filter(({ key }) => !dismissed.includes(key));
   // The restart notice shares the column, so notices never sit on top of each other (an empty column takes no space).
-  return <section className="tr-toasts" aria-label="Channel notifications" aria-live="polite"><RestartNotice />
+  return <section className="tr-toasts" aria-label="Channel notifications" aria-live="polite"><RestartNotice /><LoadNotice />
     {keyed.map(({ alert, session, key }) => {
       const meta = CHANNEL_STATES[alert.state]; const channel = `CH${alert.channel}`;
       return <article key={key} className={`tr-toast ${alert.state}`}>
@@ -42,4 +42,14 @@ export function Toasts() {
       </article>;
     })}
   </section>;
+}
+
+/** What loading the saved workspace changed (Gemini channels removed, as Trace no longer runs Gemini), until dismissed. */
+function LoadNotice() {
+  const notice = useWorkspaceStore((state) => state.loadNotice);
+  if (!notice) return null;
+  return <article className="tr-toast" aria-label="Workspace loaded">
+    <header><strong>Workspace loaded</strong><button className="tr-toast-close" aria-label="Dismiss the workspace notice" onClick={() => useWorkspaceStore.setState({ loadNotice: null })}><X size={14} /></button></header>
+    <p>{notice}</p>
+  </article>;
 }

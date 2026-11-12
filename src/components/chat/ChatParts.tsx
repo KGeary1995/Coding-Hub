@@ -1,7 +1,6 @@
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
-import { GEMINI_STEPS, HIERARCHY_MODELS, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
-import { findingOrigin } from '../../../shared/findings';
+import { HIERARCHY_MODELS, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
@@ -84,7 +83,7 @@ const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
 /** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say YOU. */
-export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner' | 'gemini'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
+export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
   if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
     {author && <p className="chat-author"><i className="seat-hex seat-you" aria-hidden="true" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
@@ -142,8 +141,7 @@ function FindingsList({ findings }: { findings: Finding[] }) {
   const open = findings.filter((finding) => finding.status === 'open').length; const unchecked = findings.filter((finding) => finding.status === 'fixed' || finding.status === 'declined').length;
   return <details className="table-findings"><summary>Findings · {open} open{unchecked ? ` · ${unchecked} to check` : ''} · {findings.length - open - unchecked} verified</summary>
     <ol>{findings.map((finding) => <li key={finding.id} className={`finding-${finding.status}`}><strong>{finding.id} · {finding.severity}</strong> {finding.text}{finding.evidence && <> <code>{finding.evidence}</code></>}
-      {(findingOrigin(finding) || finding.duplicateOf) && <small className="finding-origin">{[findingOrigin(finding), finding.duplicateOf ? `duplicate of ${finding.duplicateOf} (closed by Gemini)` : ''].filter(Boolean).join(' · ')}</small>}
-      <small>{finding.duplicateOf ? 'Closed' : STATUS_LABEL[finding.status]}{finding.response ? ` · Driver: ${finding.response}` : ''}{finding.check ? ` · Reviewer: ${finding.check}` : ''}{finding.reviewedAt ? ` · Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}` : ''}{finding.changedAt ? `, answered on ${finding.changedAt}` : ''}</small></li>)}</ol>
+      <small>{STATUS_LABEL[finding.status]}{finding.response ? ` · Driver: ${finding.response}` : ''}{finding.check ? ` · Reviewer: ${finding.check}` : ''}{finding.reviewedAt ? ` · Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}` : ''}{finding.changedAt ? `, answered on ${finding.changedAt}` : ''}</small></li>)}</ol>
   </details>;
 }
 
@@ -153,43 +151,42 @@ export function modelName(model: string) {
   const known = /^claude-(fable|opus|sonnet|haiku)-(\d+)-(\d+)/.exec(model.trim());
   return known ? `${known[1][0].toUpperCase()}${known[1].slice(1)} ${known[2]}.${known[3]}` : model.trim() || 'Claude';
 }
-const CHAIN_STEPS: { step: string; label: string; of: string[]; gemini?: true }[] = [
-  { step: 'plan', label: 'Plan', of: ['planning'] }, { step: 'challenge', label: 'Challenge', of: ['challenging', 'plan-responding'], gemini: true }, { step: 'approve', label: 'Approve', of: ['plan-review'] }, { step: 'build', label: 'Build', of: ['implementing'] },
-  { step: 'review', label: 'Review', of: ['second-reviewing', 'reviewing', 'comparing'] }, { step: 'fix', label: 'Fix', of: ['fixing'] }, { step: 'final', label: 'Final review', of: ['final', 'final-fixing'] },
+const CHAIN_STEPS: { step: string; label: string; of: string[] }[] = [
+  { step: 'plan', label: 'Plan', of: ['planning'] }, { step: 'challenge', label: 'Challenge', of: ['challenging', 'plan-responding'] }, { step: 'approve', label: 'Approve', of: ['plan-review'] }, { step: 'build', label: 'Build', of: ['implementing'] },
+  { step: 'review', label: 'Review', of: ['reviewing'] }, { step: 'fix', label: 'Fix', of: ['fixing'] }, { step: 'final', label: 'Final review', of: ['final', 'final-fixing'] },
 ];
 const ANSWER_LABEL = { accepted: 'Accepted', rejected: 'Rejected' } as const;
-/** Gemini's challenges to the plan, each with the planner's answer: open while the plan waits for the person. */
+/** Codex's challenges to the plan, each with the planner's answer: open while the plan waits for the person. */
 function ChallengeList({ challenges, plannerName, open }: { challenges: PlanChallenge[]; plannerName: string; open: boolean }) {
-  return <details className="chain-challenges" open={open}><summary>Gemini's challenges · {challenges.length}{challenges.some((item) => item.answer === 'accepted') ? ` · ${challenges.filter((item) => item.answer === 'accepted').length} accepted` : ''}</summary>
+  return <details className="chain-challenges" open={open}><summary>Codex's challenges · {challenges.length}{challenges.some((item) => item.answer === 'accepted') ? ` · ${challenges.filter((item) => item.answer === 'accepted').length} accepted` : ''}</summary>
     <ol>{challenges.map((challenge) => <li key={challenge.id} className={challenge.answer ?? 'unanswered'}><strong>{challenge.id} · {challenge.severity}</strong> {challenge.text}
       <small>{challenge.answer ? `${plannerName}: ${ANSWER_LABEL[challenge.answer]}${challenge.reason ? `, ${challenge.reason}` : ''}` : `${plannerName} did not answer it`}</small></li>)}</ol>
   </details>;
 }
 /**
- * The bar of a hierarchy Round Table: where the task is among plan, (Gemini's) challenge, approve, build, review, fix and
- * final review; the plan approval with Gemini's challenges and the planner's answers; Stop, Continue and Continue without
- * Gemini; each Claude seat's model (used when that seat starts); findings (with who reported each) and a kept message.
+ * The bar of a hierarchy Round Table: where the task is among plan, (Codex's) challenge, approve, build, review, fix and
+ * final review; the plan approval with Codex's challenges and the planner's answers; Stop, Continue and Continue without
+ * the challenge; each seat's model (used when that seat starts); findings and a kept message.
  */
 export function ChainBar({ table, busy, plannerName, builderName, lead, planner, reviewer, onRequest, onModel, detached, seats }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; /** Each seat: who, its role, what it is doing now, and its tokens today. */ seats?: ChainSeat[]; lead?: Session; planner?: Session | null; /** The Codex reviewer (hidden), for its model. */ reviewer?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
-  // The Challenge step shows only at a table with a Gemini seat (or work saved from one).
-  const steps = CHAIN_STEPS.filter((item) => !item.gemini || table.challenger || chain?.challenged);
+  const steps = CHAIN_STEPS;
   const current = steps.findIndex((item) => at && item.of.includes(at));
-  const geminiStopped = step === 'stopped' && Boolean(chain?.stoppedAt && GEMINI_STEPS.includes(chain.stoppedAt));
-  const status = step === 'challenging' ? 'Gemini challenging the plan…' : step === 'plan-responding' ? `${plannerName} answering Gemini's challenges…` : step === 'second-reviewing' ? 'Gemini reviewing, before Codex…' : step === 'comparing' ? 'Gemini comparing its review with Codex\'s…' : step === 'plan-review' && chain?.challenged && !chain.challenges?.length ? `${plannerName}'s plan is ready (Gemini raised no challenges): approve it, or write what to change` : step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${steps[current]?.label ?? ''}…`;
+  const challengeStopped = step === 'stopped' && chain?.stoppedAt === 'challenging';
+  const status = step === 'challenging' ? 'Codex challenging the plan…' : step === 'plan-responding' ? `${plannerName} answering Codex's challenges…` : step === 'plan-review' && chain?.challenged && !chain.challenges?.length && !chain.note ? `${plannerName}'s plan is ready (Codex raised no challenges): approve it, or write what to change` : step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change${chain?.note ? ` (${chain.note})` : ''}` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${steps[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner, reviewer].some((session) => session?.status === 'running' || session?.status === 'starting');
   const model = (session: Session | null | undefined, fallback: string) => session && isAgentConfig(session.config) ? session.config.model || fallback : fallback;
   const setModel = (session: Session | null | undefined, value: string) => { if (session && isAgentConfig(session.config)) onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
-    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-planner" /><i className="seat-claude" /><i className="seat-codex" />{table.challenger && <i className="seat-gemini" />}</span>
+    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-planner" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>
     <ol className="chain-steps" aria-label="Steps">{steps.map((item, index) => <li key={item.step} className={index === current ? 'current' : index < current || step === 'done' ? 'past' : ''} aria-current={index === current ? 'step' : undefined}>{item.label}</li>)}</ol>
     <span className="table-status" aria-live="polite">{detached ? detached.note : status}</span>
     {detached?.onReopen && <button className="button primary" onClick={detached.onReopen}>Reopen</button>}
     {step === 'plan-review' && <button className="button primary" onClick={() => onRequest({ action: 'table-plan', approve: true, note: '' })}>Approve plan</button>}
     {!detached && step === 'stopped' && chain?.stoppedAt && !table.stopping && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
-    {!detached && geminiStopped && !table.stopping && <button className="quiet-button" title="Go on to the next step without Gemini's part of it" onClick={() => onRequest({ action: 'table-continue', skipGemini: true })}>Continue without Gemini</button>}
+    {!detached && challengeStopped && !table.stopping && <button className="quiet-button" title="Show the plan to you without Codex's challenge" onClick={() => onRequest({ action: 'table-continue', skipChallenge: true })}>Continue without the challenge</button>}
     {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
     {onModel && lead && <details className="chain-models"><summary>Models</summary>
       <label>Planner and final review<input aria-label="Planner model" disabled={locked} defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
@@ -197,7 +194,7 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
       {reviewer && <label>Reviewer (Codex)<input aria-label="Reviewer model" disabled={locked} defaultValue={model(reviewer, HIERARCHY_MODELS.reviewer)} onBlur={(e) => setModel(reviewer, e.target.value)} spellCheck={false} /></label>}
       <small>{locked ? 'A running seat keeps its model: stop this channel (which stops all three), change them here, then start it again.' : 'Used when the channel starts again.'}</small>
     </details>}
-    <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop its planner${table.challenger ? ', reviewer and Gemini seat' : ' and reviewer'}`} onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
+    <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {chain?.challenges && chain.challenges.length > 0 && <ChallengeList challenges={chain.challenges} plannerName={plannerName} open={step === 'plan-review'} />}
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
     {seats && <ul className="chain-seats" aria-label="Seats">{seats.map((seat) => <li key={seat.role} className={seat.state === 'working' ? 'working' : ''}><i className={`seat-hex seat-${seat.colour}`} aria-hidden="true" /><strong>{seat.name}</strong>{seat.role} · {seat.state}{seat.tokens ? ` · ${short(seat.tokens)} tok today` : ''}</li>)}</ul>}
@@ -205,5 +202,5 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
   </div>;
 }
 /** One seat at a hierarchy table, for its bar. */
-export interface ChainSeat { role: 'Planner' | 'Builder' | 'Reviewer' | 'Challenger and second reviewer'; name: string; colour: 'planner' | 'claude' | 'codex' | 'gemini'; state: string; tokens: number }
-export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipGemini?: boolean } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean };
+export interface ChainSeat { role: 'Planner' | 'Builder' | 'Reviewer'; name: string; colour: 'planner' | 'claude' | 'codex'; state: string; tokens: number }
+export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean };

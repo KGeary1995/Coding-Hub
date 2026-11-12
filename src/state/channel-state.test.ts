@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
 import { localDay, type UsageRecord } from '../../shared/hub';
-import { CHANNEL_STATES, channelAlerts, channelState, todayTotals } from './channel-state';
+import { CHANNEL_STATES, channelAlerts, channelState, channelToday, channelTokensToday, todayTotals } from './channel-state';
 import { ACTIVITY_WINDOW, activitySamples, forgetActivity, isPersonInput, recordActivity, tickActivity, useActivityStore } from './activity-store';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
 import { arrangeTiles, createSession, savedWorkspace, useWorkspaceStore } from './workspace-store';
@@ -119,5 +119,15 @@ describe('attention in the workspace store', () => {
     state.applyEvent({ type: 'attention', sessionId: id, runId: 'r1', message: 'Again?', at: '2026-10-24T10:01:00.000Z' });
     state.applyEvent({ type: 'answered', sessionId: id, runId: 'r1', at: '2026-10-24T10:00:30.000Z' });
     expect(useWorkspaceStore.getState().sessions[0].attention?.message).toBe('Again?');
+  });
+});
+
+describe('a Round Table channel’s tokens today', () => {
+  it('count every agent at a hierarchy table: the builder, the reviewer and the planner', () => {
+    const lead = { ...session({ id: 'lead' }), roundTable: { partner: 'rev', planner: 'plan', kind: 'hierarchy' as const, driver: 'claude' as const, rounds: 2 } };
+    const sessions = [lead, session({ id: 'rev' }), session({ id: 'plan' })];
+    const records = [usage({ sessionId: 'lead' }), usage({ sessionId: 'rev', runId: 'r2' }), usage({ sessionId: 'plan', runId: 'r3' })];
+    const one = channelToday('lead', records).tokens;
+    expect(channelTokensToday(sessions, 'lead', records)).toBe(one * 3);
   });
 });

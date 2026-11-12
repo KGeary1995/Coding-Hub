@@ -4,7 +4,8 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import type { CLIEngineConfig, RunLog, SavedWorkspace, SessionHistoryRun, StorageInfo } from '../../../shared/types';
 import type { AgentRunningSession } from '../../../shared/ipc';
-import { readRunLogSchema, savedWorkspaceSchema } from '../../../shared/schemas';
+import { legacyWorkspaceSchema, readRunLogSchema, savedWorkspaceSchema } from '../../../shared/schemas';
+import { migrateWorkspace } from '../../../shared/workspace-migration';
 import { HubError } from '../cli/engine-adapter';
 
 interface ActiveLog { fd: number; bytes: number; truncated: boolean; pending: string; timer?: ReturnType<typeof setTimeout> }
@@ -43,11 +44,18 @@ export class WorkspaceStorage {
     } catch (error) { this.database.close(); throw error; }
   }
 
-  load(): SavedWorkspace | null {
+  load(): SavedWorkspace | null { return this.loadMigrated().workspace; }
+  /**
+   * The saved workspace in today's shape: one saved by 1.19 or 1.20 can hold Gemini channels and seats, which are
+   * dropped (migrateWorkspace). `removedChannels`: how many Gemini channels the person had, so the window can say so.
+   */
+  loadMigrated(): { workspace: SavedWorkspace | null; removedChannels: number; rootDirectory: string | null } {
     const row = this.database.prepare('SELECT snapshot FROM workspace WHERE id=1').get();
-    if (!row) return null;
-    try { return savedWorkspaceSchema.parse(JSON.parse(String(row.snapshot))); }
+    if (!row) return { workspace: null, removedChannels: 0, rootDirectory: null };
+    let saved;
+    try { saved = legacyWorkspaceSchema.parse(JSON.parse(String(row.snapshot))); }
     catch { throw new HubError('INVALID_SAVED_WORKSPACE', 'Saved workspace settings could not be read. Existing data was preserved; automatic saving is disabled for this launch.'); }
+    return migrateWorkspace(saved);
   }
 
   save(payload: unknown) {
@@ -143,8 +151,10 @@ export class WorkspaceStorage {
     const completed = this.database.prepare("SELECT runId, endedAt FROM runs WHERE status!='running' ORDER BY startedAt DESC, rowid DESC").all();
     completed.forEach((row, index) => {
       if (index < this.info.maxCompletedRuns && String(row.endedAt) >= cutoff) return;
+      // A log Windows will not delete now (locked, read-only) stays, with its record, and is tried again next time:
+      // one stubborn file must not turn storage off for the whole launch.
       try { unlinkSync(this.logPath(String(row.runId))); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return; }
       this.database.prepare('DELETE FROM runs WHERE runId=?').run(String(row.runId));
     });
   }

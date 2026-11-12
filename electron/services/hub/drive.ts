@@ -61,6 +61,12 @@ export class DriveMirror {
       const root = fs.realpathSync(this.preferences().driveDirectory);
       const mirror = new MemoryService(path.join(root, 'AI-Coding-Hub-Memory'));
       if (fs.realpathSync(mirror.root) === fs.realpathSync(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a shared folder outside the local memory directory.');
+      // Notes are immutable files named by their id: the same names and sizes on both sides means nothing to sync, and no
+      // note is read. This runs every 30 s on the main process, and reading every note there (a Drive folder downloads
+      // files it has not cached) would freeze the window and terminals. A note changed on one side almost always changes
+      // size, so the full read below still finds the conflict.
+      const here = this.local.sizes(project); const there = mirror.sizes(project);
+      if (here.size === there.size && [...here].every(([id, size]) => there.get(id) === size)) return { uploaded: 0, downloaded: 0 };
       // Preflight conflicts before writing either side. Immutable notes make retries idempotent.
       const local = this.local.list(project); const remote = mirror.list(project); const known = new Map(local.map((n) => [n.id, n]));
       for (const note of remote) if (known.has(note.id) && JSON.stringify(known.get(note.id)) !== JSON.stringify(note)) throw new HubError('MEMORY_CONFLICT', 'A Drive note has conflicting contents. No notes were overwritten. Review that file before syncing.');
@@ -70,7 +76,9 @@ export class DriveMirror {
       // the whole directory for every note on each 30-second sync tick.
       // One unreadable or conflicting file must not stop every other note from syncing.
       let failure: unknown = null;
-      for (const note of remote) if (!known.has(note.id)) { try { if (this.local.import(note)) downloaded++; } catch (error) { failure ??= error; } }
+      // A note this computer archived (moved aside when the project was full) is not downloaded again.
+      const archived = this.local.archived(project);
+      for (const note of remote) if (!known.has(note.id) && !archived.has(note.id)) { try { if (this.local.import(note)) downloaded++; } catch (error) { failure ??= error; } }
       for (const note of local) if (!remoteIds.has(note.id)) { try { if (mirror.import(note)) uploaded++; } catch (error) { failure ??= error; } }
       if (failure) throw failure;
       return { uploaded, downloaded };

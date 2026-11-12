@@ -18,7 +18,7 @@ const FILE = 'linked-computers.json';
 const DECLINED = 'linked-computers-declined.json';
 const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), url: z.string().max(500), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), linkedAt: z.iso.datetime() }).strict();
 type Link = z.infer<typeof linkSchema>;
-const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
+const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), table: z.enum(['claude', 'codex']).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
 const RETRY_MAX = 30000;
 /** A chat event from a linked computer: its shape is that computer's (it may be newer), only the envelope is checked. */
 const chatEventSchema = z.object({ type: z.string().min(1).max(40) }).passthrough();
@@ -176,8 +176,6 @@ export class LinkedComputers implements RemoteRelay {
     const link = this.linked(id);
     try { await this.request(link, 'api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chat ? { chat } : {}) }), signal: AbortSignal.timeout(30000) }); }
     catch (error) {
-      // A Trace there from before Gemini CLI channels refuses the engine with 400 "Invalid channel."
-      if (engine === 'gemini' && error instanceof HubError && error.code === 'LINK_FAILED' && /Invalid channel/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add Gemini CLI channels there.`);
       if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to add channels there from here.`); throw error; }
   }
   /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */

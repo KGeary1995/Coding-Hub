@@ -1,13 +1,14 @@
 import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import type { PermissionLevel } from '../../../shared/types';
-import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseFindings } from '../../../shared/findings';
+import { apply, type Finding, findingsFor, MAX_FINDINGS, nextFindingId, parseAnswers, parseFindings, roomForFinding } from '../../../shared/findings';
 
 type Engine = 'claude' | 'codex';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
 export interface TableHost {
   /** `permissions`: the level the person set for the run; at Full a read-only seat runs its commands without asking. */
-  run(runId: string): { sessionId: string; engine: Engine | 'gemini'; cwd: string; owner: number; permissions?: PermissionLevel } | null;
+  /** `busy`: the run is still in a turn it was given before (by an earlier table, say): its `done` has not come yet. */
+  run(runId: string): { sessionId: string; engine: Engine; cwd: string; owner: number; permissions?: PermissionLevel; busy?: boolean } | null;
   send(runId: string, text: string, images: ChatImage[]): void;
   setReadOnly(runId: string, readOnly: boolean): void;
   answer(runId: string, requestId: string, allow: boolean): void;
@@ -39,7 +40,9 @@ export function allowAtFull(host: TableHost, runId: string, requestId: string): 
 /** An answer saying the agent agrees and has nothing to add. */
 const AGREES = /^\s*\**AGREE\**\s*[.!]?\s*$/i;
 
-interface Seat { runId: string; sessionId: string; engine: Engine; busy: boolean; text: string; answer: string | null; briefed: boolean }
+interface Seat { runId: string; sessionId: string; engine: Engine; busy: boolean; text: string; answer: string | null; briefed: boolean;
+  /** Still in a turn from before this table opened: its `done` ends that old turn and is never taken as an answer. */
+  stale?: boolean }
 interface Table {
   owner: number; lead: Seat; partner: Seat; driver: Engine; rounds: number; round: number;
   phase: RoundTableState['phase']; agreed: boolean;
@@ -80,9 +83,7 @@ export class RoundTables {
   }
   private seat(runId: string): Seat {
     const run = this.host.run(runId); if (!run) throw new HubError('TABLE_RUN', 'That chat is not running.');
-    // Gemini sits only at a hierarchy table (review-chain.ts), as its challenger and second reviewer.
-    if (run.engine === 'gemini') throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
-    return { runId, sessionId: run.sessionId, engine: run.engine, busy: false, text: '', answer: null, briefed: false };
+    return { runId, sessionId: run.sessionId, engine: run.engine, busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
   }
   private state(table: Table): RoundTableState {
     return { partner: { sessionId: table.partner.sessionId, runId: table.partner.runId, engine: table.partner.engine }, driver: table.driver, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
@@ -111,7 +112,7 @@ export class RoundTables {
     return `[Trace Round Table] You are in one conversation with the person and ${other}. Trace passes each of you what the other says. ${role} When Trace shows you ${other}'s answer, reply to it briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE. ${record}`;
   }
 
-  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number, saved: { findings?: Finding[]; waiting?: string; waitingImages?: ChatImage[] } = {}): RoundTableState {
+  open(owner: number, leadRunId: string, partnerRunId: string, driver: Engine, rounds: number, saved: { findings?: Finding[]; waiting?: string; waitingImages?: ChatImage[]; rejoin?: boolean } = {}): RoundTableState {
     if (this.tableOf(leadRunId) || this.tableOf(partnerRunId)) throw new HubError('TABLE_TAKEN', 'One of these chats is already at a Round Table.');
     const lead = this.seat(leadRunId); const partner = this.seat(partnerRunId);
     const leadRun = this.host.run(leadRunId)!; const partnerRun = this.host.run(partnerRunId)!;
@@ -122,8 +123,13 @@ export class RoundTables {
     if (saved.waiting !== undefined || saved.waitingImages?.length) table.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) };
     table.kept = Boolean(table.queued);
     this.tables.set(leadRunId, table); this.roles(table);
+    // A seat still at work from before (a table closed while it worked) is stopped; nothing is sent to it until that
+    // turn has ended.
+    for (const seat of [lead, partner]) if (seat.stale) { try { this.host.interrupt(seat.runId); } catch { /* Ended. */ } }
+    // Seated again (both conversations resumed): both know each other already, so no summary and no new brief.
+    if (saved.rejoin) { lead.briefed = true; partner.briefed = true; }
     // A conversation already under way: the leading agent sums it up, and the newcomer gets that plus the latest messages.
-    if (table.recent.length) {
+    else if (table.recent.length && !lead.busy) {
       table.phase = 'joining'; lead.busy = true; lead.text = '';
       this.host.send(lead.runId, `${this.brief(table, lead)}\n\n${NAME[partner.engine]} is joining now. Write a short summary of this conversation for it: the goal, what was decided, the current state and open questions. Reply with only the summary.`, []);
       lead.briefed = true;
@@ -181,10 +187,12 @@ export class RoundTables {
   }
   setRounds(leadRunId: string, rounds: number) { const table = this.leading(leadRunId); table.rounds = Math.max(0, Math.min(5, rounds)); this.publish(table); return this.state(table); }
 
-  /** Stops both agents and ends the discussion; the table stays. */
+  /**
+   * Stops both agents and ends the discussion; the table stays. A message the person already sent is kept: it goes to
+   * both as soon as they have stopped (it was shown as sent, so it is not dropped).
+   */
   stop(leadRunId: string) {
-    // A message kept from before a restart waits for the person's own Send now or Drop it.
-    const table = this.leading(leadRunId); if (!table.kept) table.queued = null; table.round = table.rounds;
+    const table = this.leading(leadRunId); table.round = table.rounds;
     for (const seat of [table.lead, table.partner]) if (seat.busy) this.host.interrupt(seat.runId);
     table.phase = table.lead.busy || table.partner.busy ? table.phase : 'idle'; this.publish(table);
   }
@@ -220,6 +228,13 @@ export class RoundTables {
     }
     if (event.type === 'permission' && seat.engine !== table.driver && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
+    // The end of a turn from before this table opened: the seat is free, and a message waiting for it goes now.
+    if (seat.stale) {
+      seat.busy = false; seat.stale = false; seat.text = '';
+      if (!table.lead.busy && !table.partner.busy && !table.reviewing && table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); }
+      else { if (!table.lead.busy && !table.partner.busy && table.phase !== 'joining') table.phase = 'idle'; this.publish(table); }
+      return null;
+    }
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     this.settle(table, seat);
     return null;
@@ -278,14 +293,17 @@ export class RoundTables {
   private async review(table: Table) {
     const driver = table.lead.engine === table.driver ? table.lead : table.partner; const reviewer = this.other(table, driver);
     const changed: Finding[] = []; const at = new Date().toISOString();
+    let full = 0;
     for (const found of parseFindings(reviewer.answer ?? '')) {
-      if (table.findings.length >= MAX_FINDINGS) break;
-      const finding: Finding = { id: `F${table.findings.length + 1}`, ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: table.round, at };
+      if (!roomForFinding(table.findings)) { full++; continue; }
+      const finding: Finding = { id: nextFindingId(table.findings), ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: table.round, at };
       table.findings.push(finding); changed.push(finding);
     }
     for (const [seat, role] of [[reviewer, 'reviewer'], [driver, 'driver']] as const) for (const { id, verb, note } of parseAnswers(seat.answer ?? '', role)) {
       const finding = table.findings.find((item) => item.id === id); if (finding && apply(finding, verb, note) && !changed.includes(finding)) changed.push(finding);
     }
+    // A full record (MAX_FINDINGS, none verified to make room) says so, rather than dropping findings without a word.
+    if (full) this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text: `The review record is full (${MAX_FINDINGS} findings, none verified), so ${full} new ${full === 1 ? 'finding was' : 'findings were'} not recorded. Close the table to save the record to shared memory, then open it again.` } });
     if (!changed.length || !this.host.stateOf) { if (changed.length) this.publish(table); return; }
     const [before, after] = await Promise.all([table.turnStart ?? Promise.resolve(null), this.host.stateOf(table.cwd).catch(() => null)]);
     const short = after ? after.slice(0, 12) : null; const moved = before !== null && after !== null && before !== after;
@@ -299,7 +317,7 @@ export class RoundTables {
   private remember(runId: string, event: ChatEvent) {
     const line = event.type === 'user' ? `The person: ${event.text}` : event.type === 'assistant' ? event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n') : '';
     if (!line.trim()) return;
-    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? run.engine === 'gemini' ? 'Gemini' : NAME[run.engine] : 'Agent'}: `;
+    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? NAME[run.engine] : 'Agent'}: `;
     const list = this.recent.get(runId) ?? []; list.push(`${who}${line.slice(0, 2000)}`); if (list.length > RECENT * 2) list.splice(0, list.length - RECENT * 2);
     this.recent.set(runId, list);
   }

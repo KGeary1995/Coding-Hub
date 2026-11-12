@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apply, type Finding, findingOrigin, findingsFor, parseAnswers, parseChallengeAnswers, parseChallenges, parseComparison, parseFindings } from './findings';
+import { apply, type Finding, findingsFor, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings } from './findings';
 
 const finding = (extra: Partial<Finding> = {}): Finding => ({ id: 'F1', severity: 'high', evidence: 'src/a.ts:12', text: 'Leaks the token', status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: 0, at: '2026-11-10T00:00:00.000Z', ...extra });
 
@@ -29,15 +29,21 @@ describe('review record lines', () => {
     expect(findingsFor(list, 'driver')).toContain('F1 (high, src/a.ts:12): Leaks the token'); expect(findingsFor(list, 'driver')).not.toContain('F2');
     expect(findingsFor(list, 'reviewer')).toContain('F2 (high, src/a.ts:12, fixed: done)'); expect(findingsFor([finding({ status: 'verified' })], 'driver')).toBe('');
   });
-  it('reads Gemini’s challenges, the planner’s answers and Gemini’s comparison, in the forms agents write them', () => {
+  it('reads the reviewer’s challenges and the planner’s answers, in the forms agents write them', () => {
     expect(parseChallenges('Notes\nCHALLENGE high — misses mobile\n- **CHALLENGE** (low): simpler with CSS\nCHALLENGE nope')).toEqual([{ severity: 'high', text: 'misses mobile' }, { severity: 'low', text: 'simpler with CSS' }]);
     expect(parseChallengeAnswers('ACCEPTED C1\nREJECTED C2 — out of scope\nREJECTED X3')).toEqual([{ id: 'C1', answer: 'accepted', reason: '' }, { id: 'C2', answer: 'rejected', reason: 'out of scope' }]);
-    expect(parseComparison('AGREE F3\nDISPUTE F4 — not reachable\nDUPLICATE F5 of F1\nDUPLICATE F6\nCOMPARED')).toEqual([{ id: 'F3', verdict: 'agree', of: null, note: '' }, { id: 'F4', verdict: 'dispute', of: null, note: 'not reachable' }, { id: 'F5', verdict: 'duplicate', of: 'F1', note: '' }]);
   });
-  it('says where a finding came from and what Gemini said, and leaves duplicates out of what is waiting', () => {
-    expect(findingOrigin(finding())).toBe(''); expect(findingOrigin(finding({ source: 'gemini' }))).toBe('from Gemini');
-    expect(findingOrigin(finding({ gemini: 'dispute', geminiNote: 'wrong file' }))).toBe('from Codex; Gemini disputes: wrong file');
-    expect(findingsFor([finding({ gemini: 'agree' }), finding({ id: 'F2', duplicateOf: 'F1' })], 'driver')).toContain('F1 (high, src/a.ts:12, from Codex; Gemini agrees)');
-    expect(findingsFor([finding({ id: 'F2', duplicateOf: 'F1' })], 'driver')).toBe('');
+  it('writes nothing about Gemini, even for a finding saved by 1.20 with Gemini’s marks, and leaves 1.20’s duplicates out of what is waiting', () => {
+    const waiting = findingsFor([finding({ source: 'gemini', gemini: 'agree', geminiNote: 'right' }), finding({ id: 'F2', duplicateOf: 'F1' })], 'driver');
+    expect(waiting).toContain('F1 (high, src/a.ts:12): '); expect(waiting).not.toMatch(/gemini/i); expect(waiting).not.toContain('F2 (');
+  });
+});
+
+describe('only the fixed forms count', () => {
+  it('takes FINDING and CHALLENGE in capitals, any case of severity, and leaves ordinary sentences alone', () => {
+    expect(parseFindings('Finding: high quality work overall\nFinding: low-risk change\nfinding medium nothing')).toEqual([]);
+    expect(parseFindings('FINDING High a.ts:1 — real')).toEqual([{ severity: 'high', evidence: 'a.ts:1', text: 'real' }]);
+    expect(parseChallenges('Challenge: high hopes for this plan')).toEqual([]);
+    expect(parseChallenges('CHALLENGE MEDIUM — misses tests')).toEqual([{ severity: 'medium', text: 'misses tests' }]);
   });
 });

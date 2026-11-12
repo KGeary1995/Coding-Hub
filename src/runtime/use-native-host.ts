@@ -6,7 +6,7 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, leadOf, savedWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, leadOf, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
@@ -79,8 +79,8 @@ export function useNativeHost() {
       if (event.type === 'answered' && event.finished) taskTurnDone(event.sessionId);
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-      // A chat's thread: Claude Code's or Codex's, or a hierarchy table's Gemini seat (which never resumes).
-      const chatRun = before && (isAgentConfig(before.config) || before.config.engine === 'gemini') && before.config.chat === true;
+      // A chat's thread: Claude Code's or Codex's.
+      const chatRun = before && isAgentConfig(before.config) && before.config.chat === true;
       if (event.type === 'started' && before && chatRun) chatStarted(event.sessionId, event.runId, isAgentConfig(before.config) && Boolean(before.config.resumeId));
       if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
@@ -106,7 +106,7 @@ export function useNativeHost() {
     void host.loadWorkspace().then((result) => {
       if (cancelled) return;
       if (!result.ok) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: result.error.message }); return; }
-      useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info);
+      useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info, result.value.removedChannels, result.value.rootDirectory);
       loaded = true;
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
@@ -146,7 +146,8 @@ export async function startSession(id: string) {
     if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);
   }
   if (!window.codingHub) { state.setSessionError(id, 'Live sessions require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
-  const cwd = session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory;
+  // A Round Table's lead starts in its table's folder (its hidden seats keep theirs), so the table can be seated again.
+  const cwd = tableDirectory(state.sessions, session) ?? (session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory);
   if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository directory first.', true); return; }
   state.markStarting(id);
   try {
@@ -162,7 +163,7 @@ export async function startSession(id: string) {
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
   // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
-  // A hierarchy table's planner and Gemini seat too: its hidden seats start together.
+  // A hierarchy table's planner too: its hidden seats start together.
   const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
   await Promise.all(seats.map((seat) => lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));

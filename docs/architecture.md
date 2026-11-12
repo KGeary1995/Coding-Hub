@@ -6,7 +6,7 @@ Line numbers below are for orientation. Check them against the code, which moves
 
 ```text
 renderer (src/, sandboxed)  ── window.codingHub (preload) ──►  host (electron/main.ts + electron/services/)
-        ▲   zustand stores                                     │   node-pty / pipes ──► claude, codex, agy, shell
+        ▲   zustand stores                                     │   node-pty / pipes ──► claude, codex, shell  
         └── session, usage, chat… events ◄─────────────────────┘   loopback HTTP ◄── Claude hooks, phone, linked computers
 phone/ (PWA, no framework) ── HTTPS via Tailscale serve ──► RemoteServer (127.0.0.1:47821)
 shared/  typed contracts and pure logic used by both sides
@@ -90,7 +90,7 @@ shared/  typed contracts and pure logic used by both sides
    - Terminal channels use node-pty. Output is batched (16 ms / 32 KB) with flow control: pause above 1 MB unacknowledged, resume below 256 KB.
    - Chat channels use plain pipes and a JSON protocol, so raw writes and raw phone typing are refused; phones and linked computers send chat requests instead (`PtyManager.chatRemote`), and every chat event also goes to the remote's streams (`RemoteServer.onChat`, with a bounded per-channel replay).
    - `shell` channels skip every agent feature and aren't recorded.
-   - `gemini` channels run Gemini CLI (`agy`) in a PTY with `--model gemini-4-argon-high` and their permission flag (`buildGeminiLaunch`). Like `shell`, they skip `prepareLaunch` and `onStarted` (no rules, telemetry, attention, memory or recording). `GeminiChannelConfig` is a channel type outside `CLIEngine`; `isAgentConfig()` marks the Claude and Codex configs that have chat, resume and the rest. Remote channel lists report it as `shell` (`RemoteEngine`). A `gemini` config with `chat: true` is a hierarchy Round Table's hidden Gemini seat instead: `agy acp` over plain pipes (`buildGeminiChatLaunch`, `spawnChatProcess`) with `GeminiStream` speaking ACP; it also skips `prepareLaunch` and `onStarted`. `ReviewChains` compares `repositoryState` before and after each of its steps and stops the table on any change.
+   - `isAgentConfig()` marks the Claude and Codex configs, which have chat, resume and the rest; `shell` is the only other channel type. Gemini channels and the hierarchy table's Gemini seat (1.19, 1.20) are gone: `legacyWorkspaceSchema` still reads a workspace that holds them, and `migrateWorkspace` (`shared/workspace-migration.ts`) drops them on load, in the host (`WorkspaceStorage.loadMigrated`) and in the window (`hydrate`). A hierarchy table is three seats: `ReviewChains` gives the plan to the Codex reviewer once per task to challenge (`challenging`), the planner answers (`plan-responding`), and the person approves (`plan-review`).
 6. **While it runs:**
    - Output goes to `logs/<runId>.log`, the renderer and the phone.
    - `TelemetryService` polls the CLI's own transcript every 750 ms:

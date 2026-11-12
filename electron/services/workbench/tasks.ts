@@ -35,7 +35,7 @@ export class Tasks {
   list(): Task[] { return load(this.root, 'tasks.json', z.array(task).max(200), []); }
   private write(tasks: Task[]) { save(this.root, 'tasks.json', tasks); }
   async execute(input: unknown): Promise<Task[] | Task | TaskAudit | TaskSent | TaskWatch | TaskDetail | null> {
-    const request = schema.parse(input); const tasks = this.list(); if (request.action === 'task-list') return tasks;
+    const request = schema.parse(input); let tasks = this.list(); if (request.action === 'task-list') return tasks;
     if (request.action === 'task-save') {
       if (!request.id && tasks.length >= 200) throw new HubError('TASK_LIMIT', 'Up to 200 tasks are kept. Remove finished ones to add more.');
       if (request.id && !tasks.some((t) => t.id === request.id)) throw new HubError('TASK_MISSING', 'This task is no longer here.');
@@ -55,7 +55,9 @@ export class Tasks {
         if (!current.sessionId) throw new HubError('TASK_CHANNEL', 'Choose the channel to give this task to first.');
         // What was already changed when the task was sent is not this task's work.
         const files = await changedFiles(current.directory);
-        const { outcome: _old, outcomeNote: _note, ...rest } = current; // A new id each send, in the prompt, so its replies are told apart from an earlier send's or another task's.
+        // Read again after waiting for Git: a task saved, moved or removed meanwhile must not be overwritten by this list.
+        tasks = this.list(); const latest = tasks.find((t) => t.id === request.id); if (!latest) throw new HubError('TASK_MISSING', 'This task is no longer here.');
+        const { outcome: _old, outcomeNote: _note, ...rest } = latest; // A new id each send, in the prompt, so its replies are told apart from an earlier send's or another task's.
         value = { ...rest, status: 'active', sentAt: new Date().toISOString(), sendId: `t-${randomUUID().replace(/-/g, '').slice(0, 8)}`, baseline: Object.fromEntries(files ?? []) };
       }
       this.write([...tasks.filter((t) => t.id !== value.id), value]);

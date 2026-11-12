@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, discoverGemini, findGeminiExecutable, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, windowsRegistryPath, withoutAgentSession } from './discovery';
+import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, findExecutable, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, windowsRegistryPath, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -96,27 +96,16 @@ describe('Windows PATH changes made while Trace runs', () => {
   });
 });
 
-describe('Gemini CLI discovery', () => {
-  it('finds agy by name on PATH and ignores an npm shim of the same name', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'trace agy ')); directories.push(root);
-    const shimOnly = path.join(root, 'shim'); const bin = path.join(root, 'bin'); await mkdir(shimOnly); await mkdir(bin);
-    const name = process.platform === 'win32' ? 'agy.exe' : 'agy';
-    await writeFile(path.join(shimOnly, 'agy.cmd'), '@echo off'); await writeFile(path.join(bin, name), '', { mode: 0o755 });
-    const found = await findGeminiExecutable({ PATH: [shimOnly, bin].join(path.delimiter) });
-    expect(found).toEqual({ file: path.join(bin, name), prefixArgs: [], extraEnv: {}, displayPath: path.join(bin, name) });
-  });
-  it('says how to install agy when it is not on PATH', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'trace no agy ')); directories.push(root);
-    await expect(findGeminiExecutable({ PATH: root })).rejects.toMatchObject({ code: 'CLI_NOT_FOUND', message: expect.stringContaining('Gemini CLI (agy) was not found on PATH') });
-    const result = await discoverGemini({ PATH: root });
-    expect(result).toMatchObject({ executable: null, info: { engine: 'gemini', available: false, error: expect.stringContaining('Gemini CLI (agy) was not found on PATH') } });
-  });
-  it('reads the version and the flags Gemini channels need from agy --help, which agy prints on stderr', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'trace fake agy ')); directories.push(root);
-    // A Node script stands in for agy here (the PATH lookup is tested above).
-    const script = path.join(root, 'agy.cjs');
-    await writeFile(script, "if (process.argv[2] === '--version') console.log('1.5.6'); else console.error(['Usage of agy.exe:', '  --dangerously-skip-permissions  Auto-approve', '  --mode  Set the agent execution mode', '  --model  Model for the current CLI session', '', 'Available subcommands:', '  acp             Start the Agent Client Protocol (ACP) stdio server'].join('\\n'));");
-    const result = await discoverGemini({ PATH: '' }, async () => ({ file: process.execPath, prefixArgs: [script], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: script }));
-    expect(result.info).toMatchObject({ engine: 'gemini', available: true, version: '1.5.6', supportsModel: true, supportsMode: true, supportsSkipPermissions: true, supportsAcp: true, authentication: { state: 'unknown' } });
+
+describe('npm launchers on Windows', () => {
+  it.skipIf(process.platform !== 'win32')('never runs a .cmd launcher itself: one it cannot read is refused, and an executable later on PATH is used', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'trace shim ')); directories.push(root);
+    const shim = path.join(root, 'shim'); const bin = path.join(root, 'bin'); await mkdir(shim); await mkdir(bin);
+    // A launcher whose package Trace cannot find: cmd.exe would run it, and treat & or | in arguments as commands.
+    await writeFile(path.join(shim, 'claude.cmd'), '@echo off\r\nnode "%~dp0\missing\cli.js" %*\r\n');
+    await expect(findExecutable('claude', { PATH: shim })).rejects.toThrow();
+    await writeFile(path.join(bin, 'claude.exe'), 'MZ');
+    const found = await findExecutable('claude', { PATH: [shim, bin].join(path.delimiter) });
+    expect(found.file).toBe(path.join(bin, 'claude.exe')); expect(found.file).not.toMatch(/\.cmd$/i);
   });
 });

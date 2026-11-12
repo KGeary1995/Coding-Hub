@@ -342,11 +342,11 @@ it('refuses the next handoff before exceeding the readable project limit', () =>
 // 5,000 real files: Windows runners with on-access scanning take 6-10 s, past the 5 s default.
 }, 30_000);
 
-it('does not rescan every handoff for every unchanged note during Drive sync', () => {
+it('reads no note at all when both sides already hold the same notes', () => {
  const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
  for(let i=0;i<20;i++)local.write('shared',`Note ${i}`,'Ready for the next session','human');
  const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));drive.sync('shared');
- const scans=vi.spyOn(MemoryService.prototype,'list');expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).toHaveBeenCalledTimes(2);
+ const scans=vi.spyOn(MemoryService.prototype,'list');expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).not.toHaveBeenCalled();
 });
 
 it('never guesses a rollout after overlapping same-directory Codex runs exit', () => {
@@ -395,5 +395,26 @@ describe('Claude context in use', () => {
     const event = parseUsage('claude', { type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', usage: { input_tokens: 5, cache_read_input_tokens: 200000, cache_creation_input_tokens: 40000, output_tokens: 761 } } }, 'fallback')!;
     expect(event.context).toEqual({ used: 240766, limit: 0 });
     expect(parseUsage('claude', { type: 'assistant', message: { id: 'm2', usage: { input_tokens: 0, output_tokens: 0 } } }, 'm')!.context).toBeNull();
+  });
+});
+
+describe('a project full of notes', () => {
+  const note = (title: string, minute: number) => ({ id: randomUUID(), project: 'full', title, content: 'Body', author: 'human' as const, createdAt: `2026-11-12T00:${String(minute).padStart(2, '0')}:00.000Z` });
+  it('moves its oldest handoff to the archive to take a new note, never an open item, and Drive sync does not bring it back', () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 3);
+    const oldest = note('Oldest handoff', 1); const item = note('Open item: still to do', 0); const middle = note('Middle handoff', 2);
+    for (const each of [oldest, item, middle]) memory.import(each);
+    const newest = note('Automatic summary', 3); expect(memory.import(newest)).toBe(true);
+    expect(memory.list('full').map((n) => n.title).sort()).toEqual(['Automatic summary', 'Middle handoff', 'Open item: still to do']);
+    expect([...memory.archived('full')]).toEqual([oldest.id]); expect(memory.sizes('full').has(oldest.id)).toBe(true);
+    // The Drive copy still holds the archived note: it is not downloaded into the full project again.
+    const folder = path.join(root, 'drive'); new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')).import(oldest);
+    const drive = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
+    expect(drive.sync('full').downloaded).toBe(0); expect(memory.archived('full').has(oldest.id)).toBe(true);
+  });
+  it('says what to do when every note is an open item or decision', () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 2);
+    memory.import(note('Open item: one', 1)); memory.import(note('Decision: two', 2));
+    expect(() => memory.import(note('A handoff', 3))).toThrow(/Resolve or retire/);
   });
 });

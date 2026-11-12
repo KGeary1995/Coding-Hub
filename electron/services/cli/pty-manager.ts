@@ -6,18 +6,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { CLIEngine, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
+import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
 import { isAgentConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
-import { MAX_CHANNELS, ackSessionSchema, permissionLevel, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
-import { buildGeminiChatLaunch, buildGeminiLaunch, buildLaunch, HubError, launchedLevel } from './engine-adapter';
-import { discoverEngine, discoverGemini, hostEnvironment, type DiscoveredEngine } from './discovery';
+import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
+import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
+import { discoverEngine, hostEnvironment } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
-import { GeminiStream } from '../chat/gemini-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
 import { ReviewChains } from '../chat/review-chain';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
@@ -88,6 +87,8 @@ interface ManagedRun {
   title?: string;
   /** A chat channel: Claude's structured messages, turned into chat events for the window. */
   chat?: ChatStream;
+  /** A chat run was sent a message and has not ended that turn yet (its `done` has not come). */
+  turnOpen?: boolean;
 }
 
 export class PtyManager {
@@ -96,12 +97,11 @@ export class PtyManager {
   private closing = false;
   private spawn: Spawn;
   private discover: typeof discoverEngine;
-  private discoverGemini: typeof discoverGemini;
   private environment: () => Record<string, string>;
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; discoverGemini?: typeof discoverGemini; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
       abandonLaunch?: (session: AgentRunningSession) => void;
       /** Runs just seated at a Round Table without a tile of their own (partner, reviewer, planner). */
@@ -111,7 +111,6 @@ export class PtyManager {
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
-    this.discoverGemini = dependencies.discoverGemini ?? discoverGemini;
     this.environment = dependencies.environment ?? hostEnvironment;
   }
 
@@ -206,26 +205,14 @@ export class PtyManager {
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
       const baseEnvironment = this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
-      // A chat run: Claude Code or Codex in structured mode, or a Round Table's Gemini seat (agy's ACP server).
-      const chat = (isAgentConfig(request.config) || request.config.engine === 'gemini') && request.config.chat === true;
+      // A chat run: Claude Code or Codex in structured mode.
+      const chat = isAgentConfig(request.config) && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const program = shellProgram(baseEnvironment);
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
         session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
         ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-      } else if (request.config.engine === 'gemini') {
-        // Gemini CLI (agy) in a terminal: its fixed model and permission flags only. No rules, telemetry, attention hooks,
-        // memory or usage: prepareLaunch and onStarted are for Claude Code and Codex. A Round Table's Gemini seat is agy's
-        // ACP server instead, its model and plan mode set in the protocol (GeminiStream).
-        const engine = await this.discoverGemini(baseEnvironment);
-        const launch = chat ? buildGeminiChatLaunch(request.config, engine.info) : buildGeminiLaunch(request.config, engine.info);
-        if (chat) level = permissionLevel(request.config);
-        if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The Gemini CLI executable is unavailable.');
-        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
-        session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'gemini', pid: 0, cwd };
-        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...launch];
-        env = { ...baseEnvironment, ...engine.executable.extraEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       } else {
         const profileEnvironment = this.dependencies.profileEnvironment;
         if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
@@ -252,7 +239,7 @@ export class PtyManager {
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
       this.runs.set(request.sessionId, run); prepared = null;
-      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd } } : {}, level);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
       else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-8192);
@@ -282,7 +269,7 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string } }, permissions: PermissionLevel) {
+  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions }, permissions: PermissionLevel) {
     const { sessionId, runId } = run.session;
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
@@ -294,11 +281,12 @@ export class PtyManager {
       if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
+      if (event.type === 'done') run.turnOpen = false;
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') { try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } try { this.chains.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } }
     };
-    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { cwd: protocol.gemini.cwd, permissions }) : new ClaudeStream(write, emit, permissions);
+    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : new ClaudeStream(write, emit, permissions);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
@@ -331,7 +319,8 @@ export class PtyManager {
     const request = parsed.data;
     if (request.action === 'send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
-      run.chat.send(request.text, request.images);
+      // Before the send: a stream that fails at once emits `done` during send(), which must leave the run not busy.
+      run.turnOpen = true; run.chat.send(request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
@@ -344,15 +333,14 @@ export class PtyManager {
     else if (request.action === 'table-open' && request.kind === 'hierarchy') {
       // A hierarchy seats three runs of one window: the builder (this chat), the reviewer (partner) and the planner.
       if (!request.planner) throw new HubError('TABLE_PLANNER', 'A hierarchy Round Table needs its planner chat.');
-      // With agy found, a fourth: the Gemini seat (challenger and second reviewer).
-      if (find(request.partner).owner !== owner || find(request.planner).owner !== owner || (request.challenger && find(request.challenger).owner !== owner)) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
-      this.chains.open(owner, request.runId, request.partner.runId, request.planner.runId, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}), ...(request.chain ? { chain: request.chain } : {}) }, request.challenger?.runId);
+      if (find(request.partner).owner !== owner || find(request.planner).owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
+      this.chains.open(owner, request.runId, request.partner.runId, request.planner.runId, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}), ...(request.chain ? { chain: request.chain } : {}) });
       this.seated([request.partner.runId, request.planner.runId]);
     }
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
-      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
+      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.rejoin ? { rejoin: true } : {}), ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
       this.seated([request.partner.runId]);
     }
     else if (request.action === 'table-send') {
@@ -361,7 +349,7 @@ export class PtyManager {
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
-    else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipGemini === true);
+    else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
     else if (this.chains.has(request.runId)) {
       // A hierarchy's roles and rounds are fixed; the rest works as at any table.
       if (request.action === 'table-waiting') this.chains.waiting(request.runId, request.send);
@@ -381,8 +369,8 @@ export class PtyManager {
   /** Hierarchy Round Tables (plan, build, review, fix, final review), on the same chat runs. */
   private readonly chains = new ReviewChains(this.tableHost());
   private tableHost(): TableHost { return {
-    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex' | 'gemini', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions() } : null; },
-    send: (runId, text, images) => this.chatRun(runId)?.chat?.send(text, images),
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
+    send: (runId, text, images) => { const run = this.chatRun(runId); if (!run?.chat) return; run.turnOpen = true; run.chat.send(text, images); },
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),

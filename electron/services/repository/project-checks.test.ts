@@ -17,3 +17,10 @@ it('finds scoped instructions, skips dependencies, and runs only confirmed named
   const success = await checks.execute({ action: 'run', directory: root, script: 'test' }, async () => true); expect(success).toMatchObject({ exitCode: 0 }); expect('output' in success && success.output).toContain('123');
   expect(await checks.execute({ action: 'run', directory: root, script: 'lint' }, async () => true)).toMatchObject({ exitCode: 7 });
 });
+it('runs npm without handing ELECTRON_RUN_AS_NODE to what the script starts (an Electron app under test would start as Node)', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-checks-')); roots.push(root);
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "console.log(\'RUN_AS_NODE=\' + (process.env.ELECTRON_RUN_AS_NODE || \'unset\'))"' } }));
+  const checks = new ProjectChecks(() => { throw new Error('Rules missing'); });
+  const result = await checks.execute({ action: 'run', directory: root, script: 'test' }, async () => true);
+  expect('output' in result && result.output).toContain('RUN_AS_NODE=unset');
+});

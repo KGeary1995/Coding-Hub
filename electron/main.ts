@@ -32,7 +32,7 @@ import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine, discoverGemini, findExecutable, hostEnvironment } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -54,7 +54,7 @@ import { ScreenShare } from './services/remote/screen-share';
 import { MAX_DISPLAYS, SCREEN_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
-import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
+import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
@@ -136,10 +136,14 @@ const manager = new PtyManager((owner, event) => {
     const ended = hub?.telemetry ? hub.telemetry.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); return transcript; }) : Promise.resolve(null);
     void autoMemory?.finish(event.runId, ended).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
-  if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
-  if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
+  // After the window has the event: naming the channel reads the saved workspace, which can fail, and a failed alert
+  // must not leave a stopped channel showing as running.
+  try {
+    if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
+    if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
+  } catch { hostHealth?.record('desktop-alert-failed'); }
 }, { onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
@@ -179,7 +183,7 @@ const manager = new PtyManager((owner, event) => {
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
-  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isAgentConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
@@ -242,7 +246,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
@@ -286,11 +290,12 @@ async function screenRequest(owner: number, payload: unknown) {
 async function remoteUpdate(): Promise<string> {
   if (updates && updates.status().phase !== 'disabled') return updates.remoteInstall();
   if (process.platform !== 'darwin' || !app.isPackaged) throw new HubError('UPDATES_DISABLED', 'This copy of Trace is updated by hand (a portable or source copy).');
-  const version = await latestMacVersion(); if (!version) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
-  if (version === app.getVersion()) return `Trace ${version} there is already the latest version.`;
+  const release = await latestMacRelease(); if (!release) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
+  const { version } = release;
+  if (!isNewerVersion(version, app.getVersion())) return `Trace ${app.getVersion()} there is already the latest version (the downloads page has ${version}).`;
   if (manager.hasSessions) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
   if (workspaceLoaded) await flushWorkspace();
-  startMacUpdate(storageRoot, version, REMOTE_PORT);
+  startMacUpdate(storageRoot, version, REMOTE_PORT, release.sha512);
   return `Installing Trace ${version} there. It quits, restarts and is back in about a minute; if the new version does not start, the old one is put back.`;
 }
 async function linkedRequest(payload: unknown) {
@@ -566,7 +571,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
+      if (run.engine === 'shell') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -768,9 +773,10 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.gitDiff, (owner, payload) => repositoryGit.diff(owner, payload));
   handle(IPC_CHANNELS.loadWorkspace, () => {
     const database = localStorage();
-    const workspace = database.load();
+    const { workspace, removedChannels, rootDirectory } = database.loadMigrated();
     workspaceLoaded = true;
-    return { workspace, info: database.info };
+    // Only Gemini channels were saved: no workspace is left, but its project folder is kept.
+    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}) };
   });
   handle(IPC_CHANNELS.saveWorkspace, (_owner, payload) => {
     if (!workspaceLoaded) throw new HubError('WORKSPACE_NOT_LOADED', 'Load the saved workspace before saving changes.');
@@ -810,7 +816,7 @@ else app.whenReady().then(() => {
   // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
   handle(IPC_CHANNELS.screen, screenRequest);
   handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
-  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex'), discoverGemini()])).map((engine) => engine.info));
+  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
     // The manager validates the complete request. This guard also covers pending

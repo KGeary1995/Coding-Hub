@@ -17,7 +17,10 @@ export function replaceRules(text: string, content: string): string {
   const start = text.indexOf(START); const end = text.indexOf(END);
   if ((start < 0) !== (end < 0) || (start >= 0 && (end < start || text.indexOf(START, start + START.length) >= 0 || text.indexOf(END, end + END.length) >= 0))) throw new HubError('RULES_SECTION', 'An instruction file contains incomplete or duplicate shared-rules markers. Repair that section before applying rules.');
   const block = content.trim() ? `${START}\n## Shared rules for Claude Code and Codex\n\n${content}\n${END}` : '';
-  if (start >= 0) return text.slice(0, start) + block + text.slice(end + END.length);
+  if (start >= 0 && block) return text.slice(0, start) + block + text.slice(end + END.length);
+  // Removing the rules takes away what adding them put in: the blank line in front and the line break after, so a
+  // file goes back to how it was (and one Trace created ends up empty, which save() then deletes).
+  if (start >= 0) return text.slice(0, start).replace(/\n\n$/, '\n') + text.slice(end + END.length).replace(/^\r?\n/, '');
   return block ? text + (text && !text.endsWith('\n') ? '\n' : '') + (text ? '\n' : '') + block + '\n' : text;
 }
 function applied(text: string, content: string) {
@@ -89,10 +92,12 @@ export class RulesService {
     replaceRules('', content);
     const selected = targets.map((target) => ({ ...target, directory: this.directory(target.directory) }));
     if (new Set(selected.map((t) => t.directory)).size !== selected.length) throw new HubError('RULES_DIRECTORY', 'Select each project once.');
-    const writes: { before: FileState; after: string }[] = [];
+    // `after` null: the file is deleted (it held only the rules, which were removed).
+    const writes: { before: FileState; after: string | null }[] = [];
     for (const target of selected) for (const [name, expected] of [['CLAUDE.md', target.claudeHash], ['AGENTS.md', target.codexHash]]) {
       const before = this.readFile(path.join(target.directory, name)); if (before.fingerprint !== expected) throw new HubError('RULES_CHANGED', 'Project instructions changed since inspection. Reload to preserve those changes. Your unsaved rules remain in the editor.');
-      const after = replaceRules(before.text ?? '', content); if (Buffer.byteLength(after) > 1024 * 1024) throw new HubError('RULES_FILE', 'Applying rules would exceed the 1 MiB instruction-file limit.');
+      const result = replaceRules(before.text ?? '', content); if (Buffer.byteLength(result) > 1024 * 1024) throw new HubError('RULES_FILE', 'Applying rules would exceed the 1 MiB instruction-file limit.');
+      const after = before.text !== null && before.text.includes(START) && !result.trim() ? null : result;
       if (before.text !== after && !(before.text === null && after === '')) writes.push({ before, after });
     }
     // Drop deleted prepared coaching folders so they cannot fill the registry. Never prune user projects:
@@ -106,7 +111,8 @@ export class RulesService {
       for (const write of writes) {
         if (this.readFile(write.before.file).fingerprint !== write.before.fingerprint) throw new HubError('RULES_CHANGED', 'A file changed during save. Reload and retry.');
         if (write.before.text !== null) keepBackup(write.before.file, write.before.text);
-        this.replace(write.before.file, write.after, write.before.mode); completed.push(write);
+        if (write.after === null) fs.unlinkSync(write.before.file); else this.replace(write.before.file, write.after, write.before.mode);
+        completed.push(write);
       }
     } catch (error) {
       let incomplete = false;
