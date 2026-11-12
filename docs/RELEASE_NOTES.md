@@ -1,5 +1,11 @@
 ## What's new
 
+1.21.1 makes updating a Mac from another computer work again (update every computer; the phone app needs no reload):
+
+- **A Mac on 1.21.0 can be updated again.** On 1.21.0, updating a Mac from another computer stopped with "the feed lists no checksum": it looked only for a Mac update zip, which unsigned releases did not publish. Every release now publishes the zips with their checksums. A Mac on 1.21.0 gets 1.21.1 by updating from another computer as before, or by installing the disk image from the downloads page by hand.
+- **Checked before it installs.** From 1.21.1, a Mac updated from another computer installs the release's disk image, after checking it against its published checksum.
+- **Not tried yet:** the update on a real Mac.
+
 1.21.0 removes Gemini, has Codex challenge the plan, and makes stopping and restarting a Round Table dependable (update every computer and reload the phone app):
 
 - **Gemini channels and the Gemini seat are removed.** + Channel no longer offers Gemini (on the computer, another computer's tab or the phone), Local engines no longer looks for Gemini CLI (`agy`), and the hierarchy Round Table seats three agents again.

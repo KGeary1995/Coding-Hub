@@ -11,9 +11,12 @@ export function isNewerVersion(candidate: string, current: string): boolean {
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
   return false;
 }
-/** A Mac release in the feed: its version, and the sha512 (base64, as electron-builder lists it) of each chip's update zip. */
+/**
+ * A Mac release in the feed: its version, and the sha512 (base64, as electron-builder lists it) of each chip's disk
+ * image. Every release publishes the disk images; update zips only some (1.21.0 and older made them only when signed).
+ */
 export interface MacRelease { version: string; sha512: { arm64?: string; x64?: string } }
-/** Reads latest-mac.yml: the version and each update zip's sha512, the same checksums Macs that update themselves use. */
+/** Reads latest-mac.yml: the version and each disk image's sha512. */
 export function parseMacFeed(text: string): MacRelease | null {
   const version = /^version:\s*['"]?(\d+\.\d+\.\d+)['"]?\s*$/m.exec(text)?.[1]; if (!version) return null;
   const sha512: MacRelease['sha512'] = {}; let url = '';
@@ -22,8 +25,8 @@ export function parseMacFeed(text: string): MacRelease | null {
     // A line that is not indented ends the `files:` list (the top-level path/sha512 is the default file, not a chip's).
     if (/^\S/.test(line)) { url = ''; continue; }
     const sum = /^\s+sha512:\s*['"]?([A-Za-z0-9+/=]{80,100})['"]?\s*$/.exec(line);
-    const arch = /-macOS-(arm64|x64)\.zip$/.exec(url)?.[1] as 'arm64' | 'x64' | undefined;
-    if (sum && arch && url === `Trace-${version}-macOS-${arch}.zip`) sha512[arch] = sum[1];
+    const arch = /-macOS-(arm64|x64)\.dmg$/.exec(url)?.[1] as 'arm64' | 'x64' | undefined;
+    if (sum && arch && url === `Trace-${version}-macOS-${arch}.dmg`) sha512[arch] = sum[1];
   }
   return { version, sha512 };
 }
@@ -39,7 +42,7 @@ export async function latestMacVersion(fetcher: typeof fetch = fetch): Promise<s
 
 /**
  * Installs Trace `version` on a Mac that cannot update itself (a copy not signed with Trace's Developer ID). Everything
- * is downloaded and checked before Trace is touched: the release's update zip for this Mac's chip, whose sha512 must
+ * is downloaded and checked before Trace is touched: the release's disk image for this Mac's chip, whose sha512 must
  * match the feed's (`sha512`), so a damaged or replaced download is never installed. After the swap it waits until the
  * new Trace answers on its own port (`port`, which linked computers and phones reach it through); if it does not within
  * two minutes, the old app is put back and opened. It writes what it did to /tmp/trace-update.log.
@@ -53,13 +56,17 @@ exec >>/tmp/trace-update.log 2>&1; echo "== $(date) updating to ${version}"
 V=${version}; ARCH=x64; SHA='${sum(sha512.x64)}'; [ "$(uname -m)" = arm64 ] && { ARCH=arm64; SHA='${sum(sha512.arm64)}'; }
 [ -n "$SHA" ] || { echo "the feed lists no checksum for this Mac's download; Trace left as it was"; exit 1; }
 WORK=$(mktemp -d /tmp/trace-update.XXXXXX) || { echo "no work folder; Trace left as it was"; exit 1; }
-ZIP="$WORK/Trace-$V.zip"; STAGE="$WORK/stage"; APP=/Applications/Trace.app; OLD="$WORK/Trace-previous.app"
+DMG="$WORK/Trace-$V.dmg"; STAGE="$WORK/stage"; APP=/Applications/Trace.app; OLD="$WORK/Trace-previous.app"
 answers() { for i in $(seq 1 120); do code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:${port}/api/hello); [ "$code" != "000" ] && return 0; sleep 1; done; return 1; }
 restore() { echo "$1; restoring the previous version"; pkill -x Trace; sleep 2; rm -rf "$APP"; mv "$OLD" "$APP"; open -a "$APP"; exit 1; }
-curl -fsSL -o "$ZIP" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace-$V-macOS-$ARCH.zip" || { echo "download failed; Trace left as it was"; exit 1; }
-[ "$(openssl dgst -sha512 -binary "$ZIP" | base64)" = "$SHA" ] || { echo "download does not match the feed's checksum; Trace left as it was"; exit 1; }
-mkdir -p "$STAGE"; ditto -x -k "$ZIP" "$STAGE" || { echo "could not unpack the download; Trace left as it was"; exit 1; }
-[ -d "$STAGE/Trace.app" ] || { echo "the download holds no Trace.app; Trace left as it was"; exit 1; }
+curl -fsSL -o "$DMG" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace-$V-macOS-$ARCH.dmg" || { echo "download failed; Trace left as it was"; exit 1; }
+[ "$(openssl dgst -sha512 -binary "$DMG" | base64)" = "$SHA" ] || { echo "download does not match the feed's checksum; Trace left as it was"; exit 1; }
+MNT=$(hdiutil attach -nobrowse -noautoopen -readonly "$DMG" | awk -F'\\t' '/\\/Volumes\\//{print $NF}')
+[ -d "$MNT/Trace.app" ] || { echo "disk image did not mount; Trace left as it was"; exit 1; }
+mkdir -p "$STAGE" || { hdiutil detach "$MNT" -quiet; echo "no staging folder; Trace left as it was"; exit 1; }
+if ! ditto "$MNT/Trace.app" "$STAGE/Trace.app"; then hdiutil detach "$MNT" -quiet; echo "could not copy Trace.app from the disk image; Trace left as it was"; exit 1; fi
+hdiutil detach "$MNT" -quiet
+[ -x "$STAGE/Trace.app/Contents/MacOS/Trace" ] || { echo "the staged app is incomplete; Trace left as it was"; exit 1; }
 [ "$(defaults read "$STAGE/Trace.app/Contents/Info.plist" CFBundleShortVersionString)" = "$V" ] || { echo "staged app is not $V; Trace left as it was"; exit 1; }
 osascript -e 'quit app "Trace"'
 for i in $(seq 1 90); do pgrep -xq Trace || break; sleep 1; done

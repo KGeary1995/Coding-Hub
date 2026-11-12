@@ -50,7 +50,7 @@ test('signed upgrade build and installation check use the same validated baselin
   assert.equal(baselineStep.env?.TRACE_LEGACY_PRODUCT_NAME, '1');
   assert.throws(() => installBaselineVersion({ CODING_HUB_BASELINE_VERSION: '../escape' }));
 });
-test('a Developer ID Mac build makes the update zips and marks the app as able to update itself', async () => {
+test('every Mac build makes the update zips; only a Developer ID build marks the app as able to update itself', async () => {
   const load = (identity) => {
     const saved = process.env.MAC_SIGNING_IDENTITY; const file = require.resolve('../electron-builder.cjs');
     if (identity) process.env.MAC_SIGNING_IDENTITY = identity; else delete process.env.MAC_SIGNING_IDENTITY;
@@ -61,10 +61,24 @@ test('a Developer ID Mac build makes the update zips and marks the app as able t
   assert.deepEqual(signed.extraMetadata, { traceMacUpdates: true });
   assert.equal(signed.mac.notarize, Boolean(process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_API_KEY || process.env.APPLE_ID));
   assert.match(signed.mac.artifactName, /-\$\{version\}-macOS-\$\{arch\}\.\$\{ext\}$/);
-  // Ad-hoc builds cannot be installed over a signed one by macOS's updater: disk images only, and no update flag.
-  assert.deepEqual(adhoc.mac.target.map((item) => item.target), ['dmg']);
+  // Ad-hoc builds make the zips too, listed in latest-mac.yml, for Trace 1.21.0's update from another computer (the
+  // only way on for a Mac on 1.21.0), but macOS's own updater cannot install them over a signed app: no update flag.
+  assert.deepEqual(adhoc.mac.target.map((item) => item.target), ['dmg', 'zip']);
   assert.equal(adhoc.extraMetadata, undefined); assert.equal(adhoc.mac.identity, '-');
   // electron-builder's own schema check, which the build runs first: an unknown key fails every build, Windows too.
   const { validateConfiguration } = require('app-builder-lib/out/util/config/config'); const { DebugLogger } = require('builder-util');
   for (const config of [signed, adhoc]) await validateConfiguration(config, new DebugLogger(false));
+});
+test('a Mac build is refused unless latest-mac.yml lists both update zips and both disk images with their checksums', () => {
+  const { checkMacFeed } = require('./build-mac.cjs');
+  const sum = (letter) => letter.repeat(86) + '==';
+  const entry = (name, letter) => `  - url: ${name}\n    sha512: ${sum(letter)}\n    size: 1\n`;
+  const full = 'version: 1.21.1\nfiles:\n' + entry('Trace-1.21.1-macOS-x64.zip', 'A') + entry('Trace-1.21.1-macOS-arm64.zip', 'B') + entry('Trace-1.21.1-macOS-x64.dmg', 'C') + entry('Trace-1.21.1-macOS-arm64.dmg', 'D') + `path: Trace-1.21.1-macOS-x64.zip\nsha512: ${sum('A')}\n`;
+  assert.doesNotThrow(() => checkMacFeed(full, '1.21.1', 'Trace'));
+  // As 1.21.0 published it: disk images only, which a Mac on 1.21.0 cannot update from.
+  const dmgOnly = 'version: 1.21.0\nfiles:\n' + entry('Trace-1.21.0-macOS-x64.dmg', 'C') + entry('Trace-1.21.0-macOS-arm64.dmg', 'D');
+  assert.throws(() => checkMacFeed(dmgOnly, '1.21.0', 'Trace'), /Trace-1\.21\.0-macOS-arm64\.zip/);
+  assert.throws(() => checkMacFeed(full, '1.21.2', 'Trace'), /another version/);
+  // A zip listed without its checksum is refused too.
+  assert.throws(() => checkMacFeed(full.replace(`sha512: ${sum('B')}`, 'size: 2'), '1.21.1', 'Trace'), /arm64\.zip with its sha512/);
 });

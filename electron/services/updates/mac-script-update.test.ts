@@ -9,12 +9,12 @@ const ARM = 'A'.repeat(86) + '=='; const INTEL = 'B'.repeat(86) + '==';
 describe('updating a Mac that cannot update itself', () => {
   it('writes a script that is valid bash, checks the download against the feed before it swaps, and puts the old version back if the new one does not answer', () => {
     const script = macUpdateScript('1.15.0', 47821, { arm64: ARM, x64: INTEL });
-    expect(script).toContain('https://github.com/KGeary1995/trace-releases/releases/download/v$V/Trace-$V-macOS-$ARCH.zip');
+    expect(script).toContain('https://github.com/KGeary1995/trace-releases/releases/download/v$V/Trace-$V-macOS-$ARCH.dmg');
     expect(script).toContain(`SHA='${INTEL}'`); expect(script).toContain(`SHA='${ARM}'`);
-    expect(script).toContain('openssl dgst -sha512 -binary "$ZIP" | base64)" = "$SHA"');
+    expect(script).toContain('openssl dgst -sha512 -binary "$DMG" | base64)" = "$SHA"');
     expect(script).toContain('http://127.0.0.1:47821/api/hello'); expect(script).toContain('restore "the new app did not answer');
-    // The download, checksum, unpacking and version check all come before Trace is quit.
-    expect(script.indexOf('openssl dgst')).toBeLessThan(script.indexOf('ditto -x -k'));
+    // The download, checksum, mounting and version check all come before Trace is quit.
+    expect(script.indexOf('openssl dgst')).toBeLessThan(script.indexOf('hdiutil attach'));
     expect(script.indexOf('CFBundleShortVersionString')).toBeLessThan(script.indexOf("quit app \"Trace\""));
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-')), 'update.sh'); fs.writeFileSync(file, script);
     try { execFileSync('bash', ['-n', file]); } finally { fs.rmSync(path.dirname(file), { recursive: true, force: true }); }
@@ -22,14 +22,18 @@ describe('updating a Mac that cannot update itself', () => {
     // A checksum that is not one (an injection attempt) is left out, and the script then stops before anything.
     expect(macUpdateScript('1.15.0', 47821, { x64: "x'; rm -rf / #" })).toContain("SHA=''");
   });
-  it('reads the latest version and each chip’s update zip checksum from the Mac update feed', async () => {
-    const yml = `version: 1.15.0\nfiles:\n  - url: Trace-1.15.0-macOS-arm64.zip\n    sha512: ${ARM}\n    size: 1\n  - url: Trace-1.15.0-macOS-arm64.dmg\n    sha512: ${INTEL}\n  - url: Trace-1.15.0-macOS-x64.zip\n    sha512: ${INTEL}\npath: Trace-1.15.0-macOS-arm64.zip\nsha512: ${ARM}\n`;
+  it('reads the latest version and each chip’s disk image checksum from the Mac update feed, with or without update zips', async () => {
+    // As 1.21.0 published it (an unsigned build): disk images only.
+    const dmgOnly = `version: 1.21.0\nfiles:\n  - url: Trace-1.21.0-macOS-x64.dmg\n    sha512: ${INTEL}\n    size: 1\n  - url: Trace-1.21.0-macOS-arm64.dmg\n    sha512: ${ARM}\n    size: 2\npath: Trace-1.21.0-macOS-x64.dmg\nsha512: ${INTEL}\n`;
+    expect(parseMacFeed(dmgOnly)).toEqual({ version: '1.21.0', sha512: { arm64: ARM, x64: INTEL } });
+    // With update zips listed first (a signed build, and every build from 1.21.1): still the disk images' checksums.
+    const yml = `version: 1.15.0\nfiles:\n  - url: Trace-1.15.0-macOS-arm64.zip\n    sha512: ${INTEL}\n    size: 1\n  - url: Trace-1.15.0-macOS-arm64.dmg\n    sha512: ${ARM}\n  - url: Trace-1.15.0-macOS-x64.zip\n    sha512: ${ARM}\n  - url: Trace-1.15.0-macOS-x64.dmg\n    sha512: ${INTEL}\npath: Trace-1.15.0-macOS-arm64.zip\nsha512: ${INTEL}\n`;
     expect(parseMacFeed(yml)).toEqual({ version: '1.15.0', sha512: { arm64: ARM, x64: INTEL } });
     const feed = async () => new Response(yml);
     expect(await latestMacVersion(feed as typeof fetch)).toBe('1.15.0');
     expect(await latestMacRelease((async () => new Response('', { status: 404 })) as typeof fetch)).toBeNull();
-    // An older release's zip in the list is not taken for this version's.
-    expect(parseMacFeed('version: 1.16.0\nfiles:\n  - url: Trace-1.15.0-macOS-x64.zip\n    sha512: ' + INTEL + '\n')).toEqual({ version: '1.16.0', sha512: {} });
+    // An older release's disk image in the list is not taken for this version's.
+    expect(parseMacFeed('version: 1.16.0\nfiles:\n  - url: Trace-1.15.0-macOS-x64.dmg\n    sha512: ' + INTEL + '\n')).toEqual({ version: '1.16.0', sha512: {} });
   });
 });
 
@@ -37,5 +41,35 @@ describe('which version a Mac is updated to', () => {
   it('only a newer one: a Mac ahead of the downloads page is never taken back', () => {
     expect(isNewerVersion('1.21.0', '1.20.0')).toBe(true); expect(isNewerVersion('1.20.10', '1.20.9')).toBe(true); expect(isNewerVersion('2.0.0', '1.99.99')).toBe(true);
     expect(isNewerVersion('1.20.0', '1.20.0')).toBe(false); expect(isNewerVersion('1.20.0', '1.21.0')).toBe(false); expect(isNewerVersion('1.9.0', '1.10.0')).toBe(false);
+  });
+});
+
+describe('a copy from the disk image that fails part way', () => {
+  // Runs the script itself in bash, with stand-ins for the Mac tools: the download and checksum pass, the disk image
+  // mounts, and ditto copies only Info.plist (naming the right version) before it fails.
+  const bash = (() => { try { execFileSync('bash', ['--version']); return true; } catch { return false; } })();
+  it.skipIf(!bash)('never reaches the point where Trace is quit and replaced, and detaches the disk image', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-run-')); const bin = path.join(root, 'bin'); const mount = path.join(root, 'volume'); const marks = path.join(root, 'marks');
+    fs.mkdirSync(bin); fs.mkdirSync(path.join(mount, 'Trace.app', 'Contents', 'MacOS'), { recursive: true }); fs.mkdirSync(marks);
+    const stub = (name: string, body: string) => fs.writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+    stub('uname', 'echo arm64');
+    stub('curl', 'while [ $# -gt 0 ]; do [ "$1" = -o ] && { echo image > "$2"; }; shift; done; exit 0');
+    stub('openssl', 'cat >/dev/null 2>&1; echo digest');
+    stub('base64', `cat >/dev/null; echo '${ARM}'`);
+    stub('hdiutil', `if [ "$1" = attach ]; then printf '/dev/disk9\\tApple_HFS\\t%s\\n' '${mount.replace(/\\/g, '/')}'; else touch '${marks.replace(/\\/g, '/')}/detached'; fi`);
+    stub('ditto', 'mkdir -p "$2/Contents"; echo plist > "$2/Contents/Info.plist"; exit 1');
+    stub('defaults', 'echo 1.21.1');
+    for (const name of ['osascript', 'pkill', 'open', 'xattr']) stub(name, `touch '${marks.replace(/\\/g, '/')}/${name}'`);
+    const script = path.join(root, 'update.sh');
+    // The mount point reported by hdiutil must contain /Volumes/ for the script's awk; the stand-in names the test folder.
+    fs.writeFileSync(script, macUpdateScript('1.21.1', 47821, { arm64: ARM, x64: INTEL }).replace("'/\\/Volumes\\//{print $NF}'", "'{print $NF}'"));
+    try {
+      let failed = false;
+      try { execFileSync('bash', [script], { env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } }); } catch { failed = true; }
+      expect(failed).toBe(true);
+      expect(fs.existsSync(path.join(marks, 'detached'))).toBe(true);
+      // Trace was never asked to quit, so nothing was moved or replaced.
+      for (const name of ['osascript', 'pkill', 'open', 'xattr']) expect(fs.existsSync(path.join(marks, name))).toBe(false);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
