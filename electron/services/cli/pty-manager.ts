@@ -6,13 +6,13 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { CLIEngine, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
+import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
 import { isAgentConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
-import { MAX_CHANNELS, ackSessionSchema, permissionLevel, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
+import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
-import { discoverEngine, hostEnvironment, type DiscoveredEngine } from './discovery';
+import { discoverEngine, hostEnvironment } from './discovery';
 import { OscNotifications } from './attention';
 import { nodePty } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
@@ -87,6 +87,8 @@ interface ManagedRun {
   title?: string;
   /** A chat channel: Claude's structured messages, turned into chat events for the window. */
   chat?: ChatStream;
+  /** A chat run was sent a message and has not ended that turn yet (its `done` has not come). */
+  turnOpen?: boolean;
 }
 
 export class PtyManager {
@@ -279,6 +281,7 @@ export class PtyManager {
       if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
       if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
+      if (event.type === 'done') run.turnOpen = false;
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') { try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } try { this.chains.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } }
@@ -316,7 +319,8 @@ export class PtyManager {
     const request = parsed.data;
     if (request.action === 'send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
-      run.chat.send(request.text, request.images);
+      // Before the send: a stream that fails at once emits `done` during send(), which must leave the run not busy.
+      run.turnOpen = true; run.chat.send(request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
@@ -336,7 +340,7 @@ export class PtyManager {
     else if (request.action === 'table-open') {
       // Both agents' runs belong to the same window, which shows the table.
       if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
-      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
+      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.rejoin ? { rejoin: true } : {}), ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
       this.seated([request.partner.runId]);
     }
     else if (request.action === 'table-send') {
@@ -365,8 +369,8 @@ export class PtyManager {
   /** Hierarchy Round Tables (plan, build, review, fix, final review), on the same chat runs. */
   private readonly chains = new ReviewChains(this.tableHost());
   private tableHost(): TableHost { return {
-    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions() } : null; },
-    send: (runId, text, images) => this.chatRun(runId)?.chat?.send(text, images),
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
+    send: (runId, text, images) => { const run = this.chatRun(runId); if (!run?.chat) return; run.turnOpen = true; run.chat.send(text, images); },
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),

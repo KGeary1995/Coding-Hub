@@ -626,7 +626,7 @@ describe('phone permissions and chat channels', () => {
     server.setCanRun(id, true); server.revoke(id);
     expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'stop' })).status).toBe(401);
     expect((await post(server, token, '/api/chat', { action: 'interrupt', sessionId: 's1', runId: RUN })).status).toBe(401);
-    expect((await get(server, token, '/api/me')).status).toBe(401); expect((await get(server, token, '/api/chat-history?sessionId=s1')).status).toBe(401);
+    expect((await get(server, token, '/api/me')).status).toBe(401);
     expect(controls).toEqual([]); expect(chats).toEqual([]);
   });
 
@@ -665,9 +665,8 @@ describe('phone permissions and chat channels', () => {
     server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'delta', messageId: 'm1', text: 'Hi ' } });
     server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'delta', messageId: 'm1', text: 'there' } });
     const replay = { sessionId: 's1', runId: RUN, events: [{ type: 'user', text: 'hello', images: 2 }, { type: 'delta', messageId: 'm1', text: 'Hi there' }] };
-    expect((await get(server, token, '/api/chat-history?sessionId=s1')).body).toEqual(replay);
-    expect((await get(server, token, '/api/chat-history?sessionId=s2')).body).toEqual({ sessionId: 's2', runId: null, events: [] });
-    expect((await get(server, token, '/api/chat-history?sessionId=elsewhere')).status).toBe(400);
+    const kept = (sessionId: string) => (server as unknown as { chatReplay(sessionId: string, kind: 'phone'): unknown }).chatReplay(sessionId, 'phone');
+    expect(kept('s1')).toEqual(replay); expect(kept('s2')).toEqual({ sessionId: 's2', runId: null, events: [] }); expect(kept('elsewhere')).toBeNull();
     const done = { sessionId: 's1', runId: RUN, event: { type: 'assistant' as const, messageId: 'm1', blocks: [{ type: 'text' as const, text: 'Hi there' }] } };
     // A chat run also has the (empty) terminal screen every run has, as `replay`.
     const phone = stream(server, token, '?sessionId=s1', 4); const other = stream(server, token, '?sessionId=s2', 2); const linked = stream(server, laptop, '?all=1', 4);
@@ -678,7 +677,7 @@ describe('phone permissions and chat channels', () => {
     expect(theirs.map((event) => event.type)).toEqual(['channels']);
     expect(computers.map((event) => event.type)).toEqual(['channels', 'chat-replay', 'chat']); expect(computers[2].data).toEqual(done);
     // The finished message replaced its streamed text in what is kept.
-    expect((await get(server, token, '/api/chat-history?sessionId=s1')).body.events).toEqual([{ type: 'user', text: 'hello', images: 2 }, done.event]);
+    expect((kept('s1') as { events: unknown[] }).events).toEqual([{ type: 'user', text: 'hello', images: 2 }, done.event]);
   });
 });
 
@@ -791,5 +790,55 @@ describe('Round Tables on phones and linked computers', () => {
     expect(server.channels()[0].attention).toBe('Codex: Approve Bash');
     server.onSessionEvent({ type: 'answered', sessionId: 'seat', runId: 'r2', at: new Date().toISOString() });
     expect(server.channels()[0].attention).toBeNull();
+  });
+});
+
+describe('a stream’s opening replay', () => {
+  it('may be larger than the live limit, which applies again once it has drained', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const server = new RemoteServer(root, { sessions: () => [], running: () => [], write: () => {} } as unknown as RemoteHost, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
+    // A socket that is not reading yet: everything written stays queued.
+    const response = { writableLength: 0, destroyed: false, write(text: string) { this.writableLength += text.length; return false; }, destroy() { this.destroyed = true; } };
+    const stream = { device: 'computer', kind: 'computer', response, sessionId: null, all: true };
+    const inner = server as unknown as { streams: Set<unknown>; opening(stream: unknown, text: string): void; write(stream: unknown, text: string): void };
+    inner.streams.add(stream);
+    // Two long chats' threads: 3 MB in the opening replay.
+    inner.opening(stream, 'x'.repeat(1_500_000)); inner.opening(stream, 'x'.repeat(1_500_000));
+    inner.write(stream, 'a live event'); expect(response.destroyed).toBe(false);
+    // Drained once: a reader that stops now is dropped at the ordinary limit.
+    (stream as { opening?: number }).opening = 0; inner.write(stream, 'another'); expect(response.destroyed).toBe(true);
+  });
+});
+
+describe('the phone app from another of the person’s computers', () => {
+  it('may open this computer’s screen directly (its own computer off), and its page allows that connection', async () => {
+    const { server } = await remote(); await server.setEnabled(true);
+    server.allowedOrigins = () => ['https://desktop.tail1234.ts.net'];
+    const status = async (origin: string) => {
+      const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {}); cleanup.push(() => client.destroy());
+      await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+      const first = new Promise<string>((resolve) => client.once('data', (data) => resolve(String(data).split('\r\n')[0])));
+      client.write(`GET /api/phone-screen?ticket=none HTTP/1.1\r\nHost: 127.0.0.1:${server.address}\r\nOrigin: ${origin}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString('base64')}\r\n\r\n`);
+      return first;
+    };
+    // A sibling's page gets past the origin check (and is refused only for its missing ticket); any other site is not.
+    expect(await status('https://desktop.tail1234.ts.net')).toContain('401');
+    expect(await status('https://evil.example')).toContain('403');
+    const page = await fetch(base(server) + '/');
+    expect(page.headers.get('content-security-policy')).toContain('wss://desktop.tail1234.ts.net');
+  });
+});
+
+describe('requests only one kind of device may make', () => {
+  const call = (server: RemoteServer, token: string, pathname: string, body: unknown) => fetch(base(server) + pathname, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  it('pastes images only from a linked computer, and only PNG or JPEG', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const phone = await paired(server); const linked = await computer(server);
+    const text = Buffer.from('plain text, not a picture').toString('base64');
+    expect((await call(server, phone, '/api/paste-image', { sessionId: 's1', runId: 'r1', image: text })).status).toBe(403);
+    expect((await call(server, linked, '/api/paste-image', { sessionId: 's1', runId: 'r1', image: text })).status).toBe(400);
+  });
+  it('gives keys to the person’s other computers only to a phone', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const linked = await computer(server);
+    expect((await call(server, linked, '/api/computer-key', { id: '11111111-1111-4111-8111-111111111111' })).status).toBe(403);
   });
 });

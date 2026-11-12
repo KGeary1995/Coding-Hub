@@ -28,7 +28,7 @@ describe('one shared rules source for both engine instructions', () => {
     expect(() => rules.verifyLaunch(project)).not.toThrow(); expect(saved.targets[0].applied).toBe(true);
   });
   it('clearing rules removes only managed sections and releases launch requirements', () => {
-    const { project, rules } = setup(); fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Original\n'); const initial = rules.read([project]); const saved = rules.save('Temporary shared instructions', initial.revision, initial.targets); rules.save('', saved.revision, saved.targets); expect(fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toContain('# Original\n'); expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).not.toContain('coding-hub-rules'); expect(() => rules.verifyLaunch(project)).not.toThrow();
+    const { project, rules } = setup(); fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Original\n'); const initial = rules.read([project]); const saved = rules.save('Temporary shared instructions', initial.revision, initial.targets); rules.save('', saved.revision, saved.targets); expect(fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toBe('# Original\n'); /* AGENTS.md held only the rules Trace added: it is gone, not left with a stray line. */ expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false); expect(() => rules.verifyLaunch(project)).not.toThrow();
   });
   it('rolls back earlier file changes if a later write is locked', () => {
     const { project, rules } = setup(); fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Original\n'); const initial = rules.read([project]); const rename = fs.renameSync; let failed = false; vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => { if (String(to).endsWith('AGENTS.md') && !failed) { failed = true; throw new Error('Fixture file lock'); } rename(from, to); }); expect(() => rules.save('New rules', initial.revision, initial.targets)).toThrow('restored'); expect(fs.readFileSync(path.join(project, 'CLAUDE.md'), 'utf8')).toBe('# Original\n'); expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false); expect(rules.read([]).content).toBe('');
@@ -68,4 +68,12 @@ describe('shared rules regressions', () => {
     const { project, rules } = setup(); const initial = rules.read([project]); rules.save('', initial.revision, initial.targets);
     expect(fs.existsSync(path.join(project, 'CLAUDE.md'))).toBe(false); expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false);
   });
+});
+
+it('removing the rules gives back the file as it was before they were added', () => {
+  const NL = String.fromCharCode(10);
+  for (const original of ['# Original' + NL, '# Original', '']) {
+    const withRules = replaceRules(original, 'Shared rules');
+    expect(replaceRules(withRules, '')).toBe(original.endsWith(NL) || !original ? original : original + NL);
+  }
 });

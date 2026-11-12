@@ -1,6 +1,6 @@
 import { type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
-import { apply, type Finding, findingsFor, MAX_FINDINGS, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings } from '../../../shared/findings';
+import { apply, type Finding, findingsFor, MAX_FINDINGS, nextFindingId, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings, roomForFinding } from '../../../shared/findings';
 import { allowAtFull, EDITS, KEEP_IMAGES, type TableHost } from './round-table';
 import { BLOCKED_LINE, SIGNAL_INSTRUCTION, taskSignal } from '../../../shared/task-signal';
 
@@ -16,7 +16,9 @@ const MAX_CHALLENGES = 50;
 const RESTING: ChainStep[] = ['idle', 'plan-review', 'done', 'needs-you', 'stopped'];
 
 type Role = 'planner' | 'builder' | 'reviewer';
-interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex'; role: Role; busy: boolean; text: string; answer: string | null; briefed: boolean }
+interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex'; role: Role; busy: boolean; text: string; answer: string | null; briefed: boolean;
+  /** Still in a turn from before this table opened (Reopen while it worked): its `done` ends that old turn, never a step. */
+  stale?: boolean }
 interface Chain {
   owner: number; cwd: string; builder: Seat; reviewer: Seat; planner: Seat;
   step: ChainStep; stoppedAt: ChainStep | null; task: string; images: ChatImage[]; plan: string; report: string; reviewRound: number; finalRound: number;
@@ -26,6 +28,8 @@ interface Chain {
   queued: { text: string; images: ChatImage[] } | null; kept: boolean; turnStart: Promise<string | null> | null;
   /** The seat that said TASK BLOCKED: the person's next message is its answer, in the same step. */
   blocked: Seat | null;
+  /** New findings the last review reported that the full record could not take (the review then stops for the person). */
+  unrecorded: number;
   /** Counts turns: a step's answer is acted on only if no newer turn began meanwhile (Stop and Continue start one). */
   attempt: number;
 }
@@ -76,7 +80,8 @@ export class ReviewChains {
   private leading(runId: string): Chain { const chain = this.chains.get(runId); if (!chain) throw new HubError('TABLE_NONE', 'This channel has no Round Table open.'); return chain; }
   private seatOf(runId: string, role: Role): Seat {
     const run = this.host.run(runId); if (!run) throw new HubError('TABLE_RUN', 'That chat is not running.');
-    return { runId, sessionId: run.sessionId, engine: run.engine, role, busy: false, text: '', answer: null, briefed: false };
+    // A seat still working on a turn from before (a table closed while it worked) counts as busy until that turn ends.
+    return { runId, sessionId: run.sessionId, engine: run.engine, role, busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
   }
   private seats(chain: Chain) { return [chain.builder, chain.reviewer, chain.planner]; }
   private busy(chain: Chain) { return this.seats(chain).some((seat) => seat.busy); }
@@ -159,12 +164,14 @@ export class ReviewChains {
     const chain: Chain = { owner, cwd: runs[0].cwd, builder, reviewer, planner, step: before ? (resumable ? 'stopped' : before.step) : 'idle', stoppedAt: resumable ?? (before?.step === 'stopped' ? before.stoppedAt ?? null : null),
       task: before?.task ?? '', images: [], plan: before?.plan ?? '', report: before?.report ?? '', reviewRound: before?.reviewRound ?? 0, finalRound: before?.finalRound ?? 0, verdict: before?.verdict ?? null, note: before?.note ?? '',
       challenges: (before?.challenges ?? []).slice(0, MAX_CHALLENGES).map((challenge) => ({ ...challenge })), challenged: before?.challenged === true,
-      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null, attempt: 0 };
+      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null, attempt: 0, unrecorded: 0 };
     // A seat that was waiting for the person before the restart still is.
     if (before?.blocked && chain.step === 'stopped') chain.blocked = { builder, reviewer, planner }[before.blocked] ?? null;
     if (saved.waiting !== undefined || saved.waitingImages?.length) { chain.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) }; chain.kept = true; }
     this.chains.set(builderRunId, chain);
     this.host.setReadOnly(builder.runId, false); this.host.setReadOnly(reviewer.runId, true); this.host.setReadOnly(planner.runId, true);
+    // A seat still at work from before is stopped; the table waits (Stopping…) until its old turn has ended.
+    for (const seat of this.seats(chain)) if (seat.stale) { try { this.host.interrupt(seat.runId); } catch { /* Ended. */ } }
     this.publish(chain); return this.state(chain);
   }
 
@@ -179,7 +186,9 @@ export class ReviewChains {
       this.turn(chain, seat, chain.stoppedAt, answer, images);
       return;
     }
-    if (this.busy(chain)) {
+    // A seat at work, or Trace between two steps of the same task (recording the files' state while no seat is busy): the
+    // message waits for the next step. Taken as a new task, it would throw the current one away.
+    if (this.busy(chain) || !RESTING.includes(chain.step)) {
       if (chain.queued && chain.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${chain.queued.images.length} images and a message carries at most ${MAX_IMAGES}.`);
       chain.queued = chain.queued ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images] } : { text, images };
       this.publish(chain); return;
@@ -200,7 +209,8 @@ export class ReviewChains {
    */
   private reply(chain: Chain, leadRunId: string, text: string, images: ChatImage[]) {
     chain.note = '';
-    if (chain.step === 'stopped' && chain.stoppedAt) { chain.queued = { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false; this.continue(leadRunId); return; }
+    // Added to a message still waiting from before Stop, so neither is lost.
+    if (chain.step === 'stopped' && chain.stoppedAt) { chain.queued = chain.queued && !chain.kept ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images].slice(0, MAX_IMAGES) } : { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false; this.continue(leadRunId); return; }
     if (!chain.plan) { this.turn(chain, chain.planner, 'planning', `${this.planPrompt(chain)}\n\nThe person adds: ${text}`, images); return; }
     this.turn(chain, chain.builder, 'final-fixing', `[Step: changes from the person] The task:\n\n${chain.task}\n\nThe person says:\n\n${text}\n\nMake the changes they ask for, then report what you changed.`, images);
   }
@@ -208,6 +218,7 @@ export class ReviewChains {
   plan(leadRunId: string, approve: boolean, note = '') {
     const chain = this.leading(leadRunId);
     if (chain.step !== 'plan-review') throw new HubError('TABLE_STEP', 'There is no plan waiting for you.');
+    if (this.busy(chain)) throw new HubError('TABLE_STOPPING', 'An agent is still stopping. Try again once it has stopped.');
     if (approve) this.turn(chain, chain.builder, 'implementing', this.buildPrompt(chain), chain.images);
     else { if (!note.trim()) throw new HubError('TABLE_NOTE', 'Say what to change in the plan.'); this.turn(chain, chain.planner, 'planning', this.planPrompt(chain, note)); }
     return this.state(chain);
@@ -240,7 +251,8 @@ export class ReviewChains {
   }
   /** Stops the seat at work; the chain waits at its step for Continue. */
   stop(leadRunId: string) {
-    const chain = this.leading(leadRunId); if (!chain.kept) chain.queued = null; chain.blocked = null;
+    // A message the person already sent stays: it goes with the step when it continues (it was shown as sent).
+    const chain = this.leading(leadRunId); chain.blocked = null;
     if (!RESTING.includes(chain.step)) { chain.stoppedAt = chain.step; chain.step = 'stopped'; }
     for (const seat of this.seats(chain)) if (seat.busy) this.host.interrupt(seat.runId);
     this.publish(chain);
@@ -251,9 +263,14 @@ export class ReviewChains {
     for (const seat of this.seats(chain)) { try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
     this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}) } });
   }
-  /** A seat's process ended: the table closes until the window seats it again. */
+  /**
+   * A seat's process ended: the table closes until the window seats it again. The seats still at work are stopped first:
+   * nothing goes on working for a table that is no longer there.
+   */
   ended(runId: string) {
-    const chain = this.chainOf(runId); if (chain) this.close(chain.builder.runId, false);
+    const chain = this.chainOf(runId); if (!chain) return;
+    for (const seat of this.seats(chain)) if (seat.busy && seat.runId !== runId) { try { this.host.interrupt(seat.runId); } catch { /* Ended. */ } }
+    this.close(chain.builder.runId, false);
   }
 
   /** Every chat event passes here; returns a notice in place of an edit a read-only seat asked for (declined), or '' for a command allowed at Full. */
@@ -268,6 +285,8 @@ export class ReviewChains {
     // At Full access a read-only seat's commands run without an approval card, as the person's level says.
     if (event.type === 'permission' && seat.role !== 'builder' && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
+    // The end of a turn from before this table opened: the seat is free now, and no step moves on it.
+    if (seat.stale) { seat.busy = false; seat.stale = false; seat.text = ''; this.publish(chain); return null; }
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     this.finished(chain, seat, event);
     return null;
@@ -317,6 +336,7 @@ export class ReviewChains {
     if (chain.step === 'reviewing') {
       if (!isReview(answer)) { chain.stoppedAt = 'reviewing'; chain.step = 'stopped'; chain.note = 'The reviewer ended without findings or NO FINDINGS. Continue runs the review again.'; this.publish(chain); return; }
       if (!await recorded()) return;
+      if (chain.unrecorded) { const count = chain.unrecorded; chain.unrecorded = 0; chain.step = 'needs-you'; chain.note = `The review record is full (${MAX_FINDINGS} findings, none verified), so ${count} new ${count === 1 ? 'finding' : 'findings'} from this review could not be recorded. Close the table to save the record to shared memory, then open it again and give the task again.`; this.publish(chain); return; }
       this.afterReview(chain); return;
     }
     if (chain.step === 'fixing') {
@@ -347,8 +367,8 @@ export class ReviewChains {
     if (seat.role === 'planner') return;
     const changed: Finding[] = []; const at = new Date().toISOString(); const answer = seat.answer ?? '';
     if (seat.role === 'reviewer') for (const found of parseFindings(answer)) {
-      if (chain.findings.length >= MAX_FINDINGS) break;
-      const finding: Finding = { id: `F${chain.findings.length + 1}`, ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: Math.min(5, chain.reviewRound), at };
+      if (!roomForFinding(chain.findings)) { chain.unrecorded++; continue; }
+      const finding: Finding = { id: nextFindingId(chain.findings), ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: Math.min(5, chain.reviewRound), at };
       chain.findings.push(finding); changed.push(finding);
     }
     for (const { id, verb, note } of parseAnswers(answer, seat.role === 'reviewer' ? 'reviewer' : 'driver')) { const finding = chain.findings.find((item) => item.id === id); if (finding && !finding.duplicateOf && apply(finding, verb, note) && !changed.includes(finding)) changed.push(finding); }

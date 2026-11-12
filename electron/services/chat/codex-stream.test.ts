@@ -134,3 +134,16 @@ describe('Codex chat protocol', () => {
     expect(events.filter((event) => event.type !== 'done')).toEqual([]);
   });
 });
+
+describe('Stop while Codex is still opening its conversation', () => {
+  it('drops the waiting message and ends its turn, so Stop never waits for a turn that has not started', () => {
+    const { stream, sent, events, reply } = codex();
+    stream.start(); reply(1, {});
+    stream.send('hello', []);
+    stream.interrupt();
+    expect(events.filter((event) => event.type === 'done')).toEqual([{ type: 'done', isError: true, error: 'Stopped before Codex had opened the conversation.' }]);
+    // The thread opens later: the dropped message is not sent after all.
+    reply(2, { thread: { id: 't' } });
+    expect(sent.some((message) => message.method === 'turn/start')).toBe(false);
+  });
+});

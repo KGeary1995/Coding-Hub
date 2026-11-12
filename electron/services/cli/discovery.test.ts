@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, windowsRegistryPath, withoutAgentSession } from './discovery';
+import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, findExecutable, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, windowsRegistryPath, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -96,3 +96,16 @@ describe('Windows PATH changes made while Trace runs', () => {
   });
 });
 
+
+describe('npm launchers on Windows', () => {
+  it.skipIf(process.platform !== 'win32')('never runs a .cmd launcher itself: one it cannot read is refused, and an executable later on PATH is used', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'trace shim ')); directories.push(root);
+    const shim = path.join(root, 'shim'); const bin = path.join(root, 'bin'); await mkdir(shim); await mkdir(bin);
+    // A launcher whose package Trace cannot find: cmd.exe would run it, and treat & or | in arguments as commands.
+    await writeFile(path.join(shim, 'claude.cmd'), '@echo off\r\nnode "%~dp0\missing\cli.js" %*\r\n');
+    await expect(findExecutable('claude', { PATH: shim })).rejects.toThrow();
+    await writeFile(path.join(bin, 'claude.exe'), 'MZ');
+    const found = await findExecutable('claude', { PATH: [shim, bin].join(path.delimiter) });
+    expect(found.file).toBe(path.join(bin, 'claude.exe')); expect(found.file).not.toMatch(/\.cmd$/i);
+  });
+});

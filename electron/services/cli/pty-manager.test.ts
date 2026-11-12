@@ -36,6 +36,17 @@ function fixture(discover = async (engine: 'claude' | 'codex') => engines(engine
 }
 
 describe('PTY lifecycle and IPC ownership', () => {
+  it('never runs one conversation in two tiles at once, also while the first is still starting', async () => {
+    const { manager } = fixture(async (engine) => { const found = engines(engine); found.info.supportsResume = true; return found; }); const resumeId = '44444444-4444-4444-8444-444444444444';
+    const resumed = (sessionId: string) => ({ ...request(sessionId), config: { ...request(sessionId).config, resumeId } });
+    const first = manager.start(1, resumed('tile-a'));
+    // Still starting: the second tile is refused at once.
+    await expect(manager.start(1, resumed('tile-b'))).rejects.toMatchObject({ code: 'RESUME_BUSY' });
+    const started = await first.then(() => true, () => false);
+    // Running: still refused.
+    if (started) await expect(manager.start(1, resumed('tile-c'))).rejects.toMatchObject({ code: 'RESUME_BUSY' });
+    expect(started).toBe(true);
+  });
   it('binds concurrent Claude sessions to their selected profile environments before discovery and spawning', async () => {
     const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
     const discover = vi.fn(async (engine: 'claude' | 'codex', _env?: Record<string, string>) => { const result = engines(engine); result.info.authentication = { state: 'authenticated', checkedAt: new Date().toISOString(), message: 'Profile authenticated.' }; return result; });
@@ -287,7 +298,11 @@ describe('Chat channels', () => {
     const kinds = () => chats.map((chat) => chat.event.type);
 
     manager.chat(1, { action: 'send', sessionId: session.sessionId, runId: session.runId, text: 'look at this', images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] });
+    // A Round Table opened meanwhile sees the run as in a turn until that turn's `done` (review-chain: stale seats).
+    const tableRun = () => (manager as unknown as { tableHost(): { run(runId: string): { busy?: boolean } | null } }).tableHost().run(session.runId);
+    expect(tableRun()?.busy).toBe(true);
     await until(() => kinds().includes('done'));
+    expect(tableRun()?.busy).toBe(false);
     // The message is recorded for the run's history as it is sent, then Claude's conversation starts.
     expect(chats[0].event).toEqual({ type: 'user', text: 'look at this', images: 1 });
     expect(chats[1].event).toEqual({ type: 'ready', conversationId: '11111111-2222-4333-8444-555555555555', model: 'fixture-model' });
@@ -343,6 +358,22 @@ describe('Chat channels', () => {
     // Permissions change only on the computer itself: a phone must not be able to give an agent full access.
     expect(() => manager.chatRemote({ action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'full' })).toThrow(/computer it runs on/);
     expect(() => manager.chat(3, { action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'edits' })).not.toThrow();
+  });
+  it('leaves a chat run not busy when its message fails at once (a Codex thread that never started)', async () => {
+    const processes: FakePty[] = [];
+    const manager = new PtyManager(() => {}, { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} },
+      spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    const codex = await manager.start(1, { sessionId: 'failing', cwd: process.cwd(), config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null }, cols: 80, rows: 24 });
+    const written = () => processes[0].write.mock.calls.map(([line]) => JSON.parse(String(line)) as { id?: number; method?: string });
+    const answer = (method: string, reply: Record<string, unknown>) => { const request = written().find((line) => line.method === method)!; processes[0].data(JSON.stringify({ id: request.id, ...reply }) + '\n'); };
+    answer('initialize', { result: {} }); answer('thread/start', { error: { message: 'not signed in' } });
+    const tableRun = () => (manager as unknown as { tableHost(): { run(runId: string): { busy?: boolean } | null } }).tableHost().run(codex.runId);
+    // The stream answers `done` (an error) inside send(); the run must not be left in a turn.
+    manager.chat(1, { action: 'send', sessionId: codex.sessionId, runId: codex.runId, text: 'hello', images: [] });
+    expect(tableRun()?.busy).toBe(false);
+    (manager as unknown as { tableHost(): { send(runId: string, text: string, images: never[]): void } }).tableHost().send(codex.runId, 'again', []);
+    expect(tableRun()?.busy).toBe(false);
   });
   it('runs a Round Table from a phone or linked computer: open, send, driver, rounds, stop and close', async () => {
     const processes: (FakePty & { onStderr: () => void })[] = []; const chats: { owner: number; envelope: ChatEnvelope }[] = []; const seated: string[][] = [];

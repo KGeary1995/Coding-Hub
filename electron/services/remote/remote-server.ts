@@ -104,7 +104,9 @@ export interface RemoteRelay {
  * `held` collects what is sent while a phone waits for its channel's screen, so nothing arrives ahead of it. A linked
  * computer's stream (`all`) carries every channel's output; phones follow one channel at a time.
  */
-interface Stream { device: string; kind: RemoteDeviceKind; response: http.ServerResponse; sessionId: string | null; all?: boolean; held?: string[] }
+interface Stream { device: string; kind: RemoteDeviceKind; response: http.ServerResponse; sessionId: string | null; all?: boolean; held?: string[];
+  /** What the opening replay left unsent: allowed on top of STREAM_BUFFER until the stream has drained once. */
+  opening?: number }
 
 const subscriptionSchema = z.object({ endpoint: z.string().max(2048).refine(pushEndpoint, 'Not a push service.'), p256dh: z.string().regex(/^[A-Za-z0-9_-]{87}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{22}$/) }).strict();
 const deviceSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(60), tokenHash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: z.iso.datetime(), lastSeen: z.iso.datetime().nullable(), push: subscriptionSchema.optional(),
@@ -299,7 +301,10 @@ export class RemoteServer {
     // screen sharing (a Mac's) instead of reporting that this computer refused.
     if (request.headers.upgrade?.toLowerCase() === 'trace-screen') return refuse(404, 'Not Found');
     if (!this.allowedHost(request.headers.host) || request.headers['tailscale-funnel-request'] !== undefined) return refuse(403, 'Forbidden');
-    const origin = request.headers.origin; if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return refuse(403, 'Forbidden');
+    // The phone app served by another of the person's computers may connect here directly (its own computer off), as
+    // its other requests do (see handle()); it still needs a ticket of its own.
+    const origin = request.headers.origin;
+    if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '') && !this.allowedOrigins().includes(origin.replace(/\/$/, '').toLowerCase())) return refuse(403, 'Forbidden');
     const ticket = this.screenTickets.get(url.searchParams.get('ticket') ?? ''); this.screenTickets.delete(url.searchParams.get('ticket') ?? '');
     if (!ticket || ticket.expires < Date.now() || !this.devices().some((device) => device.id === ticket.device)) return refuse(401, 'Unauthorized');
     const key = request.headers['sec-websocket-key'];
@@ -590,9 +595,15 @@ export class RemoteServer {
   private local(sessionId: string) { return this.host.sessions().some((session) => session.id === sessionId); }
   private write(stream: Stream, text: string) {
     if (stream.held) { stream.held.push(text); return; }
-    // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay.
-    if (stream.response.writableLength > STREAM_BUFFER) { stream.response.destroy(); this.streams.delete(stream); return; }
+    // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay. What the opening
+    // replay sent in one go does not count: two long chats can be more than STREAM_BUFFER on their own.
+    if (stream.response.writableLength > (stream.opening ?? 0) + STREAM_BUFFER) { stream.response.destroy(); this.streams.delete(stream); return; }
     stream.response.write(text);
+  }
+  /** Part of a stream's opening replay (channel list, chat threads, screens): sent whole, and allowed for until it drains. */
+  private opening(stream: Stream, text: string) {
+    if (!this.streams.has(stream)) return;
+    stream.response.write(text); stream.opening = stream.response.writableLength;
   }
 
   private send(response: http.ServerResponse, status: number, body: unknown) {
@@ -662,7 +673,7 @@ export class RemoteServer {
       response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': file.immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
         // xterm.js sets inline styles for its rows and cursor; scripts stay limited to the app's own files.
         // The app may also call the person's other computers directly (see allowedOrigins).
-        'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ${['\'self\'', ...this.allowedOrigins()].join(' ')}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` });
+        'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ${['\'self\'', ...this.allowedOrigins().flatMap((sibling) => [sibling, sibling.replace(/^https:/, 'wss:')])].join(' ')}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` });
       return void response.end(file.body);
     }
     if (request.method === 'POST' && url.pathname === '/api/pair') {
@@ -691,11 +702,6 @@ export class RemoteServer {
     const kind: RemoteDeviceKind = device.kind ?? 'phone';
     if (request.method === 'GET' && url.pathname === '/api/channels') return this.send(response, 200, this.channels(kind));
     if (request.method === 'GET' && url.pathname === '/api/me') return this.send(response, 200, this.me(device));
-    if (request.method === 'GET' && url.pathname === '/api/chat-history') {
-      const sessionId = url.searchParams.get('sessionId') ?? '';
-      const replay = sessionId ? this.chatReplay(sessionId, kind) : null;
-      return replay ? this.send(response, 200, replay) : this.send(response, 400, { error: 'Unknown channel.' });
-    }
     if (request.method === 'POST' && url.pathname === '/api/chat') {
       const parsed = chatRequestSchema.safeParse(await this.body(request, CHAT_BODY)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid chat request. Images must be PNG, JPEG, GIF or WebP, at most 10 per message.' });
       const now = this.current(device.id); if (!now) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
@@ -718,6 +724,8 @@ export class RemoteServer {
       if (all && kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can follow every channel.' });
       response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-Content-Type-Options': 'nosniff' });
       const stream: Stream = { device: device.id, kind, response, sessionId: all ? null : sessionId, all }; this.streams.add(stream);
+      // Once the opening replay has gone out, the ordinary limit applies again.
+      response.on('drain', () => { stream.opening = 0; });
       request.on('close', () => {
         this.streams.delete(stream);
         // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
@@ -725,10 +733,10 @@ export class RemoteServer {
         // A linked computer that closed (or lost the connection) gives back every channel it showed at its size.
         if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
-      this.write(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
+      this.opening(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // A chat's recent thread, ahead of its live events (written now, before any screen replay holds the stream back).
       for (const replay of all ? this.chats.sessionIds().filter((id) => this.local(id)).map((id) => this.chats.take(id)) : sessionId ? [this.chatReplay(sessionId, kind)] : [])
-        if (replay?.runId) this.write(stream, `event: chat-replay\ndata: ${eventJSON(replay)}\n\n`);
+        if (replay?.runId) this.opening(stream, `event: chat-replay\ndata: ${eventJSON(replay)}\n\n`);
       // Each channel's screen as it is now, then everything that came after it.
       const screens: { sessionId: string; take: (callback: (screen: { runId: string; cols: number; rows: number; data: string }) => void) => boolean }[] = all
         ? [...this.replay].map(([id, mirror]) => ({ sessionId: id, take: (callback) => { mirror.snapshot((screen) => callback({ runId: mirror.runId, ...screen })); return true; } }))
@@ -736,7 +744,7 @@ export class RemoteServer {
         : sessionId && kind === 'phone' && this.relay && !this.local(sessionId) ? [{ sessionId, take: (callback) => this.relay?.snapshot(sessionId, callback) ?? false }] : [];
       if (screens.length) {
         stream.held = []; let waiting = screens.length; const ready: string[] = [];
-        const done = () => { if (--waiting) return; const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return; for (const text of [...ready, ...later]) this.write(stream, text); };
+        const done = () => { if (--waiting) return; const later = stream.held ?? []; stream.held = undefined; if (!this.streams.has(stream)) return; for (const text of ready) this.opening(stream, text); for (const text of later) this.write(stream, text); };
         for (const screen of screens) if (!screen.take((value) => { ready.push(`event: replay\ndata: ${eventJSON({ sessionId: screen.sessionId, ...value })}\n\n`); done(); })) done();
       }
       return;

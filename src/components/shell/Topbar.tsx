@@ -37,6 +37,14 @@ function Wordmark() {
   </a>;
 }
 
+/**
+ * A Round Table that could not open: the error goes on its tile (the newest channel). Marked a failed launch only when
+ * that channel is not running: the Claude chat that did start keeps its Stop, so it is never hidden while it runs.
+ */
+function tableFailed(error: string) {
+  const tile = channelsOf(useWorkspaceStore.getState().sessions).at(-1); if (!tile) return;
+  useWorkspaceStore.getState().setSessionError(tile.id, error, tile.status !== 'running' && tile.status !== 'starting');
+}
 export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onToggleExplorer: () => void }) {
   const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore();
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
@@ -51,8 +59,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const channelMenu: MenuItem[] = other
     ? (['shell', 'claude', 'codex'] as const).map((engine) => ({ label: { shell: 'Terminal', claude: 'Claude Code', codex: 'Codex' }[engine], onSelect: () => void addLinkedChannel(other.id, engine) }))
     : [{ label: 'Terminal', onSelect: () => addSession('shell') }, { label: 'Claude Code', onSelect: () => addSession('claude') }, { label: 'Codex', onSelect: () => addSession('codex') },
-      ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : []),
-      ...(sessions.length <= MAX_CHANNELS - 3 ? [{ label: 'Round Table (hierarchy)', onSelect: () => void startHierarchyTable().then((error) => { if (error) useWorkspaceStore.getState().setSessionError(channelsOf(useWorkspaceStore.getState().sessions).at(-1)?.id ?? '', error, true); }) }] : [])];
+      ...(sessions.length <= MAX_CHANNELS - 2 ? [{ label: 'Round Table', onSelect: () => void startRoundTable().then((error) => { if (error) tableFailed(error); }) }] : []),
+      ...(sessions.length <= MAX_CHANNELS - 3 ? [{ label: 'Round Table (hierarchy)', onSelect: () => void startHierarchyTable().then((error) => { if (error) tableFailed(error); }) }] : [])];
   return <header className="tr-topbar">
     <Wordmark />
     {project

@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { channelNameNow } from '../../state/channel-names';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
-import { channelsOf, leadOf, partnerOf, useWorkspaceStore } from '../../state/workspace-store';
+import { channelsOf, leadOf, useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../../state/hub-store';
-import { CHANNEL_STATES, channelAlerts, channelState, channelToday, todayTotals, usageFor } from '../../state/channel-state';
+import { CHANNEL_STATES, channelAlerts, channelState, channelTokensToday, todayTotals, usageFor } from '../../state/channel-state';
 import { focusTerminal } from '../../runtime/terminals';
 import { useLinkedStore } from '../../state/linked-store';
 import type { LinkedComputer } from '../../../shared/remote';
@@ -81,7 +81,7 @@ export function StatusBar() {
       return <button key={session.id} className="tr-sb-cell tr-sb-channel" title={`${channelNameNow(session)}: ${meta.word.toLowerCase()}${session.attention ? ` · ${session.attention.message}` : ''}`} onClick={() => jump(session.id)}>
         <i className="tr-engine-square" style={{ background: `var(--tr-ch-${session.config.engine})` }} aria-hidden="true" />CH{index + 1}
         <span style={{ color }}><span aria-hidden="true">{meta.glyph}</span> {meta.word.toLowerCase()}</span>
-        {(() => { const seat = partnerOf(sessions, session.id); const day = { tokens: channelToday(session.id, usage).tokens + (seat ? channelToday(seat.id, usage).tokens : 0) }; return day.tokens > 0 && <span className="tnum" title="New tokens in this channel today (input outside the cache, plus output), across restarts, with both agents of a Round Table; cache reads not counted">{compact(day.tokens)} tok</span>; })()}
+        {(() => { const day = { tokens: channelTokensToday(sessions, session.id, usage) }; return day.tokens > 0 && <span className="tnum" title="New tokens in this channel today (input outside the cache, plus output), across restarts, with every agent of a Round Table; cache reads not counted">{compact(day.tokens)} tok</span>; })()}
       </button>;
     })}
     <span className="tr-sb-cell tr-sb-project" title={rootDirectory ?? undefined}><span className="tr-sb-text">{project}</span></span>

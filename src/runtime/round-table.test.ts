@@ -74,7 +74,8 @@ describe('Round Tables across restarts', () => {
     expect(chat).not.toHaveBeenCalled();
     run(partner.id, RUN_B); restoreTables(); restoreTables();
     expect(chat).toHaveBeenCalledTimes(1);
-    expect(chat).toHaveBeenCalledWith({ action: 'table-open', sessionId: lead.id, runId: RUN_A, partner: { sessionId: partner.id, runId: RUN_B }, driver: 'codex', rounds: 3 });
+    // Seated again: both conversations resumed, so the host skips the joining summary.
+    expect(chat).toHaveBeenCalledWith({ action: 'table-open', rejoin: true, sessionId: lead.id, runId: RUN_A, partner: { sessionId: partner.id, runId: RUN_B }, driver: 'codex', rounds: 3 });
   });
   it('forgets a table the person closed and removes its stopped partner, and does not save one whose partner channel is gone', async () => {
     const { lead, partner, table } = seated();

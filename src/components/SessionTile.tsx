@@ -21,7 +21,7 @@ import { PastedImages } from './PastedImages';
 import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, tokens, dollars } from '../state/hub-store';
-import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, channelToday, limitRatio, usageFor } from '../state/channel-state';
+import { CHANNEL_STATES, LIMIT_THRESHOLD, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
@@ -51,7 +51,8 @@ export function SessionTile({ session, index, dense = false }: { session: Sessio
   const usage = useHubStore((s) => usageFor(session, s.usage));
   // A Round Table is one channel running two agents: its tokens are both agents', as in the status bar.
   const seatId = useWorkspaceStore((s) => partnerOf(s.sessions, session.id)?.id ?? null);
-  const today = { tokens: useHubStore((s) => channelToday(session.id, s.usage).tokens + (seatId ? channelToday(seatId, s.usage).tokens : 0)) };
+  // Every agent at the table: the partner, and a hierarchy's planner too.
+  const today = { tokens: useHubStore((s) => channelTokensToday(useWorkspaceStore.getState().sessions, session.id, s.usage)) };
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });

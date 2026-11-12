@@ -113,6 +113,8 @@ export class CodexStream implements ChatStream {
   interrupt() {
     if (this.threadId && this.turnId) this.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId }, () => {});
     else if (this.threadId) this.interruptWanted = true;
+    // Still opening the conversation: the waiting message is dropped and its turn ends here, so Stop is never left waiting.
+    else if (this.queued.length) { this.queued.splice(0); this.emit({ type: 'done', isError: true, error: 'Stopped before Codex had opened the conversation.' }); }
   }
   close() { for (const requestId of this.approvals.keys()) this.emit({ type: 'permission-done', requestId }); this.approvals.clear(); }
 

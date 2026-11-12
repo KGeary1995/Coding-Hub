@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { VerificationData, VerificationFreshness, VerificationProfile, VerificationResult, VerificationTool } from '../../../shared/workbench';
 import { load, save, directory } from './local-store';
-import { hostEnvironment } from '../cli/discovery';
+import { CLEAR_RUN_AS_NODE, hostEnvironment } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
 import { repositoryState } from './repository-state';
 const step = z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm', 'pnpm', 'yarn', 'python', 'cargo', 'go', 'dotnet']), args: z.array(z.string().max(500).refine((s) => !s.includes('\0'))).min(1).max(30) }).strict();
@@ -41,7 +41,7 @@ export class Verification {
       const base = folder.replace(/^"|"$/g, '');
       if (['npm', 'pnpm', 'yarn'].includes(tool)) {
         const entries = tool === 'npm' ? ['node_modules/npm/bin/npm-cli.js', 'npm'] : tool === 'pnpm' ? ['node_modules/pnpm/bin/pnpm.cjs', 'pnpm'] : ['node_modules/yarn/bin/yarn.js', 'yarn'];
-        for (const name of entries) try { const file = fs.realpathSync(path.join(base, name)); if (fs.statSync(file).isFile() && /\.(?:js|cjs|mjs)$/.test(file)) return { file: process.execPath, args: [file], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }; } catch {}
+        for (const name of entries) try { const file = fs.realpathSync(path.join(base, name)); if (fs.statSync(file).isFile() && /\.(?:js|cjs|mjs)$/.test(file)) return { file: process.execPath, args: [CLEAR_RUN_AS_NODE, file], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } }; } catch {}
       } else for (const name of tool === 'python' ? process.platform === 'win32' ? ['python.exe', 'python3.exe'] : ['python3', 'python'] : [tool + (process.platform === 'win32' ? '.exe' : '')]) try { const file = path.join(base, name); if (fs.statSync(file).isFile()) return { file, args: [], env }; } catch {}
     }
     throw new HubError('CHECK_TOOL', `${tool} was not found on PATH. Install it or use another verification command.`);

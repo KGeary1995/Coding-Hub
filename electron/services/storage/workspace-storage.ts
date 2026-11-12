@@ -151,8 +151,10 @@ export class WorkspaceStorage {
     const completed = this.database.prepare("SELECT runId, endedAt FROM runs WHERE status!='running' ORDER BY startedAt DESC, rowid DESC").all();
     completed.forEach((row, index) => {
       if (index < this.info.maxCompletedRuns && String(row.endedAt) >= cutoff) return;
+      // A log Windows will not delete now (locked, read-only) stays, with its record, and is tried again next time:
+      // one stubborn file must not turn storage off for the whole launch.
       try { unlinkSync(this.logPath(String(row.runId))); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return; }
       this.database.prepare('DELETE FROM runs WHERE runId=?').run(String(row.runId));
     });
   }

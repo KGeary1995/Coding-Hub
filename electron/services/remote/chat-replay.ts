@@ -38,7 +38,6 @@ export class ChatReplayBuffer {
     return { sessionId, runId: entry?.runId ?? null, events: entry ? entry.events.map((kept) => kept.event) : [] };
   }
   sessionIds() { return [...this.sessions.keys()]; }
-  has(sessionId: string) { return this.sessions.has(sessionId); }
   forget(sessionId: string) { this.sessions.delete(sessionId); }
   clear() { this.sessions.clear(); }
 

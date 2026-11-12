@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Task, TaskOutcome, TaskSent, TaskWatch } from '../../shared/workbench';
 import type { ChannelTranscript } from '../../shared/remote';
 import type { ChatBlock, RoundTableState } from '../../shared/chat';
-import { replyToTask, taskSignal } from '../../shared/task-signal';
+import { promptMark, replyToTask, taskSignal } from '../../shared/task-signal';
 import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
@@ -50,6 +50,8 @@ export async function sendTask(id: string) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
   if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals.');
+  // A terminal waiting on an approval would take the prompt's Enter as the answer (often Yes): the person answers first.
+  if (!session.config.chat && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
   const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
@@ -69,32 +71,64 @@ export async function sendTask(id: string) {
 
 type Said = { role: 'user' | 'assistant'; text: string };
 const textOf = (blocks: ChatBlock[]) => blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n');
-/** The newest reply to a task in a channel's conversation as the CLI recorded it (for terminals, whose screen Trace cannot read). */
-async function lastReply(sessionId: string, task: Task): Promise<string | null> {
+/** A channel's conversation as the CLI recorded it (for terminals, whose screen Trace cannot read); null when unreadable. */
+async function transcriptOf(sessionId: string): Promise<Said[] | null> {
   try {
     const transcript = await workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId });
-    return replyToTask((transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) }), task);
+    return (transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) });
   } catch { return null; }
 }
-/** The newest reply to a task that a chat channel drew (at a Round Table, the seat's own conversation, which has the task as Trace passed it). */
-export function chatReply(sessionId: string, task: Task): string | null {
+/** What a chat channel drew (at a Round Table, the seat's own conversation, which has the task as Trace passed it). */
+function chatOf(sessionId: string): Said[] {
   const items = useChatStore.getState().threads[sessionId]?.items ?? [];
-  return replyToTask(items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []), task);
+  return items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []);
 }
+/** The newest reply to a task in a channel's conversation as the CLI recorded it. */
+async function lastReply(sessionId: string, task: Task): Promise<string | null> { const said = await transcriptOf(sessionId); return said ? replyToTask(said, task) : null; }
+/** The newest reply to a task that a chat channel drew. */
+export function chatReply(sessionId: string, task: Task): string | null { return replyToTask(chatOf(sessionId), task); }
 
+/** A channel's working tasks, the one sent last first. */
+function activeOn(sessionId: string) {
+  return useTaskStore.getState().tasks.filter((item) => item.sessionId === sessionId && item.status === 'active' && item.sentAt)
+    .sort((a, b) => Date.parse(b.sentAt!) - Date.parse(a.sentAt!));
+}
+/**
+ * The task a turn end is about. One working on the channel: that one. Several (an earlier one not yet confirmed when
+ * the next was sent): the one whose prompt the agent last received in the conversation, so a newer task typed while the
+ * agent was still on the older one does not take the older one's reply. When that cannot be told (the conversation
+ * could not be read, or holds none of their prompts), none: guessing could move the wrong task, and the automation
+ * reads each task's own reply again later (startTaskAutomation).
+ */
+function taskOfTurn(active: Task[], said: Said[] | null): Task | undefined {
+  if (active.length === 1) return active[0];
+  if (!said) return undefined;
+  let found: Task | undefined; let at = -1;
+  for (const task of active) { const mark = promptMark(task); said.forEach((message, index) => { if (message.role === 'user' && message.text.includes(mark) && index > at) { at = index; found = task; } }); }
+  return found;
+}
 /**
  * The agent ended a turn in a channel (Claude Code's Stop hook, or a chat reply ending). Its task is done only when the
  * reply ends with TASK COMPLETE (task-signal.ts); TASK BLOCKED: … leaves it in Working, waiting for the person, and any
  * other ending (a question, a stop part way) leaves it in Working, marked unconfirmed. An error or interruption: failed.
  * Only the reply after the task's own prompt counts. `from` is where to read it: a chat's own conversation (at a Round
- * Table, the driver seat's), or by default the CLI's transcript of `sessionId`.
+ * Table, the driver seat's), the reply itself, or by default the CLI's transcript of `sessionId` (null when unreadable:
+ * the task is then left unconfirmed, never guessed done).
  */
 export async function taskTurnDone(sessionId: string, failed = false, from?: { chat: string } | { text: string | null }) {
-  const task = useTaskStore.getState().tasks.find((item) => item.sessionId === sessionId && item.status === 'active' && item.sentAt);
-  // A turn that ends within seconds of the send is the CLI taking the message, not the work.
-  if (!task || Date.now() - Date.parse(task.sentAt!) <= 5000) return;
+  // At a Round Table, a task sent while the agents were busy waits there (`table.waiting`) though its prompt already shows
+  // in the thread: until it goes, it is neither this turn's task nor a prompt the agents received.
+  const waiting = useChatStore.getState().threads[sessionId]?.table?.waiting?.trim() ?? '';
+  const delivered = (text: string) => !waiting || !text.trim() || !waiting.includes(text.trim());
+  const active = activeOn(sessionId).filter((task) => !waiting.includes(promptMark(task))); if (!active.length) return;
+  const given = from && 'text' in from ? from.text : null;
+  const said = from && 'text' in from ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
+  const task = taskOfTurn(active, said); if (!task) return;
+  // A terminal turn that ends within seconds of the send is the CLI taking the message, not the work (Claude Code's
+  // Stop hook fires then too). A chat's turn end is a real reply, however quick ("TASK BLOCKED: which file?").
+  if (!from && Date.now() - Date.parse(task.sentAt!) <= 5000) return;
   if (failed) { if (task.outcome !== 'failed') await setTaskStatus(task.id, 'active', 'failed').catch(() => {}); return; }
-  const reply = !from ? await lastReply(sessionId, task) : 'chat' in from ? chatReply(from.chat, task) : from.text;
+  const reply = said ? replyToTask(said, task) : given;
   const signal = taskSignal(reply ?? '');
   if (signal?.kind === 'complete') await setTaskStatus(task.id, 'review', 'finished').catch(() => {});
   else if (signal?.kind === 'blocked') await setTaskStatus(task.id, 'active', 'blocked', signal.reason).catch(() => {});
@@ -114,7 +148,11 @@ const rechecked = new Map<string, { at: number; reply: string }>();
  */
 export function chainTasks(leadId: string, table: RoundTableState) {
   if (table.kind !== 'hierarchy' || !table.chain) return;
-  const task = useTaskStore.getState().tasks.find((item) => item.sessionId === leadId && item.status === 'active' && item.sentAt); if (!task) return;
+  // The task the chain is working on: only the one whose prompt it carries. A chain carrying no task's prompt (something
+  // typed at the table, or a verdict published again after its task moved on) marks nothing: a verdict on one task must
+  // never move another.
+  const active = activeOn(leadId); const chainTask = table.chain.task;
+  const task = active.find((item) => chainTask.includes(promptMark(item))); if (!task) return;
   const { step, verdict, note } = table.chain;
   if (step === 'done' && verdict === 'approved') void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
   else if (step === 'needs-you' && (task.outcome !== 'blocked' || task.outcomeNote !== note)) void setTaskStatus(task.id, 'active', 'blocked', note.slice(0, 500) || 'The Round Table needs you.').catch(() => {});

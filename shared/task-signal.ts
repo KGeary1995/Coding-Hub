@@ -15,15 +15,21 @@ export const SIGNAL_INSTRUCTION = `When you are done, list the files you changed
  */
 export const promptMark = (task: { title: string; sendId?: string }) => { const line = task.title.trim().replace(/\s*\n\s*/g, ' '); return `Task${task.sendId ? ` ${task.sendId}` : ''}: ${line}${/[.!?]$/.test(line) ? '' : '.'}`; };
 export const isSendId = (value: unknown): value is string => typeof value === 'string' && /^t-[0-9a-f]{8}$/.test(value);
+/** A message carrying the start of another send's prompt ("Task t-…:" with a different send, or a different title). */
+const anotherSend = (text: string, mark: string) => [...text.matchAll(/Task t-[0-9a-f]{8}: /g)].some((found) => !text.startsWith(mark, found.index));
 /**
  * The newest reply to this task: only what the agent said after the task's own prompt was sent (its latest copy, if it
  * was sent again). An earlier task's TASK COMPLETE never counts for this one; with no prompt found, there is no reply.
+ * It ends where the next task was sent (every task prompt carries SIGNAL_INSTRUCTION), so a later task's TASK COMPLETE
+ * never counts for this one either.
  */
 export function replyToTask(messages: { role: 'user' | 'assistant'; text: string }[], task: { title: string; sendId?: string }): string | null {
   const mark = promptMark(task); let start = -1;
   messages.forEach((message, index) => { if (message.role === 'user' && message.text.includes(mark)) start = index; });
   if (start < 0) return null;
-  const after = messages.slice(start + 1).filter((message) => message.role === 'assistant' && message.text.trim());
+  // The next task's prompt: its instruction, or its own send id (a transcript can keep only the start of a long prompt).
+  const next = messages.findIndex((message, index) => index > start && message.role === 'user' && (message.text.includes(SIGNAL_INSTRUCTION) || anotherSend(message.text, mark)));
+  const after = messages.slice(start + 1, next < 0 ? undefined : next).filter((message) => message.role === 'assistant' && message.text.trim());
   return after.length ? after[after.length - 1].text : null;
 }
 

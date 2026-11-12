@@ -117,7 +117,7 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
   runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-continue'), skipChallenge: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),

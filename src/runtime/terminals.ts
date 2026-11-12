@@ -216,6 +216,13 @@ function acknowledge(sessionId: string, runId: string, bytes: number) {
 export function routeTerminalEvent(event: SessionEvent) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
   if (!session || session.runId !== event.runId) { if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length); return; }
+  // A chat channel (and a Round Table's hidden seats) draws no terminal: none is made for it, with its 5,000 lines of
+  // scrollback. Its run still starts clean.
+  if (isAgentConfig(session.config) && session.config.chat) {
+    if (event.type === 'started') { forgetActivity(event.sessionId); clearPastedImages(event.sessionId); clearTerminalTitle(event.sessionId); }
+    if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length);
+    return;
+  }
   const entry = getTerminal(session);
   if (event.type === 'started') {
     entry.terminal.reset();

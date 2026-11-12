@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -106,6 +106,17 @@ describe('local workspace storage', () => {
     expect(storage.history().map((item) => item.runId).sort()).toEqual([active, second].sort());
     expect(() => storage.readLog({ runId: first })).toThrow('no longer available');
     expect(storage.readLog({ runId: active }).text).toBe('active');
+  });
+
+  it('skips an old log it cannot delete, instead of turning storage off for the launch', () => {
+    const { root, storage } = open(); const snapshot = workspace(); storage.save(snapshot);
+    const old = run(storage); storage.append(old, 'old'); storage.endRun(old, 0); storage.close(); databases.splice(databases.indexOf(storage), 1);
+    // The log is something that cannot be unlinked (a folder stands in for a locked file).
+    const log = path.join(root, 'logs', `${old}.log`); rmSync(log); mkdirSync(log);
+    const reopened = new WorkspaceStorage(root, undefined, { maxCompletedRuns: 0 }); databases.push(reopened);
+    expect(reopened.load()).toEqual(snapshot);
+    // Kept, with its record, to be tried again later.
+    expect(reopened.history().map((item) => item.runId)).toEqual([old]);
   });
 
   it('returns only a bounded tail for a large log', () => {

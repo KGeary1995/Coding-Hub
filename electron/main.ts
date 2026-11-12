@@ -54,7 +54,7 @@ import { ScreenShare } from './services/remote/screen-share';
 import { MAX_DISPLAYS, SCREEN_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
-import { latestMacVersion, startMacUpdate } from './services/updates/mac-script-update';
+import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
@@ -136,10 +136,14 @@ const manager = new PtyManager((owner, event) => {
     const ended = hub?.telemetry ? hub.telemetry.end(event.runId).catch(() => { hostHealth?.record('telemetry-finalization-failed'); reportStorageError('Usage recording could not finish for this run. The CLI exit is still reported.'); return transcript; }) : Promise.resolve(null);
     void autoMemory?.finish(event.runId, ended).catch(() => hostHealth?.record('auto-memory-summary-failed'));
   }
-  if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
-  if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   try { remote?.onSessionEvent(event); } catch { hostHealth?.record('remote-event-failed'); }
   sendToRenderer(IPC_CHANNELS.sessionEvent, event, owner);
+  // After the window has the event: naming the channel reads the saved workspace, which can fail, and a failed alert
+  // must not leave a stopped channel showing as running.
+  try {
+    if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
+    if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
+  } catch { hostHealth?.record('desktop-alert-failed'); }
 }, { onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
@@ -286,11 +290,12 @@ async function screenRequest(owner: number, payload: unknown) {
 async function remoteUpdate(): Promise<string> {
   if (updates && updates.status().phase !== 'disabled') return updates.remoteInstall();
   if (process.platform !== 'darwin' || !app.isPackaged) throw new HubError('UPDATES_DISABLED', 'This copy of Trace is updated by hand (a portable or source copy).');
-  const version = await latestMacVersion(); if (!version) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
-  if (version === app.getVersion()) return `Trace ${version} there is already the latest version.`;
+  const release = await latestMacRelease(); if (!release) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
+  const { version } = release;
+  if (!isNewerVersion(version, app.getVersion())) return `Trace ${app.getVersion()} there is already the latest version (the downloads page has ${version}).`;
   if (manager.hasSessions) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
   if (workspaceLoaded) await flushWorkspace();
-  startMacUpdate(storageRoot, version, REMOTE_PORT);
+  startMacUpdate(storageRoot, version, REMOTE_PORT, release.sha512);
   return `Installing Trace ${version} there. It quits, restarts and is back in about a minute; if the new version does not start, the old one is put back.`;
 }
 async function linkedRequest(payload: unknown) {

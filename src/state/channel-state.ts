@@ -1,6 +1,6 @@
 import type { Session } from '../../shared/types';
 import { freshInput, localDay, newTokens, type UsageRecord } from '../../shared/hub';
-import { channelsOf, leadOf } from './workspace-store';
+import { channelsOf, hiddenSeats, leadOf } from './workspace-store';
 
 /** What a session is doing, as the Trace design shows it (docs/design/trace/README.md). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
@@ -95,3 +95,6 @@ export function todayTotals(records: UsageRecord[], now = new Date()) {
  * starts a new run, often resuming the same conversation, and the day's count carries on.
  */
 export const channelToday = (sessionId: string, records: UsageRecord[], now = new Date()) => todayTotals(records.filter((record) => record.sessionId === sessionId), now);
+/** New tokens today in a channel as the person sees it: its own, and every hidden seat's at the Round Table it leads (partner and planner). */
+export const channelTokensToday = (sessions: Session[], sessionId: string, records: UsageRecord[], now = new Date()) =>
+  [sessionId, ...hiddenSeats(sessions, sessionId).map((seat) => seat.id)].reduce((sum, id) => sum + channelToday(id, records, now).tokens, 0);

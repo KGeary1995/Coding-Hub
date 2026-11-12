@@ -38,3 +38,12 @@ describe('review record lines', () => {
     expect(waiting).toContain('F1 (high, src/a.ts:12): '); expect(waiting).not.toMatch(/gemini/i); expect(waiting).not.toContain('F2 (');
   });
 });
+
+describe('only the fixed forms count', () => {
+  it('takes FINDING and CHALLENGE in capitals, any case of severity, and leaves ordinary sentences alone', () => {
+    expect(parseFindings('Finding: high quality work overall\nFinding: low-risk change\nfinding medium nothing')).toEqual([]);
+    expect(parseFindings('FINDING High a.ts:1 — real')).toEqual([{ severity: 'high', evidence: 'a.ts:1', text: 'real' }]);
+    expect(parseChallenges('Challenge: high hopes for this plan')).toEqual([]);
+    expect(parseChallenges('CHALLENGE MEDIUM — misses tests')).toEqual([{ severity: 'medium', text: 'misses tests' }]);
+  });
+});

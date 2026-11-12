@@ -25,7 +25,7 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
   const say = (runId: string, text: string) => { const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; tables.observe({ sessionId: runs[runId].sessionId, runId, event }); };
   const done = (runId: string) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } });
   const last = () => events.filter((envelope) => envelope.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>;
-  return { tables, sent, modes, answers, interrupted, say, done, last, runs };
+  return { tables, sent, modes, answers, interrupted, say, done, last, runs, events };
 }
 
 describe('Round Table', () => {
@@ -107,6 +107,55 @@ describe('Round Table', () => {
     tables.open(1, CLAUDE, CODEX, 'claude', 2);
     tables.send(CLAUDE, 'First', []); tables.stop(CLAUDE);
     expect(interrupted).toEqual([CLAUDE, CODEX]);
+  });
+
+  it('keeps a message sent before Stop and sends it to both once they have stopped', () => {
+    const { tables, sent, done, last } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 2);
+    tables.send(CLAUDE, 'First', []); tables.send(CLAUDE, 'Also this', []);
+    tables.stop(CLAUDE);
+    expect(last().table.waiting).toBe('Also this');
+    done(CLAUDE); done(CODEX);
+    expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Also this'], [CODEX, 'Also this']]);
+  });
+
+  it('seated again after a restart: no joining summary, and no new brief', () => {
+    const { tables, sent, say, last } = setup();
+    tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'user', text: 'Build the phone chat view', images: 0 } });
+    say(CLAUDE, 'Started on ChatView for the phone.');
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { rejoin: true });
+    expect(last().table.phase).toBe('idle'); expect(sent).toHaveLength(0);
+    tables.send(CLAUDE, 'Go on', []);
+    expect(sent.map((item) => item.text)).toEqual(['Go on', 'Go on']);
+  });
+
+  it('waits for an agent still in a turn from before, and never takes that turn for an answer', () => {
+    const { tables, sent, interrupted, say, done, last, runs } = setup();
+    (runs[CLAUDE] as { busy?: boolean }).busy = true;
+    tables.open(1, CLAUDE, CODEX, 'claude', 2, { rejoin: true });
+    expect(interrupted).toEqual([CLAUDE]);
+    // The person writes while Claude is still in that old turn: it waits.
+    tables.send(CLAUDE, 'What now?', []);
+    expect(sent).toHaveLength(0); expect(last().table.waiting).toBe('What now?');
+    // The old turn ends: not an answer; the waiting message goes to both.
+    say(CLAUDE, 'Half of an old reply.'); done(CLAUDE);
+    expect(sent.map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'What now?'], [CODEX, 'What now?']]);
+    say(CLAUDE, 'Answer.'); done(CLAUDE); say(CODEX, 'AGREE'); done(CODEX);
+    expect(sent[2]).toMatchObject({ runId: CLAUDE }); expect(sent[2].text).toContain('AGREE');
+    expect(sent[3].text).toContain('Answer.'); expect(sent[3].text).not.toContain('Half of an old reply.');
+  });
+
+  it('says so when the record is full, and makes room by dropping verified findings first', async () => {
+    const { tables, say, done, last, events } = setup();
+    const at = new Date().toISOString(); const finding = (n: number, status: 'open' | 'verified') => ({ id: `F${n}`, severity: 'low' as const, evidence: '', text: `f${n}`, status, response: '', check: '', reviewedAt: null, changedAt: null, round: 1, at });
+    tables.open(1, CLAUDE, CODEX, 'claude', 0, { findings: [finding(1, 'verified'), ...Array.from({ length: 49 }, (_, i) => finding(i + 2, 'open'))] });
+    tables.send(CLAUDE, 'Review it', []);
+    say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'FINDING high a.ts:1 — new one\nFINDING low b.ts:2 — another'); done(CODEX);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const findings = last().table.findings!;
+    // F1 (verified) made room for F51; the next has no room, and the thread says so.
+    expect(findings).toHaveLength(50); expect(findings.at(-1)).toMatchObject({ id: 'F51', text: 'new one' }); expect(findings.some((item) => item.id === 'F1')).toBe(false);
+    expect(events.find((envelope) => envelope.event.type === 'notice')?.event).toMatchObject({ text: expect.stringContaining('1 new finding was not recorded') });
   });
 
   it('has the leading agent sum up a conversation already under way for the newcomer', () => {

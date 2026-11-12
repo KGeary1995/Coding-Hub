@@ -94,7 +94,9 @@ export type ChatRequest =
   /** What the agent may do without asking, from now on (this computer's window only). */
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
-  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain }
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain;
+    /** A saved table seated again (after a restart, or a seat started again): both conversations resumed, so no joining summary. */
+    rejoin?: true }
   /** A hierarchy table's plan: approve it (the builder starts), or send it back with what to change. */
   | { action: 'table-plan'; sessionId: string; runId: string; approve: boolean; note: string }
   /** Picks a stopped hierarchy table up at its step; `skipChallenge`: a stopped challenge is left out instead. */

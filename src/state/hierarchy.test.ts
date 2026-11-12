@@ -11,7 +11,8 @@ const { channelsOf, createSession, leadOf, plannerOf } = await import('./workspa
 const { modelName } = await import('../components/chat/ChatParts');
 const { savedWorkspaceSchema: workspaceSchema } = await import('../../shared/schemas');
 
-const chain = (step: SavedChain['step'], extra: Partial<SavedChain> = {}): SavedChain => ({ step, task: 'Add a footer', plan: '1. Edit', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', ...extra });
+// The chain's task is the prompt Tasks sent (its completion instruction taken out), so it carries the task's mark.
+const chain = (step: SavedChain['step'], extra: Partial<SavedChain> = {}): SavedChain => ({ step, task: 'Task: Add a footer. Keep the current look.', plan: '1. Edit', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', ...extra });
 const table = (c: SavedChain): RoundTableState => ({ kind: 'hierarchy', partner: { sessionId: 'rev', runId: 'r', engine: 'codex' }, planner: { sessionId: 'plan', runId: 'p', engine: 'claude' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false, chain: c });
 const task: Task = { id: crypto.randomUUID(), title: 'Add a footer', directory: '/p', sessionId: 'lead', scope: ['**'], status: 'active', notes: '', verificationId: null, createdAt: '2026-11-10T00:00:00.000Z', sentAt: '2026-11-10T00:00:00.000Z' };
 const statusCalls = () => calls.filter((call) => call.action === 'task-status');
@@ -33,7 +34,7 @@ describe('a task given to a hierarchy Round Table', () => {
 
 describe('the hierarchy table in the window', () => {
   it('lists a plan waiting for approval in Needs you', () => {
-    expect(needsYou([], [], [], { lead: table(chain('plan-review')) })).toMatchObject([{ kind: 'plan-review', sessionId: 'lead', detail: 'Add a footer', action: 'answer' }]);
+    expect(needsYou([], [], [], { lead: table(chain('plan-review', { task: 'Add a footer' })) })).toMatchObject([{ kind: 'plan-review', sessionId: 'lead', detail: 'Add a footer', action: 'answer' }]);
   });
   it('hides the planner like the partner, saves without tiles for either, and names models as people do', () => {
     const lead = { ...createSession('claude'), roundTable: { partner: 'rev', planner: 'plan', kind: 'hierarchy' as const, driver: 'claude' as const, rounds: 2, chain: chain('final') } };

@@ -26,9 +26,24 @@ export interface Finding {
   source?: 'gemini'; gemini?: 'agree' | 'dispute'; geminiNote?: string; duplicateOf?: string;
 }
 export const MAX_FINDINGS = 50;
+/**
+ * Room for one more finding in a record: under MAX_FINDINGS, or by dropping the oldest verified one (its work is done).
+ * False when the record is full of findings still waiting: a new one must not be dropped without a word.
+ */
+export function roomForFinding(findings: Finding[]): boolean {
+  if (findings.length < MAX_FINDINGS && nextNumber(findings) <= 999) return true;
+  const verified = findings.findIndex((finding) => finding.status === 'verified');
+  if (verified < 0 || nextNumber(findings) > 999) return false;
+  findings.splice(verified, 1); return true;
+}
+const nextNumber = (findings: Finding[]) => findings.reduce((most, finding) => Math.max(most, Number(finding.id.slice(1)) || 0), 0) + 1;
+/** The next finding's id: one past the highest, so ids never repeat after older ones were dropped (F1 to F999). */
+export const nextFindingId = (findings: Finding[]) => `F${nextNumber(findings)}`;
 const LINE_LIMIT = 500;
 
-const FINDING = /^\s*(?:[-*]\s*)?\**FINDING\**\s*[:(\[]?\s*(high|medium|low)\s*[)\]]?\s*[:,-]?\s*(.+)$/i;
+// The keyword in capitals only: an ordinary sentence ("Finding: high quality work overall") is not a finding.
+const SEVERITY = '(high|medium|low|High|Medium|Low|HIGH|MEDIUM|LOW)';
+const FINDING = new RegExp(String.raw`^\s*(?:[-*]\s*)?\**FINDING\**\s*[:(\[]?\s*${SEVERITY}\s*[)\]]?\s*[:,-]?\s*(.+)$`);
 const ANSWER = /^\s*(?:[-*]\s*)?\**(FIXED|DECLINED|VERIFIED|REOPENED)\**\s+F(\d{1,3})\b\s*[:,.-]?\s*(.*)$/i;
 /** "path:line — problem" or "path — problem": the evidence is the first word when it looks like a file reference. */
 function split(rest: string) {
@@ -74,7 +89,7 @@ export function findingsFor(findings: Finding[], role: 'driver' | 'reviewer'): s
     : `Findings the driver answered, waiting for your check. Check each, then answer on its own line "VERIFIED F<n>" or "REOPENED F<n>: why":\n${lines.join('\n')}`;
 }
 
-const CHALLENGE = /^\s*(?:[-*]\s*)?\**CHALLENGE\**\s*[:(\[]?\s*(high|medium|low)\s*[)\]]?\s*[:,—–-]*\s*(.+)$/i;
+const CHALLENGE = new RegExp(String.raw`^\s*(?:[-*]\s*)?\**CHALLENGE\**\s*[:(\[]?\s*${SEVERITY}\s*[)\]]?\s*[:,—–-]*\s*(.+)$`);
 const RESPONSE = /^\s*(?:[-*]\s*)?\**(ACCEPTED|REJECTED)\**\s+C(\d{1,3})\b\s*[:,.—–-]*\s*(.*)$/i;
 /** The reviewer's challenges to a plan: "CHALLENGE high|medium|low — text" lines (Trace numbers them C1, C2, …). */
 export function parseChallenges(answer: string): { severity: FindingSeverity; text: string }[] {
