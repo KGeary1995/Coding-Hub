@@ -63,8 +63,10 @@ curl -fsSL -o "$DMG" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace
 [ "$(openssl dgst -sha512 -binary "$DMG" | base64)" = "$SHA" ] || { echo "download does not match the feed's checksum; Trace left as it was"; exit 1; }
 MNT=$(hdiutil attach -nobrowse -noautoopen -readonly "$DMG" | awk -F'\\t' '/\\/Volumes\\//{print $NF}')
 [ -d "$MNT/Trace.app" ] || { echo "disk image did not mount; Trace left as it was"; exit 1; }
-mkdir -p "$STAGE"; ditto "$MNT/Trace.app" "$STAGE/Trace.app"; hdiutil detach "$MNT" -quiet
-[ -d "$STAGE/Trace.app" ] || { echo "the disk image holds no Trace.app; Trace left as it was"; exit 1; }
+mkdir -p "$STAGE" || { hdiutil detach "$MNT" -quiet; echo "no staging folder; Trace left as it was"; exit 1; }
+if ! ditto "$MNT/Trace.app" "$STAGE/Trace.app"; then hdiutil detach "$MNT" -quiet; echo "could not copy Trace.app from the disk image; Trace left as it was"; exit 1; fi
+hdiutil detach "$MNT" -quiet
+[ -x "$STAGE/Trace.app/Contents/MacOS/Trace" ] || { echo "the staged app is incomplete; Trace left as it was"; exit 1; }
 [ "$(defaults read "$STAGE/Trace.app/Contents/Info.plist" CFBundleShortVersionString)" = "$V" ] || { echo "staged app is not $V; Trace left as it was"; exit 1; }
 osascript -e 'quit app "Trace"'
 for i in $(seq 1 90); do pgrep -xq Trace || break; sleep 1; done
