@@ -45,31 +45,46 @@ describe('which version a Mac is updated to', () => {
 });
 
 describe('a copy from the disk image that fails part way', () => {
-  // Runs the script itself in bash, with stand-ins for the Mac tools: the download and checksum pass, the disk image
-  // mounts, and ditto copies only Info.plist (naming the right version) before it fails.
-  const bash = (() => { try { execFileSync('bash', ['--version']); return true; } catch { return false; } })();
+  // Runs the script itself in bash: the download and checksum pass, the disk image mounts, and ditto copies only
+  // Info.plist (naming the right version) before it fails. The Mac tools are shell functions put at the top of the
+  // script, which bash prefers to any program whatever PATH holds (Git Bash's own wrapper puts its curl first).
+  // A bash that runs scripts as macOS would: on Windows Git Bash at its own path (the first `bash` on PATH can be
+  // WSL's, which cannot see Windows folders), elsewhere the system's. None found: skipped.
+  const bash = (() => {
+    const candidate = process.platform === 'win32' ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map((root) => path.join(root!, 'Git', 'bin', 'bash.exe')).find((file) => fs.existsSync(file)) : 'bash';
+    if (!candidate) return null;
+    try { execFileSync(candidate, ['--version']); return candidate; } catch { return null; }
+  })();
   it.skipIf(!bash)('never reaches the point where Trace is quit and replaced, and detaches the disk image', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-run-')); const bin = path.join(root, 'bin'); const mount = path.join(root, 'volume'); const marks = path.join(root, 'marks');
-    fs.mkdirSync(bin); fs.mkdirSync(path.join(mount, 'Trace.app', 'Contents', 'MacOS'), { recursive: true }); fs.mkdirSync(marks);
-    const stub = (name: string, body: string) => fs.writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
-    stub('uname', 'echo arm64');
-    stub('curl', 'while [ $# -gt 0 ]; do [ "$1" = -o ] && { echo image > "$2"; }; shift; done; exit 0');
-    stub('openssl', 'cat >/dev/null 2>&1; echo digest');
-    stub('base64', `cat >/dev/null; echo '${ARM}'`);
-    stub('hdiutil', `if [ "$1" = attach ]; then printf '/dev/disk9\\tApple_HFS\\t%s\\n' '${mount.replace(/\\/g, '/')}'; else touch '${marks.replace(/\\/g, '/')}/detached'; fi`);
-    stub('ditto', 'mkdir -p "$2/Contents"; echo plist > "$2/Contents/Info.plist"; exit 1');
-    stub('defaults', 'echo 1.21.1');
-    for (const name of ['osascript', 'pkill', 'open', 'xattr']) stub(name, `touch '${marks.replace(/\\/g, '/')}/${name}'`);
-    const script = path.join(root, 'update.sh');
-    // The mount point reported by hdiutil must contain /Volumes/ for the script's awk; the stand-in names the test folder.
-    fs.writeFileSync(script, macUpdateScript('1.21.1', 47821, { arm64: ARM, x64: INTEL }).replace("'/\\/Volumes\\//{print $NF}'", "'{print $NF}'"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-run-')); const mount = path.join(root, 'volume'); const marks = path.join(root, 'marks');
+    fs.mkdirSync(path.join(mount, 'Trace.app', 'Contents', 'MacOS'), { recursive: true }); fs.mkdirSync(marks);
+    const posix = (file: string) => file.replace(/\\/g, '/'); const log = path.join(root, 'update.log'); const script = path.join(root, 'update.sh');
+    const tools = [
+      'uname() { echo arm64; }',
+      'curl() { while [ $# -gt 0 ]; do [ "$1" = -o ] && echo image > "$2"; shift; done; return 0; }',
+      'openssl() { echo digest; }',
+      `base64() { cat >/dev/null; echo '${ARM}'; }`,
+      `hdiutil() { if [ "$1" = attach ]; then printf '/dev/disk9\\tApple_HFS\\t%s\\n' '${posix(mount)}'; else touch '${posix(marks)}/detached'; fi; }`,
+      'ditto() { mkdir -p "$2/Contents"; echo plist > "$2/Contents/Info.plist"; return 1; }',
+      'defaults() { echo 1.21.1; }',
+      ...['osascript', 'pkill', 'open', 'xattr'].map((name) => `${name}() { touch '${posix(marks)}/${name}'; }`),
+    ].join('\n');
+    // The stand-in's mount point is the test folder, not /Volumes/, and the script's own log goes there too, so a
+    // failure shows where the script stopped.
+    const text = macUpdateScript('1.21.1', 47821, { arm64: ARM, x64: INTEL })
+      .replace("'/\\/Volumes\\//{print $NF}'", "'{print $NF}'").replace('exec >>/tmp/trace-update.log', `exec >>'${posix(log)}'`)
+      .replace('set -u\n', `set -u\n${tools}\n`);
+    fs.writeFileSync(script, text);
     try {
       let failed = false;
-      try { execFileSync('bash', [script], { env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } }); } catch { failed = true; }
+      try { execFileSync(bash!, [script], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch { failed = true; }
+      const said = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '(no log)';
+      // It stopped at the copy, with the reason: not earlier (which would not test the copy) and not later.
+      expect(said).toContain('could not copy Trace.app from the disk image; Trace left as it was');
       expect(failed).toBe(true);
-      expect(fs.existsSync(path.join(marks, 'detached'))).toBe(true);
+      expect(fs.existsSync(path.join(marks, 'detached')), said).toBe(true);
       // Trace was never asked to quit, so nothing was moved or replaced.
-      for (const name of ['osascript', 'pkill', 'open', 'xattr']) expect(fs.existsSync(path.join(marks, name))).toBe(false);
+      for (const name of ['osascript', 'pkill', 'open', 'xattr']) expect(fs.existsSync(path.join(marks, name)), said).toBe(false);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
