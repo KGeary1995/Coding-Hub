@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { inBatches } from './plan-limits';
+import { CLAUDE_USAGE_ARGS, inBatches } from './plan-limits';
 
 describe('usage limit checks', () => {
+  it('reads Claude usage without starting MCP servers, so no server opens a console window', () => {
+    expect(CLAUDE_USAGE_ARGS).toEqual(expect.arrayContaining(['-p', '/usage', '--no-session-persistence', '--strict-mcp-config']));
+    expect(CLAUDE_USAGE_ARGS).not.toContain('--mcp-config');
+  });
+
   it('runs at most the given number of checks at once and keeps their order', async () => {
     let running = 0; let most = 0;
     const tasks = Array.from({ length: 11 }, (_, index) => async () => {

@@ -6,11 +6,17 @@ import { findExecutable, hostEnvironment, type Executable } from '../cli/discove
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
-/** Claude Code's own `/usage`, run without a model request and without saving a session. */
+/**
+ * `/usage` needs no tools. Without `--strict-mcp-config` every check started the person's MCP servers, plugin ones
+ * included (npx, uvx), and on Windows a uvx Python server opened a visible console every few minutes (2026-11-12).
+ */
+export const CLAUDE_USAGE_ARGS = ['-p', '/usage', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
+
+/** Claude Code's own `/usage`, run without a model request, without saving a session and without MCP servers. */
 export function readClaudeLimits(executable: Executable, env: Record<string, string>, account: string): Promise<PlanLimits> {
   const checkedAt = new Date().toISOString();
   return new Promise((resolve) => {
-    execFile(executable.file, [...executable.prefixArgs, '-p', '/usage', '--output-format', 'json', '--no-session-persistence'], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
+    execFile(executable.file, [...executable.prefixArgs, ...CLAUDE_USAGE_ARGS], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
       let result = ''; try { result = text(JSON.parse(stdout).result); } catch { /* Below. */ }
       const windows = parseClaudeUsage(result);
       resolve({ engine: 'claude', account, windows, plan: /subscription/i.test(result) ? 'Subscription' : null, checkedAt, error: windows.length ? null : error ? 'Claude Code did not answer /usage.' : /api key|api usage|pay-as-you-go/i.test(result) ? 'This account is billed by API usage, which has no session or weekly limit.' : 'Claude Code did not report usage limits.' });
