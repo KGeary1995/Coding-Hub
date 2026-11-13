@@ -1,5 +1,10 @@
 ## What's new
 
+1.21.2 stops a console window from flashing up every few minutes on Windows (update every computer; the phone app needs no reload):
+
+- **No more stray console windows.** Trace checks each Claude account's plan limits every few minutes by running Claude Code's `/usage`. Each check also started every MCP server from the person's Claude Code plugins (through `npx` and `uvx`), and on Windows a Python server started by `uvx` opened a visible console window. The check now starts no MCP servers (`--strict-mcp-config`); it never needed them.
+- **Lighter checks everywhere.** The same change means a plan-limits check no longer starts those servers on a Mac either.
+
 1.21.1 makes updating a Mac from another computer work again (update every computer; the phone app needs no reload):
 
 - **A Mac on 1.21.0 can be updated again.** On 1.21.0, updating a Mac from another computer stopped with "the feed lists no checksum": it looked only for a Mac update zip, which unsigned releases did not publish. Every release now publishes the zips with their checksums. A Mac on 1.21.0 gets 1.21.1 by updating from another computer as before, or by installing the disk image from the downloads page by hand.
