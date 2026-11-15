@@ -10,13 +10,17 @@ const { PtyManager } = require('../dist-electron/electron/services/cli/pty-manag
   await Promise.all(directories.map((directory) => mkdir(directory)));
   const outputs = new Map();
   const exits = new Set();
+  // The stand-in CLI runs under plain Node on Windows: Electron-as-Node writes nothing to a Windows pseudo console (seen on
+  // Windows 11: ConPTY showed cmd's and node's output, and none of electron.exe's), so every wait below timed out there.
+  // The PTY manager under test still runs inside Electron.
+  const runtime = process.platform === 'win32' && process.env.npm_node_execpath ? process.env.npm_node_execpath : process.execPath;
   const manager = new PtyManager((_owner, event) => {
     if (event.type === 'data') outputs.set(event.sessionId, (outputs.get(event.sessionId) ?? '') + event.data);
     if (event.type === 'exit') exits.add(event.sessionId);
   }, {
     discover: async (engine) => ({
-      info: { engine, available: true, version: '2.1.296', executable: process.execPath, supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null },
-      executable: { file: process.execPath, prefixArgs: [path.join(__dirname, 'fixtures/interactive-cli.cjs')], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: process.execPath },
+      info: { engine, available: true, version: '2.1.296', executable: runtime, supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null },
+      executable: { file: runtime, prefixArgs: [path.join(__dirname, 'fixtures/interactive-cli.cjs')], extraEnv: { ELECTRON_RUN_AS_NODE: '1' }, displayPath: runtime },
     }),
   });
   const wait = async (test) => {

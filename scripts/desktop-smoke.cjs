@@ -47,6 +47,9 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   env[pathKey] = bin + path.delimiter + (env[pathKey] ?? '');
+  // The app's home folder too: Skills & plugins also lists ~/.agents, and a developer's own skills there come before
+  // the rows this test checks (on a clean CI runner there are none). Windows only: os.homedir() reads USERPROFILE.
+  if (process.platform === 'win32') { env.USERPROFILE = path.join(root, 'home'); await mkdir(env.USERPROFILE); }
   if (process.platform === 'linux') {
     env.XDG_CONFIG_HOME = path.join(root, 'xdg-config');
     env.XDG_CACHE_HOME = path.join(root, 'xdg-cache');
