@@ -129,10 +129,12 @@ function showPair(error = '') {
 const linkText = () => !connected ? 'reconnecting…' : via ? `live · ${via}` : 'live';
 function listen(sessionId: string | null) {
   stop?.();
-  stop = follow(sessionId, onEvent, (value: boolean, target: Target) => {
+  stop = follow(sessionId, onEvent, (value: boolean, target: Target, problem?: string) => {
     connected = value; if (value) via = target.id ? target.name : null;
     for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = linkText(); }
-    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !via; notice.textContent = via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : ''; }
+    // While nothing is connected, the list says which computer this app is asking for and why it does not answer.
+    const text = !value && problem ? problem : via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : '';
+    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !text; notice.textContent = text; }
     // On its own computer, the phone picks up keys to the others, so it can still reach them when this one is off.
     if (value && !target.id) void collectKeys().catch(() => {});
   }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
