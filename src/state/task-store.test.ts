@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../shared/workbench';
 
-const calls: Record<string, unknown>[] = []; let listed: Task[] = []; let transcript: unknown = null;
-vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'channel-transcript' ? transcript : request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
+const calls: Record<string, unknown>[] = []; let failStatus = 0; let listed: Task[] = []; let transcript: unknown = null;
+vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { if (request.action === 'task-status' && failStatus > 0) { failStatus--; throw new Error('disk full'); } calls.push(request); return request.action === 'channel-transcript' ? transcript : request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
 vi.mock('../runtime/terminals', () => ({ writeTerminal: vi.fn(async () => true) }));
 
-const { chainTasks, sendTask, startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
+const { chainTasks, returnTasks, sendTask, startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
 const { useChatStore } = await import('./chat-store');
 const { useWorkspaceStore } = await import('./workspace-store');
 const { useActivityStore } = await import('./activity-store');
@@ -209,5 +209,68 @@ describe('a task waiting at a Round Table', () => {
     await taskTurnDone('table', false, { chat: 'table' });
     expect(statusCalls()).toEqual([{ action: 'task-status', id: a.id, status: 'review', outcome: 'finished' }]);
     useChatStore.setState({ threads: {} });
+  });
+});
+
+describe('tasks a hierarchy table removed without starting them go back to To do', () => {
+  beforeEach(() => { calls.length = 0; });
+  const prompt = (title: string) => `Task: ${title}. When you are done, end with TASK COMPLETE.`;
+  it('moves only working tasks on that channel whose prompt was removed, and never the one the table is working on', async () => {
+    const header = working('lead', { title: 'Add a header' }); const footer = working('lead', { title: 'Add a footer' }); const elsewhere = working('other', { title: 'Add a header' });
+    const reviewed = working('lead', { title: 'Add a menu', status: 'review' });
+    useTaskStore.setState({ tasks: [header, footer, elsewhere, reviewed] }); listed = [header, footer, elsewhere, reviewed];
+    await returnTasks('lead', [prompt('Add a header'), prompt('Add a menu'), prompt('Add a footer')], 'Task: Add a footer.');
+    expect(statusCalls()).toEqual([{ action: 'task-status', id: header.id, status: 'queued' }]);
+  });
+  it('says so when the status cannot be written, and tries again on the next automation tick', async () => {
+    const header = working('lead', { title: 'Add a header' }); useTaskStore.setState({ tasks: [header], error: '' }); listed = [header];
+    failStatus = 1;
+    await returnTasks('lead', [prompt('Add a header')]);
+    expect(useTaskStore.getState().error).toContain('could not be put back in To do (disk full)');
+    calls.length = 0; vi.useFakeTimers();
+    const stop = startTaskAutomation(); await vi.advanceTimersByTimeAsync(5000); stop(); vi.useRealTimers();
+    const toDo = () => statusCalls().filter((call) => call.status === 'queued'); expect(toDo()).toEqual([{ action: 'task-status', id: header.id, status: 'queued' }]);
+    // Written once it worked: the next tick tries nothing more.
+    calls.length = 0; vi.useFakeTimers(); const again = startTaskAutomation(); await vi.advanceTimersByTimeAsync(5000); again(); vi.useRealTimers(); expect(toDo()).toEqual([]);
+  });
+  const toDo = () => statusCalls().filter((call) => call.status === 'queued');
+  it('retries only the send that was discarded: the same task sent again since is left working (F6)', async () => {
+    const first = working('lead6', { title: 'Add a header', sendId: 's-0001' }); useTaskStore.setState({ tasks: [first] }); listed = [first];
+    failStatus = 1; await returnTasks('lead6', [`Task s-0001: Add a header. ${prompt('x')}`]); expect(toDo()).toEqual([]);
+    // Sent again before the retry: the same task, a new send.
+    const again = { ...first, sendId: 's-0002' }; useTaskStore.setState({ tasks: [again] }); listed = [again]; calls.length = 0;
+    vi.useFakeTimers(); const stop = startTaskAutomation(); await vi.advanceTimersByTimeAsync(15000); stop(); vi.useRealTimers();
+    expect(toDo()).toEqual([]);
+  });
+  it('returns a send whose title was edited since, by its send id; a task without one still by its title (F9)', async () => {
+    const edited = working('lead9', { title: 'Add a header (blue)', sendId: 's-0009' }); const legacy = working('lead9', { title: 'Add a footer' });
+    const other = working('lead9', { title: 'Add a menu', sendId: 's-00091' });
+    useTaskStore.setState({ tasks: [edited, legacy, other] }); listed = [edited, legacy, other]; calls.length = 0;
+    await returnTasks('lead9', [`Task s-0009: Add a header. ${prompt('x')}`, prompt('Add a footer')]);
+    expect(toDo()).toEqual([{ action: 'task-status', id: edited.id, status: 'queued' }, { action: 'task-status', id: legacy.id, status: 'queued' }]);
+  });
+  it('finishes a task renamed while its hierarchy table worked, by its send id; one without a send id by its title', async () => {
+    const approved = (task: string) => ({ kind: 'hierarchy' as const, partner: { sessionId: 'r', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: true, chain: { step: 'done' as const, task, plan: 'P', report: '', reviewRound: 0, finalRound: 0, verdict: 'approved' as const, note: '' } });
+    const renamed = working('lead10', { title: 'Add a header (blue)', sendId: 's-0010' }); const prefix = working('lead10', { title: 'Add a menu', sendId: 's-00101' });
+    useTaskStore.setState({ tasks: [prefix, renamed] }); listed = [prefix, renamed]; calls.length = 0;
+    chainTasks('lead10', approved('Task s-0010: Add a header.'));
+    await vi.waitFor(() => expect(statusCalls()).toEqual([{ action: 'task-status', id: renamed.id, status: 'review', outcome: 'finished' }]));
+    const legacy = working('lead11', { title: 'Add a footer' }); useTaskStore.setState({ tasks: [legacy] }); listed = [legacy]; calls.length = 0;
+    chainTasks('lead11', approved('Task: Add a footer.'));
+    await vi.waitFor(() => expect(statusCalls()).toEqual([{ action: 'task-status', id: legacy.id, status: 'review', outcome: 'finished' }]));
+  });
+  it('keeps a discard the task list has not caught up with, and returns the task once the list shows it (F7)', async () => {
+    const header = working('lead7', { title: 'Add a header' }); useTaskStore.setState({ tasks: [] }); listed = [header];
+    await returnTasks('lead7', [prompt('Add a header')]);
+    vi.useFakeTimers(); const stop = startTaskAutomation(); await vi.advanceTimersByTimeAsync(5000); stop(); vi.useRealTimers();
+    expect(toDo()).toEqual([{ action: 'task-status', id: header.id, status: 'queued' }]);
+  });
+  it('lets go of a discard once a list loaded after it has no such working task', async () => {
+    const moved = working('lead8', { title: 'Add a header', status: 'queued' }); useTaskStore.setState({ tasks: [] }); listed = [moved];
+    await returnTasks('lead8', [prompt('Add a header')]);
+    vi.useFakeTimers(); const stop = startTaskAutomation(); await vi.advanceTimersByTimeAsync(10000);
+    // Now working again on the channel (sent anew by the person): the old discard must not move it.
+    listed = [{ ...moved, status: 'active' }]; await vi.advanceTimersByTimeAsync(10000); stop(); vi.useRealTimers();
+    expect(toDo()).toEqual([]);
   });
 });

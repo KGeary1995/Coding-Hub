@@ -246,6 +246,16 @@ else if (args.startsWith('serve --bg --https=443')) {
     const leaveOut = page.locator('.chain-bar').getByRole('button', { name: 'Continue without the challenge', exact: true });
     await leaveOut.waitFor({ timeout: 60000 }); await leaveOut.click();
     await page.locator('.chain-bar').filter({ hasText: 'plan is ready' }).filter({ hasText: 'The challenge was left out at your request.' }).waitFor({ timeout: 60000 });
+    // A revision the person asks for survives Stop: Continue asks the planner for it again (the stand-in planner answers
+    // with the prompt it was given, after 4 s for this note, and an interrupt cancels that answer).
+    await tableBox.fill('Make the footer smaller, slow-fixture-reply'); await tableBox.press('Enter');
+    const chainBar = page.locator('.chain-bar');
+    await chainBar.getByRole('button', { name: 'Stop', exact: true }).click({ timeout: 30000 });
+    await chainBar.getByRole('button', { name: 'Continue', exact: true }).click({ timeout: 30000 });
+    await chainBar.getByRole('button', { name: 'Approve plan', exact: true }).waitFor({ timeout: 60000 });
+    const revised = page.locator('.table-planner').filter({ hasText: 'The person asks you to revise the plan' });
+    assert.equal(await revised.count(), 1, 'one planner answer to the revision: the stopped turn left none');
+    assert.match(await revised.innerText(), /Make the footer smaller, slow-fixture-reply/);
     await phone.locator('#channel-list button').filter({ hasText: 'Round Table' }).filter({ hasNotText: 'CH3' }).first().click();
     await phone.locator('.phone-chat .chain-bar').filter({ hasText: 'Round Table · hierarchy' }).filter({ hasText: 'Approve plan' }).waitFor({ timeout: 30000 });
     await phone.locator('.phone-chat .chat-author').filter({ hasText: 'Planner' }).first().waitFor({ timeout: 30000 });
@@ -261,7 +271,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await fs.rm(root, { recursive: true, force: true });

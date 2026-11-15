@@ -41,7 +41,9 @@ export type ChatEvent =
    * closed it (from any window, phone or computer), so the lead forgets it and its partner is stopped; without it, one
    * of the runs ended and the table is seated again when both run.
    */
-  | { type: 'table'; table: RoundTableState | null; closed?: true };
+  | { type: 'table'; table: RoundTableState | null; closed?: true;
+    /** Tasks from Tasks the host just removed from a hierarchy table without starting them (dropped, or the table closed): the window puts them back in To do. */
+    discarded?: string[] };
 export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent };
 
 /**
@@ -52,19 +54,36 @@ export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent 
  */
 /** The default models of a hierarchy table's Claude seats (the person can change them on its bar). */
 /** Each seat's model when it starts, unless changed under Models: the reviewer's too, so it does not inherit whatever Codex's own settings default to. */
-export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6-astra' } as const;
+export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6.1-sol' } as const;
+/** Reviewer models a hierarchy no longer uses: a reviewer saved with one starts on HIERARCHY_MODELS.reviewer instead. */
+export const RETIRED_REVIEWER_MODELS: readonly string[] = ['gpt-6-astra'];
 /**
  * A hierarchy Round Table's step (electron/services/chat/review-chain.ts): challenging (the reviewer, Codex, challenges
  * the plan before the person sees it) and plan-responding (the planner answers the challenges) come between planning
  * and plan-review.
  */
 export type ChainStep = 'idle' | 'planning' | 'challenging' | 'plan-responding' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
+/**
+ * Whether a hierarchy step comes at or after the final review: the final review itself, or a fix or review it sent back.
+ * What the person writes then is a follow-up, which the planner plans again, never straight to the builder.
+ */
+export function late(chain: { finalRound: number }, step: ChainStep | null | undefined): boolean {
+  return step === 'final' || step === 'final-fixing' || ((step === 'fixing' || step === 'reviewing') && chain.finalRound > 0);
+}
 /** One of the reviewer's challenges to a plan, and the planner's answer to it. */
 export interface PlanChallenge { id: string; severity: 'high' | 'medium' | 'low'; text: string; answer?: 'accepted' | 'rejected'; reason?: string }
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
 export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
   /** The reviewer's challenges to this task's plan, with the planner's answers; and whether this task's plan was already challenged (once per task). */
-  challenges?: PlanChallenge[]; challenged?: true }
+  challenges?: PlanChallenge[]; challenged?: true;
+  /** Present while the planner writes the plan again after the final review (the person wrote meanwhile): the final review's request, '' when it had none. */
+  replan?: string;
+  /** Present while the planner revises a plan the person sent back: what the person asked for (with their later replies). */
+  revision?: string;
+  /** Why the message waiting could not join the task when the planner would have planned again (too long, too many images); it waits until dropped. */
+  held?: string;
+  /** Tasks from Tasks that arrived while the table worked, in order: each starts once the task before it is approved. */
+  nextTasks?: string[] }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';
@@ -103,6 +122,8 @@ export type ChatRequest =
   | { action: 'table-continue'; sessionId: string; runId: string; skipChallenge?: boolean }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
+  /** Removes a task from Tasks waiting at a hierarchy table: the one at `index`, only if it still starts with `head`. */
+  | { action: 'table-next-drop'; sessionId: string; runId: string; index: number; head: string }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
   | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex' }
   | { action: 'table-rounds'; sessionId: string; runId: string; rounds: number }

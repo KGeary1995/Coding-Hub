@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelConfigSchema, chatRequestSchema, engineConfigSchema, legacyWorkspaceSchema, modelValue, savedWorkspaceSchema, startSessionSchema } from './schemas';
+import { channelConfigSchema, chatRequestSchema, engineConfigSchema, legacyWorkspaceSchema, modelValue, savedChainSchema, savedWorkspaceSchema, startSessionSchema } from './schemas';
 import { migrateWorkspace } from './workspace-migration';
 import { workspace120 } from './workspace-120.fixture';
 
@@ -51,5 +51,41 @@ describe('Gemini, removed after 1.20', () => {
     expect(migrateWorkspace(legacyWorkspaceSchema.parse(saved)).workspace!.sessions[0].roundTable!.chain!.step).toBe('reviewing');
     const only = { ...workspace120(), sessions: [workspace120().sessions[4]], tiles: [{ ...workspace120().tiles[1], x: 0 }], focusedSessionId: null };
     expect(migrateWorkspace(legacyWorkspaceSchema.parse(only))).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/p' });
+  });
+});
+
+describe('a hierarchy chain planning again after the final review', () => {
+  const chain = { step: 'planning', task: 'T', plan: 'P', report: 'R', reviewRound: 0, finalRound: 0, verdict: null, note: '' };
+  it('loads with its final review request, and without one as before', () => {
+    expect(savedChainSchema.parse({ ...chain, replan: 'rename it' }).replan).toBe('rename it');
+    expect(savedChainSchema.parse({ ...chain, replan: '' }).replan).toBe('');
+    expect(savedChainSchema.parse(chain)).not.toHaveProperty('replan');
+    expect(savedChainSchema.safeParse({ ...chain, replan: 'x'.repeat(20_001) }).success).toBe(false);
+  });
+});
+
+describe('a hierarchy chain with tasks from Tasks waiting', () => {
+  const chain = { step: 'final', task: 'T', plan: 'P', report: 'R', reviewRound: 0, finalRound: 0, verdict: null, note: '' };
+  it('loads them, and at most ten', () => {
+    expect(savedChainSchema.parse({ ...chain, nextTasks: ['Task: B.'], held: 'Too long.' })).toMatchObject({ nextTasks: ['Task: B.'], held: 'Too long.' });
+    expect(savedChainSchema.safeParse({ ...chain, nextTasks: Array.from({ length: 11 }, () => 'Task: B.') }).success).toBe(false);
+    expect(savedChainSchema.safeParse({ ...chain, nextTasks: [''] }).success).toBe(false);
+  });
+});
+
+describe('a hierarchy chain revising a plan', () => {
+  const chain = { step: 'planning', task: 'T', plan: 'P', report: 'R', reviewRound: 0, finalRound: 0, verdict: null, note: '' };
+  it('loads with the note, and without one as before', () => {
+    expect(savedChainSchema.parse({ ...chain, revision: 'Use the helper.' }).revision).toBe('Use the helper.');
+    expect(savedChainSchema.parse(chain)).not.toHaveProperty('revision');
+    expect(savedChainSchema.safeParse({ ...chain, revision: 'x'.repeat(410_001) }).success).toBe(false);
+  });
+});
+
+describe('dropping a task from Tasks waiting at a hierarchy table', () => {
+  const run = { sessionId: 's', runId: '11111111-1111-4111-8111-111111111111' };
+  it('takes an index of 0 to 9 and the start of the task as shown', () => {
+    expect(chatRequestSchema.safeParse({ action: 'table-next-drop', ...run, index: 0, head: 'Task: B.' }).success).toBe(true);
+    for (const bad of [{ index: 10, head: 'Task: B.' }, { index: -1, head: 'Task: B.' }, { index: 1.5, head: 'Task: B.' }, { index: 0, head: '' }, { index: 0, head: 'x'.repeat(201) }]) expect(chatRequestSchema.safeParse({ action: 'table-next-drop', ...run, ...bad }).success).toBe(false);
   });
 });

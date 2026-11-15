@@ -7,6 +7,8 @@ import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
 import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, rememberTable, restoreTables } from './round-table';
 import { closeChannel, startSession, stopSession } from './use-native-host';
+import { useTaskStore } from '../state/task-store';
+import type { Task } from '../../shared/workbench';
 
 // Chat channels draw no terminal; the real module needs a DOM.
 vi.mock('./terminals', () => ({ focusTerminal: () => {}, routeTerminalEvent: () => {}, terminalDimensions: () => ({ cols: 100, rows: 24 }), releaseRemovedTerminals: () => {} }));
@@ -86,6 +88,15 @@ describe('Round Tables across restarts', () => {
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions.filter((session) => session.id !== partner.id) }));
     expect(savedWorkspace().sessions[0].roundTable).toBeUndefined();
   });
+  it('closing a saved hierarchy table that is not open puts its waiting tasks from Tasks back in To do', async () => {
+    const { lead, table } = seated(); const { codingHub } = host();
+    const writes: unknown[] = []; Object.assign(codingHub, { workbench: vi.fn(async (request: { action: string }) => { if (request.action === 'task-status') writes.push(request); return { ok: true, value: request.action === 'task-list' ? useTaskStore.getState().tasks : null }; }) });
+    const waiting: Task = { id: crypto.randomUUID(), title: 'Add a header', directory: '/project', sessionId: lead.id, scope: ['**'], status: 'active', notes: '', verificationId: null, createdAt: new Date().toISOString(), sentAt: new Date().toISOString() };
+    useTaskStore.setState({ tasks: [waiting] });
+    rememberTable(lead.id, { ...table, kind: 'hierarchy', chain: { step: 'final', task: 'Task: Add a footer.', plan: 'P', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', nextTasks: ['Task: Add a header. End with TASK COMPLETE.'] } });
+    await forgetTable(lead.id); await vi.waitFor(() => expect(writes).toEqual([{ action: 'task-status', id: waiting.id, status: 'queued' }]));
+    expect(savedWorkspace().sessions.find((session) => session.id === lead.id)?.roundTable).toBeUndefined();
+  });
 });
 
 describe('A Round Table in one tile', () => {
@@ -141,15 +152,19 @@ describe('A Round Table in one tile', () => {
     const { codingHub } = host(); const modelOf = (id: string) => startedModel(codingHub, id);
     const lead = await runningLead(); await openHierarchy(lead.id);
     const reviewer = useWorkspaceStore.getState().sessions.find((session) => session.config.engine === 'codex')!;
-    expect(modelOf(reviewer.id)).toBe(HIERARCHY_MODELS.reviewer); expect(HIERARCHY_MODELS.reviewer).toBe('gpt-6-astra');
+    expect(modelOf(reviewer.id)).toBe(HIERARCHY_MODELS.reviewer); expect(HIERARCHY_MODELS.reviewer).toBe('gpt-6.1-sol');
     // A table saved before the reviewer had a model of its own: it gets the table's when it starts again.
     await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === reviewer.id ? { ...session, config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null } } : session) }));
-    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6-astra');
+    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-sol');
+    // One saved on the retired gpt-6-astra: it starts on the table's model too.
+    await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
+    useWorkspaceStore.getState().updateConfig(reviewer.id, { engine: 'codex', chat: true, model: 'gpt-6-astra', reasoningEffort: null });
+    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-sol'); expect(find(reviewer.id)!.config).toMatchObject({ model: 'gpt-6.1-sol' });
     // One chosen under Models stays.
     await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
-    useWorkspaceStore.getState().updateConfig(reviewer.id, { engine: 'codex', chat: true, model: 'gpt-6.1-sol', reasoningEffort: null });
-    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-sol');
+    useWorkspaceStore.getState().updateConfig(reviewer.id, { engine: 'codex', chat: true, model: 'gpt-6.1-terra', reasoningEffort: null });
+    await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-terra');
   });
   it('leaves a discussion table\'s Codex partner on Codex\'s own settings', async () => {
     const { codingHub } = host(); const lead = await runningLead(); await openRoundTable(lead.id);

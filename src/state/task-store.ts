@@ -24,7 +24,7 @@ export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string
  */
 export const useTaskStore = create<{ tasks: Task[]; watch: TaskWatch; draftFor: string | null; error: string }>(() => ({ tasks: [], watch: { changed: {}, warnings: [] }, draftFor: null, error: '' }));
 
-export async function loadTasks() { try { useTaskStore.setState({ tasks: await workbench<Task[]>({ action: 'task-list' }), error: '' }); } catch (error) { useTaskStore.setState({ error: (error as Error).message }); } }
+export async function loadTasks() { const load = ++loadsStarted; try { useTaskStore.setState({ tasks: await workbench<Task[]>({ action: 'task-list' }), error: '' }); loadedSince = Math.max(loadedSince, load); } catch (error) { useTaskStore.setState({ error: (error as Error).message }); } }
 export async function saveTask(task: Omit<Task, 'id' | 'createdAt'> & { id?: string }) {
   // Fields the host keeps itself are left out; task-save refuses them.
   const { sentAt: _sent, baseline: _baseline, designRef: _design, createdAt: _created, outcome: _outcome, outcomeNote: _note, pullRequest: _pr, sendId: _send, ...fields } = task as Task;
@@ -143,6 +143,11 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
 /** When each quiet terminal task's reply was last read, and what it said: read again only when it may have changed. */
 const rechecked = new Map<string, { at: number; reply: string }>();
 /**
+ * What names one send of a task in its prompt: `Task <sendId>:`, which a later title edit does not change (the colon ends
+ * it, so one id never matches as the start of another). A task sent before send ids existed: its whole mark, title included.
+ */
+const sendMark = (task: Task) => task.sendId ? `Task ${task.sendId}:` : promptMark(task);
+/**
  * A hierarchy Round Table's verdict moves the task given to its channel: APPROVED by the planner sends it to Ready for
  * review; a table that needs the person, or was stopped, marks it so. The builder's own turn ends say nothing here.
  */
@@ -152,13 +157,50 @@ export function chainTasks(leadId: string, table: RoundTableState) {
   // typed at the table, or a verdict published again after its task moved on) marks nothing: a verdict on one task must
   // never move another.
   const active = activeOn(leadId); const chainTask = table.chain.task;
-  const task = active.find((item) => chainTask.includes(promptMark(item))); if (!task) return;
+  const task = active.find((item) => chainTask.includes(sendMark(item))); if (!task) return;
   const { step, verdict, note } = table.chain;
   if (step === 'done' && verdict === 'approved') void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
   else if (step === 'needs-you' && (task.outcome !== 'blocked' || task.outcomeNote !== note)) void setTaskStatus(task.id, 'active', 'blocked', note.slice(0, 500) || 'The Round Table needs you.').catch(() => {});
   else if (step === 'plan-review' && task.outcome !== 'blocked') void setTaskStatus(task.id, 'active', 'blocked', 'The plan is waiting for your approval.').catch(() => {});
   else if (step === 'stopped' && task.outcome !== 'stopped') void setTaskStatus(task.id, 'active', 'stopped').catch(() => {});
   else if (!['done', 'needs-you', 'plan-review', 'stopped', 'idle'].includes(step) && task.outcome && task.outcome !== 'finished') void setTaskStatus(task.id, 'active').catch(() => {});
+}
+/**
+ * Sends a hierarchy table removed without starting them, not yet put back in To do. Each keeps the prompt that was sent
+ * (its mark names the send: `Task <sendId>: …`), so a retry moves only that send, never the same task sent again since.
+ * One stays until it is written, or until a task list loaded after the discard has no working task for it.
+ */
+const returning: { leadId: string; text: string; running: string; loads: number }[] = [];
+/** Task list loads started, and the latest one that finished: a discard is settled only by a load started after it. */
+let loadsStarted = 0; let loadedSince = 0;
+/**
+ * Tasks from Tasks a hierarchy table removed without starting them (the person dropped them, or closed the table):
+ * back to To do. Only working tasks on that channel whose prompt is one of `texts`, and never the task the table is on
+ * (`running`, its chain's task). Retried on every automation tick until written.
+ */
+export function returnTasks(leadId: string, texts: string[], running = '') {
+  for (const text of texts) returning.push({ leadId, text, running, loads: loadsStarted });
+  return flushReturns();
+}
+let flushing: Promise<void> | null = null;
+function flushReturns(): Promise<void> {
+  // One pass at a time; a discard arriving meanwhile is taken by the next pass (at once, or at the next tick).
+  if (flushing) return flushing.then(() => flushReturns());
+  flushing = (async () => {
+    let reloaded = false;
+    for (const entry of [...returning]) {
+      const done = () => { const index = returning.indexOf(entry); if (index >= 0) returning.splice(index, 1); };
+      const task = useTaskStore.getState().tasks.find((item) => { if (item.sessionId !== entry.leadId || item.status !== 'active') return false; const mark = sendMark(item); return entry.text.includes(mark) && !entry.running.includes(mark); });
+      if (!task) {
+        // Not on the list this window has: settled once a list loaded after the discard says so; until then, load it.
+        if (loadedSince > entry.loads) done(); else if (!reloaded) { reloaded = true; await loadTasks(); }
+        continue;
+      }
+      try { await setTaskStatus(task.id, 'queued'); done(); }
+      catch (error) { useTaskStore.setState({ error: `“${task.title}” could not be put back in To do (${(error as Error).message}). Trace tries again.` }); }
+    }
+  })().finally(() => { flushing = null; });
+  return flushing;
 }
 export function startTaskAutomation() {
   let ticks = 0;
@@ -183,6 +225,7 @@ export function startTaskAutomation() {
       }
       else if (task.outcome === 'quiet' && recent.some((value) => value > 0)) void setTaskStatus(task.id, 'active').catch(() => {});
     }
+    if (returning.length) void flushReturns();
     // Every 30 s: the open tasks' changes, and the board itself, so a task moved from a phone shows here too.
     if (++ticks % 6 === 0) { void refreshTaskWatch(); void loadTasks(); }
   };

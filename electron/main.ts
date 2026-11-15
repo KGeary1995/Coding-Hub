@@ -39,7 +39,7 @@ import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
 import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './services/cli/attention';
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
-import { HostHealth } from './services/storage/host-health';
+import { gpuCrashWindows, HostHealth } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
@@ -73,7 +73,12 @@ const storageRoot = resolveStorageRoot(storageBase, profileRoot);
 setBackupRoot(storageRoot);
 let hostHealth: HostHealth | null = null;
 process.on('uncaughtExceptionMonitor', (_error, origin) => hostHealth?.record('host-uncaught-exception', origin));
-app.on('child-process-gone', (_event, details) => { if (details.reason !== 'clean-exit') hostHealth?.record('child-process-gone', `${details.type}: ${details.reason}`, details.exitCode); });
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason === 'clean-exit') return;
+  hostHealth?.record('child-process-gone', `${details.type}: ${details.reason}`, details.exitCode);
+  // With a GPU crash, each window's state, to tell a black window from one that was hidden, minimized or behind another.
+  if (details.type === 'GPU') hostHealth?.record('gpu-crash-windows', gpuCrashWindows(BrowserWindow.getAllWindows()));
+});
 let workflows: Workflows | null = null;
 let delivery: Delivery | null = null;
 let verification: Verification | null = null;

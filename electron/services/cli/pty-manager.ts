@@ -350,6 +350,7 @@ export class PtyManager {
     }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
+    else if (request.action === 'table-next-drop') { if (!this.chains.has(request.runId)) throw new HubError('TABLE_STEP', 'Only a hierarchy Round Table keeps tasks from Tasks waiting.'); this.chains.dropNext(request.runId, request.index, request.head); }
     else if (this.chains.has(request.runId)) {
       // A hierarchy's roles and rounds are fixed; the rest works as at any table.
       if (request.action === 'table-waiting') this.chains.waiting(request.runId, request.send);

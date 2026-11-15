@@ -57,7 +57,8 @@ describe('shared rules regressions', () => {
     const gone = path.join(root, 'coaching', 'report-0'); fs.rmSync(gone, { recursive: true });
     state = rules.read([project]); state = rules.save(state.content, state.revision, state.targets);
     expect(state.directories).toContain(project); expect(state.directories).not.toContain(gone);
-  });
+    // 100 rule saves take about 2 s alone; with the whole suite running they passed vitest's default 5 s and failed.
+  }, 30_000);
   it('keeps user projects registered while their folder is temporarily unreachable', () => {
     const { root, project, rules } = setup(); let state = rules.read([project]); state = rules.save('Shared', state.revision, state.targets);
     const away = project + '-offline'; fs.renameSync(project, away);

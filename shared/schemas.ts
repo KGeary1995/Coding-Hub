@@ -33,7 +33,7 @@ export const LEGACY_CHAIN_STEPS = ['second-reviewing', 'comparing'] as const;
 const legacyChainStep = z.enum([...chainSteps, ...LEGACY_CHAIN_STEPS]);
 const planChallenge = z.object({ id: z.string().regex(/^C\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), text: z.string().min(1).max(500), answer: z.enum(['accepted', 'rejected']).optional(), reason: z.string().max(500).optional() }).strict();
 /** A hierarchy table's work, saved with it (shared/chat.ts SavedChain). */
-const chainFields = { task: z.string().max(200_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000), challenges: z.array(planChallenge).max(50).optional(), challenged: z.literal(true).optional() };
+const chainFields = { task: z.string().max(410_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000), challenges: z.array(planChallenge).max(50).optional(), challenged: z.literal(true).optional(), replan: z.string().max(20_000).optional(), revision: z.string().max(410_000).optional(), held: z.string().max(2_000).optional(), nextTasks: z.array(z.string().min(1).max(200_000)).max(10).optional() };
 export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer']).optional(), ...chainFields }).strict();
 /** A chain as Trace 1.20 saved it, with its Gemini seat's steps and flags (loading only; migrateWorkspace drops them). */
 const legacyChainSchema = z.object({ step: legacyChainStep, stoppedAt: legacyChainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer', 'challenger']).optional(), ...chainFields, geminiReviewed: z.literal(true).optional(), compared: z.literal(true).optional(), firstFinding: z.number().int().min(0).max(50).optional() }).strict();
@@ -121,6 +121,7 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-continue'), skipChallenge: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-next-drop'), index: z.number().int().min(0).max(9), head: z.string().min(1).max(200) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),

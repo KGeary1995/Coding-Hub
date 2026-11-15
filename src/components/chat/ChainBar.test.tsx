@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { RoundTableState } from '../../../shared/chat';
-import { ChainBar, type ChainSeat, Item } from './ChatParts';
+import { ChainBar, type ChainSeat, Item, waitingLabel } from './ChatParts';
 
 const table = (step: NonNullable<RoundTableState['chain']>['step'], extra: Partial<RoundTableState> = {}): RoundTableState => ({ kind: 'hierarchy', partner: { sessionId: 'r', runId: 'r', engine: 'codex' }, driver: 'claude', rounds: 2, round: 1, phase: 'answering', agreed: false, chain: { step, task: 'Task', plan: 'Plan', report: '', reviewRound: 1, finalRound: 0, verdict: null, note: '' }, ...extra });
 const seats: ChainSeat[] = [
@@ -63,3 +63,51 @@ describe('the hierarchy bar: Codex challenges the plan', () => {
   });
 });
 
+
+describe('the hierarchy bar: a message waiting', () => {
+  type Chain = NonNullable<RoundTableState['chain']>;
+  const at = (step: Chain['step'], chain: Partial<Chain> = {}, extra: Partial<RoundTableState> = {}): RoundTableState => { const state = table(step, { waiting: 'Also add a header.', ...extra }); return { ...state, chain: { ...state.chain!, ...chain } }; };
+  /** The buttons the bar shows, by their text, each with what it asks for when pressed. */
+  const buttons = (state: RoundTableState) => {
+    const requests: unknown[] = []; const found: Record<string, () => unknown> = {};
+    const walk = (node: unknown) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } const props = (node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }).props; if ((node as { type?: unknown }).type === 'button' && typeof props?.children === 'string' && props.onClick) { const click = props.onClick; found[props.children] = () => { requests.length = 0; click(); return requests[0]; }; } walk(props?.children); };
+    walk(ChainBar({ table: state, busy: state.chain?.step !== 'needs-you' && state.chain?.step !== 'stopped', plannerName: 'Fable 5.2', builderName: 'Opus 5.5', onRequest: (request) => requests.push(request) }));
+    return found;
+  };
+  it('says where it will go at each step', () => {
+    expect(waitingLabel(at('needs-you'))).toBe('Waiting (Send now sends it to the planner): ');
+    expect(waitingLabel(at('stopped', { stoppedAt: 'final' }))).toBe('Goes to the planner when you continue: ');
+    expect(waitingLabel(at('stopped', { stoppedAt: 'fixing', finalRound: 1 }))).toBe('Goes to the planner when you continue: ');
+    expect(waitingLabel(at('stopped', { stoppedAt: 'fixing' }))).toBe('Goes with the step when you continue: ');
+    expect(waitingLabel(at('final'))).toBe('Goes to the planner after the final review, or starts the next task if it approves: ');
+    expect(waitingLabel(at('reviewing', { finalRound: 1 }))).toBe('Goes to the planner as a follow-up: '); expect(waitingLabel(at('fixing', { finalRound: 2 }))).toBe('Goes to the planner as a follow-up: ');
+    expect(waitingLabel(at('reviewing'))).toBe('Goes with the next step, or to the planner if the final review is next: '); expect(waitingLabel(at('fixing'))).toBe('Goes with the next step, or to the planner if the final review is next: ');
+    for (const step of ['planning', 'challenging', 'implementing'] as const) expect(waitingLabel(at(step))).toBe('Goes with the next step: ');
+    expect(bar(at('final'))).toContain('Goes to the planner after the final review'); expect(bar(at('final', {}, { waitingKept: true }))).toContain('Kept from before Trace restarted: ');
+  });
+  it('offers Send now and Drop it when the table needs the person, each sending its request', () => {
+    const found = buttons(at('needs-you'));
+    expect(Object.keys(found)).toEqual(expect.arrayContaining(['Send now', 'Drop it']));
+    expect(found['Send now']()).toEqual({ action: 'table-waiting', send: true }); expect(found['Drop it']()).toEqual({ action: 'table-waiting', send: false });
+  });
+  it('offers Drop it when stopped, not while a seat is still stopping, and neither while the table works', () => {
+    const stopped = buttons(at('stopped', { stoppedAt: 'final' }));
+    expect(stopped['Drop it']()).toEqual({ action: 'table-waiting', send: false }); expect(stopped['Send now']).toBeUndefined();
+    expect(buttons(at('stopped', { stoppedAt: 'final' }, { stopping: true }))['Drop it']).toBeUndefined();
+    const working = buttons(at('final')); expect(working['Drop it']).toBeUndefined(); expect(working['Send now']).toBeUndefined();
+  });
+});
+
+describe('the hierarchy bar: tasks from Tasks waiting', () => {
+  const task = (name: string) => `Task: ${name}. When you are done, end with TASK COMPLETE. ${'x'.repeat(250)}`;
+  const state = (detached = false) => { const base = table('final'); const html = renderToStaticMarkup(<ChainBar table={{ ...base, chain: { ...base.chain!, nextTasks: [task('B'), task('C')] } }} busy plannerName="Fable 5.2" builderName="Opus 5.5" onRequest={() => {}} {...(detached ? { detached: { note: 'Not open.' } } : {})} />); return html; };
+  it('lists each with its own Drop it, which asks to drop that one by index and the start of its text', () => {
+    const html = state(); expect(html).toContain('2 tasks from Tasks'); expect(html).toContain('Task: B.'); expect(html).toContain('Task: C.');
+    const requests: unknown[] = []; const base = table('final');
+    const element = ChainBar({ table: { ...base, chain: { ...base.chain!, nextTasks: [task('B'), task('C')] } }, busy: true, plannerName: 'Fable 5.2', builderName: 'Opus 5.5', onRequest: (request) => requests.push(request) });
+    const drops: (() => void)[] = []; const walk = (node: unknown) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } const props = (node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }).props; if ((node as { type?: unknown }).type === 'button' && props?.children === 'Drop it' && props.onClick) drops.push(props.onClick); walk(props?.children); };
+    walk(element); expect(drops).toHaveLength(2);
+    drops[1](); expect(requests).toEqual([{ action: 'table-next-drop', index: 1, head: task('C').slice(0, 200) }]);
+  });
+  it('offers no Drop it on a table that is not open (the host could not do it)', () => { expect(state(true)).not.toContain('>Drop it<'); });
+});
