@@ -349,6 +349,24 @@ it('reads no note at all when both sides already hold the same notes', () => {
  const scans=vi.spyOn(MemoryService.prototype,'list');expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).not.toHaveBeenCalled();
 });
 
+it('reads a note with the same content in different bytes on Drive once, not on every sync, and still copies new notes', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));const remote=new MemoryService(path.join(folder,'AI-Coding-Hub-Memory'));
+ const notes=Array.from({length:5},(_,i)=>local.write('shared',`Note ${i}`,'Ready for the next session','human'));
+ const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));drive.sync('shared');
+ // Another program rewrote the Drive copy with other line endings: the same note, a different size.
+ const copy=path.join(remote.directory('shared'),notes[0].id+'.json');fs.writeFileSync(copy,fs.readFileSync(copy,'utf8').replace(/\n/g,'\r\n'));
+ expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});
+ const reads=vi.spyOn(MemoryService.prototype,'note');const scans=vi.spyOn(MemoryService.prototype,'list');
+ expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(await drive.syncLater('shared')).toEqual({uploaded:0,downloaded:0});
+ expect(reads).not.toHaveBeenCalled();expect(scans).not.toHaveBeenCalled();
+ // A new note on each side is the only one read, and both arrive.
+ const added=local.write('shared','Added here','Body','human');remote.write('shared','Added on Drive','Body','codex');
+ expect(await drive.syncLater('shared')).toEqual({uploaded:1,downloaded:1});expect(reads.mock.calls.map(([,id])=>id).filter((id)=>id!==added.id)).toHaveLength(1);
+ expect(local.list('shared')).toHaveLength(7);expect(remote.list('shared')).toHaveLength(7);
+ // A copy that really differs is still caught.
+ fs.writeFileSync(copy,fs.readFileSync(copy,'utf8').replace('Ready for the next session','Changed on Drive'));expect(()=>drive.sync('shared')).toThrow('conflicting');
+});
+
 it('never guesses a rollout after overlapping same-directory Codex runs exit', () => {
  vi.useFakeTimers();const {root,project}=setup();const codex=path.join(root,'codex');const now=new Date();
  const folder=path.join(codex,'sessions',String(now.getUTCFullYear()),String(now.getUTCMonth()+1).padStart(2,'0'),String(now.getUTCDate()).padStart(2,'0'));fs.mkdirSync(folder,{recursive:true});

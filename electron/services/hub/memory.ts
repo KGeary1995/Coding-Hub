@@ -40,6 +40,21 @@ export class MemoryService {
     }
     return sizes;
   }
+  /** sizes(), without holding the process while a slow folder (Google Drive answers each file in about half a millisecond) is read. */
+  async sizesLater(project: string): Promise<Map<string, number>> {
+    const dir = this.directory(project); const sizes = new Map<string, number>();
+    for (const folder of [dir, path.join(dir, ARCHIVE)]) {
+      let entries: fs.Dirent[]; try { entries = await fs.promises.readdir(folder, { withFileTypes: true }); } catch { continue; }
+      const names = entries.filter((e) => e.isFile() && NOTE_FILE.test(e.name)).map((e) => e.name);
+      for (let i = 0; i < names.length; i += 32) await Promise.all(names.slice(i, i + 32).map(async (name) => { sizes.set(name.slice(0, -5), (await fs.promises.stat(path.join(folder, name))).size); }));
+    }
+    return sizes;
+  }
+  /** One listed note, or null when list() would leave it out: missing, archived, too large, or not a valid note of this project. */
+  note(project: string, id: string): MemoryNote | null {
+    const target = path.join(this.directory(project), id + '.json');
+    try { if (fs.statSync(target).size > 512000) return null; const note = noteSchema.parse(JSON.parse(fs.readFileSync(target, 'utf8'))); return note.project === project && note.id === id ? note : null; } catch { return null; }
+  }
   /** The ids of a project's archived notes (moved aside to keep it under the limit; kept, but no longer listed). */
   archived(project: string): Set<string> {
     const folder = path.join(this.directory(project), ARCHIVE); if (!fs.existsSync(folder)) return new Set();
