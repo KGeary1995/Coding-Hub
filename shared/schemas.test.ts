@@ -81,3 +81,11 @@ describe('a hierarchy chain revising a plan', () => {
     expect(savedChainSchema.safeParse({ ...chain, revision: 'x'.repeat(410_001) }).success).toBe(false);
   });
 });
+
+describe('dropping a task from Tasks waiting at a hierarchy table', () => {
+  const run = { sessionId: 's', runId: '11111111-1111-4111-8111-111111111111' };
+  it('takes an index of 0 to 9 and the start of the task as shown', () => {
+    expect(chatRequestSchema.safeParse({ action: 'table-next-drop', ...run, index: 0, head: 'Task: B.' }).success).toBe(true);
+    for (const bad of [{ index: 10, head: 'Task: B.' }, { index: -1, head: 'Task: B.' }, { index: 1.5, head: 'Task: B.' }, { index: 0, head: '' }, { index: 0, head: 'x'.repeat(201) }]) expect(chatRequestSchema.safeParse({ action: 'table-next-drop', ...run, ...bad }).success).toBe(false);
+  });
+});

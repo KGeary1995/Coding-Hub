@@ -309,3 +309,4 @@
 /* Codex's challenges to the plan, with the planner's answers. */
 .chain-challenges { width: 100%; text-transform: none; letter-spacing: normal; font-size: 12px; } .chain-challenges ol { margin: 4px 0 0; padding-left: 20px; } .chain-challenges li { margin: 2px 0; }
 .chain-challenges small { display: block; color: var(--tr-fg-dim); } .chain-challenges .accepted small { color: var(--tr-fg-muted); }
+.chain-next-tasks { width: 100%; margin: 4px 0 0; padding-left: 20px; text-transform: none; letter-spacing: normal; font-size: 12px; } .chain-next-tasks li button { margin-left: 8px; }

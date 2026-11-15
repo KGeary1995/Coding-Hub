@@ -21,7 +21,7 @@ function setup() {
   const challenges = { auto: true };
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
   const tables = () => events.filter((e) => e.event.type === 'table').map((e) => (e.event as Extract<ChatEvent, { type: 'table' }>).table!);
-  return { chains, sent, modes, answers, interrupted, reply, last, runs, challenges, tables };
+  return { chains, sent, modes, answers, interrupted, reply, last, runs, challenges, tables, events };
 }
 /** A table at its final review: the task given, the plan approved, built, and reviewed with no findings. */
 async function atFinal(task = 'Add a footer.') {
@@ -541,5 +541,39 @@ describe('a plan owed by the planner is never lost', () => {
     chains.send(BUILDER, 'Keep the old colours.', []); await reply(PLANNER, 'TASK BLOCKED: Which helper?');
     chains.send(BUILDER, 'formatDate.', []);
     expect(sent.at(-1)!.text).toContain('[The person answers] formatDate.'); expect(last().chain!.revision).toBe('Use the existing helper.\n\nKeep the old colours.'); expect(last().waiting).toBeUndefined();
+  });
+});
+
+describe('tasks from Tasks waiting at a table can be dropped, and go back to Tasks when it closes', () => {
+  const task = (name: string) => `Task: ${name}. ${SIGNAL_INSTRUCTION}`;
+  /** The tasks each table event said were removed without starting, in order. */
+  const discards = (events: ChatEnvelope[]) => events.flatMap((e) => e.event.type === 'table' && e.event.discarded ? [e.event.discarded] : []);
+  const waitingThree = async () => { const table = await atFinal(task('A')); for (const name of ['B', 'C', 'D']) table.chains.send(BUILDER, task(name), []); return table; };
+  it('drops the task asked for, says so to the window, and the rest still start in order', async () => {
+    const { chains, reply, last, events } = await waitingThree();
+    chains.dropNext(BUILDER, 1, task('C').slice(0, 200));
+    expect(last().chain!.nextTasks).toEqual([task('B'), task('D')]); expect(discards(events)).toEqual([[task('C')]]);
+    await reply(PLANNER, 'APPROVED'); expect(last().chain).toMatchObject({ step: 'planning', task: 'Task: B.', nextTasks: [task('D')] });
+    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.'); await reply(REVIEWER, 'NO FINDINGS'); await reply(PLANNER, 'APPROVED');
+    expect(last().chain).toMatchObject({ step: 'planning', task: 'Task: D.' }); expect(last().chain).not.toHaveProperty('nextTasks'); expect(discards(events)).toHaveLength(1);
+  });
+  it('refuses a head that no longer matches (the task started meanwhile) and an index out of range, changing nothing', async () => {
+    const { chains, reply, last, events } = await waitingThree();
+    const head = task('B').slice(0, 200); await reply(PLANNER, 'APPROVED');
+    // B started; C is at index 0 now, and the person's Drop it for B must not drop C.
+    expect(() => chains.dropNext(BUILDER, 0, head)).toThrow(/no longer waiting/); expect(() => chains.dropNext(BUILDER, 5, task('C').slice(0, 200))).toThrow(/no longer waiting/);
+    expect(() => chains.dropNext(BUILDER, 0, '')).toThrow(/no longer waiting/);
+    expect(last().chain!.nextTasks).toEqual([task('C'), task('D')]); expect(discards(events)).toEqual([]);
+  });
+  it('closed by the person: the tasks still waiting at that moment are discarded, not the one that started; a task sent after is refused', async () => {
+    const { chains, reply, events } = await atFinal(task('A')); chains.send(BUILDER, task('B'), []); chains.send(BUILDER, task('C'), []);
+    await reply(PLANNER, 'APPROVED'); chains.close(BUILDER);
+    expect(discards(events)).toEqual([[task('C')]]); expect(events.at(-1)!.event).toMatchObject({ type: 'table', table: null, closed: true });
+    expect(() => chains.send(BUILDER, task('E'), [])).toThrow(/no Round Table open/);
+  });
+  it('closed because a seat ended: nothing is discarded (the tasks stay with the saved table for Reopen)', async () => {
+    const { chains, last, events } = await atFinal(task('A')); chains.send(BUILDER, task('B'), []); const saved = last().chain!;
+    chains.ended(PLANNER); expect(discards(events)).toEqual([]); expect(events.at(-1)!.event).toMatchObject({ type: 'table', table: null }); expect(events.at(-1)!.event).not.toHaveProperty('closed');
+    expect(saved.nextTasks).toEqual([task('B')]);
   });
 });

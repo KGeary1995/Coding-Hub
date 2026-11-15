@@ -98,6 +98,11 @@ async function retire(leadId: string): Promise<string | null> {
   if (retiring.has(leadId)) return null; retiring.add(leadId);
   try {
     const failure = await archiveFindings(leadId);
+    // Tasks from Tasks still waiting at the table go back to To do before it is forgotten (also a table closed while not
+    // open, which the host never hears of).
+    const saved = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId)?.roundTable?.chain;
+    // Loaded here, not at the top: the task store pulls in the terminals, which this module does not otherwise need.
+    if (!failure && saved?.nextTasks?.length) { const { nextTasks, task } = saved; void import('../state/task-store').then(({ returnTasks }) => returnTasks(leadId, nextTasks, task)); }
     const seats = hiddenSeats(useWorkspaceStore.getState().sessions, leadId); const ids = new Set(seats.map((seat) => seat.id));
     for (const seat of seats) if (live(seat)) { await settled([seat.id], 'starting'); await stopSession(seat.id); await settled([seat.id]); }
     useWorkspaceStore.setState((state) => {
@@ -113,7 +118,7 @@ async function retire(leadId: string): Promise<string | null> {
 /** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */
 const retiring = new Set<string>();
 
-type TableRequest = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
+type TableRequest = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-next-drop'; index: number; head: string };
 /** A request to the table a running chat channel leads; the error message, or null. */
 export async function tableRequest(leadId: string, request: TableRequest): Promise<string | null> {
   const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);

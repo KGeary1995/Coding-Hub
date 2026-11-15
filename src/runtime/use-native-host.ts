@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
 import type { ChannelEngine } from '../../shared/types';
-import { HIERARCHY_MODELS } from '../../shared/chat';
+import { HIERARCHY_MODELS, RETIRED_REVIEWER_MODELS } from '../../shared/chat';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { forgetTable, rememberTable, restoreTables } from './round-table';
@@ -11,7 +11,7 @@ import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDim
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
-import { chainTasks, startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { chainTasks, returnTasks, startTaskAutomation, taskTurnDone } from '../state/task-store';
 import { useChatStore } from '../state/chat-store';
 
 /**
@@ -70,6 +70,8 @@ export function useNativeHost() {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
       applyChatEvent(envelope); if (envelope.event.type === 'done') chatTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) { rememberTable(envelope.sessionId, envelope.event.table); chainTasks(envelope.sessionId, envelope.event.table); }
+      // Tasks from Tasks the host removed from a hierarchy table without starting them (dropped, or the table closed): back to To do.
+      if (envelope.event.type === 'table' && envelope.event.discarded?.length) void returnTasks(envelope.sessionId, envelope.event.discarded, envelope.event.table?.chain?.task);
       // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
@@ -139,8 +141,9 @@ export async function startSession(id: string) {
   const session = state.sessions.find((item) => item.id === id);
   if (!session || session.status === 'running' || session.status === 'starting') return;
   // A hierarchy table's reviewer saved before it had a model of its own would start on whatever Codex's settings
-  // default to: it gets the table's (Models on the bar can change it while the channel is stopped).
-  if (session.config.engine === 'codex' && !session.config.model && state.sessions.some((item) => item.roundTable?.kind === 'hierarchy' && item.roundTable.partner === id)) {
+  // default to, and one saved on a retired reviewer model (gpt-6-astra) on that: both get the table's (Models on the bar
+  // can change it while the channel is stopped).
+  if (session.config.engine === 'codex' && (!session.config.model || RETIRED_REVIEWER_MODELS.includes(session.config.model)) && state.sessions.some((item) => item.roundTable?.kind === 'hierarchy' && item.roundTable.partner === id)) {
     state.updateConfig(id, { ...session.config, model: HIERARCHY_MODELS.reviewer });
     const updated = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
     if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);

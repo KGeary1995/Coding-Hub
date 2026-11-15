@@ -119,7 +119,8 @@ export class ReviewChains {
   }
   /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64 (as at a discussion table). */
   private keptImages(images: ChatImage[]) { if (!images.length) return {}; return images.reduce((sum, image) => sum + image.data.length, 0) <= KEEP_IMAGES ? { waitingImages: images } : { waitingImagesDropped: images.length }; }
-  private publish(chain: Chain) { this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: this.state(chain) } }); }
+  /** Sends the table's state to its window; `discarded`: tasks from Tasks just removed without starting (the window puts them back in To do). */
+  private publish(chain: Chain, discarded?: string[]) { this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: this.state(chain), ...(discarded?.length ? { discarded } : {}) } }); }
 
   /** What a seat is told about the table, once, before its first message here. */
   private brief(chain: Chain, seat: Seat) {
@@ -383,11 +384,23 @@ export class ReviewChains {
     for (const seat of this.seats(chain)) if (seat.busy) this.host.interrupt(seat.runId);
     this.publish(chain);
   }
+  /**
+   * Removes a task from Tasks waiting its turn: the one at `index`, only if it still starts with `head` (what the person
+   * saw), so a task that started meanwhile is never taken for the next one. The window puts it back in To do.
+   */
+  dropNext(leadRunId: string, index: number, head: string) {
+    const chain = this.leading(leadRunId); const task = chain.nextTasks[index];
+    if (!head || task === undefined || !task.startsWith(head)) throw new HubError('TABLE_STEP', 'That task is no longer waiting: it has started, or was removed.');
+    chain.nextTasks.splice(index, 1); this.publish(chain, [task]); return this.state(chain);
+  }
   close(leadRunId: string, byPerson = true) {
     const chain = this.chains.get(leadRunId); if (!chain) return;
     this.chains.delete(leadRunId);
     for (const seat of this.seats(chain)) { try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
-    this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}) } });
+    // Closed by the person: the tasks from Tasks still waiting go back to To do. A seat that ended keeps them with the
+    // saved table, for Reopen.
+    const discarded = byPerson && chain.nextTasks.length ? [...chain.nextTasks] : null;
+    this.host.emit(chain.owner, { sessionId: chain.builder.sessionId, runId: chain.builder.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}), ...(discarded ? { discarded } : {}) } });
   }
   /**
    * A seat's process ended: the table closes until the window seats it again. The seats still at work are stopped first:

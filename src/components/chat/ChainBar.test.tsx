@@ -97,3 +97,17 @@ describe('the hierarchy bar: a message waiting', () => {
     const working = buttons(at('final')); expect(working['Drop it']).toBeUndefined(); expect(working['Send now']).toBeUndefined();
   });
 });
+
+describe('the hierarchy bar: tasks from Tasks waiting', () => {
+  const task = (name: string) => `Task: ${name}. When you are done, end with TASK COMPLETE. ${'x'.repeat(250)}`;
+  const state = (detached = false) => { const base = table('final'); const html = renderToStaticMarkup(<ChainBar table={{ ...base, chain: { ...base.chain!, nextTasks: [task('B'), task('C')] } }} busy plannerName="Fable 5.2" builderName="Opus 5.5" onRequest={() => {}} {...(detached ? { detached: { note: 'Not open.' } } : {})} />); return html; };
+  it('lists each with its own Drop it, which asks to drop that one by index and the start of its text', () => {
+    const html = state(); expect(html).toContain('2 tasks from Tasks'); expect(html).toContain('Task: B.'); expect(html).toContain('Task: C.');
+    const requests: unknown[] = []; const base = table('final');
+    const element = ChainBar({ table: { ...base, chain: { ...base.chain!, nextTasks: [task('B'), task('C')] } }, busy: true, plannerName: 'Fable 5.2', builderName: 'Opus 5.5', onRequest: (request) => requests.push(request) });
+    const drops: (() => void)[] = []; const walk = (node: unknown) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } const props = (node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }).props; if ((node as { type?: unknown }).type === 'button' && props?.children === 'Drop it' && props.onClick) drops.push(props.onClick); walk(props?.children); };
+    walk(element); expect(drops).toHaveLength(2);
+    drops[1](); expect(requests).toEqual([{ action: 'table-next-drop', index: 1, head: task('C').slice(0, 200) }]);
+  });
+  it('offers no Drop it on a table that is not open (the host could not do it)', () => { expect(state(true)).not.toContain('>Drop it<'); });
+});

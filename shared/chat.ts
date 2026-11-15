@@ -41,7 +41,9 @@ export type ChatEvent =
    * closed it (from any window, phone or computer), so the lead forgets it and its partner is stopped; without it, one
    * of the runs ended and the table is seated again when both run.
    */
-  | { type: 'table'; table: RoundTableState | null; closed?: true };
+  | { type: 'table'; table: RoundTableState | null; closed?: true;
+    /** Tasks from Tasks the host just removed from a hierarchy table without starting them (dropped, or the table closed): the window puts them back in To do. */
+    discarded?: string[] };
 export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent };
 
 /**
@@ -52,7 +54,9 @@ export type ChatEnvelope = { sessionId: string; runId: string; event: ChatEvent 
  */
 /** The default models of a hierarchy table's Claude seats (the person can change them on its bar). */
 /** Each seat's model when it starts, unless changed under Models: the reviewer's too, so it does not inherit whatever Codex's own settings default to. */
-export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6-astra' } as const;
+export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-opus-5-5', reviewer: 'gpt-6.1-sol' } as const;
+/** Reviewer models a hierarchy no longer uses: a reviewer saved with one starts on HIERARCHY_MODELS.reviewer instead. */
+export const RETIRED_REVIEWER_MODELS: readonly string[] = ['gpt-6-astra'];
 /**
  * A hierarchy Round Table's step (electron/services/chat/review-chain.ts): challenging (the reviewer, Codex, challenges
  * the plan before the person sees it) and plan-responding (the planner answers the challenges) come between planning
@@ -118,6 +122,8 @@ export type ChatRequest =
   | { action: 'table-continue'; sessionId: string; runId: string; skipChallenge?: boolean }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
+  /** Removes a task from Tasks waiting at a hierarchy table: the one at `index`, only if it still starts with `head`. */
+  | { action: 'table-next-drop'; sessionId: string; runId: string; index: number; head: string }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
   | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex' }
   | { action: 'table-rounds'; sessionId: string; runId: string; rounds: number }
