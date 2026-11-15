@@ -1,5 +1,12 @@
 ## What's new
 
+1.21.3 stops Trace freezing for a few seconds every 30 seconds, and the phone app says which computer it can't reach (update every computer and reload the phone app):
+
+- **No more freeze every 30 seconds.** With memory syncing to a Google Drive folder, Trace could stop responding for 2 to 5 seconds every 30 seconds: its window, its terminals and the phone. One note whose two copies had the same content but different bytes (other line endings) made every sync read every note of that project from Drive. Trace now reads only the notes that differ, remembers the ones it has compared, and lists the Drive folder in the background.
+- **Still one pause after starting.** While such a note exists, the first sync after Trace starts compares that project once, which can take a few seconds.
+- **The phone app says which computer it is waiting for.** The app on your phone's home screen belongs to the computer it was added from, and opens from a saved copy even when that computer is off. It used to say only "reconnecting…". It now names that computer and its address, and says whether the computer can't be reached or is on with Trace closed. To use another computer, open that computer's phone address in the browser and add the app again from there.
+- **Not tried yet:** the installed app on Windows or a Mac, and a real phone. Checked with the unit tests, the phone remote smoke test, the sync against a real Drive folder, and the phone message in a desktop browser. The desktop smoke test fails on the development computer at its Skills & plugins step, with and without these changes.
+
 1.21.2 stops a console window from flashing up every few minutes on Windows (update every computer; the phone app needs no reload):
 
 - **No more stray console windows.** Trace checks each Claude account's plan limits every few minutes by running Claude Code's `/usage`. Each check also started every MCP server from the person's Claude Code plugins (through `npx` and `uvx`), and on Windows a Python server started by `uvx` opened a visible console window. The check now starts no MCP servers (`--strict-mcp-config`); it never needed them.

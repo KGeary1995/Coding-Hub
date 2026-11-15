@@ -54,7 +54,16 @@ export class HubService {
     this.rules = new RulesService(root);
     this.memory = new MemoryService(path.join(root, 'memory')); this.drive = new DriveMirror(this.memory, () => this.preferences());
     this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules, () => this.telemetry?.list() ?? []);
-    this.interval = setInterval(() => { for (const project of this.projects) try { this.drive.sync(project); } catch { /* Offline sync retries; originals remain local. */ } try { this.devices.sync(); } catch { /* Reported in Settings; the next tick retries. */ } }, 30000);
+    this.interval = setInterval(() => void this.tick(), 30000);
+  }
+  /** One at a time: a slow Drive folder can take longer to list than the 30 seconds between ticks. */
+  private ticking = false;
+  private async tick() {
+    if (this.ticking) return; this.ticking = true;
+    try {
+      for (const project of [...this.projects]) try { await this.drive.syncLater(project); } catch { /* Offline sync retries; originals remain local. */ }
+      try { this.devices.sync(); } catch { /* Reported in Settings; the next tick retries. */ }
+    } finally { this.ticking = false; }
   }
   preferences(): HubPreferences {
     // The default Drive folder is a Windows drive letter; elsewhere the person chooses the folder (it differs per account).

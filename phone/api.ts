@@ -32,8 +32,21 @@ export const activeTarget = () => active;
 export async function api(path: string, init: RequestInit = {}, target: Target = active) {
   const response = await fetch(target.base + path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${target.key() ?? ''}`, 'Content-Type': 'application/json' } });
   if (response.status === 401) { if (target.id) { siblings.remove(target.id); throw new Unpaired(false); } token.clear(); throw new Unpaired(); }
-  if (!response.ok) throw new Error((await response.json().catch(() => ({})) as { error?: string }).error ?? 'The computer did not accept the request.');
+  if (!response.ok) throw Object.assign(new Error((await response.json().catch(() => ({})) as { error?: string }).error ?? 'The computer did not accept the request.'), { status: response.status });
   return response;
+}
+
+/**
+ * Why this app's computer could not be connected to, naming it and its address: the installed app belongs to the
+ * computer it was added from and opens from its saved copy while that one is off, so "reconnecting…" alone left a
+ * phone waiting on a computer the person did not know it was asking for (2026-11-14).
+ */
+export function connectionProblem(error: unknown, name: string | null, host: string): string {
+  const computer = name ? `${name} (${host})` : host; const status = (error as { status?: number }).status;
+  // Tailscale answers 502 for a computer that is on while Trace is closed or still starting.
+  if (status && status >= 500) return `${computer} is on, but Trace is not open there. Open Trace on that computer, or add this app again from the computer you want.`;
+  if (status) return `${computer} did not accept this phone: ${(error as Error).message}`;
+  return `${computer} can’t be reached. Check that it is on, and that Tailscale is connected on this phone.`;
 }
 
 export async function pair(code: string, name: string) {
@@ -129,18 +142,20 @@ export const addChannel = async (engine: 'claude' | 'codex' | 'shell', chatChann
  * Follows a computer's event stream (server-sent events read through fetch, which can send the device key): the one
  * that served this app when it answers, otherwise each other computer the phone has a key for, directly. It reconnects
  * after a drop until `stop` is called, trying this app's computer first each time, and while on another computer it
- * checks every 30 seconds whether this app's computer is back. `onState` reports the connection and which computer.
+ * checks every 30 seconds whether this app's computer is back. `onState` reports the connection and which computer,
+ * and, when no computer could be connected to, why this app's own could not (`problem`).
  */
-export function follow(sessionId: string | null, onEvent: (event: StreamEvent) => void, onState: (connected: boolean, via: Target) => void, onUnpaired: () => void) {
+export function follow(sessionId: string | null, onEvent: (event: StreamEvent) => void, onState: (connected: boolean, via: Target, problem?: string) => void, onUnpaired: () => void) {
   let stopped = false; let controller: AbortController | null = null;
   const run = async () => {
     while (!stopped) {
+      let problem: string | undefined;
       for (const target of [home, ...siblings.list().map(direct)]) {
         if (stopped) return;
-        controller = new AbortController(); const connecting = setTimeout(() => controller?.abort(), 6000); let back: ReturnType<typeof setInterval> | null = null;
+        controller = new AbortController(); const connecting = setTimeout(() => controller?.abort(), 6000); let back: ReturnType<typeof setInterval> | null = null; let opened = false;
         try {
           const response = await api('/api/stream' + (sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''), { signal: controller.signal }, target);
-          clearTimeout(connecting); active = target; onState(true, target);
+          clearTimeout(connecting); opened = true; active = target; onState(true, target);
           if (target !== home) {
             const current = controller;
             back = setInterval(() => { void api('/api/computers', { signal: AbortSignal.timeout(4000) }, home).then(() => current.abort()).catch(() => {}); }, 30000);
@@ -165,11 +180,13 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
           break;
         } catch (error) {
           if (error instanceof Unpaired && error.home) { stopped = true; onUnpaired(); return; }
+          // Only a connection that never opened is explained: one that dropped is usually back in two seconds.
+          if (target === home && !opened && !stopped) problem = connectionProblem(error, homeName(), location.host);
           if (active === target && target !== home) break;
         } finally { clearTimeout(connecting); if (back) clearInterval(back); }
       }
       if (stopped) return;
-      onState(false, active); await new Promise((resolve) => setTimeout(resolve, 2000));
+      onState(false, active, problem); await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   };
   void run();
