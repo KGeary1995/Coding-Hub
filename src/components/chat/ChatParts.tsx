@@ -1,10 +1,11 @@
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
-import { HIERARCHY_MODELS, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
+import { HIERARCHY_MODELS, late, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
 import { isAgentConfig } from '../../../shared/types';
+import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 
 /**
  * The parts of a chat thread shared by the desktop's chat channels and the phone: messages, tool cards, approvals and
@@ -168,6 +169,19 @@ function ChallengeList({ challenges, plannerName, open }: { challenges: PlanChal
  * final review; the plan approval with Codex's challenges and the planner's answers; Stop, Continue and Continue without
  * the challenge; each seat's model (used when that seat starts); findings and a kept message.
  */
+/**
+ * Where a message waiting at a hierarchy table (one not kept from before a restart) will go, as review-chain.ts sends it:
+ * with the next step, or to the planner once the final review is reached.
+ */
+export function waitingLabel(table: RoundTableState): string {
+  const chain = table.chain; const step = chain?.step ?? 'idle'; const finalRound = chain?.finalRound ?? 0;
+  if (step === 'needs-you') return 'Waiting (Send now sends it to the planner): ';
+  if (step === 'stopped') return late({ finalRound }, chain?.stoppedAt) ? 'Goes to the planner when you continue: ' : 'Goes with the step when you continue: ';
+  if (step === 'final') return 'Goes to the planner after the final review, or starts the next task if it approves: ';
+  if (late({ finalRound }, step)) return 'Goes to the planner as a follow-up: ';
+  if (step === 'reviewing' || step === 'fixing') return 'Goes with the next step, or to the planner if the final review is next: ';
+  return 'Goes with the next step: ';
+}
 export function ChainBar({ table, busy, plannerName, builderName, lead, planner, reviewer, onRequest, onModel, detached, seats }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; /** Each seat: who, its role, what it is doing now, and its tokens today. */ seats?: ChainSeat[]; lead?: Session; planner?: Session | null; /** The Codex reviewer (hidden), for its model. */ reviewer?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const steps = CHAIN_STEPS;
@@ -196,7 +210,8 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     </details>}
     <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {chain?.challenges && chain.challenges.length > 0 && <ChallengeList challenges={chain.challenges} plannerName={plannerName} open={step === 'plan-review'} />}
-    {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Goes with the next step: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
+    {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : waitingLabel(table)}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}{chain?.held && <> ({chain.held})</>}{!table.waitingKept && step === 'needs-you' && <button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button>}{!table.waitingKept && (step === 'needs-you' || (step === 'stopped' && !table.stopping)) && <button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button>}</span>}
+    {chain?.nextTasks?.length ? <span className="table-waiting" role="status">{chain.nextTasks.length === 1 ? 'From Tasks, starts once this task is approved: ' : `${chain.nextTasks.length} tasks from Tasks start one by one once this task is approved, first: `}<q>{(() => { const first = chain.nextTasks[0].replace(SIGNAL_INSTRUCTION, '').trim(); return first.length > 80 ? first.slice(0, 80) + '…' : first; })()}</q></span> : null}
     {seats && <ul className="chain-seats" aria-label="Seats">{seats.map((seat) => <li key={seat.role} className={seat.state === 'working' ? 'working' : ''}><i className={`seat-hex seat-${seat.colour}`} aria-hidden="true" /><strong>{seat.name}</strong>{seat.role} · {seat.state}{seat.tokens ? ` · ${short(seat.tokens)} tok today` : ''}</li>)}</ul>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;

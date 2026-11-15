@@ -1,4 +1,4 @@
-import { type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
+import { late, type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, MAX_FINDINGS, nextFindingId, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings, roomForFinding } from '../../../shared/findings';
 import { allowAtFull, EDITS, KEEP_IMAGES, type TableHost } from './round-table';
@@ -32,7 +32,26 @@ interface Chain {
   unrecorded: number;
   /** Counts turns: a step's answer is acted on only if no newer turn began meanwhile (Stop and Continue start one). */
   attempt: number;
+  /** Set while the planner writes the plan again after the final review: the final review's request ('' when none). */
+  replan: string | null;
+  /** Set while the planner revises a plan the person sent back: what they asked for. With replan, a plan is owed until one arrives. */
+  revision: string | null;
+  /** Why the message waiting could not be planned again with the task (too long, too many images): it stays until dropped. */
+  held: string | null;
+  /**
+   * Tasks from Tasks that arrived while the table worked, in order. Each is a task of its own (tracked by its mark in the
+   * chain's task), so it never joins a step or a typed message: it starts once the task before it is approved.
+   */
+  nextTasks: string[];
 }
+/** The most tasks from Tasks that wait for the table at once. */
+const MAX_NEXT_TASKS = 10;
+/** A message from Tasks: its prompt carries the TASK COMPLETE instruction, and Tasks sends no images. */
+const fromTasks = (text: string, images: ChatImage[]) => text.includes(SIGNAL_INSTRUCTION) && !images.length;
+/** The longest task a chain keeps (as saved: shared/schemas.ts chainFields): two of the longest messages, with room for the headings between them. */
+const MAX_TASK = 410_000;
+/** The longest message the person sends (shared/schemas.ts table-send). A task that long still has room for a follow-up as long. */
+const MAX_MESSAGE = 200_000;
 const cut = (text: string) => text.length > RELAY_LIMIT ? `${text.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]` : text;
 /** A reply's last non-empty line, without Markdown emphasis, quote marks or list dashes around it. */
 function lastLine(answer: string) {
@@ -65,7 +84,8 @@ export function verdictOf(answer: string): { approved: true } | { approved: fals
  * reviews, as findings; the builder fixes them, for up to REVIEW_ROUNDS rounds; then the planner reviews the whole and
  * ends with APPROVED or CHANGES NEEDED. Changes go back to the fix step: the builder makes them, the reviewer checks
  * them, and the planner reviews again; up to FINAL_ROUNDS times before the table asks the person.
- * The task is complete only on APPROVED. Trace passes each step's output to the next seat.
+ * What the person writes once the final review is reached goes back to the planner, who plans again (replan); the
+ * reviewer challenges that plan and the person approves it before the builder starts. The task is complete only on APPROVED. Trace passes each step's output to the next seat.
  */
 export class ReviewChains {
   private chains = new Map<string, Chain>();
@@ -93,7 +113,7 @@ export class ReviewChains {
       findings: chain.findings.map((finding) => ({ ...finding })),
       ...(chain.step === 'stopped' && this.busy(chain) ? { stopping: true } : {}),
       chain: { step: chain.step, ...(chain.stoppedAt ? { stoppedAt: chain.stoppedAt } : {}), ...(chain.blocked ? { blocked: chain.blocked.role } : {}), reviewRound: chain.reviewRound, finalRound: chain.finalRound, plan: chain.plan, verdict: chain.verdict, note: chain.note, task: chain.task, report: chain.report,
-        ...(chain.challenges.length ? { challenges: chain.challenges.map((challenge) => ({ ...challenge })) } : {}), ...(chain.challenged ? { challenged: true as const } : {}) },
+        ...(chain.challenges.length ? { challenges: chain.challenges.map((challenge) => ({ ...challenge })) } : {}), ...(chain.challenged ? { challenged: true as const } : {}), ...(chain.replan !== null ? { replan: chain.replan } : {}), ...(chain.revision !== null ? { revision: chain.revision } : {}), ...(chain.held ? { held: chain.held } : {}), ...(chain.nextTasks.length ? { nextTasks: [...chain.nextTasks] } : {}) },
       ...(chain.queued ? { waiting: chain.queued.text, ...this.keptImages(chain.queued.images), ...(chain.kept ? { waitingKept: true } : {}) } : {}),
     };
   }
@@ -111,22 +131,84 @@ export class ReviewChains {
     const steps = 'Steps: the planner plans, the reviewer (Codex) challenges the plan and the planner answers, the person approves the plan, the builder implements, the reviewer reviews, the builder fixes, and the planner gives the final review.';
     return `[Trace Round Table · hierarchy] ${steps} Trace passes each step's output to the next. ${role} End each reply as your step asks. Only if you need the person first (a question, an approval, a choice that is theirs), end instead with the line ${BLOCKED_LINE} and what you need.`;
   }
-  /** One step: a turn for one seat. A message the person sent meanwhile goes along with it. */
-  private turn(chain: Chain, seat: Seat, step: ChainStep, text: string, images: ChatImage[] = []) {
-    chain.step = step; chain.stoppedAt = null; chain.attempt++;
+  /**
+   * One step: a turn for one seat. A message the person sent meanwhile goes along with it; at or after the final review
+   * it goes to the planner instead (replan). `hold`: the step runs without it (a blocked seat's answer), and the message
+   * waits for the step after.
+   */
+  private turn(chain: Chain, seat: Seat, step: ChainStep, text: string, images: ChatImage[] = [], hold = false) {
+    let waiting = hold ? null : this.followUp(chain);
+    // A follow-up too long to join the task stops the table at this step, its request kept: once the person drops the
+    // message, Continue runs the step as it would have run.
+    if (waiting && late(chain, step)) { if (!this.replan(chain, null, false)) { chain.step = 'stopped'; chain.stoppedAt = step; chain.blocked = null; this.publish(chain); } return; }
+    // A plan still owed: the message joins what the planner is asked, saved (Stop, a restart or an empty answer keeps it).
+    // The plain planning prompt is built again with it; a blocked planner's answer goes as it is, with the message added.
+    if (waiting && step === 'planning' && this.owed(chain)) {
+      const plain = text === this.planPrompt(chain); const problem = this.owe(chain, waiting.text);
+      if (problem) { chain.held = `${problem} Drop the waiting message to go on.`; chain.step = 'stopped'; chain.stoppedAt = step; chain.blocked = null; this.publish(chain); return; }
+      if (plain) { text = this.planPrompt(chain); images = [...images, ...waiting.images].slice(0, MAX_IMAGES); chain.queued = null; waiting = null; }
+    }
+    chain.step = step; chain.stoppedAt = null; chain.attempt++; chain.held = null;
     let extra = ''; let pictures = images;
-    if (chain.queued && !chain.kept) { extra = `\n\nThe person adds: ${chain.queued.text}`; pictures = [...images, ...chain.queued.images].slice(0, MAX_IMAGES); chain.queued = null; }
+    if (waiting) { extra = `\n\nThe person adds: ${waiting.text}`; pictures = [...images, ...waiting.images].slice(0, MAX_IMAGES); chain.queued = null; }
     seat.busy = true; seat.text = ''; seat.answer = null;
     const intro = seat.briefed ? '' : `${this.brief(chain, seat)}\n\n`; seat.briefed = true;
     chain.turnStart = this.host.stateOf ? this.host.stateOf(chain.cwd).catch(() => null) : null;
     this.host.send(seat.runId, `${intro}${text}${extra}`, pictures);
     this.publish(chain);
   }
+  /**
+   * The person wrote once the final review was reached: their message (with one still waiting, not kept) joins the task,
+   * and the planner plans again from where the work stands; the reviewer challenges that plan and the person approves it.
+   * Checked before anything changes: `strict` (the person's own send) refuses a follow-up that is too long or has too many
+   * images. Otherwise (Trace between steps) nothing changes but `held`, which says why, and it returns false: the caller
+   * stops where the work was going, with its step and the final review's request kept.
+   */
+  private replan(chain: Chain, extra: { text: string; images: ChatImage[] } | null, strict: boolean): boolean {
+    const waiting = this.followUp(chain);
+    const parts = [waiting, extra].filter((part): part is { text: string; images: ChatImage[] } => part !== null);
+    const text = parts.map((part) => part.text.trim()).filter(Boolean).join('\n\n'); const images = parts.flatMap((part) => part.images);
+    const task = `${chain.task}\n\n[The person's follow-up after the final review]\n${text}`;
+    const problem = task.length > MAX_TASK ? { code: 'TABLE_TASK_LONG', message: `The task with this follow-up would be longer than ${MAX_TASK.toLocaleString('en-US')} characters. Write a shorter follow-up, or give it as a new task once the table is done.` }
+      : images.length > MAX_IMAGES ? { code: 'TABLE_IMAGES', message: `The follow-up and the message waiting would carry ${images.length} images; a message carries at most ${MAX_IMAGES}.` } : null;
+    if (problem && strict) throw new HubError(problem.code, problem.message);
+    if (problem) { chain.held = `${problem.message} Drop the waiting message to go on with the work as it was.`; return false; }
+    // A follow-up after the final review takes the place of a revision still owed.
+    chain.replan = chain.verdict === 'changes' ? chain.note : ''; chain.revision = null;
+    chain.task = task; chain.images = images; chain.blocked = null; chain.held = null; if (waiting) chain.queued = null;
+    chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = ''; chain.challenged = false; chain.challenges = [];
+    // The plan, the builder's report and the findings stay: the planner plans from where the work stands.
+    this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), images);
+    return true;
+  }
+  /**
+   * The message the person wrote meanwhile that goes along with the next step (or into a re-plan). Not one kept from
+   * before a restart (it waits for Send now), and not a task from Tasks: that is a task of its own, tracked by its mark
+   * in the chain's task, so it waits and starts as the next task once this one is done (or on Send now).
+   */
+  /** Whether the planner owes a plan: a revision the person asked for, or a re-plan after the final review. */
+  private owed(chain: Chain) { return chain.revision !== null || chain.replan !== null; }
+  /**
+   * Adds the person's feedback to what the planner owes (the revision, or the task for a re-plan), saved with the chain.
+   * Returns why not (too long), changing nothing; empty feedback changes nothing.
+   */
+  private owe(chain: Chain, text: string): string | null {
+    if (!text.trim()) return null;
+    const joined = `${chain.revision ?? chain.task}\n\n${text}`;
+    if (joined.length > MAX_TASK) return `With this message, what the planner is asked would be longer than ${MAX_TASK.toLocaleString('en-US')} characters.`;
+    if (chain.revision !== null) chain.revision = joined; else chain.task = joined;
+    return null;
+  }
+  private followUp(chain: Chain) { return chain.queued && !chain.kept && !fromTasks(chain.queued.text, chain.queued.images) ? chain.queued : null; }
   // The prompts for each step.
-  private planPrompt(chain: Chain, note?: string) {
-    return note
-      ? `[Step: plan, revised] The person asks you to revise the plan:\n\n${note}\n\nWrite the whole plan again, as numbered steps, with the files to change and how to check the result. End with the line PLAN READY.`
-      : `[Step: plan] The task:\n\n${chain.task}\n\nRead what you need in the project, then write a plan the builder can follow: numbered steps, the files to change, and how to check the result. Do not change files. End with the line PLAN READY.`;
+  /** Built only from what the chain saves (revision, replan, task), so Continue and a restart at this step ask the same. */
+  private planPrompt(chain: Chain) {
+    if (chain.revision !== null) return `[Step: plan, revised] The person asks you to revise the plan:\n\n${chain.revision}\n\nWrite the whole plan again, as numbered steps, with the files to change and how to check the result. End with the line PLAN READY.`;
+    if (chain.replan !== null) {
+      const open = findingsFor(chain.findings, 'driver');
+      return `[Step: plan again, after the final review] The person wrote after the final review; their follow-up is at the end of the task. The task:\n\n${chain.task}\n\nYour plan so far:\n\n${cut(chain.plan)}\n\nThe builder's latest report:\n\n${cut(chain.report)}\n\n${open ? `${open}\n\n` : ''}${chain.replan ? `Your final review asked for changes:\n\n${chain.replan}\n\n` : ''}Read what you need in the project, then write the whole plan again for what is still to do (the follow-up, and anything left from before): numbered steps, the files to change, and how to check the result. Do not change files. End with the line PLAN READY.`;
+    }
+    return `[Step: plan] The task:\n\n${chain.task}\n\nRead what you need in the project, then write a plan the builder can follow: numbered steps, the files to change, and how to check the result. Do not change files. End with the line PLAN READY.`;
   }
   private challengePrompt(chain: Chain) { return `[Step: challenge the plan] The task:\n\n${chain.task}\n\nThe planner's plan:\n\n${cut(chain.plan)}\n\nRead what you need in the project, but change nothing and write no plan of your own. Challenge the plan: requirements it misses, a simpler approach, and cases where it would fail. Report each on its own line as "CHALLENGE high|medium|low — the challenge" (Trace numbers them C1, C2, …). If you have none, end with the line NO CHALLENGES.`; }
   private answerPrompt(chain: Chain) {
@@ -164,7 +246,7 @@ export class ReviewChains {
     const chain: Chain = { owner, cwd: runs[0].cwd, builder, reviewer, planner, step: before ? (resumable ? 'stopped' : before.step) : 'idle', stoppedAt: resumable ?? (before?.step === 'stopped' ? before.stoppedAt ?? null : null),
       task: before?.task ?? '', images: [], plan: before?.plan ?? '', report: before?.report ?? '', reviewRound: before?.reviewRound ?? 0, finalRound: before?.finalRound ?? 0, verdict: before?.verdict ?? null, note: before?.note ?? '',
       challenges: (before?.challenges ?? []).slice(0, MAX_CHALLENGES).map((challenge) => ({ ...challenge })), challenged: before?.challenged === true,
-      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null, attempt: 0, unrecorded: 0 };
+      findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), queued: null, kept: false, turnStart: null, blocked: null, attempt: 0, unrecorded: 0, replan: before?.replan ?? null, revision: before?.revision ?? null, held: before?.held ?? null, nextTasks: (before?.nextTasks ?? []).slice(0, MAX_NEXT_TASKS) };
     // A seat that was waiting for the person before the restart still is.
     if (before?.blocked && chain.step === 'stopped') chain.blocked = { builder, reviewer, planner }[before.blocked] ?? null;
     if (saved.waiting !== undefined || saved.waitingImages?.length) { chain.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) }; chain.kept = true; }
@@ -183,12 +265,19 @@ export class ReviewChains {
     // A seat that asked the person (TASK BLOCKED) gets the answer and goes on with its step.
     if (chain.step === 'stopped' && chain.blocked && chain.stoppedAt && !this.busy(chain)) {
       const seat = chain.blocked; chain.blocked = null; chain.note = ''; const answer = `[The person answers] ${text}\n\nGo on with your step.`;
-      this.turn(chain, seat, chain.stoppedAt, answer, images);
+      // At or after the final review, a message still waiting is not this answer: it is planned again once the step ends.
+      this.turn(chain, seat, chain.stoppedAt, answer, images, late(chain, chain.stoppedAt));
       return;
     }
     // A seat at work, or Trace between two steps of the same task (recording the files' state while no seat is busy): the
     // message waits for the next step. Taken as a new task, it would throw the current one away.
     if (this.busy(chain) || !RESTING.includes(chain.step)) {
+      // A task from Tasks waits on its own, never merged with what the person types (that goes to the next step, or to
+      // the planner after the final review): it starts once the current task is approved.
+      if (fromTasks(text, images)) {
+        if (chain.nextTasks.length >= MAX_NEXT_TASKS) throw new HubError('TABLE_TASKS_FULL', `${MAX_NEXT_TASKS} tasks from Tasks already wait for this Round Table. Send this one once it is done.`);
+        chain.nextTasks.push(text); this.publish(chain); return;
+      }
       if (chain.queued && chain.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${chain.queued.images.length} images and a message carries at most ${MAX_IMAGES}.`);
       chain.queued = chain.queued ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images] } : { text, images };
       this.publish(chain); return;
@@ -200,19 +289,40 @@ export class ReviewChains {
     // with TASK COMPLETE, which would push each step's own last line (PLAN READY, APPROVED) aside: here the planner's
     // APPROVED completes the task, and each seat's brief says when to end with TASK BLOCKED.
     chain.task = text.replace(SIGNAL_INSTRUCTION, '').trim(); chain.images = images; chain.plan = ''; chain.report = ''; chain.reviewRound = 0; chain.finalRound = 0; chain.verdict = null; chain.note = '';
-    chain.challenges = []; chain.challenged = false;
+    chain.challenges = []; chain.challenged = false; chain.replan = null; chain.revision = null;
     this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), images);
   }
   /**
-   * The person's reply while the table waits for them: it goes with the stopped step when it continues; with no plan
-   * yet, to the planner with the task; otherwise to the builder as changes, which the planner then reviews again.
+   * The person's reply while the table waits for them: with no plan yet, to the planner with the task; a step stopped
+   * before the final review takes it along when it continues; otherwise (the final review reached) the planner plans
+   * again with it (replan), and the person approves that plan before the builder starts.
    */
   private reply(chain: Chain, leadRunId: string, text: string, images: ChatImage[]) {
+    // replan runs before the note is cleared: it keeps the final review's request from it.
+    const stopped = chain.step === 'stopped' && chain.stoppedAt;
+    if (stopped && late(chain, chain.stoppedAt)) { this.replan(chain, { text, images }, true); return; }
+    // A plan still owed (a revision or a re-plan the planner answered with nothing, or was stopped at): the reply, and a
+    // message still waiting before it, join what the planner is asked, saved, before the planner is asked again.
+    if (this.owed(chain) && (!stopped || chain.stoppedAt === 'planning')) {
+      const waiting = this.followUp(chain); const pictures = [...(waiting?.images ?? []), ...images].slice(0, MAX_IMAGES);
+      const problem = this.owe(chain, [waiting?.text ?? '', text].filter((part) => part.trim()).join('\n\n'));
+      if (problem) throw new HubError('TABLE_TASK_LONG', `${problem} Write a shorter reply.`);
+      chain.note = ''; if (waiting) chain.queued = null;
+      if (stopped) { if (pictures.length) chain.queued = { text: '', images: pictures }; this.continue(leadRunId); }
+      else this.turn(chain, chain.planner, 'planning', this.planPrompt(chain), pictures);
+      return;
+    }
+    if (!stopped && chain.plan) { this.replan(chain, { text, images }, true); return; }
     chain.note = '';
     // Added to a message still waiting from before Stop, so neither is lost.
-    if (chain.step === 'stopped' && chain.stoppedAt) { chain.queued = chain.queued && !chain.kept ? { text: [chain.queued.text, text].filter(Boolean).join('\n\n'), images: [...chain.queued.images, ...images].slice(0, MAX_IMAGES) } : { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false; this.continue(leadRunId); return; }
-    if (!chain.plan) { this.turn(chain, chain.planner, 'planning', `${this.planPrompt(chain)}\n\nThe person adds: ${text}`, images); return; }
-    this.turn(chain, chain.builder, 'final-fixing', `[Step: changes from the person] The task:\n\n${chain.task}\n\nThe person says:\n\n${text}\n\nMake the changes they ask for, then report what you changed.`, images);
+    if (stopped) {
+      // A task from Tasks waiting keeps its place (it starts once this one is done); the reply goes with the step on its own.
+      const task = chain.queued && !chain.kept && !this.followUp(chain) ? chain.queued : null; const waiting = this.followUp(chain);
+      chain.queued = waiting ? { text: [waiting.text, text].filter(Boolean).join('\n\n'), images: [...waiting.images, ...images].slice(0, MAX_IMAGES) } : { text, images: images.slice(0, MAX_IMAGES) }; chain.kept = false;
+      try { this.continue(leadRunId); } finally { if (task) { chain.queued = task; this.publish(chain); } }
+      return;
+    }
+    this.turn(chain, chain.planner, 'planning', `${this.planPrompt(chain)}\n\nThe person adds: ${text}`, images);
   }
   /** The person on the plan: approve it (the builder starts), or send it back with what to change. */
   plan(leadRunId: string, approve: boolean, note = '') {
@@ -220,7 +330,12 @@ export class ReviewChains {
     if (chain.step !== 'plan-review') throw new HubError('TABLE_STEP', 'There is no plan waiting for you.');
     if (this.busy(chain)) throw new HubError('TABLE_STOPPING', 'An agent is still stopping. Try again once it has stopped.');
     if (approve) this.turn(chain, chain.builder, 'implementing', this.buildPrompt(chain), chain.images);
-    else { if (!note.trim()) throw new HubError('TABLE_NOTE', 'Say what to change in the plan.'); this.turn(chain, chain.planner, 'planning', this.planPrompt(chain, note)); }
+    else {
+      if (!note.trim()) throw new HubError('TABLE_NOTE', 'Say what to change in the plan.');
+      if (note.length > MAX_MESSAGE) throw new HubError('TABLE_NOTE_LONG', `Say what to change in fewer than ${MAX_MESSAGE.toLocaleString('en-US')} characters.`);
+      // Saved with the chain until a plan arrives: Stop, a restart or an empty answer does not lose it.
+      chain.revision = note; this.turn(chain, chain.planner, 'planning', this.planPrompt(chain));
+    }
     return this.state(chain);
   }
   /** Picks a stopped chain up at its step (after Stop, or a restart). `skipChallenge`: a stopped challenge is left out. */
@@ -244,9 +359,20 @@ export class ReviewChains {
   }
   waiting(leadRunId: string, send: boolean) {
     const chain = this.leading(leadRunId); if (!chain.queued) return this.state(chain);
-    chain.kept = false;
-    if (!send) chain.queued = null;
-    else if (!this.busy(chain) && (chain.step === 'idle' || chain.step === 'done' || chain.step === 'needs-you')) { const { text, images } = chain.queued; chain.queued = null; this.send(leadRunId, text, images); return this.state(chain); }
+    const { kept, held } = chain; chain.kept = false; chain.held = null;
+    if (!send) {
+      chain.queued = null;
+      // Dropped once the work was approved: the tasks from Tasks it held back start, in order.
+      if (!this.busy(chain) && chain.step === 'done' && chain.nextTasks.length) { this.send(leadRunId, chain.nextTasks.shift()!, []); return this.state(chain); }
+    }
+    else if (!this.busy(chain) && (chain.step === 'idle' || chain.step === 'done' || chain.step === 'needs-you')) {
+      // Taken from the queue only for send() (which would otherwise add it twice); put back as it was if send refuses it.
+      const queued = chain.queued; chain.queued = null;
+      try { this.send(leadRunId, queued.text, queued.images); } catch (error) { chain.queued = queued; chain.kept = kept; chain.held = held; this.publish(chain); throw error; }
+      return this.state(chain);
+    }
+    // The table is at work: a task from Tasks kept from before a restart joins the tasks waiting their turn.
+    else if (fromTasks(chain.queued.text, chain.queued.images) && chain.nextTasks.length < MAX_NEXT_TASKS) { chain.nextTasks.push(chain.queued.text); chain.queued = null; }
     this.publish(chain); return this.state(chain);
   }
   /** Stops the seat at work; the chain waits at its step for Continue. */
@@ -307,9 +433,10 @@ export class ReviewChains {
     // the same step), while the files' state was being taken leaves the old answer behind.
     const recorded = async () => { await this.record(chain, seat); return this.chains.get(chain.builder.runId) === chain && chain.step === step && chain.attempt === attempt; };
     if (chain.step === 'planning') {
-      chain.plan = answer.replace(/\n?\s*PLAN READY\s*$/i, '').trim();
-      if (!chain.plan) { chain.step = 'needs-you'; chain.note = 'The planner wrote no plan.'; this.publish(chain); return; }
-      chain.note = '';
+      // An empty answer keeps everything as it was (the plan before, and the revision or re-plan still owed), for the person's reply.
+      const plan = answer.replace(/\n?\s*PLAN READY\s*$/i, '').trim();
+      if (!plan) { chain.step = 'needs-you'; chain.note = 'The planner wrote no plan.'; this.publish(chain); return; }
+      chain.plan = plan; chain.note = ''; chain.replan = null; chain.revision = null;
       // Once per task the reviewer challenges the plan before the person sees it; a revised plan is not challenged again.
       if (!chain.challenged) { this.turn(chain, chain.reviewer, 'challenging', this.challengePrompt(chain)); return; }
       chain.step = 'plan-review'; this.publish(chain); return;
@@ -348,11 +475,25 @@ export class ReviewChains {
     }
     if (chain.step === 'final') {
       const verdict = verdictOf(answer);
-      if (verdict?.approved) { chain.verdict = 'approved'; chain.step = 'done'; chain.note = ''; this.publish(chain); return; }
-      if (!verdict) { chain.step = 'needs-you'; chain.note = 'The planner ended its final review without APPROVED or CHANGES NEEDED.'; this.publish(chain); return; }
+      // A message the person wrote during the final review (not one kept from before a restart, nor a task from Tasks).
+      const followUp = this.followUp(chain) !== null;
+      if (verdict?.approved) {
+        chain.verdict = 'approved'; chain.step = 'done'; chain.note = ''; chain.held = null; this.publish(chain);
+        // This task is done (Tasks moves it on). Next: a message the person wrote meanwhile, then the tasks from Tasks in
+        // order, one per approval. A message kept from before a restart still waits for Send now.
+        if (chain.queued && !chain.kept) { const { text, images } = chain.queued; chain.queued = null; this.send(chain.builder.runId, text, images); }
+        else if (!chain.queued && chain.nextTasks.length) this.send(chain.builder.runId, chain.nextTasks.shift()!, []);
+        return;
+      }
+      // A follow-up too long to plan again with the task (held says why) stops the table at the final review, its verdict
+      // and note kept: once the person drops the message, Continue runs the final review again.
+      const heldAtFinal = () => { chain.step = 'stopped'; chain.stoppedAt = 'final'; chain.blocked = null; this.publish(chain); };
+      if (!verdict) { if (followUp) { if (!this.replan(chain, null, false)) heldAtFinal(); return; } chain.step = 'needs-you'; chain.note = 'The planner ended its final review without APPROVED or CHANGES NEEDED.'; this.publish(chain); return; }
       chain.verdict = 'changes'; chain.note = verdict.changes;
+      if (chain.finalRound >= FINAL_ROUNDS && followUp) { if (!this.replan(chain, null, false)) heldAtFinal(); return; }
       if (chain.finalRound >= FINAL_ROUNDS) { chain.step = 'needs-you'; chain.note = `The planner still asks for changes after ${FINAL_ROUNDS} rounds: ${verdict.changes}`; this.publish(chain); return; }
       // Back to the fix step: the builder makes the changes, the reviewer checks them once more, then the final review again.
+      // With a message from the person waiting, turn() sends it all to the planner instead (replan).
       chain.finalRound++; chain.reviewRound = REVIEW_ROUNDS - 1; this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return;
     }
     this.publish(chain);

@@ -59,12 +59,27 @@ export const HIERARCHY_MODELS = { planner: 'claude-fable-5-2', builder: 'claude-
  * and plan-review.
  */
 export type ChainStep = 'idle' | 'planning' | 'challenging' | 'plan-responding' | 'plan-review' | 'implementing' | 'reviewing' | 'fixing' | 'final' | 'final-fixing' | 'done' | 'needs-you' | 'stopped';
+/**
+ * Whether a hierarchy step comes at or after the final review: the final review itself, or a fix or review it sent back.
+ * What the person writes then is a follow-up, which the planner plans again, never straight to the builder.
+ */
+export function late(chain: { finalRound: number }, step: ChainStep | null | undefined): boolean {
+  return step === 'final' || step === 'final-fixing' || ((step === 'fixing' || step === 'reviewing') && chain.finalRound > 0);
+}
 /** One of the reviewer's challenges to a plan, and the planner's answer to it. */
 export interface PlanChallenge { id: string; severity: 'high' | 'medium' | 'low'; text: string; answer?: 'accepted' | 'rejected'; reason?: string }
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
 export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
   /** The reviewer's challenges to this task's plan, with the planner's answers; and whether this task's plan was already challenged (once per task). */
-  challenges?: PlanChallenge[]; challenged?: true }
+  challenges?: PlanChallenge[]; challenged?: true;
+  /** Present while the planner writes the plan again after the final review (the person wrote meanwhile): the final review's request, '' when it had none. */
+  replan?: string;
+  /** Present while the planner revises a plan the person sent back: what the person asked for (with their later replies). */
+  revision?: string;
+  /** Why the message waiting could not join the task when the planner would have planned again (too long, too many images); it waits until dropped. */
+  held?: string;
+  /** Tasks from Tasks that arrived while the table worked, in order: each starts once the task before it is approved. */
+  nextTasks?: string[] }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';

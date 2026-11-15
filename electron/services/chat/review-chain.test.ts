@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
+import type { ChatEnvelope, ChatEvent, ChatImage } from '../../../shared/chat';
 import type { TableHost } from './round-table';
 import { FINAL_ROUNDS, isReview, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
 import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
@@ -9,8 +9,8 @@ function setup() {
   const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number; permissions?: 'ask' | 'edits' | 'full' }> = {
     [BUILDER]: { sessionId: 'builder', engine: 'claude', cwd: '/p', owner: 1 }, [REVIEWER]: { sessionId: 'reviewer', engine: 'codex', cwd: '/p', owner: 1 }, [PLANNER]: { sessionId: 'planner', engine: 'claude', cwd: '/p', owner: 1 },
   };
-  const sent: { runId: string; text: string }[] = []; const modes: Record<string, boolean> = {}; const answers: { requestId: string; allow: boolean }[] = []; const interrupted: string[] = []; const events: ChatEnvelope[] = [];
-  const host: TableHost = { run: (id) => runs[id] ?? null, send: (runId, text) => { sent.push({ runId, text }); }, setReadOnly: (id, ro) => { modes[id] = ro; }, answer: (_r, requestId, allow) => { answers.push({ requestId, allow }); }, interrupt: (id) => { interrupted.push(id); }, emit: (_o, e) => { events.push(e); } };
+  const sent: { runId: string; text: string; images: ChatImage[] }[] = []; const modes: Record<string, boolean> = {}; const answers: { requestId: string; allow: boolean }[] = []; const interrupted: string[] = []; const events: ChatEnvelope[] = [];
+  const host: TableHost = { run: (id) => runs[id] ?? null, send: (runId, text, images) => { sent.push({ runId, text, images }); }, setReadOnly: (id, ro) => { modes[id] = ro; }, answer: (_r, requestId, allow) => { answers.push({ requestId, allow }); }, interrupt: (id) => { interrupted.push(id); }, emit: (_o, e) => { events.push(e); } };
   const chains = new ReviewChains(host);
   const reply = async (runId: string, text: string, isError = false) => {
     const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; chains.observe({ sessionId: runs[runId].sessionId, runId, event });
@@ -20,8 +20,16 @@ function setup() {
   };
   const challenges = { auto: true };
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
-  return { chains, sent, modes, answers, interrupted, reply, last, runs, challenges };
+  const tables = () => events.filter((e) => e.event.type === 'table').map((e) => (e.event as Extract<ChatEvent, { type: 'table' }>).table!);
+  return { chains, sent, modes, answers, interrupted, reply, last, runs, challenges, tables };
 }
+/** A table at its final review: the task given, the plan approved, built, and reviewed with no findings. */
+async function atFinal(task = 'Add a footer.') {
+  const table = setup(); const { chains, reply, last } = table; chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, task, []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+  await reply(BUILDER, 'Built.'); await reply(REVIEWER, 'NO FINDINGS'); expect(last().chain!.step).toBe('final');
+  return table;
+}
+const IMAGE = (n: number) => ({ mediaType: 'image/png' as const, data: `iVBORw0KGgo${n}` });
 
 describe('hierarchy Round Table', () => {
   it('plans, waits for the plan to be approved, builds, reviews, fixes, and completes only on the planner’s APPROVED', async () => {
@@ -148,20 +156,27 @@ describe('hierarchy Round Table', () => {
     expect(verdictOf('Looks right.\nAPPROVED\nTASK COMPLETE')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: rename it\n**TASK COMPLETE**')).toEqual({ approved: false, changes: 'rename it' });
     expect(verdictOf('TASK COMPLETE')).toBeNull();
   });
-  it('takes the person’s reply while the table waits for them as part of the same task, not a new one', async () => {
+  it('takes the person’s reply while the table waits for them as part of the same task, and plans it again once the final review is reached', async () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
     await reply(BUILDER, 'Built.'); await reply(REVIEWER, 'NO FINDINGS');
     for (let round = 0; round < FINAL_ROUNDS; round++) { await reply(PLANNER, 'CHANGES NEEDED: rename it'); await reply(BUILDER, 'Renamed.'); await reply(REVIEWER, 'NO FINDINGS'); }
     await reply(PLANNER, 'CHANGES NEEDED: still wrong'); expect(last().chain!.step).toBe('needs-you');
-    // Needs you, with a plan: the reply goes to the builder as changes, and the planner reviews again.
+    // Needs you, with a plan: the reply goes to the planner, who plans again; the builder gets nothing until that plan is approved.
+    const before = sent.length;
     chains.send(BUILDER, 'Keep the old name, it is fine.', []);
-    expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('Keep the old name'); expect(last().chain).toMatchObject({ step: 'final-fixing', task: 'Add a footer.', plan: 'Plan' });
-    await reply(BUILDER, 'Left it.'); expect(sent.at(-1)!.runId).toBe(PLANNER); expect(last().chain!.step).toBe('final');
-    // Stopped: the reply goes along with the step it continues.
-    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.send(BUILDER, 'Look at the footer too.', []);
-    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: final review'); expect(sent.at(-1)!.text).toContain('The person adds: Look at the footer too.'); expect(last().chain!.task).toBe('Add a footer.');
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]);
+    const prompt = sent.at(-1)!.text; expect(prompt).toContain('[Step: plan again, after the final review]'); expect(prompt).toContain('Keep the old name'); expect(prompt).toContain('Your plan so far:\n\nPlan'); expect(prompt).toContain('still wrong');
+    expect(last().chain).toMatchObject({ step: 'planning', finalRound: 0, reviewRound: 0, verdict: null, plan: 'Plan', replan: `The planner still asks for changes after ${FINAL_ROUNDS} rounds: still wrong` });
+    expect(last().chain!.task).toContain('Add a footer.'); expect(last().chain!.task).toContain('Keep the old name, it is fine.');
+    await reply(PLANNER, 'Plan 2\nPLAN READY');
+    // Codex challenges the new plan (none here), and it waits for the person.
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER, REVIEWER]); expect(last().chain).toMatchObject({ step: 'plan-review', plan: 'Plan 2' }); expect(last().chain).not.toHaveProperty('replan');
+    chains.plan(BUILDER, true); expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('Plan 2'); expect(last().chain!.step).toBe('implementing');
+    // Stopped before the final review: the reply goes along with the step it continues (the build).
+    chains.stop(BUILDER); await reply(BUILDER, 'partial'); chains.send(BUILDER, 'Look at the footer too.', []);
+    expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('[Step: implement]'); expect(sent.at(-1)!.text).toContain('The person adds: Look at the footer too.'); expect(last().chain!.step).toBe('implementing');
     // A task from Tasks is still a new task; so is a message once the work is done.
-    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.send(BUILDER, `Task t-0123abcd: Other. ${SIGNAL_INSTRUCTION}`, []);
+    chains.stop(BUILDER); await reply(BUILDER, 'partial'); chains.send(BUILDER, `Task t-0123abcd: Other. ${SIGNAL_INSTRUCTION}`, []);
     expect(last().chain).toMatchObject({ step: 'planning', task: 'Task t-0123abcd: Other.' });
     await reply(PLANNER, 'Plan B\nPLAN READY'); chains.plan(BUILDER, true); await reply(BUILDER, 'Done.'); await reply(REVIEWER, 'NO FINDINGS'); await reply(PLANNER, 'APPROVED');
     chains.send(BUILDER, 'Next thing.', []); expect(last().chain).toMatchObject({ step: 'planning', task: 'Next thing.' });
@@ -210,5 +225,321 @@ describe('hierarchy Round Table', () => {
   it('counts a reply as a review only with findings, answers to findings, or NO FINDINGS on its last line', () => {
     expect(isReview('FINDING low a.ts:1 — typo')).toBe(true); expect(isReview('VERIFIED F2')).toBe(true); expect(isReview('All fine.\n- NO FINDINGS.')).toBe(true); expect(isReview('NO FINDINGS\nTASK COMPLETE')).toBe(true);
     expect(isReview('')).toBe(false); expect(isReview('NO FINDINGS\nWant me to look at the tests?')).toBe(false); expect(isReview('FIXED F1')).toBe(false);
+  });
+});
+
+describe('a follow-up once the final review is reached goes back to the planner', () => {
+  const builderTurns = (sent: { runId: string }[], from: number) => sent.slice(from).filter((item) => item.runId === BUILDER).length;
+  it('a message during the final review, then CHANGES NEEDED: the planner plans again, with the request', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.send(BUILDER, 'Also add a header.', []); expect(last().waiting).toBe('Also add a header.'); const before = sent.length;
+    await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(sent.at(-1)!.text).toContain('Also add a header.'); expect(sent.at(-1)!.text).toContain('Your final review asked for changes:\n\nrename it');
+    expect(last().chain).toMatchObject({ step: 'planning', replan: 'rename it', finalRound: 0 }); expect(last().waiting).toBeUndefined();
+    await reply(PLANNER, 'Plan 2'); expect(last().chain!.step).toBe('plan-review'); expect(builderTurns(sent, before)).toBe(0);
+    chains.plan(BUILDER, true); expect(sent.at(-1)!.runId).toBe(BUILDER);
+  });
+  it('a message during the final review, then APPROVED: the task is done, and the message starts the next task', async () => {
+    const { chains, sent, reply, last, tables } = await atFinal();
+    chains.send(BUILDER, 'Also add a header.', []); const before = sent.length;
+    await reply(PLANNER, 'APPROVED');
+    expect(tables().some((table) => table.chain?.step === 'done' && table.chain.verdict === 'approved' && table.chain.task === 'Add a footer.')).toBe(true);
+    expect(last().chain).toMatchObject({ step: 'planning', task: 'Also add a header.', plan: '' }); expect(last().chain).not.toHaveProperty('replan'); expect(last().waiting).toBeUndefined();
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(sent.at(-1)!.text).toContain('[Step: plan] The task:\n\nAlso add a header.');
+  });
+  it('a message during the final review that ends with no verdict goes to the planner instead of asking the person', async () => {
+    const { chains, sent, reply, last } = await atFinal(); chains.send(BUILDER, 'Also add a header.', []);
+    await reply(PLANNER, 'Looks fine, I think.'); expect(last().chain).toMatchObject({ step: 'planning', replan: '' }); expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).not.toContain('Your final review asked');
+  });
+  it('stopped at a fix or a review the final review sent back, a typed reply goes to the planner (C1)', async () => {
+    for (const at of ['fixing', 'reviewing'] as const) {
+      const { chains, sent, reply, last } = await atFinal();
+      await reply(PLANNER, 'CHANGES NEEDED: rename it'); expect(last().chain).toMatchObject({ step: 'fixing', finalRound: 1 });
+      if (at === 'reviewing') { await reply(BUILDER, 'Renamed.'); expect(last().chain!.step).toBe('reviewing'); }
+      chains.stop(BUILDER); await reply(at === 'fixing' ? BUILDER : REVIEWER, 'partial'); expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: at });
+      const before = sent.length; chains.send(BUILDER, 'Leave the name.', []);
+      expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(sent.at(-1)!.text).toContain('Leave the name.');
+      // At the fix the final review's request is still open; once the builder has made it (at the review), it is not asked again.
+      expect(last().chain).toMatchObject({ step: 'planning', finalRound: 0, replan: at === 'fixing' ? 'rename it' : '' }); expect(last().chain!.task).toContain('Leave the name.');
+    }
+  });
+  it('a message waiting at Stop goes to the planner on Continue, not to the final review (C2)', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.send(BUILDER, 'Also add a header.', []); chains.stop(BUILDER); await reply(PLANNER, 'partial'); const before = sent.length;
+    chains.continue(BUILDER);
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(sent.at(-1)!.text).not.toContain('[Step: final review');
+    expect(last().chain!.step).toBe('planning'); expect(last().chain!.task).toContain('Also add a header.');
+  });
+  it('a message typed while the planner is still stopping goes to the planner on Continue (C2)', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.stop(BUILDER); chains.send(BUILDER, 'Also add a header.', []); expect(last().waiting).toBe('Also add a header.');
+    await reply(PLANNER, 'partial'); chains.continue(BUILDER);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(last().chain!.task).toContain('Also add a header.');
+  });
+  it('joins a message still waiting and a new reply, with all their images, into the task (C3)', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.stop(BUILDER); chains.send(BUILDER, 'First.', [IMAGE(1)]); await reply(PLANNER, 'partial');
+    chains.send(BUILDER, 'Second.', [IMAGE(2), IMAGE(3)]);
+    expect(last().chain!.task).toBe("Add a footer.\n\n[The person's follow-up after the final review]\nFirst.\n\nSecond.");
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('First.\n\nSecond.'); expect(sent.at(-1)!.images).toEqual([IMAGE(1), IMAGE(2), IMAGE(3)]);
+  });
+  it('refuses a follow-up too long or with too many images, and changes nothing (C3)', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.stop(BUILDER); chains.send(BUILDER, 'First.', [IMAGE(1)]); await reply(PLANNER, 'partial'); const before = sent.length; const state = JSON.stringify(last());
+    expect(() => chains.send(BUILDER, 'x'.repeat(410_000), [])).toThrow(/longer than 410,000 characters/);
+    expect(() => chains.send(BUILDER, 'More.', Array.from({ length: 10 }, (_, n) => IMAGE(n + 2)))).toThrow(/11 images/);
+    expect(sent.length).toBe(before); expect(JSON.stringify(last())).toBe(state); expect(last()).toMatchObject({ waiting: 'First.', chain: { step: 'stopped', stoppedAt: 'final', task: 'Add a footer.' } });
+  });
+  it('a waiting follow-up too long to join the task stops the table at its next step, request kept; dropped, Continue runs that step (F1)', async () => {
+    const { chains, sent, reply, last } = await atFinal('x'.repeat(409_990));
+    chains.send(BUILDER, 'Also add a header.', []); const before = sent.length;
+    await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    expect(sent.length).toBe(before); expect(last()).toMatchObject({ waiting: 'Also add a header.', chain: { step: 'stopped', stoppedAt: 'fixing', verdict: 'changes', note: 'rename it', finalRound: 1 } });
+    expect(last().chain!.held).toContain('longer than 410,000 characters'); expect(last().chain).not.toHaveProperty('replan');
+    // Continue with the message still there stops again, as before.
+    chains.continue(BUILDER); expect(sent.length).toBe(before); expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'fixing', note: 'rename it' });
+    chains.waiting(BUILDER, false); expect(last().waiting).toBeUndefined(); expect(last().chain).not.toHaveProperty('held');
+    chains.continue(BUILDER);
+    expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain("The planner's final review asks for changes:\n\nrename it"); expect(last().chain).toMatchObject({ step: 'fixing', finalRound: 1 });
+    await reply(BUILDER, 'Renamed.'); await reply(REVIEWER, 'NO FINDINGS'); expect(last().chain!.step).toBe('final');
+  });
+  it('a task as long as one message (199,990 characters) still takes a follow-up: waiting, after CHANGES NEEDED, and a two-character reply at needs-you (F1)', async () => {
+    const { chains, sent, reply, last } = await atFinal('x'.repeat(199_990));
+    chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    expect(last().chain).toMatchObject({ step: 'planning', replan: 'rename it' }); expect(last().chain).not.toHaveProperty('held'); expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('Also add a header.');
+    const other = await atFinal('x'.repeat(199_990)); await other.reply(PLANNER, 'Looks fine, I think.'); expect(other.last().chain!.step).toBe('needs-you');
+    other.chains.send(BUILDER, 'ok', []); expect(other.sent.at(-1)!.runId).toBe(PLANNER); expect(other.last().chain).toMatchObject({ step: 'planning' }); expect(other.last().chain!.task.endsWith('\nok')).toBe(true);
+    // A follow-up as long as the longest message fits too.
+    const longest = await atFinal('x'.repeat(200_000)); await longest.reply(PLANNER, 'Looks fine, I think.'); longest.chains.send(BUILDER, 'y'.repeat(200_000), []); expect(longest.last().chain!.step).toBe('planning');
+  });
+  it('a waiting follow-up too long, after a final review with no verdict or with its rounds used up: stopped at the final review; dropped, Continue runs it again (F1)', async () => {
+    for (const exit of ['no verdict', 'rounds used up'] as const) {
+      const { chains, sent, reply, last } = await atFinal('x'.repeat(409_990));
+      if (exit === 'rounds used up') for (let round = 0; round < FINAL_ROUNDS; round++) { await reply(PLANNER, 'CHANGES NEEDED: rename it'); await reply(BUILDER, 'Renamed.'); await reply(REVIEWER, 'NO FINDINGS'); }
+      chains.send(BUILDER, 'Also add a header.', []); const before = sent.length;
+      await reply(PLANNER, exit === 'no verdict' ? 'Looks fine, I think.' : 'CHANGES NEEDED: still wrong');
+      expect(sent.length).toBe(before); expect(last()).toMatchObject({ waiting: 'Also add a header.', chain: { step: 'stopped', stoppedAt: 'final' } }); expect(last().chain!.held).toContain('longer than 410,000 characters');
+      if (exit === 'rounds used up') expect(last().chain).toMatchObject({ verdict: 'changes', note: 'still wrong', finalRound: FINAL_ROUNDS });
+      chains.waiting(BUILDER, false); expect(last().waiting).toBeUndefined(); expect(last().chain).not.toHaveProperty('held');
+      expect(() => chains.continue(BUILDER)).not.toThrow();
+      expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: final review'); expect(last().chain!.step).toBe('final');
+    }
+  });
+  it('Send now that send() refuses leaves the message waiting as it was, with its images (F2)', async () => {
+    const { reply, last } = await atFinal('x'.repeat(409_990));
+    await reply(PLANNER, 'Looks fine, I think.'); expect(last().chain!.step).toBe('needs-you');
+    const saved = last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [], waiting: 'Also add a header.', waitingImages: [IMAGE(1)] });
+    expect(() => after.chains.waiting(BUILDER, true)).toThrow(/longer than 410,000/);
+    expect(after.last()).toMatchObject({ waiting: 'Also add a header.', waitingImages: [IMAGE(1)], waitingKept: true, chain: { step: 'needs-you' } }); expect(after.sent).toEqual([]);
+    after.chains.waiting(BUILDER, false); expect(after.last().waiting).toBeUndefined();
+  });
+  it('a task from Tasks sent during the final review is not merged into this task: it starts as the next task once this one is approved (F3)', async () => {
+    const { chains, sent, reply, last, tables } = await atFinal(`Task: Add a footer. ${SIGNAL_INSTRUCTION}`);
+    chains.send(BUILDER, `Task: Add a header. ${SIGNAL_INSTRUCTION}`, []); const before = sent.length;
+    await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    // The fix goes on without it; it is never added to a step's prompt or to this task.
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([BUILDER]); expect(sent.at(-1)!.text).not.toContain('Add a header'); expect(last().chain!.task).toBe('Task: Add a footer.');
+    await reply(BUILDER, 'Renamed.'); await reply(REVIEWER, 'NO FINDINGS'); expect(sent.slice(before).some((item) => item.text.includes('Add a header'))).toBe(false); expect(last().chain!.nextTasks).toEqual([`Task: Add a header. ${SIGNAL_INSTRUCTION}`]); expect(last().waiting).toBeUndefined();
+    await reply(PLANNER, 'APPROVED');
+    expect(tables().some((table) => table.chain?.step === 'done' && table.chain.task === 'Task: Add a footer.')).toBe(true);
+    expect(last().chain).toMatchObject({ step: 'planning', task: 'Task: Add a header.' }); expect(last().chain).not.toHaveProperty('nextTasks');
+  });
+  it('a typed follow-up and a waiting task from Tasks: the follow-up is planned again, the task keeps waiting (F3)', async () => {
+    const { chains, sent, reply, last } = await atFinal(`Task: Add a footer. ${SIGNAL_INSTRUCTION}`);
+    chains.stop(BUILDER); chains.send(BUILDER, `Task: Add a header. ${SIGNAL_INSTRUCTION}`, []); await reply(PLANNER, 'partial');
+    chains.send(BUILDER, 'Keep the old colour.', []);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('Keep the old colour.'); expect(sent.at(-1)!.text).not.toContain('Add a header');
+    expect(last().chain!.task).toBe("Task: Add a footer.\n\n[The person's follow-up after the final review]\nKeep the old colour."); expect(last().chain!.nextTasks).toEqual([`Task: Add a header. ${SIGNAL_INSTRUCTION}`]);
+  });
+  it('a typed correction after a task from Tasks is queued stays apart from it, and goes to the planner before any more building (F4)', async () => {
+    const header = `Task: Add a header. ${SIGNAL_INSTRUCTION}`;
+    const { chains, sent, reply, last } = await atFinal(`Task: Add a footer. ${SIGNAL_INSTRUCTION}`);
+    chains.send(BUILDER, header, []); chains.send(BUILDER, 'Do not rename it; keep the old name.', []);
+    expect(last()).toMatchObject({ waiting: 'Do not rename it; keep the old name.', chain: { nextTasks: [header] } }); const before = sent.length;
+    await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(sent.at(-1)!.text).toContain('Do not rename it; keep the old name.'); expect(sent.at(-1)!.text).not.toContain('Add a header');
+    expect(last().chain).toMatchObject({ step: 'planning', nextTasks: [header] }); expect(last().chain!.task).toContain('keep the old name'); expect(last().waiting).toBeUndefined();
+    // The same with the correction typed first.
+    const other = await atFinal(`Task: Add a footer. ${SIGNAL_INSTRUCTION}`); other.chains.send(BUILDER, 'Keep the old name.', []); other.chains.send(BUILDER, header, []);
+    await other.reply(PLANNER, 'CHANGES NEEDED: rename it'); expect(other.sent.at(-1)!.runId).toBe(PLANNER); expect(other.last().chain).toMatchObject({ step: 'planning', nextTasks: [header] });
+  });
+  it('tasks from Tasks waiting start one per approval, in order; at most ten wait (F4)', async () => {
+    const task = (name: string) => `Task: ${name}. ${SIGNAL_INSTRUCTION}`;
+    const { chains, reply, last } = await atFinal(task('A'));
+    chains.send(BUILDER, task('B'), []); chains.send(BUILDER, task('C'), []);
+    for (let n = 0; n < 8; n++) chains.send(BUILDER, task(`D${n}`), []);
+    expect(() => chains.send(BUILDER, task('E'), [])).toThrow(/10 tasks from Tasks already wait/);
+    await reply(PLANNER, 'APPROVED'); expect(last().chain).toMatchObject({ step: 'planning', task: 'Task: B.' }); expect(last().chain!.nextTasks![0]).toBe(task('C'));
+    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.'); await reply(REVIEWER, 'NO FINDINGS'); await reply(PLANNER, 'APPROVED');
+    expect(last().chain).toMatchObject({ step: 'planning', task: 'Task: C.' }); expect(last().chain!.nextTasks).toHaveLength(8);
+  });
+  it('tasks from Tasks waiting are kept through a restart, and wait behind a kept message until it is sent or dropped (F4)', async () => {
+    const header = `Task: Add a header. ${SIGNAL_INSTRUCTION}`;
+    const { chains, reply, last } = await atFinal(); chains.send(BUILDER, header, []); chains.stop(BUILDER); await reply(PLANNER, 'partial');
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: last().chain!, findings: [], waiting: 'Kept message.' });
+    expect(after.last().chain!.nextTasks).toEqual([header]);
+    after.chains.continue(BUILDER); await after.reply(PLANNER, 'APPROVED');
+    expect(after.last()).toMatchObject({ waiting: 'Kept message.', waitingKept: true, chain: { step: 'done', nextTasks: [header] } });
+    after.chains.waiting(BUILDER, false); expect(after.last().chain).toMatchObject({ step: 'planning', task: 'Task: Add a header.' }); expect(after.sent.at(-1)!.runId).toBe(PLANNER);
+  });
+  it('a task from Tasks kept from before a restart and sent while the table works waits with the other tasks, not with a step (F4)', async () => {
+    const header = `Task: Add a header. ${SIGNAL_INSTRUCTION}`;
+    const { chains, reply, last } = await atFinal(); chains.stop(BUILDER); await reply(PLANNER, 'partial');
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: last().chain!, findings: [], waiting: header });
+    after.chains.continue(BUILDER); after.chains.waiting(BUILDER, true);
+    expect(after.last().waiting).toBeUndefined(); expect(after.last().chain!.nextTasks).toEqual([header]);
+    await after.reply(PLANNER, 'CHANGES NEEDED: rename it'); expect(after.sent.at(-1)!.runId).toBe(BUILDER); expect(after.sent.at(-1)!.text).not.toContain('Add a header');
+  });
+  it('stopped before the final review with a task from Tasks waiting, a reply goes with the step and the task keeps waiting (F3)', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    chains.stop(BUILDER); chains.send(BUILDER, `Task: Add a header. ${SIGNAL_INSTRUCTION}`, []); await reply(BUILDER, 'partial');
+    chains.send(BUILDER, 'Use the blue.', []);
+    expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('The person adds: Use the blue.'); expect(sent.at(-1)!.text).not.toContain('Add a header');
+    expect(last().chain).toMatchObject({ step: 'implementing', nextTasks: [`Task: Add a header. ${SIGNAL_INSTRUCTION}`] }); expect(last().waiting).toBeUndefined();
+  });
+  it('Stop while planning again, then Continue: the prompt still has the follow-up, the old plan and the final review’s request (C4)', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'CHANGES NEEDED: rename it'); const first = sent.at(-1)!.text;
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.continue(BUILDER);
+    const again = sent.at(-1)!.text; expect(sent.at(-1)!.runId).toBe(PLANNER);
+    for (const part of ['Also add a header.', 'Your plan so far:\n\nPlan', "The builder's latest report:\n\nBuilt.", 'rename it']) expect(again).toContain(part);
+    // The same prompt as the first time, without the brief the planner had then.
+    expect(first.endsWith(again)).toBe(true);
+  });
+  it('the same after a restart at that step (C4)', async () => {
+    const { chains, reply, last } = await atFinal();
+    chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'CHANGES NEEDED: rename it'); const saved = last().chain!;
+    expect(saved).toMatchObject({ step: 'planning', replan: 'rename it' });
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] }); expect(after.last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'planning', replan: 'rename it' });
+    after.chains.continue(BUILDER); const prompt = after.sent.at(-1)!.text; expect(after.sent.at(-1)!.runId).toBe(PLANNER);
+    for (const part of ['[Step: plan again', 'Also add a header.', 'Your plan so far:\n\nPlan', 'rename it']) expect(prompt).toContain(part);
+    await after.reply(PLANNER, 'Plan 2'); expect(after.last().chain).toMatchObject({ step: 'plan-review', plan: 'Plan 2' }); expect(after.sent.some((item) => item.runId === BUILDER)).toBe(false);
+  });
+  it('a message kept from before a restart still waits for Send now after APPROVED (C5)', async () => {
+    const { chains, reply, last } = await atFinal(); chains.stop(BUILDER); await reply(PLANNER, 'partial'); const saved = last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [], waiting: 'Kept message.' });
+    after.chains.continue(BUILDER); expect(after.sent.at(-1)!.text).toContain('[Step: final review'); expect(after.sent.at(-1)!.text).not.toContain('Kept message.');
+    await after.reply(PLANNER, 'APPROVED'); expect(after.last()).toMatchObject({ waiting: 'Kept message.', waitingKept: true, chain: { step: 'done', verdict: 'approved' } }); expect(after.sent.length).toBe(1);
+  });
+  it('a blocked seat after the final review gets only its answer; a message waiting goes to the planner once that step ends', async () => {
+    const { chains, sent, reply, last } = await atFinal();
+    await reply(PLANNER, 'CHANGES NEEDED: rename it'); chains.send(BUILDER, 'Also add a header.', []);
+    await reply(BUILDER, 'TASK BLOCKED: Which name?'); expect(last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'fixing', blocked: 'builder' });
+    chains.send(BUILDER, 'Use Footer.', []);
+    expect(sent.at(-1)!.runId).toBe(BUILDER); expect(sent.at(-1)!.text).toContain('[The person answers] Use Footer.'); expect(sent.at(-1)!.text).not.toContain('Also add a header.'); expect(last().waiting).toBe('Also add a header.');
+    await reply(BUILDER, 'Renamed to Footer.');
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(last().chain).toMatchObject({ step: 'planning', report: 'Renamed to Footer.' }); expect(last().chain!.task).toContain('Also add a header.');
+  });
+  it('a task from Tasks keeps its mark in the task after a follow-up, without its TASK COMPLETE instruction', async () => {
+    const { chains, reply, last } = await atFinal(`Task t-0123abcd: Add a footer. ${SIGNAL_INSTRUCTION}`);
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.send(BUILDER, 'Also add a header.', []); expect(last().chain!.step).toBe('planning');
+    expect(last().chain!.task).toContain('Task t-0123abcd: Add a footer.'); expect(last().chain!.task).toContain('Also add a header.'); expect(last().chain!.task).not.toContain(SIGNAL_INSTRUCTION);
+  });
+});
+
+describe('a plan owed by the planner is never lost', () => {
+  /** A table whose plan the person sent back with a note; the planner is revising it. */
+  const revising = async () => {
+    const table = setup(); const { chains, reply } = table; chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan A');
+    chains.plan(BUILDER, false, 'Use the existing helper.'); return table;
+  };
+  it('Stop during a revision, then Continue, and the same after a restart: the planner is asked the person’s note again', async () => {
+    const { chains, sent, reply, last } = await revising();
+    expect(last().chain).toMatchObject({ step: 'planning', revision: 'Use the existing helper.', plan: 'Plan A' });
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.continue(BUILDER);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: plan, revised]'); expect(sent.at(-1)!.text).toContain('Use the existing helper.');
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); const saved = last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] }); after.chains.continue(BUILDER);
+    expect(after.sent.at(-1)!.text).toContain('[Step: plan, revised] The person asks you to revise the plan:\n\nUse the existing helper.');
+    await after.reply(PLANNER, 'Plan B'); expect(after.last().chain).toMatchObject({ step: 'plan-review', plan: 'Plan B' }); expect(after.last().chain).not.toHaveProperty('revision');
+  });
+  it('refuses a revision note over 200,000 characters and changes nothing', async () => {
+    const { chains, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan A');
+    expect(() => chains.plan(BUILDER, false, 'x'.repeat(200_001))).toThrow(/fewer than 200,000 characters/); expect(last().chain!.step).toBe('plan-review'); expect(last().chain).not.toHaveProperty('revision');
+  });
+  it('an empty answer to a revision keeps the old plan and the note; a reply joins the note, and both survive Stop and a restart (C1)', async () => {
+    const { chains, sent, reply, last } = await revising();
+    await reply(PLANNER, '   '); expect(last().chain).toMatchObject({ step: 'needs-you', note: 'The planner wrote no plan.', plan: 'Plan A', revision: 'Use the existing helper.' });
+    chains.send(BUILDER, 'And keep the old colours.', []);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(last().chain).toMatchObject({ step: 'planning', plan: 'Plan A', revision: 'Use the existing helper.\n\nAnd keep the old colours.', task: 'Add a footer.' });
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); const saved = last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] }); after.chains.continue(BUILDER);
+    const prompt = after.sent.at(-1)!.text; expect(prompt).toContain('Use the existing helper.'); expect(prompt).toContain('And keep the old colours.'); expect(after.last().chain!.plan).toBe('Plan A');
+  });
+  it('an empty answer to a re-plan after CHANGES NEEDED keeps the plan, the request and the follow-up; a reply joins them, through Stop and a restart (C1)', async () => {
+    const { chains, sent, reply, last } = await atFinal(); chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    expect(last().chain).toMatchObject({ step: 'planning', replan: 'rename it' });
+    await reply(PLANNER, ''); expect(last().chain).toMatchObject({ step: 'needs-you', plan: 'Plan', replan: 'rename it' });
+    const before = sent.length; chains.send(BUILDER, 'Use h2 for it.', []);
+    expect(sent.slice(before).map((item) => item.runId)).toEqual([PLANNER]); expect(last().chain).toMatchObject({ step: 'planning', replan: 'rename it', finalRound: 0 });
+    expect(last().chain!.task).toBe("Add a footer.\n\n[The person's follow-up after the final review]\nAlso add a header.\n\nUse h2 for it.");
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); const saved = last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] }); after.chains.continue(BUILDER);
+    const prompt = after.sent.at(-1)!.text;
+    for (const part of ['[Step: plan again', 'Your plan so far:\n\nPlan', 'Your final review asked for changes:\n\nrename it', 'Also add a header.', 'Use h2 for it.']) expect(prompt).toContain(part);
+  });
+  it('a reply too long to join what the planner owes is refused, and nothing changes', async () => {
+    const { chains, reply, last } = await revising(); await reply(PLANNER, ''); const state = JSON.stringify(last());
+    expect(() => chains.send(BUILDER, 'x'.repeat(410_000), [])).toThrow(/longer than 410,000 characters/); expect(JSON.stringify(last())).toBe(state);
+  });
+  it('a builder that answers with nothing does not change where a reply goes after the final review (C2)', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    await reply(BUILDER, ''); await reply(REVIEWER, 'NO FINDINGS'); expect(last().chain).toMatchObject({ step: 'final', report: '' });
+    await reply(PLANNER, 'Looks fine, I think.'); expect(last().chain!.step).toBe('needs-you');
+    chains.send(BUILDER, 'Add a test too.', []);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('[Step: plan again'); expect(last().chain!.task).toContain('Add a test too.');
+  });
+  it('a follow-up after the final review takes the place of a revision still owed', async () => {
+    const { chains, reply, last } = await atFinal(); chains.stop(BUILDER); await reply(PLANNER, 'partial');
+    chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'Plan 2'); expect(last().chain!.step).toBe('plan-review');
+    chains.plan(BUILDER, false, 'Smaller.'); expect(last().chain).toMatchObject({ revision: 'Smaller.' });
+    await reply(PLANNER, 'Plan 3'); expect(last().chain).toMatchObject({ step: 'plan-review', plan: 'Plan 3' }); expect(last().chain).not.toHaveProperty('revision'); expect(last().chain).not.toHaveProperty('replan');
+  });
+  /** Stops the planner, opens the table again as after a restart, and returns the prompt Continue sends. */
+  const restartPrompt = async (table: ReturnType<typeof setup>) => {
+    table.chains.stop(BUILDER); await table.reply(PLANNER, 'partial'); const saved = table.last().chain!;
+    const after = setup(); after.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: saved, findings: [] }); after.chains.continue(BUILDER); return after.sent.at(-1)!.text;
+  };
+  it('revision, Stop, a typed correction: it joins the note, and Stop and a restart keep it (F5)', async () => {
+    const table = await revising(); const { chains, sent, reply, last } = table;
+    chains.stop(BUILDER); await reply(PLANNER, 'partial'); chains.send(BUILDER, 'Keep the old colours.', []);
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain('Use the existing helper.\n\nKeep the old colours.'); expect(sent.at(-1)!.text).not.toContain('The person adds');
+    expect(last().chain).toMatchObject({ step: 'planning', revision: 'Use the existing helper.\n\nKeep the old colours.' });
+    expect(await restartPrompt(table)).toContain('Use the existing helper.\n\nKeep the old colours.');
+  });
+  it('revision, Stop, a reply too long to join the note: refused, and nothing changes (F5)', async () => {
+    const { chains, sent, reply, last } = await revising(); chains.stop(BUILDER); await reply(PLANNER, 'partial'); const before = sent.length; const state = JSON.stringify(last());
+    expect(() => chains.send(BUILDER, 'x'.repeat(410_000), [])).toThrow(/longer than 410,000 characters/); expect(sent.length).toBe(before); expect(JSON.stringify(last())).toBe(state);
+  });
+  it('revision, Stop, a correction typed while the planner is still stopping, then Continue: it joins the note too (F5)', async () => {
+    const table = await revising(); const { chains, sent, reply, last } = table;
+    chains.stop(BUILDER); chains.send(BUILDER, 'Keep the old colours.', []); expect(last().waiting).toBe('Keep the old colours.');
+    await reply(PLANNER, 'partial'); chains.continue(BUILDER);
+    expect(sent.at(-1)!.text).toContain('Use the existing helper.\n\nKeep the old colours.'); expect(last().chain!.revision).toBe('Use the existing helper.\n\nKeep the old colours.'); expect(last().waiting).toBeUndefined();
+    expect(await restartPrompt(table)).toContain('Keep the old colours.');
+  });
+  it('feedback sent while the planner revises, an empty answer, then a reply: both join the note in order, and a restart keeps them (F5)', async () => {
+    const table = await revising(); const { chains, sent, reply, last } = table;
+    chains.send(BUILDER, 'Keep the old colours.', []); expect(last().waiting).toBe('Keep the old colours.');
+    await reply(PLANNER, ''); expect(last()).toMatchObject({ waiting: 'Keep the old colours.', chain: { step: 'needs-you', revision: 'Use the existing helper.' } });
+    chains.send(BUILDER, 'And a dark mode.', []);
+    const note = 'Use the existing helper.\n\nKeep the old colours.\n\nAnd a dark mode.';
+    expect(sent.at(-1)!.text).toContain(note); expect(sent.at(-1)!.text).not.toContain('The person adds'); expect(last().chain!.revision).toBe(note); expect(last().waiting).toBeUndefined();
+    expect(await restartPrompt(table)).toContain(note);
+  });
+  it('the same for a re-plan after the final review: the feedback joins the task (F5)', async () => {
+    const table = await atFinal(); const { chains, sent, reply, last } = table;
+    chains.send(BUILDER, 'Also add a header.', []); await reply(PLANNER, 'CHANGES NEEDED: rename it');
+    chains.send(BUILDER, 'Use h2 for it.', []); await reply(PLANNER, ''); chains.send(BUILDER, 'And make it blue.', []);
+    const task = "Add a footer.\n\n[The person's follow-up after the final review]\nAlso add a header.\n\nUse h2 for it.\n\nAnd make it blue.";
+    expect(last().chain).toMatchObject({ step: 'planning', task, replan: 'rename it' }); expect(sent.at(-1)!.text).toContain(task);
+    const prompt = await restartPrompt(table); expect(prompt).toContain(task); expect(prompt).toContain('rename it');
+  });
+  it('a planner that asked the person while revising gets the answer as it is; a message waiting still joins the note after (F5)', async () => {
+    const { chains, sent, reply, last } = await revising();
+    chains.send(BUILDER, 'Keep the old colours.', []); await reply(PLANNER, 'TASK BLOCKED: Which helper?');
+    chains.send(BUILDER, 'formatDate.', []);
+    expect(sent.at(-1)!.text).toContain('[The person answers] formatDate.'); expect(last().chain!.revision).toBe('Use the existing helper.\n\nKeep the old colours.'); expect(last().waiting).toBeUndefined();
   });
 });
