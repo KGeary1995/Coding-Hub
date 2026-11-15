@@ -1,5 +1,17 @@
 ## What's new
 
+1.22.0 lets work go on at a hierarchy Round Table after its final review, and keeps tasks from Tasks apart from what you type (update every computer and reload the phone app):
+
+- **A follow-up after the final review goes back to the planner.** Once a hierarchy table has reached its final review, what you write goes to the planner, who plans again from where the work stands; Codex challenges that plan and you approve it before the builder starts. A message waiting when the planner approves starts as the next task.
+- **Tasks from Tasks wait their turn.** A task sent from Tasks while the table works is never merged with what you type and never joins the current task: it waits, listed on the bar, and starts once the task before it is approved, one per approval.
+- **Waiting tasks can be dropped.** Each waiting task has its own **Drop it**, which puts it back in **To do**; so does closing the table, for every task still waiting. A task renamed while its table works is still matched, and still marked finished on approval.
+- **A plan you sent back is not lost.** A revision you asked for survives **Stop** and a restart, and an empty answer from the planner loses neither the plan before it nor what you asked.
+- **The bar says where a waiting message will go:** with the next step, or to the planner.
+- **The hierarchy reviewer runs `gpt-6.1-sol`.** A reviewer saved on `gpt-6-astra`, or with no model, starts on `gpt-6.1-sol`; another model chosen under **Models** stays.
+- **GPU crashes leave more behind.** With a GPU process crash, Trace now also records each window's state. The black window seen on 15 November was not reproduced (a new check crashed the GPU process 16 times and the window painted 15 times; the one failure is unexplained), so its cause is not known.
+- **The desktop and PTY smoke tests run on a Windows development computer again.**
+- **Not tried yet:** a real task at a hierarchy table in the installed app, **Drop it** from a phone, and anything on a Mac. Checked with the unit tests and the desktop, PTY, phone remote and GPU-crash smoke tests on Windows.
+
 1.21.3 stops Trace freezing for a few seconds every 30 seconds, and the phone app says which computer it can't reach (update every computer and reload the phone app):
 
 - **No more freeze every 30 seconds.** With memory syncing to a Google Drive folder, Trace could stop responding for 2 to 5 seconds every 30 seconds: its window, its terminals and the phone. One note whose two copies had the same content but different bytes (other line endings) made every sync read every note of that project from Drive. Trace now reads only the notes that differ, remembers the ones it has compared, and lists the Drive folder in the background.
