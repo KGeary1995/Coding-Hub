@@ -6,7 +6,7 @@ import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSessio
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
 import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, rememberTable, restoreTables } from './round-table';
-import { closeChannel, startSession, stopSession } from './use-native-host';
+import { closeChannel, remoteControl, startSession, stopSession } from './use-native-host';
 import { useTaskStore } from '../state/task-store';
 import type { Task } from '../../shared/workbench';
 
@@ -78,6 +78,18 @@ describe('Round Tables across restarts', () => {
     expect(chat).toHaveBeenCalledTimes(1);
     // Seated again: both conversations resumed, so the host skips the joining summary.
     expect(chat).toHaveBeenCalledWith({ action: 'table-open', rejoin: true, sessionId: lead.id, runId: RUN_A, partner: { sessionId: partner.id, runId: RUN_B }, driver: 'codex', rounds: 3 });
+  });
+  it('does not serialize a hierarchy task\'s images to tell whether the saved table changed', () => {
+    const { lead, table } = seated(); const image = { mediaType: 'image/png', data: 'A'.repeat(4096) };
+    const chain = (images: unknown[]) => ({ step: 'planning' as const, task: 'T', plan: '', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', images });
+    const hierarchy = (images: unknown[]) => ({ ...table, kind: 'hierarchy' as const, chain: chain(images) } as RoundTableState);
+    rememberTable(lead.id, hierarchy([image])); const before = useWorkspaceStore.getState().sessions;
+    const stringify = vi.spyOn(JSON, 'stringify');
+    rememberTable(lead.id, hierarchy([{ ...image }]));
+    expect(useWorkspaceStore.getState().sessions).toBe(before);
+    expect(stringify.mock.results.some((result) => String(result.value).includes(image.data))).toBe(false); stringify.mockRestore();
+    rememberTable(lead.id, hierarchy([{ ...image, data: 'B' }]));
+    expect(useWorkspaceStore.getState().sessions).not.toBe(before);
   });
   it('forgets a table the person closed and removes its stopped partner, and does not save one whose partner channel is gone', async () => {
     const { lead, partner, table } = seated();
@@ -267,3 +279,27 @@ describe('A hierarchy table: three seats, and opening again after a restart', ()
   });
 });
 
+
+describe('closing a Round Table’s channel from its tile', () => {
+  const finding = (id: string, status: 'open' | 'verified') => ({ id, severity: 'high' as const, evidence: '', text: `problem ${id}`, status, response: '', check: '', reviewedAt: null, changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' });
+  it('saves its findings to shared memory first, and keeps the channel when they cannot be saved', async () => {
+    const { codingHub } = host(); const writes: string[] = []; let offline = true;
+    Object.assign(codingHub, { hub: vi.fn(async (request: { action: string; title?: string; notes?: { title: string }[] }) => { if (request.action === 'memory-key') return { ok: true, value: 'project' }; if (offline) return { ok: false, error: { code: 'HOST_ERROR', message: 'Drive folder is offline' } }; writes.push(...request.notes?.map((note) => note.title) ?? [request.title!]); return { ok: true, value: null }; }) });
+    const lead = await runningLead(); await openRoundTable(lead.id); const partner = useWorkspaceStore.getState().sessions.at(-1)!;
+    useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions.map((session) => session.id === lead.id ? { ...session, roundTable: { ...session.roundTable!, findings: [finding('F1', 'open'), finding('F2', 'verified')] } } : session), createSession('shell')] }));
+    expect(await closeChannel(lead.id)).toBe(false);
+    expect(find(lead.id)).toMatchObject({ status: 'exited', error: expect.stringMatching(/could not be saved to shared memory \(Drive folder is offline\).*try Close again/) });
+    expect(find(lead.id)!.roundTable?.findings).toHaveLength(2);
+    offline = false; expect(await closeChannel(lead.id)).toBe(true);
+    expect(writes).toEqual(['Round Table review record: 2 findings, 1 verified', 'Open item: Round Table F1 (high, open): problem F1']);
+    expect(find(lead.id)).toBeUndefined(); expect(find(partner.id)).toBeUndefined();
+  });
+  it('from a phone saves nothing while the channel is still starting, so the table keeps its findings', async () => {
+    const { codingHub } = host(); const writes: string[] = [];
+    Object.assign(codingHub, { hub: vi.fn(async (request: { action: string; title?: string; notes?: { title: string }[] }) => { if (request.action === 'memory-key') return { ok: true, value: 'project' }; writes.push(...request.notes?.map((note) => note.title) ?? [request.title!]); return { ok: true, value: null }; }) });
+    const { lead, partner } = seated(); const shell = createSession('shell');
+    useWorkspaceStore.setState({ sessions: [{ ...lead, status: 'starting', roundTable: { partner: partner.id, driver: 'codex', rounds: 3, findings: [finding('F1', 'open')] } }, partner, shell] });
+    expect(await remoteControl(lead.id, 'close')).toBe('This channel is still starting. Close it again once it runs.');
+    expect(writes).toEqual([]); expect(find(lead.id)!.roundTable?.findings).toHaveLength(1);
+  });
+});

@@ -17,7 +17,7 @@ function discovery(provider: AccountProvider, installed = true) {
   return { connection: { provider, installed, executable: installed ? '/official-cli' : null, version: '2.0.0', state: 'not-authenticated' as const, message: installed ? 'Sign in.' : 'Install the CLI.', canLogin: installed, checkedAt: new Date().toISOString() }, executable: installed ? { file: '/official-cli', prefixArgs: [], extraEnv: {}, displayPath: '/official-cli' } : null };
 }
 function fixture(inspect = async (provider: AccountProvider) => discovery(provider)) {
-  const pty = new FakePty(); const spawn = vi.fn(() => pty as unknown as IPty); const events: AccountEvent[] = []; const openGuide = vi.fn(async () => {});
+  const pty = new FakePty(); const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => pty as unknown as IPty); const events: AccountEvent[] = []; const openGuide = vi.fn(async () => {});
   const manager = new AccountLoginManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, inspect, spawn, openGuide });
   return { manager, pty, spawn, events, openGuide };
 }

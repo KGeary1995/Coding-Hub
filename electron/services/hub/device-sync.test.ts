@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -177,6 +177,52 @@ describe('device sync', () => {
     expect(b.sync.otherUsage()).toEqual([expect.objectContaining({ runId: 'run-a', machine: 'desk' })]);
     expect(fs.readdirSync(path.join(drive, SYNC_FOLDER, 'usage'))).toHaveLength(2);
     a.preferences = { ...a.preferences, syncDevices: false }; expect(a.sync.otherUsage()).toEqual([]);
+  });
+
+  it('gathers and publishes this computer’s usage every few minutes, not on every tick, and at once for Sync now', () => {
+    const drive = temporary(); const usage = [record('run-a')]; let gathered = 0;
+    const root = temporary(); fs.writeFileSync(path.join(root, 'machine.json'), JSON.stringify({ id: randomUUID(), name: 'desk' }));
+    const preferences: HubPreferences = { ...DEFAULT_PREFERENCES, prices: [], driveDirectory: drive, syncDevices: true };
+    const sync = new DeviceSync(root, () => preferences, () => {}, new RulesService(root), () => { gathered++; return usage; });
+    const own = path.join(drive, SYNC_FOLDER, 'usage', JSON.parse(fs.readFileSync(path.join(root, 'machine.json'), 'utf8')).id + '.json');
+    const published = () => JSON.parse(fs.readFileSync(own, 'utf8')).value.map((item: UsageRecord) => item.output);
+    sync.sync(); expect(gathered).toBe(1); expect(published()).toEqual([5]);
+    usage[0] = { ...usage[0], output: 50 }; sync.sync(); sync.sync();
+    expect(gathered).toBe(1); expect(published()).toEqual([5]);
+    sync.sync(true); expect(gathered).toBe(2); expect(published()).toEqual([50]);
+    // Once five minutes have passed, a plain tick gathers and publishes again.
+    usage[0] = { ...usage[0], output: 70 }; sync.sync(); expect(gathered).toBe(2);
+    const later = Date.now() + 5 * 60_000; const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
+    try { sync.sync(); expect(gathered).toBe(3); expect(published()).toEqual([70]); } finally { clock.mockRestore(); }
+    // A lost device-sync.json does not rewrite a usage file that already holds the same records.
+    const marked = JSON.parse(fs.readFileSync(own, 'utf8')); marked.updatedAt = '2026-01-01T00:00:00.000Z'; fs.writeFileSync(own, JSON.stringify(marked));
+    const written = fs.readFileSync(own, 'utf8'); fs.rmSync(path.join(root, 'device-sync.json'));
+    expect(sync.sync(true).error).toBeNull(); expect(fs.readFileSync(own, 'utf8')).toBe(written);
+  });
+  it('reads another computer’s usage records that carry fields a newer version added', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop', [record('run-b')]); b.sync.sync();
+    const file = fs.readdirSync(path.join(drive, SYNC_FOLDER, 'usage')).map((name) => path.join(drive, SYNC_FOLDER, 'usage', name))[0];
+    const document = JSON.parse(fs.readFileSync(file, 'utf8')); document.value[0].addedLater = 1; fs.writeFileSync(file, JSON.stringify(document));
+    a.sync.sync(); expect(a.sync.otherUsage()).toEqual([expect.objectContaining({ runId: 'run-b', machine: 'laptop' })]);
+  });
+  it('takes the shared templates back when this computer’s template file is missing, instead of deleting them for everyone', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); const b = computer(drive, 'laptop'); const item = template('Web app');
+    save(a.root, 'project-templates.json', [item]); a.sync.sync(); b.sync.sync();
+    fs.rmSync(path.join(a.root, 'project-templates.json')); a.sync.sync(); b.sync.sync();
+    expect(fs.existsSync(path.join(drive, SYNC_FOLDER, 'templates', item.id + '.json'))).toBe(true);
+    expect(templates(a.root).map((entry) => entry.id)).toEqual([item.id]); expect(templates(b.root).map((entry) => entry.id)).toEqual([item.id]);
+  });
+  it('makes a sub-folder removed by hand again on the next sync', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); a.sync.sync();
+    fs.rmSync(path.join(drive, SYNC_FOLDER, 'computers'), { recursive: true });
+    expect(a.sync.sync().error).toBeNull(); expect(fs.readdirSync(path.join(drive, SYNC_FOLDER, 'computers'))).toHaveLength(1);
+  });
+  it('refuses a sub-folder that became a link after the sync folder was prepared', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); a.sync.sync(); const outside = temporary();
+    const usage = path.join(drive, SYNC_FOLDER, 'usage'); fs.rmSync(usage, { recursive: true });
+    // A junction needs no Developer Mode on Windows; elsewhere the type is ignored and a symbolic link is made.
+    fs.symlinkSync(outside, usage, 'junction');
+    expect(a.sync.sync().error).toContain('link'); expect(fs.readdirSync(outside)).toHaveLength(0);
   });
 
   it('keeps syncing the other parts when one shared file is unreadable', () => {

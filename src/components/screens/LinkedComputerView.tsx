@@ -131,7 +131,7 @@ export function LinkedComputerView() {
       <UpdateThere computer={computer} />
       {/* Its own screen-sharing server answers even while Trace there is closed. */}
       <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => setScreenOf(showScreen ? null : computer.id)}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
-    {addError && <p className="session-error" role="alert">{addError}</p>}
+    {addError && <div className="session-error" role="alert"><span>{addError}</span><button className="quiet-button" aria-label="Dismiss this notice" onClick={() => useLinkedStore.setState({ addError: '' })}><X size={14} /></button></div>}
     {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
       {computer.connected && !computer.channels.length && <p className="history-empty">No channels on {computer.name}. Add one with + Channel.</p>}
       {!computer.connected && <p className="history-empty">{computer.name} is not reachable right now. Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected. If Trace has closed there, Screen still reaches it.</p>}

@@ -6,6 +6,55 @@ User-facing basics (CLI not found, Codex exits at once, Tailscale) are in the [R
 
 ## Running Trace
 
+### Trace stops responding for a moment
+
+**Symptom:** for one to three seconds the window, every terminal and the phone stop answering, then carry on.
+
+**Cause up to 1.22.0:** work done on the main process, tied to events rather than a timer (the [audit of 17 November 2026](audit-2026-11-17.md#the-1-to-3-second-freezes) measured it). The largest was memory sync with Google Drive: Drive answers each file in about half a millisecond, and a project's first comparison after a start read every note on both sides (1 to 2 s for 300 to 800 notes), every channel start listed the project's Drive folder, and notes were copied one at a time. After every start, today's usage also re-read weeks of CLI logs in passes of up to about 100 ms, and every Git call, channel start and plan-limits check could run `reg.exe` synchronously on Windows.
+
+**Now:** Drive sync runs in the background (`DriveMirror.syncLater`, `electron/services/hub/drive.ts`) and remembers the notes it compared (`memory/.drive-compared.json`); today's usage is read in the background and keeps its progress in `day-usage.json`; the registry PATH is read in the background. See [architecture.md](architecture.md#shared-memory).
+
+**Check:** a freeze now leaves a record, in the `stalls` list of `~/.coding-hub/host-health.json` (`HostHealth.stall`, `electron/services/storage/host-health.ts`). It is kept apart from the lifecycle events, so channel starts cannot push it out, and holds the last 200 entries. Each entry has `time`, `side` (`main`, `window` or `gpu`), `kind`, `ms` and `job`:
+
+- **The main process** (`side: "main"`, `kind: "main-stall"`): Node's event-loop delay sampler (`monitorEventLoopDelay`, read once a second by `MainStalls`) records any stall of 250 ms or more. `job` names the labelled job (`timed()`) that took at least half of it, with its time, or `after <job>` for the last labelled job before it. The labels are a window call's IPC channel and action (`hub drive-sync`, `workbench usage-today`), `session-<event>` (a channel's output or exit), `launch-prepare`, `tailscale-check`, `usage-alerts`, `hub-tick` (the synchronous part of the hub's 30-second tick: sync between computers through the Drive folder, `HubService.tick`) and `telemetry-poll` (a channel's 750 ms usage read, `TelemetryService`). `timed()` measures only the synchronous part of what it wraps (for an IPC call, up to the handler's first `await`). Background work that runs in pieces, such as the Drive memory sync or today's usage read (`DayUsage`), has no label of its own. A stall in unlabelled work shows as `after <job>`, and that job may not be the cause. A stall over a minute is a computer that slept and is not recorded.
+- **The window** (`side: "window"`): `src/runtime/window-health.ts` reports long tasks of 250 ms or more (`long-task`, with the task's name), timers late by a second or more while the window is visible that no long task explains (`stall`), and a terminal's lost graphics context (`context-lost`; `context-restored` is accepted but nothing sends it yet). The window is untrusted, so the host takes at most 10 of its reports a minute, and only a kind, a length and a short label. The host also records Chromium's own `unresponsive` and `responsive` events for the window (no length; Chromium sends them only after several seconds), and they are not limited.
+
+Note the time of a freeze, then look for an entry within a few seconds of it:
+
+```powershell
+(Get-Content "$HOME\.coding-hub\host-health.json" | ConvertFrom-Json).stalls | Select-Object -Last 20
+```
+
+A stall with no channel starting or ending around it, or many in a row, is worth reporting with those entries. **Settings → Running application → Application stability & crash diagnostics** shows the same record. A freeze with no entry at all, on either side, points outside Trace's processes: the GPU process (its deaths are recorded as `side: "gpu"`), the display driver, or the computer itself.
+
+### "Trace could not start"
+
+Something failed while Trace was starting (`app.whenReady` in `electron/main.ts`), before it could open its window. Trace records `host-start-failed` in `~/.coding-hub/host-health.json` and quits, instead of running on with no window. Open it again; if it keeps happening, the events just before `host-start-failed` in that file show how far it got.
+
+### Today's usage is missing the last few replies after a power cut
+
+`telemetry/usage.db` runs in WAL mode with `PRAGMA synchronous=NORMAL` (`TelemetryService`, `electron/services/hub/telemetry.ts`), so a power cut can lose its last few records. Nothing needs doing: the next start reads them again from the CLIs' own logs.
+
+### `~/.coding-hub/crash-dumps` fills up
+
+Crash dumps stay on this computer and are never uploaded. From this version Trace removes those older than 14 days at each start (`pruneCrashDumps`, `electron/services/storage/host-health.ts`), and programs started in channels no longer inherit Trace's crash handler (`CHROME_CRASHPAD_PIPE_NAME` is removed from their environment), so an Electron or Chromium program run there no longer leaves its dumps here. Dumps from before that may belong to such programs, or to the GPU crash smoke test, and can be deleted.
+
+### Drive memory sync reports a conflict, or a project says it exceeds its note limit
+
+A Drive note whose content differs from the copy here (same id) is reported as a conflict and neither copy is overwritten; the project's other notes keep syncing (`DriveMirror.run`). Review it with **Shared memory → Inspect Drive conflicts**.
+
+Notes whose copies differ only in bytes (another program rewrote their line endings, say) are compared once and remembered in `~/.coding-hub/memory/.drive-compared.json`. Deleting that file is safe: Trace compares those notes once more.
+
+A project that says it exceeds its note limit (another computer's notes arrived while it was nearly full) is repaired by saving one new note: the oldest handoffs move to the project's `archive/` folder. Open items and decisions are never moved.
+
+### Today's total (Σ today) looks wrong
+
+Trace reads Claude Code's and Codex's own logs for the last 60 days and keeps how far it read each one in `~/.coding-hub/day-usage.json` (`DayUsage`, `electron/services/hub/day-usage.ts`). If a CLI rewrote or removed its logs, the saved positions can be off. Quit Trace, delete `day-usage.json`, and start it again: the next start reads the 60 days again, in the background, so the total fills in over the first minute or so. Agents that a Claude Code workflow starts are counted too, and can appear up to 5 seconds after they start.
+
+### A computer linked itself, or a removed one keeps coming back
+
+With **Link my computers automatically** on, another computer signed in to your Tailscale account links without a code, and each time Trace says so in its window ("A computer linked to Trace here: …"), shows a desktop notification unless notifications are off, and records `computer-auto-linked` in host health. If it isn't yours, remove it under **Settings → Other computers**, and turn the switch off if you want every link to need a code. Trace on a removed computer is kept out by `remote-unlinked.json` (in Trace's data folder) until it is linked with a code; delete that file to forget the list. The list matches the id Trace on that computer sends, so a program that sends a new id is not stopped by it; the notification is what shows that.
+
 ### A channel's memory tools fail with "coding-hub-memory: Connection closed"
 
 **Cause:** the project's own `.mcp.json` (or `.codex/config.toml`) has a `coding-hub-memory` entry whose `command` or script path no longer exists. This happened to installs made before the 1.11 rename, because the Windows app moved from `…\Programs\AI Coding Hub\AI Coding Hub.exe` to `…\Programs\AI Coding Hub\Trace\Trace.exe`.
@@ -58,15 +107,19 @@ The message names the cause. From source, run `npm run rebuild:native`, because 
 
 ## Developing
 
-### `npm test` fails with `EPERM: operation not permitted, symlink …` on Windows
+### Symbolic-link tests are skipped on Windows (or fail with `EPERM: operation not permitted, symlink …`)
 
-Several tests create symbolic links without a Windows guard, for example in `pty-manager.test.ts` (worktree detection), `hub.test.ts` (rejecting links) and `rules.test.ts`. Windows allows that only with **Developer Mode** on, or from an elevated shell. On a standard Windows account, expect about four of these to fail. These failures don't indicate a regression. They pass in CI, both on Linux and on the elevated Windows runner.
+Some tests create symbolic links, for example in `pty-manager.test.ts` (worktree detection), `hub.test.ts` (rejecting links) and `rules.test.ts`. Windows allows that only with **Developer Mode** on, or from an elevated shell. Those tests first check whether a link can be made (`canSymlink`, `electron/services/hub/symlink.fixture.ts`) and are skipped where it cannot, so on a standard Windows account `npm test` reports them as skipped and has no `EPERM` failures. They run in CI, both on Linux and on the elevated Windows runner. An `EPERM … symlink` failure now means a new test creates a link without that check: guard it the same way.
 
 ### A test times out, or fails with `EBUSY … rmdir` in a temp folder
 
-Heavy tests are close to their limits on slow machines and Windows runners. Examples: the 5,000-note memory limit test in `hub.test.ts`, the workbench verification test, the coaching folder-limit test and the `flow-git-push` step of `scripts/productivity-smoke.cjs`. `EBUSY` follows a timeout, because Windows can't delete a folder that a still-running child process uses.
+Heavy tests are close to their limits on slow machines and Windows runners. Examples: the 5,000-note memory limit test in `hub.test.ts`, the workbench verification test, the coaching folder-limit test and the `flow-git-push` step of `scripts/productivity-smoke.cjs`. `EBUSY` follows a timeout, because Windows can't delete a folder that a still-running child process uses. The smoke scripts now remove their folder through `removeFolder` (`scripts/lib/cleanup.cjs`), which retries for about 5 s and then only warns ("Could not remove the test folder …"), so the error printed is the test's own; delete a folder it names by hand.
 
 **Check:** rerun the single file (`npx vitest run <file>`). If it passes alone, or a CI rerun of the failed job passes, it's timing. If it keeps failing, investigate.
+
+### Release's publish job fails: "No successful Windows release candidate run on <sha>"
+
+Publish checks that **Windows release candidate** passed on the exact commit being released (`release.yml`, step "Check the Windows release candidate passed on this commit"), because Release itself never starts the Windows installer. A candidate run on a pull request's branch commit does not count for the merge commit. Start it on main (`gh workflow run windows-release.yml --ref main`), wait for it to pass on that commit, then rerun only the failed job: `gh run rerun <release run id> --failed`. If main has moved on since the tag, the candidate must be run on the tagged commit itself, for example from a branch that points at it.
 
 ### GitHub Actions jobs fail in about 2 seconds with no logs
 

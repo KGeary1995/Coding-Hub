@@ -25,16 +25,29 @@ export interface PlanLimits {
 /** Parses Claude Code's `/usage` text ("Current session: 5% used · resets Oct 25 at 11:59pm (America/Los_Angeles)"). */
 export function parseClaudeUsage(text: string): LimitWindow[] {
   const windows: LimitWindow[] = [];
-  for (const match of text.matchAll(/^Current (session|week)( \(([^)]+)\))?:\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets ([^\n(]+?)(?:\s*\([^)]*\))?)?\s*$/gm)) {
+  // An indented line, and a share under one percent ("<1% used", read as 1), are read too.
+  for (const match of text.matchAll(/^[ \t]*Current (session|week)( \(([^)]+)\))?:\s*<?\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets ([^\n(]+?)(?:\s*\([^)]*\))?)?\s*$/gm)) {
     const scope = match[3]; const label = match[1] === 'session' ? 'Session' : !scope || /^all models$/i.test(scope) ? 'Week' : `Week (${scope})`;
     windows.push({ label, usedPercent: Number(match[4]), resets: match[5]?.trim() || null });
   }
   return windows;
 }
 
-/** A Codex rate-limit window, named by its length. */
-export function codexWindow(window: { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null }): LimitWindow {
-  const minutes = window.windowDurationMins ?? 0;
+/**
+ * A Codex rate-limit window, named by its length. The app server's reply is checked, not trusted: null when it is not the
+ * shape Trace knows (a newer Codex), rather than a window with no share or a time that cannot be read.
+ */
+export function codexWindow(window: unknown): LimitWindow | null {
+  const value = (window && typeof window === 'object' ? window : {}) as Record<string, unknown>; const number = (field: unknown) => typeof field === 'number' && Number.isFinite(field) ? field : null;
+  const used = number(value.usedPercent); if (used === null || used < 0 || used > 1000) return null;
+  const minutes = Math.max(0, number(value.windowDurationMins) ?? 0); const seconds = number(value.resetsAt);
+  const at = seconds !== null && seconds > 0 && seconds < 1e11 ? seconds * 1000 : typeof value.resetsAt === 'string' ? Date.parse(value.resetsAt) : NaN;
   const label = minutes > 0 && minutes <= 360 ? 'Session' : minutes >= 10000 && minutes <= 10200 ? 'Week' : minutes ? `${Math.round(minutes / 60)} h` : 'Limit';
-  return { label, usedPercent: window.usedPercent, resets: window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : null };
+  return { label, usedPercent: used, resets: Number.isFinite(at) ? new Date(at).toISOString() : null };
+}
+/** The windows of one Codex reply, the session first; two with one name are told apart by their length. */
+export function codexWindows(windows: unknown[]): LimitWindow[] {
+  const read = windows.flatMap((window) => { const parsed = codexWindow(window); return parsed ? [{ parsed, minutes: Number((window as { windowDurationMins?: unknown }).windowDurationMins) || 0 }] : []; });
+  const named = read.map(({ parsed, minutes }) => read.filter((other) => other.parsed.label === parsed.label).length > 1 && minutes ? { ...parsed, label: `${parsed.label} (${minutes % 60 ? `${minutes} min` : `${minutes / 60} h`})` } : parsed);
+  return named.sort((a, b) => (a.label.startsWith('Session') ? -1 : 0) - (b.label.startsWith('Session') ? -1 : 0));
 }

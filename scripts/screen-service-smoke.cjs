@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
+const { removeFolder } = require('./lib/cleanup.cjs');
 // The Windows screen service end to end: Trace started with --screen-service captures this computer's real screen,
 // and a second Trace, linked to it, shows it with Screen. Input goes to a log file instead of being pressed
 // (CODING_HUB_TEST_SCREEN_INPUT_LOG), so the test does not take over the mouse. Windows only, like the service.
@@ -105,7 +106,9 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
     await until(async () => !(await healthy()), 'the service to quit', 100);
     console.log('screen service smoke passed');
   } finally {
-    await app?.close().catch(() => {}); service.kill();
-    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+    await app?.close().catch(() => {});
+    // The service holds its profile in the folder until it has exited, so wait for that (up to 5 s) before removing it.
+    if (service.exitCode === null && service.signalCode === null) await new Promise((resolve) => { service.once('exit', resolve); service.kill(); setTimeout(resolve, 5000).unref(); });
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exit(1); });

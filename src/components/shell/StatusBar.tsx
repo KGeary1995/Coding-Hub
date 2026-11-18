@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect } from 'react';
 import { channelNameNow } from '../../state/channel-names';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
@@ -58,7 +59,7 @@ const linkedAlerts = (computers: LinkedComputer[]): LinkedAlert[] => computers.f
     : !channel.running && channel.failed ? [{ sessionId: channel.sessionId, computerId: computer.id, state: 'failed' as const, text: `${computer.name} CH${channel.channel} failed` }] : []));
 /** The one global status layer: every channel's state, the project, today's usage, alerts and the host. */
 export function StatusBar() {
-  const { sessions, rootDirectory, persistenceStatus } = useWorkspaceStore();
+  const { sessions, rootDirectory, persistenceStatus } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, rootDirectory: s.rootDirectory, persistenceStatus: s.persistenceStatus })));
   const usage = useHubStore((state) => state.usage);
   const logs = useDayUsage((state) => state.usage);
   const today = dayTotal(logs, todayTotals(usage));

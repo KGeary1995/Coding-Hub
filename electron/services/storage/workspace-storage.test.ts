@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -70,6 +70,19 @@ describe('local workspace storage', () => {
     expect(storage.load()).toEqual(snapshot);
   });
 
+  it('answers repeated reads from what was last read or saved, without parsing the row again', () => {
+    const { root, storage } = open(); const snapshot = workspace(); storage.save(snapshot); storage.close();
+    const reopened = new WorkspaceStorage(root); databases.push(reopened); const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const first = reopened.load(); expect(first).toEqual(snapshot); expect(parse).toHaveBeenCalledTimes(1);
+      expect(reopened.load()).toBe(first); expect(parse).toHaveBeenCalledTimes(1);
+      const changed = { ...snapshot, focusedSessionId: 'claude' }; reopened.save(changed);
+      expect(reopened.load()).toEqual(changed); expect(() => reopened.save({ ...changed, tiles: [] })).toThrow(); expect(reopened.load()).toEqual(changed);
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally { parse.mockRestore(); }
+    reopened.close(); const fresh = new WorkspaceStorage(root); databases.push(fresh); expect(fresh.load()).toEqual({ ...snapshot, focusedSessionId: 'claude' });
+  });
+
   it('preserves unreadable settings and rejects future database versions', () => {
     const { root, storage } = open(); storage.close();
     const db = new DatabaseSync(path.join(root, 'storage.db'));
@@ -98,10 +111,11 @@ describe('local workspace storage', () => {
   });
 
   it('bounds UTF-8 logs without cutting a character and preserves active runs during retention', () => {
-    const { storage } = open({ maxLogBytes: 8, maxCompletedRuns: 1 });
+    const { storage } = open({ maxLogBytes: 10, maxCompletedRuns: 1 });
     const active = run(storage); storage.append(active, 'active');
+    // The start keeps 6 bytes and the newest output 2: the emoji does not fit whole, so it is dropped, not cut.
     const first = run(storage); storage.append(first, 'abcdef🚀more'); storage.endRun(first, 0);
-    expect(storage.readLog({ runId: first })).toMatchObject({ text: 'abcdef', logTruncated: true });
+    expect(storage.readLog({ runId: first })).toMatchObject({ text: 're', logTruncated: true });
     const second = run(storage); storage.append(second, 'newest'); storage.endRun(second, 0);
     expect(storage.history().map((item) => item.runId).sort()).toEqual([active, second].sort());
     expect(() => storage.readLog({ runId: first })).toThrow('no longer available');
@@ -117,6 +131,43 @@ describe('local workspace storage', () => {
     expect(reopened.load()).toEqual(snapshot);
     // Kept, with its record, to be tried again later.
     expect(reopened.history().map((item) => item.runId)).toEqual([old]);
+  });
+
+  it('keeps the newest output of a long run, not only its first megabytes, within the per-run limit', () => {
+    const { root, storage } = open({ maxLogBytes: 1000 }); const id = run(storage);
+    storage.append(id, 'START' + 'x'.repeat(595)); storage.history();
+    for (let i = 0; i < 40; i++) { storage.append(id, `line ${i} ` + 'y'.repeat(40) + '\n'); storage.history(); }
+    storage.append(id, 'FINAL'); storage.endRun(id, 1);
+    const log = storage.readLog({ runId: id });
+    expect(log).toMatchObject({ logTruncated: true, tailOnly: true }); expect(log.text.endsWith('line 39 ' + 'y'.repeat(40) + '\nFINAL')).toBe(true); expect(log.text).not.toContain('START');
+    const saved = readdirSync(path.join(root, 'logs')).filter((name) => name.startsWith(id)).reduce((sum, name) => sum + statSync(path.join(root, 'logs', name)).size, 0);
+    expect(saved).toBeLessThanOrEqual(1000); expect(storage.history().find((item) => item.runId === id)?.recordedBytes).toBe(saved);
+    // A run that fits reads back whole, start and end together.
+    const short = run(storage); storage.append(short, 'a'.repeat(600)); storage.history(); storage.append(short, 'b'.repeat(150)); storage.endRun(short, 0);
+    expect(storage.readLog({ runId: short })).toMatchObject({ text: 'a'.repeat(600) + 'b'.repeat(150), logTruncated: false, tailOnly: false });
+  });
+
+  it('still reads a run that 1.22.0 or earlier cut off at the limit, which has its start and no tail files', () => {
+    const { root, storage } = open(); const id = run(storage); storage.append(id, 'saved before the update'); storage.endRun(id, 0);
+    const writer = new DatabaseSync(path.join(root, 'storage.db'));
+    try { writer.prepare('UPDATE runs SET logTruncated=1 WHERE runId=?').run(id); } finally { writer.close(); }
+    expect(readdirSync(path.join(root, 'logs')).filter((name) => name.startsWith(id))).toEqual([`${id}.log`]);
+    expect(storage.readLog({ runId: id })).toMatchObject({ text: 'saved before the update', logTruncated: true });
+  });
+
+  it('lists every kept completed run however many channels are running', () => {
+    const { storage } = open({ maxCompletedRuns: 1 }); const done = run(storage); storage.endRun(done, 0);
+    const running = Array.from({ length: 6 }, () => run(storage));
+    expect(storage.history().map((item) => item.runId).sort()).toEqual([done, ...running].sort());
+  });
+
+  it('does not commit to the database on each 200 ms output flush', async () => {
+    const { root, storage } = open(); const id = run(storage);
+    storage.append(id, 'streamed output'); await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(readFileSync(path.join(root, 'logs', `${id}.log`), 'utf8')).toBe('streamed output');
+    const reader = new DatabaseSync(path.join(root, 'storage.db'), { readOnly: true });
+    try { expect(reader.prepare('SELECT recordedBytes FROM runs WHERE runId=?').get(id)?.recordedBytes).toBe(0); } finally { reader.close(); }
+    expect(storage.history().find((item) => item.runId === id)?.recordedBytes).toBe(15);
   });
 
   it('returns only a bounded tail for a large log', () => {

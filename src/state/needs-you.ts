@@ -1,7 +1,7 @@
 import type { Session } from '../../shared/types';
 import type { UsageRecord } from '../../shared/hub';
 import type { Task } from '../../shared/workbench';
-import type { RoundTableState } from '../../shared/chat';
+import { waitingImageCount, type RoundTableState } from '../../shared/chat';
 import { channelAlerts } from './channel-state';
 
 /**
@@ -18,7 +18,7 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
   // A hierarchy table's plan waits for the person's approval.
   for (const [sessionId, table] of Object.entries(tables)) if (table?.kind === 'hierarchy' && table.chain?.step === 'plan-review') items.push({ key: `p:${sessionId}`, kind: 'plan-review', title: 'A Round Table plan waits for your approval', detail: table.chain.task.length > 120 ? table.chain.task.slice(0, 120) + '…' : table.chain.task, since: null, sessionId, taskId: null, action: 'answer' });
   // A Round Table message kept from before a restart waits for the person to send or drop it.
-  for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting !== undefined && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: (table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting) || `${table.waitingImages?.length ?? 0} images`, since: null, sessionId, taskId: null, action: 'answer' });
+  for (const [sessionId, table] of Object.entries(tables)) if (table?.waiting !== undefined && table.waitingKept) items.push({ key: `w:${sessionId}`, kind: 'table-waiting', title: 'Round Table message kept from before the restart', detail: (table.waiting.length > 120 ? table.waiting.slice(0, 120) + '…' : table.waiting) || `${waitingImageCount(table)} images`, since: null, sessionId, taskId: null, action: 'answer' });
   const taskOf = (sessionId: string) => tasks.find((task) => task.sessionId === sessionId && (task.status === 'active' || task.status === 'review'));
   for (const alert of channelAlerts(sessions, records)) {
     const session = sessions.find((item) => item.id === alert.sessionId); const task = taskOf(alert.sessionId);

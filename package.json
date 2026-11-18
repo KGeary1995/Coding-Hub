@@ -1,6 +1,6 @@
 {
   "name": "ai-coding-hub",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/entry.js",
@@ -10,7 +10,8 @@
     "build:host": "tsc -p tsconfig.electron.json",
     "build:phone": "vite build -c vite.phone.config.ts",
     "build": "npm run typecheck && vite build && npm run build:phone && npm run build:host",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:pty": "npm run build:host && node scripts/run-pty-smoke.cjs",
     "test:desktop": "npm run build && node scripts/desktop-smoke.cjs",

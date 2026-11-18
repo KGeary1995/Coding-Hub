@@ -21,13 +21,10 @@ button { transition: background .15s ease, border-color .15s ease, color .15s ea
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .app-shell { height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; }
-.navigation { width: 234px; padding: 0 12px; background: var(--tr-surface); border-color: var(--border); height: 100%; position: relative; flex-shrink: 0; }
-.navigation nav { flex: 1; min-height: 0; overflow-y: auto; }
 .main-shell { padding: 0 24px; min-height: 0; overflow-y: auto; background: var(--canvas); }
 .command-trigger { min-width: 220px; background: var(--tr-hover); border-color: var(--tr-line-strong); color: var(--tr-fg-strong); border-radius: var(--tr-r-control); padding: 8px 10px; font-size: 13px; }
 .command-trigger:hover { border-color: var(--tr-fg-dim); color: var(--tr-fg-strong); }
 kbd { color: var(--tr-fg-strong); border-color: var(--tr-line-strong); background: var(--tr-raised); padding: 2px 4px; border-radius: var(--tr-r-control); font-size: 12px; }
-.version { color: var(--tr-fg-strong); border-color: var(--tr-line-strong); letter-spacing: .3px; background: var(--tr-hover); }
 .workspace-page { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .eyebrow { color: var(--tr-fg-strong); font-weight: 600; letter-spacing: 1.3px; }
 h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spacing: -.65px; line-height: 1.25; }
@@ -110,8 +107,6 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .usage-table td, .help-comparison td { padding: 12px; border-color: var(--tr-line-strong); color: var(--tr-fg-strong); }
 .usage-table tbody tr:nth-child(even), .help-comparison tbody tr:nth-child(even) { background: var(--tr-panel); }
 .command-menu { background: var(--tr-surface); border-color: var(--tr-line-strong); box-shadow: var(--tr-shadow-overlay); }
-.command-search { border-color: var(--tr-line-strong); }
-.command-search input { color: var(--tr-fg-strong); }
 .error-message { color: var(--tr-st-limit); }
 .react-grid-item.react-grid-placeholder { background: var(--accent); opacity: .12; border: 1px dashed var(--accent); }
 ::-webkit-scrollbar { width: 7px; height: 7px; }
@@ -167,7 +162,7 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .task-actions .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
 @media (max-width: 1350px) { .task-panel .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 [data-contrast='high'] { --border: var(--tr-fg-dim); --muted: var(--tr-fg); }
-[data-contrast='high'] .navigation, [data-contrast='high'] .session-tile, [data-contrast='high'] .storage-card, [data-contrast='high'] .hub-form { border-color: var(--border); }
+[data-contrast='high'] .session-tile, [data-contrast='high'] .storage-card, [data-contrast='high'] .hub-form { border-color: var(--border); }
 [data-contrast='high'] .quiet-button, [data-contrast='high'] .session-welcome > small { color: var(--tr-fg-strong); }
 
 .account-details { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 6px; }
@@ -213,6 +208,8 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .diagnostic-step.passed { border-left: 3px solid var(--tr-add); }
 .backup-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); }
 .backup-row > span { margin-right: auto; font-size: 13px; }
+/* A delete question stays where its Delete button was, after the row's text. */
+.backup-row > .confirm-step { margin-right: 0; }
 .task-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .task-board > section { background: var(--tr-hover); border: 1px solid var(--border); padding: 12px; border-radius: var(--tr-r-control); }
 .task-board h2 { text-transform: capitalize; }
@@ -274,8 +271,14 @@ h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spaci
 .search-results header .quiet-button, .template-list header > span { flex-shrink: 0; }
 .hub-form .update-checkbox { flex-direction: row; align-items: center; }
 
+/* A tile or view that failed to draw (ErrorBoundary): said in place, so the rest of the window keeps working. */
+.view-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; height: 100%; padding: 16px; border: 1px solid var(--tr-st-failed); background: var(--tr-bg); color: var(--tr-fg-muted); font: var(--tr-t-control); overflow: auto; }
+.view-failed strong { color: var(--tr-st-failed); }
 /* A channel waiting for the person (Trace HOLD). Answering happens in the CLI's own prompt. */
 .session-attention { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--tr-st-waiting); border-bottom: 1px solid var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 12%, transparent); color: var(--tr-fg-strong); font-size: 14px; }
+/* On a terminal channel it lies over the top of the terminal, so the terminal (and the CLI's size) stays as it is.
+   It holds nothing to press, so clicks and selection reach the terminal under it. */
+.terminal-frame > .session-attention.over-terminal { position: absolute; top: 0; left: 0; right: 0; z-index: 3; border-top: 0; background: color-mix(in srgb, var(--tr-st-waiting) 14%, var(--tr-term, var(--tr-bg))); pointer-events: none; }
 .session-attention > span:first-child { color: var(--tr-st-waiting); font-family: var(--tr-font-mono); }
 .session-attention > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

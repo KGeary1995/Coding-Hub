@@ -88,6 +88,8 @@ export interface CodingHubHost {
   listHistory(): Promise<HostResult<SessionHistoryRun[]>>;
   readRunLog(request: { runId: string }): Promise<HostResult<RunLog>>;
   onStorageError(listener: (message: string) => void): () => void;
+  /** The window's own health (a lost WebGL context, a long stall), for Settings' lifecycle diagnostics. */
+  reportWindowHealth?(report: WindowHealthReport): Promise<HostResult<null>>;
   onWorkspaceFlush(listener: (requestId: string) => void): () => void;
   finishWorkspaceFlush(request: { requestId: string; workspace?: SavedWorkspace }): Promise<HostResult<null>>;
   pickDirectory(): Promise<string | null>;
@@ -126,8 +128,20 @@ export interface CodingHubHost {
 export interface ClipboardImage { thumbnail: string; full: string; width: number; height: number; hasText: boolean }
 /** The most a CLI can put on the clipboard at once. */
 export const COPY_LIMIT = 1024 * 1024;
+/** A copied image up to this size is shown as it was copied; a bigger one is scaled down (and encoded) first. */
+export const CLIPBOARD_PREVIEW_LIMIT = 8 * 1024 * 1024;
+/**
+ * The type a copied image can be shown with as it is, without encoding it again on the main process: PNG or JPEG
+ * (which a linked computer can also read) within CLIPBOARD_PREVIEW_LIMIT. Null when it must be re-encoded.
+ */
+export function clipboardPreviewType(type: string, bytes: number): 'image/png' | 'image/jpeg' | null {
+  const name = type.toLowerCase().split(';')[0].trim();
+  return (name === 'image/png' || name === 'image/jpeg') && bytes > 0 && bytes <= CLIPBOARD_PREVIEW_LIMIT ? name : null;
+}
 /** What a desktop notification opens: a channel here, another computer's tab, or Usage. */
 export type AlertTarget = { sessionId: string } | { computerId: string } | { view: 'usage' };
+/** What the window reports about itself (windowHealthSchema): `ms` is how long a task or stall took, `detail` a short label. */
+export interface WindowHealthReport { kind: 'long-task' | 'stall' | 'context-lost' | 'context-restored'; ms?: number; detail?: string }
 export const IPC_CHANNELS = {
   workbench: 'coding-hub:workbench',
   coaching: 'coding-hub:coaching',
@@ -152,6 +166,7 @@ export const IPC_CHANNELS = {
   listHistory: 'coding-hub:list-history',
   readRunLog: 'coding-hub:read-run-log',
   storageError: 'coding-hub:storage-error',
+  windowHealth: 'coding-hub:window-health',
   workspaceFlush: 'coding-hub:workspace-flush',
   finishWorkspaceFlush: 'coding-hub:finish-workspace-flush',
   pickDirectory: 'coding-hub:pick-directory',

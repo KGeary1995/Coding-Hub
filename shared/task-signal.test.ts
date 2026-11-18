@@ -44,6 +44,11 @@ describe('the task completion line', () => {
     expect(taskSignal('Done.\n**TASK COMPLETE.**\n')).toEqual({ kind: 'complete' });
     expect(taskSignal('`TASK BLOCKED: need the API key name`')).toEqual({ kind: 'blocked', reason: 'need the API key name' });
     expect(taskSignal('TASK BLOCKED:')).toEqual({ kind: 'blocked', reason: 'The agent needs you.' });
+    for (const line of ['**TASK COMPLETE**.', 'TASK COMPLETE ✅', '✅ TASK COMPLETE', '## TASK COMPLETE', 'TASK COMPLETE!', '`TASK COMPLETE`.']) expect(taskSignal(`Done.\n${line}`), line).toEqual({ kind: 'complete' });
+    expect(taskSignal('TASK BLOCKED: **which branch?**')).toEqual({ kind: 'blocked', reason: 'which branch?' });
+    expect(taskSignal('Is the TASK COMPLETE?')).toBeNull(); expect(taskSignal('TASK COMPLETE?')).toBeNull(); expect(taskSignal('TASK COMPLETE soon')).toBeNull();
+    for (const line of ['- [ ] TASK COMPLETE', '~~TASK COMPLETE~~', '❌ TASK COMPLETE', 'TASK COMPLETE ❌']) expect(taskSignal(`Done.\n${line}`), line).toBeNull();
+    expect(taskSignal('Done.\n✔️ TASK COMPLETE…')).toEqual({ kind: 'complete' });
   });
   it('does not take a mention earlier in the reply, or a question, as the signal', () => {
     expect(taskSignal('TASK COMPLETE\nline 2\nline 3\nShould I go on?')).toBeNull();

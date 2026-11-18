@@ -21,7 +21,9 @@ export type ChatEvent =
   /** What a tool returned, shortened for display. */
   | { type: 'tool-result'; toolUseId: string; text: string; isError: boolean; image: boolean }
   /** Claude asks to use a tool the permission settings do not already allow. */
-  | { type: 'permission'; requestId: string; toolName: string; description: string; input: Record<string, unknown>; canAllowEdits: boolean }
+  | { type: 'permission'; requestId: string; toolName: string; description: string; input: Record<string, unknown>; canAllowEdits: boolean;
+    /** The tool's own name when the name shown (Claude's display name) differs: a Round Table declines edits by either. */
+    tool?: string }
   /** The approval was answered (here, from another window, or by the run ending). */
   | { type: 'permission-done'; requestId: string }
   /** The reply finished: whether it ended in an error, and Claude's own error text then. */
@@ -83,7 +85,9 @@ export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The se
   /** Why the message waiting could not join the task when the planner would have planned again (too long, too many images); it waits until dropped. */
   held?: string;
   /** Tasks from Tasks that arrived while the table worked, in order: each starts once the task before it is approved. */
-  nextTasks?: string[] }
+  nextTasks?: string[];
+  /** The task's images, up to KEEP_IMAGES of base64, so a step continued after a restart still has them. */
+  images?: ChatImage[] }
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';
@@ -104,7 +108,11 @@ export interface RoundTableState {
   waiting?: string; waitingKept?: boolean;
   /** Its images, when small enough to keep through a restart; otherwise how many would be lost. */
   waitingImages?: ChatImage[]; waitingImagesDropped?: number;
+  /** What phones and linked computers get instead of waitingImages (forFollowers): how many there are, not their data. */
+  waitingImageCount?: number;
 }
+/** How many images a waiting message has: their data on the owning computer, only the count on a phone or linked computer. */
+export const waitingImageCount = (table: Pick<RoundTableState, 'waitingImages' | 'waitingImageCount'> | undefined) => table?.waitingImages?.length ?? table?.waitingImageCount ?? 0;
 export const ROUND_TABLE_MAX_ROUNDS = 5;
 export type ChatRequest =
   | { action: 'send'; sessionId: string; runId: string; text: string; images: ChatImage[] }

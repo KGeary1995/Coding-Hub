@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DiscoveredEngine } from './discovery';
+import { AUTH_TIMED_OUT } from './auth-status';
+import { canSymlink } from '../hub/symlink.fixture';
 
 class FakePty {
   pid = 99999999;
@@ -67,6 +69,41 @@ describe('PTY lifecycle and IPC ownership', () => {
     await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_LOGIN_REQUIRED' });
     expect(spawn).not.toHaveBeenCalled();
   });
+  it('asks for the sign-in probes only for a named profile, and says so when they timed out', async () => {
+    const options: unknown[] = [];
+    const discover = vi.fn(async (engine: 'claude' | 'codex', _env?: Record<string, string>, option?: { authentication?: boolean }) => { options.push(option); const result = engines(engine); result.info.authentication = { state: 'unknown', checkedAt: new Date().toISOString(), message: AUTH_TIMED_OUT }; return result; });
+    const manager = new PtyManager(() => {}, { spawn: () => new FakePty() as unknown as IPty, discover, profileEnvironment: (base) => base, environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } }); managers.push(manager);
+    await manager.start(7, request());
+    await expect(manager.start(7, { ...request('profiled'), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_LOGIN_REQUIRED', message: expect.stringContaining('in time') });
+    expect(options).toEqual([{ authentication: false }, { authentication: true }]);
+  });
+  it('waits for beforeLaunch before preparing an agent launch, but never fails or hangs a start for it', async () => {
+    const order: string[] = []; let finish!: () => void;
+    const prepareLaunch = vi.fn(() => { order.push('prepare'); });
+    const make = (beforeLaunch: (cwd: string) => Promise<unknown>, beforeLaunchMilliseconds?: number) => { const manager = new PtyManager(() => {}, { spawn: () => new FakePty() as unknown as IPty, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, prepareLaunch, beforeLaunch, beforeLaunchMilliseconds }); managers.push(manager); return manager; };
+    const waiting = make(async (cwd) => { order.push('before ' + (cwd === fs.realpathSync(process.cwd()))); await new Promise<void>((resolve) => { finish = resolve; }); order.push('synced'); });
+    const started = waiting.start(1, request('waits'));
+    await new Promise((resolve) => setTimeout(resolve, 20)); expect(order).toEqual(['before true']);
+    finish(); await started; expect(order).toEqual(['before true', 'synced', 'prepare']);
+    await expect(make(async () => { throw new Error('Drive offline'); }).start(1, request('fails'))).resolves.toMatchObject({ sessionId: 'fails' });
+    await expect(make(() => new Promise(() => {}), 10).start(1, request('hangs'))).resolves.toMatchObject({ sessionId: 'hangs' });
+  });
+  it('reads Windows\' sudo setting without blocking, for Terminal channels only, and only where sudo.exe exists', async () => {
+    const withSudo = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-sudo-')); const withoutSudo = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-nosudo-'));
+    fs.mkdirSync(path.join(withSudo, 'System32')); fs.writeFileSync(path.join(withSudo, 'System32', 'sudo.exe'), '');
+    try {
+      let systemRoot = withSudo; const sudoMode = vi.fn(async () => 3); const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
+      const manager = new PtyManager(() => {}, { spawn, sudoMode, discover: async (engine) => engines(engine), environment: async () => ({ PATH: '/bin', SystemRoot: systemRoot }), stopDependencies: { platform: 'linux', signalGroup: () => {} } }); managers.push(manager);
+      await manager.start(1, request('agent')); expect(sudoMode).not.toHaveBeenCalled();
+      await manager.start(1, { sessionId: 'shell', cwd: process.cwd(), config: { engine: 'shell' }, cols: 80, rows: 24 });
+      expect(sudoMode).toHaveBeenCalledTimes(process.platform === 'win32' ? 1 : 0);
+      if (process.platform === 'win32') expect(spawn.mock.calls.at(-1)?.[0]).toBe(path.win32.join(withSudo, 'System32', 'sudo.exe'));
+      // Windows 10 and older Windows 11 have no sudo.exe: no reg.exe run for a setting that cannot apply.
+      systemRoot = withoutSudo; sudoMode.mockClear();
+      await manager.start(1, { sessionId: 'shell-two', cwd: process.cwd(), config: { engine: 'shell' }, cols: 80, rows: 24 });
+      expect(sudoMode).not.toHaveBeenCalled();
+    } finally { fs.rmSync(withSudo, { recursive: true, force: true }); fs.rmSync(withoutSudo, { recursive: true, force: true }); }
+  });
   it('rejects named profiles when host profile storage is unavailable instead of using the default account', async () => {
     const { manager, spawn } = fixture();
     await expect(manager.start(7, { ...request(), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_STORAGE' });
@@ -108,6 +145,24 @@ describe('PTY lifecycle and IPC ownership', () => {
     expect(events.at(-1)).toMatchObject({ type: 'data', data: 'drawn-at-80' });
   });
 
+  it('treats a resize in the moment between a CLI ending and node-pty reporting it as harmless', async () => {
+    const { manager, processes } = fixture(); const run = await manager.start(7, request());
+    processes[0].resize.mockImplementation(() => { throw new Error('Cannot resize a pty that has already exited'); });
+    expect(() => manager.resize(7, { ...runReference(run), cols: 100, rows: 30 })).toThrow('could not be resized');
+    Object.assign(processes[0], { _agent: { exitCode: 0 } });
+    expect(() => manager.resize(7, { ...runReference(run), cols: 100, rows: 30 })).not.toThrow();
+    expect(() => manager.resizeRemote(runReference(run), 50, 20)).not.toThrow();
+  });
+  it('counts a folder as in use only for launches starting in it', async () => {
+    let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { manager } = fixture(async (engine) => { await gate; return engines(engine); });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-pending-')); const inside = path.join(root, 'project'); fs.mkdirSync(inside);
+    try {
+      const start = manager.start(7, { ...request(), cwd: inside });
+      expect(manager.usesDirectory(root)).toBe(true); expect(manager.usesDirectory(path.join(os.tmpdir(), 'hub-elsewhere'))).toBe(false);
+      release(); await start;
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it('rejects input from another owner and stale references after restart', async () => {
     const { manager } = fixture();
     const first = await manager.start(7, request());
@@ -159,11 +214,20 @@ it('keeps Claude lifecycle owned and resolves exit even if native event delivery
 });
 
 describe('worktree in-use detection', () => {
-  it('treats sessions in subfolders and through links as inside the directory', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-within-')); const tree = path.join(root, 'tree'); fs.mkdirSync(path.join(tree, 'packages', 'web'), { recursive: true }); fs.symlinkSync(tree, path.join(root, 'link'));
+  it('treats sessions in subfolders as inside the directory, and its parent or a sibling as outside', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-within-')); const tree = path.join(root, 'tree');
     try {
-      expect(isWithinDirectory(tree, tree)).toBe(true); expect(isWithinDirectory(tree, path.join(tree, 'packages', 'web'))).toBe(true); expect(isWithinDirectory(tree, path.join(root, 'link', 'packages'))).toBe(true);
+      fs.mkdirSync(path.join(tree, 'packages', 'web'), { recursive: true });
+      expect(isWithinDirectory(tree, tree)).toBe(true); expect(isWithinDirectory(tree, path.join(tree, 'packages', 'web'))).toBe(true);
       expect(isWithinDirectory(tree, root)).toBe(false); expect(isWithinDirectory(tree, tree + '-sibling')).toBe(false);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+  // Creating the link needs Developer Mode (or an elevated session) on Windows.
+  it.skipIf(!canSymlink)('treats sessions reached through a symbolic link as inside the directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-within-')); const tree = path.join(root, 'tree');
+    try {
+      fs.mkdirSync(path.join(tree, 'packages'), { recursive: true }); fs.symlinkSync(tree, path.join(root, 'link'));
+      expect(isWithinDirectory(tree, path.join(root, 'link', 'packages'))).toBe(true);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
@@ -358,6 +422,16 @@ describe('Chat channels', () => {
     // Permissions change only on the computer itself: a phone must not be able to give an agent full access.
     expect(() => manager.chatRemote({ action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'full' })).toThrow(/computer it runs on/);
     expect(() => manager.chat(3, { action: 'permissions', sessionId: session.sessionId, runId: session.runId, level: 'edits' })).not.toThrow();
+  });
+  it('cuts a chat approval’s alert text to one short line, however long the command it asks about', async () => {
+    const processes: FakePty[] = []; const events: SessionEvent[] = [];
+    const manager = new PtyManager((_owner, event) => events.push(event), { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} },
+      spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    await manager.start(1, { sessionId: 'long-command', cwd: process.cwd(), config: { engine: 'claude' as const, chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, cols: 80, rows: 24 });
+    processes[0].data(JSON.stringify({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', description: 'echo start\n' + 'x'.repeat(5000), input: { command: 'x' } } }) + '\n');
+    const attention = events.find((event) => event.type === 'attention') as { message: string } | undefined;
+    expect(attention?.message.startsWith('Approve Bash: echo start x')).toBe(true); expect(attention!.message.length).toBeLessThanOrEqual(200); expect(attention!.message).not.toContain('\n');
   });
   it('leaves a chat run not busy when its message fails at once (a Codex thread that never started)', async () => {
     const processes: FakePty[] = [];

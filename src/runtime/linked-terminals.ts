@@ -6,14 +6,34 @@ import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { workbench } from './workbench';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
 import { attachCopy } from './terminals';
+import { inputPieces } from './input-pieces';
+import { forgetLinkedChatsExcept } from '../state/chat-store';
 
 /**
  * Terminals showing channels that run on a linked computer. Each is drawn at that CLI's own size: the other computer
  * owns it, and this window only asks for its tile's size (`linked-fit`). What the person types goes back to that computer.
  */
-interface Entry { terminal: Terminal; element: HTMLDivElement; runId: string | null; queue: Promise<unknown> }
+interface Entry { terminal: Terminal; element: HTMLDivElement; runId: string | null; queue: Promise<unknown>; failures: number }
 const terminals = new Map<string, Entry>();
 const MAC = navigator.userAgent.includes('Mac'); const WINDOWS = navigator.userAgent.includes('Windows');
+/** The most a linked computer takes in one 'linked-input' request (main.ts and remote-server.ts check it). */
+export const LINKED_INPUT_LIMIT = 4096;
+
+/**
+ * Typing and pastes go out one request at a time and in order, so "y" then Enter cannot arrive reversed, and a long paste
+ * goes in pieces the host accepts. When one fails, what was already waiting behind it is not sent (arriving late, it would
+ * answer whatever the CLI shows by then), and the reason shows above that computer's channels.
+ */
+export function sendLinkedInput(entry: Pick<Entry, 'runId' | 'queue' | 'failures'>, computerId: string, sessionId: string, data: string) {
+  const runId = entry.runId; if (!runId || !data) return;
+  const after = entry.failures;
+  entry.queue = entry.queue.then(async () => {
+    for (const piece of inputPieces(data, LINKED_INPUT_LIMIT)) {
+      if (after !== entry.failures || entry.runId !== runId) return;
+      await workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: piece });
+    }
+  }).catch((error: Error) => { entry.failures++; useLinkedStore.setState({ addError: `Not everything typed reached the channel, so what followed it was not sent. Check the channel before typing again. ${error.message}` }); });
+}
 
 function base64(bytes: Uint8Array) { let text = ''; for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(text); }
 
@@ -30,7 +50,7 @@ async function pasteClipboardImage(entry: Entry, computerId: string, sessionId: 
   const result = await window.codingHub?.clipboardImage().catch(() => null);
   const full = result?.ok ? result.value?.full : undefined;
   if (full) { sendImage(entry, computerId, sessionId, engine, full.slice(full.indexOf(',') + 1)); return; }
-  const runId = entry.runId; if (runId) entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: '\x16' })).catch(() => {});
+  sendLinkedInput(entry, computerId, sessionId, '\x16');
 }
 const key = (computerId: string, sessionId: string) => `${computerId}:${sessionId}`;
 
@@ -39,14 +59,11 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
   const element = document.createElement('div'); element.className = 'terminal-surface linked-surface';
   const terminal = new Terminal({ cols: size.cols ?? 100, rows: size.rows ?? 30, scrollback: 5000, fontFamily: TERMINAL_FONT, fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.3, theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[engine] } });
   terminal.open(element);
-  const entry: Entry = { terminal, element, runId: null, queue: Promise.resolve() };
-  // Keystrokes go out one at a time and in order, so "y" then Enter cannot arrive reversed.
+  const entry: Entry = { terminal, element, runId: null, queue: Promise.resolve(), failures: 0 };
   terminal.onData((data) => {
     // The computer running the CLI answers its queries (cursor position, device attributes, colours) and focus
     // reports itself; this view's own answers would reach the CLI twice, as stray input like ^[[12;1R.
-    const typed = withoutTerminalReplies(data).replace(/\x1b\[[IO]/g, '');
-    const runId = entry.runId; if (!runId || !typed) return;
-    entry.queue = entry.queue.then(() => workbench({ action: 'linked-input', id: computerId, sessionId, runId, data: typed })).catch(() => {});
+    sendLinkedInput(entry, computerId, sessionId, withoutTerminalReplies(data).replace(/\x1b\[[IO]/g, ''));
   });
   // On Windows, xterm would turn Ctrl+V into ^V, which pastes nothing, and Ctrl+C into ^C, which would interrupt the CLI
   // there instead of copying what is selected here. Let the browser paste or copy instead.
@@ -66,7 +83,7 @@ export function linkedTerminal(computerId: string, sessionId: string, engine: 'c
     event.preventDefault(); event.stopPropagation();
     void file.arrayBuffer().then((bytes) => sendImage(entry, computerId, sessionId, engine, base64(new Uint8Array(bytes))));
   }, true);
-  attachCopy(terminal, element);
+  attachCopy(terminal, element, () => engine !== 'shell');
   terminals.set(id, entry);
   return entry;
 }
@@ -78,6 +95,8 @@ export function routeLinkedEvent(event: LinkedComputerEvent) {
     // Channels that went away (or whose computer was unlinked) drop their terminals.
     const live = new Set(event.computers.flatMap((computer) => computer.channels.map((channel) => key(computer.id, channel.sessionId))));
     for (const [id, entry] of terminals) if (!live.has(id)) { entry.terminal.dispose(); entry.element.remove(); terminals.delete(id); }
+    // Chat threads go only with their computer: a Round Table's hidden seats are not in its channel list.
+    forgetLinkedChatsExcept(event.computers.map((computer) => computer.id));
     return;
   }
   const entry = terminals.get(key(event.id, event.sessionId)); if (!entry) return;

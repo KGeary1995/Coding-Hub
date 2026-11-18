@@ -21,11 +21,23 @@ export function migrateWorkspace(saved: LegacySavedWorkspace | SavedWorkspace): 
   });
   if (!sessions.length) return { workspace: null, removedChannels, rootDirectory: saved.rootDirectory };
   const ids = new Set(sessions.map((session) => session.id));
-  const tiles: GridTile[] = saved.tiles.filter((tile) => ids.has(tile.sessionId));
+  // A removed tile would leave a gap the grid never closes (it only moves tiles up), so the rest are laid out again.
+  const kept = saved.tiles.filter((tile) => ids.has(tile.sessionId));
+  const tiles: GridTile[] = removedChannels ? arrangeChannels([...kept].sort((a, b) => a.y - b.y || a.x - b.x).map((tile) => tile.sessionId), saved.layoutMode) : kept;
   return {
     workspace: { ...saved, sessions, tiles, focusedSessionId: saved.focusedSessionId && ids.has(saved.focusedSessionId) ? saved.focusedSessionId : null },
     removedChannels, rootDirectory: saved.rootDirectory,
   };
+}
+
+/**
+ * Tiles for channels in order, as a layout lays them out: columns wrap after four, rows stack, and the grid keeps two
+ * rows (five to eight channels sit three or four across). The window's arrangeTiles calls this.
+ */
+export function arrangeChannels(ids: string[], mode: SavedWorkspace['layoutMode']): GridTile[] {
+  const columns = mode === 'rows' ? 1 : mode === 'columns' ? Math.min(4, ids.length) : ids.length <= 2 ? ids.length : Math.ceil(ids.length / 2);
+  const width = 12 / columns;
+  return ids.map((sessionId, index) => ({ sessionId, x: (index % columns) * width, y: Math.floor(index / columns) * 12, w: width, h: 12, minW: 3, minH: 10 }));
 }
 
 /** A chain without Trace 1.20's Gemini steps and flags. */

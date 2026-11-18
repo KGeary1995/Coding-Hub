@@ -10,6 +10,7 @@ const fs = require('node:fs'); const os = require('node:os'); const path = requi
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
 const { tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); const rejectOnce = process.argv.includes('--reject-once'); const reviseAndModels = process.argv.includes('--revise-and-models'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-chain-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project, stdio: 'pipe' });
@@ -83,5 +84,6 @@ async function until(page, test, minutes, label) {
     note('files', { hello: fs.existsSync(path.join(project, 'hello.txt')) ? fs.readFileSync(path.join(project, 'hello.txt'), 'utf8').slice(0, 80) : null, test: fs.existsSync(path.join(project, 'test.sh')) });
     note('findings', { text: await page.locator('.table-findings summary').innerText().catch(() => 'none') });
   } catch (error) { note('error', { error: String(error).slice(0, 500) }); await shot(page, '99-error'); }
-  finally { fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2)); await app.close().catch(() => {}); }
+  // The scratch project and Trace data (storage, logs, memory) go; what the check saw is kept in <outDir>.
+  finally { fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2)); await app.close().catch(() => {}); await removeFolder(root); }
 })();

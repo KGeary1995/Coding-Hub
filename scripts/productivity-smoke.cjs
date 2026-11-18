@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
@@ -86,5 +87,5 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(900,640));await page.waitForTimeout(250);assert.equal(await page.evaluate(()=>document.body.scrollWidth>innerWidth),false);assert.equal(await page.getByRole('tab',{name:'Recovery',exact:true}).isVisible(),true);
     const backup=await wb(page,{action:'backup-create',includeLogs:true});const restoredBackup=await wb(page,{action:'backup-restore',id:backup.record.id});await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'runtime'})).storagePath,restoredBackup.restoredPath);assert.equal((await wb(page,{action:'flow-conversations'}))[0].pinned,true);assert.equal((await wb(page,{action:'flow-templates'}))[0].name,'Paired implementation');
     assert.deepEqual(errors,[]);console.log('PASS: named sessions and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
-  } finally {if(app)await app.close();await fs.rm(root,{recursive:true,force:true});}
+  } finally {await app?.close().catch(()=>{});await removeFolder(root);}
 })().catch((error)=>{console.error(error);process.exitCode=1;});

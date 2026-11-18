@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-workbench-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
@@ -61,8 +62,15 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.mouse.move(1, 1);
     const detail = tile.locator('.tr-tile-detail');
     await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '0');
-    await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
-    await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '1');
+    // Shown, the row has its own height and stays clear of the header's state chip and action buttons.
+    const detailShown = async () => {
+      await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
+      await page.waitForFunction(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.opacity === '1' && style.transform === 'none'; });
+      const { row, others } = await tile.evaluate((element) => { const box = (node) => { const { left, right, top, bottom } = node.getBoundingClientRect(); return { left, right, top, bottom }; }; return { row: box(element.querySelector('.tr-tile-detail')), others: [...element.querySelectorAll('.tr-state-chip, .tr-tile-head .tr-action')].map(box) }; });
+      assert.ok(row.bottom - row.top >= 22, `The detail row is ${row.bottom - row.top} px high`);
+      for (const other of others) assert.ok(other.right <= row.left || other.left >= row.right || other.bottom <= row.top || other.top >= row.bottom, 'The detail row lies over the header');
+    };
+    await detailShown();
     assert.match(await detail.textContent(), /pid \d+ · cwd /);
     await page.mouse.move(1, 1);
     // Enter on the tile itself moves into its terminal.
@@ -98,6 +106,10 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
     await page.getByRole('button', { name: 'Retry CH3', exact: true }).waitFor();
+    // With an error line under the header the row sits in the flow and stays shown, so it never covers the line or its button.
+    await detailShown(); await page.mouse.move(1, 1);
+    assert.equal(await page.evaluate(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.position + ' ' + style.opacity; }), 'static 1');
+    assert.equal(await tile.locator('.session-error button').first().evaluate((button) => { const { left, top, width, height } = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(left + width / 2, top + height / 2)); }), true, 'The failed channel’s error button is covered');
     // A short tile can push the repeated error into scrollback (the Windows console repaints the main screen
     // first), so scroll back a line at a time until it is in view, as a user would.
     await tile.locator('.xterm-screen').hover();
@@ -112,5 +124,5 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     // Print what each tile showed, so a CI failure includes the CLI's own output and the app's diagnostic.
     try { for (const window of app ? app.windows() : []) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.session-tile')].map((tile, index) => `tile ${index}: error=${JSON.stringify(tile.querySelector('.session-error')?.textContent ?? null)} terminal=${JSON.stringify((tile.querySelector('.xterm-rows')?.textContent ?? '').slice(-600))}`).join('\n') + '\nevents=' + JSON.stringify((window.events ?? []).filter((event) => event.type !== 'data' || /Error|fixture/.test(event.data)).slice(-12)))); } catch { /* The window may be gone. */ }
     throw error;
-  } finally { if (app) await app.close(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

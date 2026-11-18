@@ -6,9 +6,10 @@ import { CoachingService } from './service';
 import { RulesService } from '../hub/rules';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
+/** The native spelling RulesService.directory() gives (8.3 short names such as RUNNER~1 expanded), so the folder checks below compare like with like. */
 describe('explicit local coaching reports', () => {
   it('stores curated examples, removes them on request, and prepares a separate report folder with shared rules', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-coaching-')); roots.push(root); const rules = new RulesService(root); const service = new CoachingService(root, rules);
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-coaching-'))); roots.push(root); const rules = new RulesService(root); const service = new CoachingService(root, rules);
     const item = service.execute({ action: 'add', text: 'Review this function', notes: 'Some rework', outcome: 'partial' }) as any;
     expect(service.execute({ action: 'list' })).toHaveLength(1);
     const prepared = service.execute({ action: 'prepare', report: 'Selected examples only' }) as any;
@@ -19,7 +20,7 @@ describe('explicit local coaching reports', () => {
 });
 describe('prepared folder limit', () => {
   it('replaces the oldest unused folder instead of refusing after 100 requests', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-coaching-')); roots.push(root); const rules = new RulesService(root);
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-coaching-'))); roots.push(root); const rules = new RulesService(root);
     let protectedFolder = ''; const service = new CoachingService(root, rules, (directory) => directory === protectedFolder);
     const folders: string[] = [];
     for (let index = 0; index < 100; index++) { const { directory } = service.execute({ action: 'prepare', report: `Report ${index}` }) as { directory: string }; const time = new Date(Date.UTC(2026, 0, 1, 0, index)); fs.utimesSync(directory, time, time); folders.push(directory); }

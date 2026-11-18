@@ -14,7 +14,9 @@ import type { SharedRules } from '../../shared/hub';
  */
 export async function setUpWorktree(directory: string): Promise<boolean> {
   const rules = await hubCall<SharedRules>({ action: 'rules-read', directories: [directory] });
-  const target = rules.targets.find((item) => item.directory === directory) ?? rules.targets.find((item) => item.directory.toLowerCase() === directory.toLowerCase());
+  // One folder was asked for, so its target is the only one. The host names it in the folder's native spelling, which
+  // can differ from `directory` by more than letter case (8.3 names, subst or mapped drives).
+  const target = rules.targets[0];
   if (!rules.content.trim() || !target || target.applied) return false;
   if (target.error) throw new Error(`The worktree is ready, but the shared rules could not be applied there: ${target.error}`);
   await hubCall<SharedRules>({ action: 'rules-save', content: rules.content, revision: rules.revision, targets: [{ directory: target.directory, claudeHash: target.claudeHash, codexHash: target.codexHash }] });

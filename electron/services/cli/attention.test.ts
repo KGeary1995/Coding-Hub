@@ -29,6 +29,10 @@ describe('Claude attention endpoint', () => {
   }
   const post = (url: string, body: unknown) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
 
+  it('keeps handling server errors after it started, so a second one is not thrown in the main process', async () => {
+    const { server } = await setup(); const http = (server as unknown as { server: import('node:http').Server }).server;
+    expect(() => { http.emit('error', new Error('first')); http.emit('error', new Error('second')); }).not.toThrow();
+  });
   it('reports permission prompts for a registered run and ignores idle notices', async () => {
     const { server, seen } = await setup(); const runId = randomUUID(); const url = server.register(runId)!;
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/hook\/[0-9a-f-]{36}\/[0-9a-f]{64}$/);

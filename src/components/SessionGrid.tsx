@@ -1,10 +1,12 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { SessionTile } from './SessionTile';
+import { ErrorBoundary } from './ErrorBoundary';
 
 export function SessionGrid() {
-  const { sessions: all, tiles, setTiles, focusedSessionId, layoutMode } = useWorkspaceStore();
+  const { sessions: all, tiles, setTiles, focusedSessionId, layoutMode } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, tiles: s.tiles, setTiles: s.setTiles, focusedSessionId: s.focusedSessionId, layoutMode: s.layoutMode })));
   // A Round Table's partner runs in the background: its lead's tile shows the table.
   const sessions = useMemo(() => channelsOf(all), [all]);
   const container = useRef<HTMLDivElement>(null);
@@ -28,7 +30,7 @@ export function SessionGrid() {
   const focusedIndex = sessions.findIndex((session) => session.id === focusedSessionId);
   return (
     <div ref={container} className="session-grid-container">
-    {focusedIndex >= 0 ? <div className="focused-session"><SessionTile session={sessions[focusedIndex]} index={focusedIndex} /></div> : width > 0 && <GridLayout
+    {focusedIndex >= 0 ? <div className="focused-session"><ErrorBoundary label={`Channel ${focusedIndex + 1}`}><SessionTile session={sessions[focusedIndex]} index={focusedIndex} /></ErrorBoundary></div> : width > 0 && <GridLayout
       className="session-grid"
       width={width}
       cols={12}
@@ -42,7 +44,7 @@ export function SessionGrid() {
       resizeHandles={['se']}
       onLayoutChange={(next) => setTiles(next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })))}
     >
-      {sessions.map((session, index) => <div key={session.id}><SessionTile session={session} index={index} dense={sessions.length > 2} /></div>)}
+      {sessions.map((session, index) => <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} dense={sessions.length > 2} /></ErrorBoundary></div>)}
     </GridLayout>}
     </div>
   );

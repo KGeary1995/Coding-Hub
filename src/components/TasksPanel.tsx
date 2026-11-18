@@ -10,6 +10,7 @@ import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace
 import { channelNameNow } from '../state/channel-names';
 import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
 import { isAgentConfig } from '../../shared/types';
+import { ConfirmStep } from './ConfirmStep';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
 /** "Only these files": blank means the whole project. */
@@ -26,11 +27,13 @@ const limitedTo = (task: Task) => task.scope.some((pattern) => pattern === '**' 
  * and whether it still holds, the Round Table's findings on its channel, and the pull request opened from it.
  */
 /** One empty list, so the store selector returns the same value when there are none. */
-const NO_FINDINGS: Finding[] = [];
+const NO_FINDINGS: Finding[] = []; const NO_PROMPTS: string[] = [];
 function TaskEverything({ task, channel, changed, check }: { task: Task; channel: string; changed: string[]; check: string }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null); const [open, setOpen] = useState(false);
   const channelFindings = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.findings ?? NO_FINDINGS : NO_FINDINGS);
-  const tasks = useTaskStore((state) => state.tasks); const findings = findingsForTask(task, tasks, channelFindings);
+  // Tasks waiting at a hierarchy table have not started: they neither end this task's findings nor take them.
+  const waitingPrompts = useChatStore((state) => task.sessionId ? state.threads[task.sessionId]?.table?.chain?.nextTasks ?? NO_PROMPTS : NO_PROMPTS);
+  const tasks = useTaskStore((state) => state.tasks); const findings = findingsForTask(task, tasks, channelFindings, waitingPrompts);
   useEffect(() => { if (open) void workbench<TaskDetail>({ action: 'task-detail', id: task.id }).then(setDetail).catch(() => setDetail(null)); }, [open, task.id, changed.length]);
   const waiting = findings.filter((finding) => finding.status !== 'verified');
   return <details className="task-everything" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}><summary>Everything about this task</summary>
@@ -49,6 +52,8 @@ export function TasksPanel() {
   const { sessions, rootDirectory } = useWorkspaceStore();
   const { tasks, watch, draftFor, error } = useTaskStore();
   const [form, setForm] = useState(EMPTY_FORM); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [note, setNote] = useState('');
+  /** The task whose Remove was pressed: removing has no undo, so it asks first. */
+  const [removing, setRemoving] = useState<string | null>(null);
   const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
   // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
   const agents = channelsOf(sessions).filter((session) => isAgentConfig(session.config));
@@ -109,7 +114,9 @@ export function TasksPanel() {
             {task.status === 'review' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'done'))}>Mark done</button>}
             {task.status === 'done' && <button className="quiet-button" disabled={busy} onClick={() => void run(() => setTaskStatus(task.id, 'review'))}>Reopen</button>}
             <button className="quiet-button" onClick={() => edit(task)}>Edit</button>
-            <button className="quiet-button" disabled={busy} onClick={() => void run(() => removeTask(task.id))}>Remove</button>
+            {removing === task.id
+              ? <ConfirmStep question={task.status === 'active' ? 'Remove this task while a channel works on it?' : 'Remove this task and its notes?'} action="Remove" busy={busy} onConfirm={() => { setRemoving(null); void run(() => removeTask(task.id)); }} onCancel={() => setRemoving(null)} />
+              : <button className="quiet-button" disabled={busy} onClick={() => setRemoving(task.id)}>Remove</button>}
           </div>
         </article>;
       })}

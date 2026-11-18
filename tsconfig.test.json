@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["electron/**/*.test.ts", "scripts/lib/*.test.ts", "vitest.setup.ts", "vitest.setup.test.ts", "src/env.d.ts"],
+  "exclude": []
+}

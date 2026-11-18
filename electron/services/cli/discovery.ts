@@ -47,12 +47,11 @@ export function withoutAgentSession(env: Record<string, string>): Record<string,
 }
 
 const REGISTRY_PATHS = ['HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'HKCU\\Environment'];
-/** Reads one `Path` value with reg.exe; null when it is missing or reg.exe fails. */
-function readRegistryPath(key: string): string | null {
-  try {
-    const output = execFileSync('reg.exe', ['query', key, '/v', 'Path'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    return /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(output)?.[1]?.trim() || null;
-  } catch { return null; }
+/** Reads one `Path` value with reg.exe, without blocking the main process; null when it is missing or reg.exe fails. */
+function readRegistryPath(key: string): Promise<string | null> {
+  return new Promise((resolve) => execFile('reg.exe', ['query', key, '/v', 'Path'], { encoding: 'utf8', timeout: 3000, windowsHide: true }, (error, output) => {
+    resolve(error ? null : /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(output)?.[1]?.trim() || null);
+  }));
 }
 
 /**
@@ -60,9 +59,10 @@ function readRegistryPath(key: string): string | null {
  * when it starts, so without this a CLI or tool installed while Trace runs (Node.js, winget, an npm with its own prefix,
  * a folder added in System Properties) is not found until Trace restarts. `%NAME%` references are expanded from `env`.
  */
-export function windowsRegistryPath(env: Record<string, string>, read: (key: string) => string | null = readRegistryPath): string[] {
+export async function windowsRegistryPath(env: Record<string, string>, read: (key: string) => string | null | Promise<string | null> = readRegistryPath): Promise<string[]> {
   const lookup = new Map(Object.entries(env).map(([key, value]) => [key.toUpperCase(), value]));
-  return REGISTRY_PATHS.flatMap((key) => (read(key) ?? '').split(';'))
+  const values = await Promise.all(REGISTRY_PATHS.map(async (key) => { try { return await read(key); } catch { return null; } }));
+  return values.flatMap((value) => (value ?? '').split(';'))
     .map((folder) => folder.trim().replace(/%([^%]+)%/g, (whole, name: string) => lookup.get(name.toUpperCase()) ?? whole)).filter(Boolean);
 }
 
@@ -77,22 +77,54 @@ export function mergePath(folders: string[], windows = process.platform === 'win
   return result;
 }
 
-/** The registry is read at most every few seconds; a burst of launches shares one read. */
-let registryCache: { at: number; folders: string[] } | null = null;
-function currentRegistryPath(env: Record<string, string>) {
-  if (registryCache && Date.now() - registryCache.at < 5000) return registryCache.folders;
-  registryCache = { at: Date.now(), folders: windowsRegistryPath(env) };
-  return registryCache.folders;
+/**
+ * The registry PATH, read in the background so no caller waits for reg.exe on the main process (Git calls, plan limits
+ * and task checks ask for an environment often). `current()` answers with the last read and starts a new one once it is
+ * older than `freshMilliseconds`; `refresh()` waits for a read that new, as a channel start does, so a CLI installed a
+ * moment ago is still found. A burst of callers shares one read.
+ */
+export class RegistryPath {
+  private value: { at: number; folders: string[] } | null = null;
+  private reading: Promise<string[]> | null = null;
+  constructor(private read: (env: Record<string, string>) => Promise<string[]> = (env) => windowsRegistryPath(env), private freshMilliseconds = 5000, private now: () => number = () => Date.now()) {}
+  /** The folders last read (none before the first read finishes: Trace's own PATH has them from its start). */
+  current(env: Record<string, string>): string[] { if (!this.fresh()) void this.refresh(env); return this.value?.folders ?? []; }
+  refresh(env: Record<string, string>): Promise<string[]> {
+    if (this.fresh()) return Promise.resolve(this.value!.folders);
+    this.reading ??= this.read(env).then((folders) => { this.value = { at: this.now(), folders }; return folders; }, () => this.value?.folders ?? []).finally(() => { this.reading = null; });
+    return this.reading;
+  }
+  private fresh() { return this.value !== null && this.now() - this.value.at < this.freshMilliseconds; }
+}
+const registryPath = new RegistryPath();
+
+/**
+ * Variables Chromium sets for its own processes. CHROME_CRASHPAD_PIPE_NAME names Trace's crash handler: an Electron or
+ * Chromium program started in a channel (a dev build, a smoke test) would send its crash dumps into Trace's folder.
+ */
+const CHROMIUM_INTERNAL = /^CHROME_CRASHPAD_PIPE_NAME$/i;
+/** Trace's own environment, without what belongs to the session or app that started it. */
+function inheritedEnvironment(): Record<string, string> {
+  return withoutAgentSession(Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined && !CHROMIUM_INTERNAL.test(entry[0]))));
 }
 
-export function hostEnvironment(registry: (env: Record<string, string>) => string[] = currentRegistryPath): Record<string, string> {
-  const env = withoutAgentSession(Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)));
+export function hostEnvironment(registry: (env: Record<string, string>) => string[] = (env) => registryPath.current(env)): Record<string, string> {
+  const env = inheritedEnvironment();
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   const extra = process.platform === 'win32'
     ? [...registry(env), path.join(os.homedir(), '.local', 'bin'), ...(env.APPDATA ? [path.join(env.APPDATA, 'npm')] : [])]
     : [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.npm-global', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
   env[pathKey] = mergePath([...(env[pathKey] ?? '').split(path.delimiter), ...extra]).join(path.delimiter);
   return env;
+}
+
+/**
+ * hostEnvironment() with a registry PATH read no more than a few seconds ago: what a channel start and every "is this
+ * CLI installed" check uses, so installing a tool and pressing Refresh finds it the first time.
+ */
+export async function freshHostEnvironment(registry: RegistryPath = registryPath): Promise<Record<string, string>> {
+  if (process.platform === 'win32') await registry.refresh(inheritedEnvironment());
+  return hostEnvironment((env) => registry.current(env));
 }
 
 /**
@@ -142,7 +174,8 @@ async function findNode(directories: string[]): Promise<string | null> {
   return null;
 }
 
-export async function findExecutable(engine: CLIEngine, env = hostEnvironment()): Promise<Executable> {
+export async function findExecutable(engine: CLIEngine, environment?: Record<string, string>): Promise<Executable> {
+  const env = environment ?? await freshHostEnvironment();
   let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   let node: Promise<string | null> | null = null;
@@ -188,12 +221,19 @@ export async function checkAuthentication(engine: CLIEngine, executable: Executa
   const unknown = () => classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
   if (!new RegExp(`^\\s*${command}\\b`, 'm').test(help)) return unknown();
   const subhelp = await probeCLI(executable, [command, '--help'], env);
+  // A CLI too slow to answer says nothing about the login; reported as such, not as an unsupported check.
+  if (subhelp.timedOut) return classifyAuthentication(engine, subhelp);
   if (subhelp.exitCode !== 0 || !/^\s*status\b/m.test(subhelp.stdout + '\n' + subhelp.stderr)) return unknown();
   const result = await probeCLI(executable, [command, 'status'], env);
   return classifyAuthentication(engine, result);
 }
 
-export async function discoverEngine(engine: CLIEngine, env = hostEnvironment()): Promise<DiscoveredEngine> {
+/**
+ * `authentication: false` skips the two sign-in probes (`auth --help`, `auth status`); a channel start needs them only
+ * for a named Claude profile, and without them a start waits for two CLI runs instead of four.
+ */
+export async function discoverEngine(engine: CLIEngine, environment?: Record<string, string>, options: { authentication?: boolean } = {}): Promise<DiscoveredEngine> {
+  const env = environment ?? await freshHostEnvironment();
   const info: EngineInfo = { engine, available: false, executable: null, version: null, supportsModel: false, supportsConfig: false, supportsNoDaemon: false, error: null, checkedAt: new Date().toISOString() };
   try {
     const executable = await findExecutable(engine, env);
@@ -212,7 +252,7 @@ export async function discoverEngine(engine: CLIEngine, env = hostEnvironment())
     info.supportsSettings = advertisesFlag(help, '--settings');
     info.supportsChrome = engine === 'claude' && advertisesFlag(help, '--chrome');
     info.supportsPermissions =engine === 'claude' ? advertisesFlag(help, '--permission-mode') && advertisesFlag(help, '--allow-dangerously-skip-permissions') : advertisesFlag(help, '--ask-for-approval') && advertisesFlag(help, '--sandbox');
-    info.authentication = await checkAuthentication(engine, executable, help, env);
+    if (options.authentication !== false) info.authentication = await checkAuthentication(engine, executable, help, env);
     info.available = true;
     return { info, executable };
   } catch (error) {

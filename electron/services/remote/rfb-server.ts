@@ -67,7 +67,7 @@ const u32 = (value: number) => { const buffer = Buffer.alloc(4); buffer.writeUIn
  * trip across the network, not two; sending waits while the connection is backed up.
  */
 export class RfbSession {
-  private buffer: Buffer = Buffer.alloc(0); private stage: 'version' | 'security' | 'init' | 'messages' = 'version';
+  private buffer: Buffer = Buffer.alloc(0); private stage: 'version' | 'security' | 'init' | 'messages' = 'version'; private legacy = false;
   private encodings = new Set<number>(); private request: { incremental: boolean } | null = null; private pumping = false;
   private continuous = false; private offered = false;
   private closed = false; private clipboardTimer: ReturnType<typeof setInterval> | null = null; private lastClipboard: string | null = null;
@@ -108,12 +108,13 @@ export class RfbSession {
       if (this.stage === 'version') {
         if (this.buffer.length < 12) return;
         if (!/^RFB 003\.00[78]\n$/.test(this.buffer.subarray(0, 12).toString('latin1'))) throw new Error('version');
-        this.take(12); this.socket.write(Buffer.from([1, 1])); this.stage = 'security'; continue;
+        this.legacy = this.take(12)[10] === 0x37; this.socket.write(Buffer.from([1, 1])); this.stage = 'security'; continue;
       }
       if (this.stage === 'security') {
         if (this.buffer.length < 1) return;
         if (this.take(1)[0] !== 1) throw new Error('security');
-        this.socket.write(Buffer.alloc(4)); this.stage = 'init'; continue;
+        // RFB 3.7 sends no SecurityResult for "None"; 3.8 does.
+        if (!this.legacy) this.socket.write(Buffer.alloc(4)); this.stage = 'init'; continue;
       }
       if (this.stage === 'init') {
         if (this.buffer.length < 1) return; this.take(1);

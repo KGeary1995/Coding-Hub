@@ -4,6 +4,8 @@ export interface ConfigInventory { servers: MCPConfig[]; extensions: (LocalExten
 export type HubRequest =
   | { action: 'rules-read'; directories: string[] }
   | { action: 'rules-save'; content: string; revision: string; targets: RulesTargetReference[] }
+  /** Removes a registered project whose folder was deleted from the shared-rules registry; refused while the folder exists. */
+  | { action: 'rules-forget'; directory: string }
   | { action: 'inventory'; directory: string | null }
   | { action: 'toggle-server'; id: string; enabled: boolean }
   | { action: 'remove-server'; id: string }
@@ -18,6 +20,8 @@ export type HubRequest =
   /** Whether commits a note names are in the folder's clone and on remote branches (as of the last fetch). */
   | { action: 'memory-commits'; directory: string; shas: string[] }
   | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
+  /** Several notes at once (a closing table's findings), with one Drive sync per project rather than one per note. */
+  | { action: 'memory-write-many'; notes: { project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }[] }
   | { action: 'memory-install'; directory: string; project?: string }
   | { action: 'memory-entries'; directory: string }
   | { action: 'memory-use-auto-key'; directory: string }

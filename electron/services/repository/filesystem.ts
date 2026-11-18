@@ -9,10 +9,12 @@ import { HubError } from '../cli/engine-adapter';
 export const FILE_PREVIEW_LIMIT = 1024 * 1024;
 export const DIRECTORY_ENTRY_LIMIT = 500;
 
+/** Windows drops trailing dots and spaces (`.git.` is `.git`), and `name:stream` or `name::$INDEX_ALLOCATION` opens `name`. */
+const isGit = (part: string) => (process.platform === 'win32' ? part.replace(/[. ]+$/, '') : part).toLowerCase() === '.git';
 export function validateRelativePath(relative: string, allowRoot = false) {
   const segments = relative.split(process.platform === 'win32' ? /[\\/]/ : /\//);
   if ((!relative && !allowRoot) || relative.includes('\0') || path.isAbsolute(relative) || path.win32.isAbsolute(relative) || /^[a-z]:/i.test(relative)
-    || (relative && segments.some((part) => part === '' || part === '.' || part === '..' || part.toLowerCase() === '.git'))) {
+    || (relative && segments.some((part) => part === '' || part === '.' || part === '..' || isGit(part) || (process.platform === 'win32' && part.includes(':'))))) {
     throw new HubError('INVALID_PATH', 'Choose a path inside the selected project. Git metadata is not available in the file browser.');
   }
 }
@@ -30,6 +32,8 @@ export async function scopedPath(root: string, relative: string, allowRoot = fal
   const resolved = await realpath(current);
   const within = path.relative(root, resolved);
   if (within === '..' || within.startsWith('..' + path.sep) || path.isAbsolute(within)) throw new HubError('INVALID_PATH', 'This path is outside the selected project.');
+  // Checked again on the real path: a Windows short name (`GIT~1`) reaches Git metadata under another name.
+  if (within.split(path.sep).some(isGit)) throw new HubError('INVALID_PATH', 'Choose a path inside the selected project. Git metadata is not available in the file browser.');
   return resolved;
 }
 

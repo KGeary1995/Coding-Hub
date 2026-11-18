@@ -6,6 +6,8 @@ body { margin: 0; background: var(--tr-bg); color: var(--tr-fg); font: 400 16px/
 button, input { font: inherit; color: inherit; }
 button { min-height: 44px; padding: 0 14px; border: 1px solid var(--tr-line-control, var(--tr-line)); border-radius: var(--tr-r-control, 6px); background: var(--tr-panel); cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
+/* An attached image's remove button stays a small circle (tile.css), with a larger area around it to tap. */
+.chat-attachments button { min-height: 0; } .chat-attachments button::after { content: ""; position: absolute; inset: -8px; }
 button.primary { background: var(--tr-fg-strong); color: var(--tr-on-light, #0b1010); border-color: transparent; font-weight: 600; }
 button.quiet { border: 0; background: none; color: var(--tr-fg-dim); }
 input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--tr-line-control, var(--tr-line)); border-radius: var(--tr-r-control, 6px); background: var(--tr-term); }
@@ -105,7 +107,7 @@ footer { padding: 16px; text-align: center; }
 /* A channel's conversation: messages as plain paragraphs, wrapped, the person's set apart. */
 .conversation { white-space: normal; font: var(--tr-t-body, 14px/1.45 system-ui); }
 .conversation .said { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.conversation .said.you { padding: 6px 8px; border-left: 2px solid var(--tr-focus); background: var(--tr-surface); }
+.conversation .said.you { padding: 6px 8px; border-left: 2px solid var(--tr-fg-strong); background: var(--tr-surface); }
 .conversation .said.tool { margin-bottom: 4px; font-family: var(--tr-font-mono, monospace); font-size: 12px; }
 /* A computer's screen: the picture scaled to the phone's width, a field for the phone keyboard, and keys it lacks. */
 main.screen { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; }
@@ -155,6 +157,9 @@ button.primary { background: var(--tr-ch-codex); color: var(--tr-on-light); text
 .add-menu button { border: 0; border-bottom: 1px solid var(--tr-line); background: none; text-align: left; text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
 .phone-alert { position: fixed; left: 16px; right: 90px; bottom: calc(28px + env(safe-area-inset-bottom)); margin: 0; color: var(--tr-fg-muted); font: 400 13px var(--tr-font-mono); }
 .add-wrap[hidden] { display: none; }
+.control-error { margin: 6px 12px; }
+.control-error[hidden] { display: none; }
+.sending { margin: 6px 0; font-size: 14px; }
 
 /* The tabs along the bottom (Channels, Usage, Tasks, History, More), and the screens above them. */
 #app:has(> .tabbar) { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { commitRefs, commitsTrailer, describeCommits } from '../../../shared/commit-refs';
+import { allCommitRefs, commitRefs, commitsTrailer, describeCommits, MAX_REFS } from '../../../shared/commit-refs';
 import { commitStatus } from './commit-status';
 
 const roots: string[] = [];
@@ -17,6 +17,13 @@ describe('commits named in memory notes', () => {
     expect(commitRefs(summary)).toEqual(['846dc43', '69e9994']);
     expect(commitRefs(`Handoff text.\n\n${commitsTrailer(['ABC1234', 'def5678'])}`)).toEqual(['abc1234', 'def5678']);
     expect(commitRefs('Fixed in 34ccd2b, local only.')).toEqual([]);
+  });
+  it('checks the newest ten of a long session and says how many more there are', () => {
+    const summary = 'Commits made during the session:\n' + Array.from({ length: 20 }, (_, index) => `- abc${1000 + index} Change ${index}`).join('\n');
+    expect(commitRefs(summary)).toHaveLength(MAX_REFS); expect(allCommitRefs(summary)).toHaveLength(20);
+    const status = { checkedAt: '2026-11-17T10:00:00.000Z', fetchedAt: null, commits: commitRefs(summary).map((sha) => ({ sha, known: true, remotes: ['origin/main'] })) };
+    expect(commitRefs(`Commits: ${'a'.repeat(64)}`)).toEqual(['a'.repeat(64)]);
+    expect(describeCommits(status, 10)).toMatch(/abc1009 on origin\/main; 10 more commits not checked$/); expect(describeCommits(status)).toMatch(/abc1009 on origin\/main$/);
   });
   it('says which commits are pushed, as of the last fetch, and which are only local or unknown', async () => {
     const root = temp(); const remote = path.join(root, 'remote.git'); const clone = path.join(root, 'clone');

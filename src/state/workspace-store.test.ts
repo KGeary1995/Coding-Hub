@@ -212,3 +212,58 @@ describe('a Round Table\'s folder', () => {
     expect(tableDirectory([following, workspaceSeat], following)).toBeNull();
   });
 });
+
+describe('events that change nothing', () => {
+  it('leave the state as it was, so nothing redraws or is saved for them', () => {
+    const session = useWorkspaceStore.getState().sessions[0];
+    useWorkspaceStore.getState().markStarting(session.id);
+    useWorkspaceStore.getState().applyEvent({ type: 'started', sessionId: session.id, runId: 'run', engine: 'claude', pid: 1, cwd: '/p' });
+    const before = useWorkspaceStore.getState(); let notified = 0; const stop = useWorkspaceStore.subscribe(() => { notified++; });
+    useWorkspaceStore.getState().applyEvent({ type: 'answered', sessionId: session.id, runId: 'run', at: new Date().toISOString() });
+    useWorkspaceStore.getState().applyEvent({ type: 'answered', sessionId: 'elsewhere', runId: 'run', at: new Date().toISOString() });
+    useWorkspaceStore.getState().applyEvent({ type: 'exit', sessionId: session.id, runId: 'older', exitCode: 0 });
+    expect(notified).toBe(0); expect(useWorkspaceStore.getState()).toBe(before);
+    useWorkspaceStore.getState().applyEvent({ type: 'attention', sessionId: session.id, runId: 'run', message: 'Allow?', at: new Date().toISOString() });
+    stop(); expect(notified).toBe(1); expect(useWorkspaceStore.getState().sessions[0].attention?.message).toBe('Allow?');
+  });
+});
+
+describe('adding a chat with every slot taken', () => {
+  it('turns no existing channel into a chat', () => {
+    while (useWorkspaceStore.getState().sessions.length < MAX_CHANNELS) useWorkspaceStore.getState().addSession('claude');
+    const before = useWorkspaceStore.getState().sessions;
+    useWorkspaceStore.getState().addChatSession('claude');
+    expect(useWorkspaceStore.getState().sessions).toEqual(before);
+    expect(useWorkspaceStore.getState().sessions.some((session) => (session.config as { chat?: boolean }).chat)).toBe(false);
+  });
+});
+
+describe('restoring a run into a full workspace', () => {
+  it('replaces a visible idle channel, never a Round Table’s lead or its hidden seat', () => {
+    const lead = { ...createSession('claude'), status: 'idle' as const }; const seat = createSession('codex');
+    const withTable = { ...lead, roundTable: { partner: seat.id, driver: 'claude' as const, rounds: 2, findings: [] } };
+    const running = Array.from({ length: MAX_CHANNELS - 3 }, () => ({ ...createSession('codex'), status: 'running' as const, runId: 'r' }));
+    const idle = createSession('claude');
+    useWorkspaceStore.setState({ sessions: [withTable, seat, ...running, idle] });
+    const run = { runId: 'h', sessionId: 'x', engine: 'codex', cwd: '/restored', config: { engine: 'codex', model: '', reasoningEffort: null } } as never;
+    expect(useWorkspaceStore.getState().restoreRun(run)).toBe(true);
+    const ids = useWorkspaceStore.getState().sessions.map((session) => session.id);
+    expect(ids).toContain(withTable.id); expect(ids).toContain(seat.id); expect(ids).not.toContain(idle.id);
+    useWorkspaceStore.setState({ sessions: [withTable, seat, ...running, { ...idle, status: 'running' as const }] });
+    expect(useWorkspaceStore.getState().restoreRun(run)).toBe(false);
+  });
+});
+
+describe('removing a Round Table\'s partner', () => {
+  const finding = { id: 'F1', severity: 'high' as const, evidence: '', text: 'problem', status: 'open' as const, response: '', check: '', reviewedAt: null, changedAt: null, round: 1, at: '2026-11-10T00:00:00.000Z' };
+  it('keeps the lead\'s record while it holds findings not yet saved, and drops it otherwise', () => {
+    for (const findings of [[finding], []]) {
+      const lead = createSession('claude'); const seat = createSession('codex'); const other = createSession('claude');
+      useWorkspaceStore.setState({ sessions: [{ ...lead, roundTable: { partner: seat.id, driver: 'codex', rounds: 3, findings } }, seat, other] });
+      useWorkspaceStore.getState().removeSession(seat.id);
+      const kept = useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id)!;
+      expect(useWorkspaceStore.getState().sessions.some((session) => session.id === seat.id)).toBe(false);
+      if (findings.length) expect(kept.roundTable?.findings).toHaveLength(1); else expect(kept.roundTable).toBeUndefined();
+    }
+  });
+});

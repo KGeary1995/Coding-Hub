@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+let reads = 0;
+vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async () => { reads++; return { day: '2026-11-02', claude: 0, codex: 0, cost: null, complete: false }; }) }));
 import type { UsageRecord } from '../../shared/hub';
 import { channelToday } from './channel-state';
-import { dayTotal } from './day-usage-store';
+import { dayTotal, FOLLOW_UP_MS, refreshDayUsage } from './day-usage-store';
 import { dailySeries, inWindow, logRecords, usageTotals } from './usage-summary';
 
 const now = new Date(2026, 10, 2, 15, 0);
@@ -24,5 +27,17 @@ describe("today's counts", () => {
     expect(dayTotal(logs, { tokens: 1500, cost: null }, now)).toEqual({ tokens: 1500, cost: null, logs: null });
     expect(dayTotal({ ...logs, day: '2026-11-01' }, { tokens: 10, cost: null }, now).tokens).toBe(10);
     expect(dayTotal(null, { tokens: 10, cost: null }, now).tokens).toBe(10);
+  });
+});
+
+describe('catching up on a long day', () => {
+  it('keeps one chain of follow-up reads, a second apart, however often the status bar asks', async () => {
+    vi.useFakeTimers();
+    try {
+      await refreshDayUsage(); await refreshDayUsage(); await refreshDayUsage(); expect(reads).toBe(3);
+      await vi.advanceTimersByTimeAsync(FOLLOW_UP_MS - 1); expect(reads).toBe(3);
+      await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(4);
+      await vi.advanceTimersByTimeAsync(FOLLOW_UP_MS); expect(reads).toBe(5);
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
   });
 });

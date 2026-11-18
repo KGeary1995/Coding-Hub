@@ -10,7 +10,7 @@ interface Kept { event: ChatEvent; size: number }
 
 /**
  * Recent chat events per channel, so a phone or another computer opening a chat sees its thread without re-reading the
- * CLI's transcript. Chat events never carry image data (a `user` event counts its images), so nothing large is kept.
+ * CLI's transcript. Chat events carry no image data (a `user` event counts its images; a table's go through forFollowers first), so nothing large is kept.
  * Streamed text is folded: consecutive pieces of one message join, and the finished message replaces them.
  */
 export class ChatReplayBuffer {
@@ -25,7 +25,9 @@ export class ChatReplayBuffer {
     }
     const last = entry.events.at(-1);
     if (event.type === 'delta' && last?.event.type === 'delta' && last.event.messageId === event.messageId) {
-      const joined: ChatEvent = { ...last.event, text: last.event.text + event.text }; this.replace(entry, entry.events.length - 1, joined); this.trim(entry); return;
+      // Its size grows by the piece's (JSON escapes characters one by one), so a long reply is not serialized whole per piece.
+      const joined: ChatEvent = { ...last.event, text: last.event.text + event.text }; const size = last.size + JSON.stringify(event.text).length - 2;
+      entry.bytes += size - last.size; entry.events[entry.events.length - 1] = { event: joined, size }; this.trim(entry); return;
     }
     if (event.type === 'assistant') this.remove(entry, (kept) => kept.event.type === 'delta' && kept.event.messageId === event.messageId);
     // Only the latest Round Table state matters to a viewer that joins later.
@@ -41,9 +43,6 @@ export class ChatReplayBuffer {
   forget(sessionId: string) { this.sessions.delete(sessionId); }
   clear() { this.sessions.clear(); }
 
-  private replace(entry: { events: Kept[]; bytes: number }, index: number, event: ChatEvent) {
-    const size = JSON.stringify(event).length; entry.bytes += size - entry.events[index].size; entry.events[index] = { event, size };
-  }
   private remove(entry: { events: Kept[]; bytes: number }, match: (kept: Kept) => boolean) {
     entry.events = entry.events.filter((kept) => { if (!match(kept)) return true; entry.bytes -= kept.size; return false; });
   }
@@ -51,6 +50,18 @@ export class ChatReplayBuffer {
   private trim(entry: { events: Kept[]; bytes: number }) {
     while (entry.events.length > 1 && (entry.events.length > CHAT_REPLAY_EVENTS || entry.bytes > CHAT_REPLAY_BYTES)) entry.bytes -= entry.events.shift()!.size;
   }
+}
+
+/**
+ * A chat event as phones and linked computers get it: a Round Table's images (the task's, up to 6 MB of base64, and a
+ * waiting message's) go as a count only. No follower shows them, and every table state would carry them: stringified for
+ * each follower on the main process, and enough to push the rest of the thread out of the replay (CHAT_REPLAY_BYTES).
+ */
+export function forFollowers(envelope: ChatEnvelope): ChatEnvelope {
+  const { event } = envelope; if (event.type !== 'table' || !event.table) return envelope;
+  const { waitingImages, chain, ...table } = event.table; if (!waitingImages?.length && !chain?.images?.length) return envelope;
+  const kept = chain ? (({ images: _images, ...rest }) => rest)(chain) : undefined;
+  return { ...envelope, event: { ...event, table: { ...table, ...(kept ? { chain: kept } : {}), ...(waitingImages?.length ? { waitingImageCount: waitingImages.length } : {}) } } };
 }
 
 /** Drops a resumed chat's oldest earlier messages until its history fits HISTORY_BYTES. */

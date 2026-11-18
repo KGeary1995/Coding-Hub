@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createECDH, createPublicKey, verify } from 'node:crypto';
-import { encrypt, pushEndpoint, pushSender, vapidHeader, vapidKeys } from './web-push';
+import { encrypt, pushEndpoint, pushSender, VAPID_CONTACT, vapidHeader, vapidKeys } from './web-push';
 
 describe('web push', () => {
   it('encrypts exactly as RFC 8291 appendix A', () => {
@@ -15,7 +15,9 @@ describe('web push', () => {
     const header = vapidHeader('https://fcm.googleapis.com/fcm/send/abc', keys, Date.parse('2026-10-24T12:00:00Z'));
     const [, token, key] = /^vapid t=([^,]+), k=(.+)$/.exec(header)!; expect(key).toBe(keys.publicKey);
     const [head, claims, signature] = token.split('.');
-    expect(JSON.parse(Buffer.from(claims, 'base64url').toString())).toMatchObject({ aud: 'https://fcm.googleapis.com', exp: Date.parse('2026-10-25T00:00:00Z') / 1000 });
+    expect(JSON.parse(Buffer.from(claims, 'base64url').toString())).toMatchObject({ aud: 'https://fcm.googleapis.com', exp: Date.parse('2026-10-25T00:00:00Z') / 1000, sub: VAPID_CONTACT });
+    // The contact is the public downloads page: the source repository is private.
+    expect(VAPID_CONTACT).toBe('https://github.com/KGeary1995/trace-releases');
     const publicKey = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: raw.subarray(1, 33).toString('base64url'), y: raw.subarray(33).toString('base64url') }, format: 'jwk' });
     expect(verify('sha256', Buffer.from(`${head}.${claims}`), { key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url'))).toBe(true);
   });

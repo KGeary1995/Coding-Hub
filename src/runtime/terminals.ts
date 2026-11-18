@@ -13,6 +13,7 @@ import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } fr
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
 import { forgetChatsExcept } from '../state/chat-store';
 import { osc52Text, unwrapCopied, type CopiedRow } from './copy-text';
+import { inputPieces } from './input-pieces';
 
 const MAC = /Mac/.test(navigator.userAgent);
 const WINDOWS = /Windows/.test(navigator.userAgent);
@@ -41,9 +42,10 @@ function readImageFile(file: File): Promise<string> {
  * lines to fit the window; copying joins those lines again. Claude Code's full-screen view selects text itself (a drag
  * there goes to the CLI, not the terminal) and copies it with an OSC 52 request, which on a linked computer's channel
  * arrives here with its output. It is honoured only just after the person used the mouse or keyboard in this channel,
- * so a CLI cannot change the clipboard on its own.
+ * so a CLI cannot change the clipboard on its own, and only in Claude Code and Codex channels (`agent`): in a plain
+ * terminal, `cat` on an untrusted file right after Enter could otherwise put a command of its choosing on the clipboard.
  */
-export function attachCopy(terminal: Terminal, element: HTMLElement) {
+export function attachCopy(terminal: Terminal, element: HTMLElement, agent: () => boolean) {
   element.addEventListener('copy', (event) => {
     if (!terminal.hasSelection() || !event.clipboardData) return;
     const rows = selectedRows(terminal); if (!rows?.length) return;
@@ -55,7 +57,7 @@ export function attachCopy(terminal: Terminal, element: HTMLElement) {
   let touched = 0; const touch = () => { touched = Date.now(); };
   element.addEventListener('mouseup', touch, true); element.addEventListener('keydown', touch, true);
   terminal.parser.registerOscHandler(52, (data) => {
-    const text = osc52Text(data); if (text !== null && Date.now() - touched < 3000) void window.codingHub?.copyText(text);
+    const text = osc52Text(data); if (text !== null && Date.now() - touched < 3000 && agent()) void window.codingHub?.copyText(text);
     return true;
   });
 }
@@ -68,7 +70,8 @@ function selectedRows(terminal: Terminal): CopiedRow[] | null {
     const line = buffer.getLine(y); if (!line) continue;
     const full = line.translateToString(false);
     const from = y === range.start.y ? range.start.x : 0; const to = y === range.end.y ? range.end.x : terminal.cols;
-    const part = full.slice(from, to);
+    // By cell column, not string index: a double-width character before the selection takes two cells but one character.
+    const part = line.translateToString(false, from, to);
     if (line.isWrapped && rows.length) rows[rows.length - 1].text += part;
     else rows.push({ text: part, startColumn: from, line: full });
   }
@@ -89,12 +92,43 @@ function attachDrop(id: string, element: HTMLElement) {
   });
 }
 
-interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void> }
+interface TerminalEntry { terminal: Terminal; element: HTMLDivElement; fit: FitAddon; run: RunReference | null; inputQueue: Promise<void>; webgl?: WebglAddon; webglRetry?: ReturnType<typeof setTimeout> }
 const terminals = new Map<string, TerminalEntry>();
 useHubStore.subscribe((state, previous) => {
+  // Terminals made before the preferences loaded, or before the setting changed, follow it now.
+  if (state.preferences.terminalWebGL !== previous.preferences.terminalWebGL) for (const entry of terminals.values()) setWebGL(entry, webglWanted());
   if (state.preferences.terminalFontSize === previous.preferences.terminalFontSize) return;
   for (const entry of terminals.values()) { entry.terminal.options.fontSize = state.preferences.terminalFontSize; try { entry.fit.fit(); } catch { /* Hidden terminal fits on remount. */ } }
 });
+
+/**
+ * WebGL drawing (Settings). When the graphics context is lost (a driver reset, the GPU process restarting), the addon
+ * waits 3 s for it to come back while the terminal draws nothing, then gives up for good. Instead the terminal goes back
+ * to the DOM renderer at once and tries WebGL again a few seconds later; new terminals try it too. After three losses
+ * within ten minutes every terminal stays on the DOM renderer until Trace restarts.
+ */
+const webglLosses: number[] = []; const LOSS_WINDOW = 10 * 60 * 1000; const RETRY_MS = 5000;
+let webglLostListener: (() => void) | null = null;
+/** Called once per lost graphics context (once for a reset that loses every terminal's), for the host's health record. */
+export function onWebGLContextLost(listener: (() => void) | null) { webglLostListener = listener; }
+function webglWanted() {
+  while (webglLosses.length && Date.now() - webglLosses[0] > LOSS_WINDOW) webglLosses.shift();
+  return useHubStore.getState().preferences.terminalWebGL === true && webglLosses.length < 3;
+}
+function setWebGL(entry: TerminalEntry, on: boolean) {
+  if (!on) { if (entry.webglRetry) clearTimeout(entry.webglRetry); entry.webglRetry = undefined; const addon = entry.webgl; entry.webgl = undefined; try { addon?.dispose(); } catch { /* Keep software rendering when the graphics context fails. */ } return; }
+  if (entry.webgl) return;
+  const addon = new WebglAddon();
+  try { entry.terminal.loadAddon(addon); entry.webgl = addon; addon.onContextLoss(() => webglLost(entry, addon)); }
+  catch { try { addon.dispose(); } catch { /* Never attached. */ } }
+}
+function webglLost(entry: TerminalEntry, addon: WebglAddon) {
+  if (entry.webgl !== addon) return;
+  // One GPU reset loses every terminal's context at once: losses within a second count (and are reported) as one.
+  setWebGL(entry, false); const now = Date.now();
+  if (!webglLosses.length || now - webglLosses[webglLosses.length - 1] > 1000) { webglLosses.push(now); webglLostListener?.(); }
+  entry.webglRetry = setTimeout(() => { entry.webglRetry = undefined; if ([...terminals.values()].includes(entry) && webglWanted()) setWebGL(entry, true); }, RETRY_MS);
+}
 
 function reportInputError(id: string, message: string) { useWorkspaceStore.getState().setSessionError(id, message); }
 
@@ -114,15 +148,11 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(element);
-  let webgl: WebglAddon | undefined;
-  const disposeWebGL = () => { const addon = webgl; webgl = undefined; try { addon?.dispose(); } catch { /* Keep software rendering when the graphics context fails. */ } };
-  if (useHubStore.getState().preferences.terminalWebGL === true) try {
-    webgl = new WebglAddon();
-    terminal.loadAddon(webgl);
-    webgl.onContextLoss(disposeWebGL);
-  } catch { disposeWebGL(); }
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);
+  if (webglWanted()) setWebGL(entry, true);
+  // The canvas's own event, seen on its way down: the addon's 3 s wait is not waited out (after its own listener has run).
+  element.addEventListener('webglcontextlost', () => { const addon = entry.webgl; if (addon) setTimeout(() => webglLost(entry, addon), 0); }, true);
   terminal.onData((data) => {
     // Enter on its own is the person sending their message, and with it any images they attached.
     if (data === '\r') markPastedImagesSent(session.id);
@@ -153,7 +183,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     if (WINDOWS) void showClipboardImage(session.id);
   }, true);
   attachDrop(session.id, element);
-  attachCopy(terminal, element);
+  attachCopy(terminal, element, () => { const config = useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config; return Boolean(config && isAgentConfig(config)); });
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
@@ -178,14 +208,10 @@ export function writeTerminal(id: string, data: string): Promise<boolean> {
   let succeeded = true; const sentAt = new Date().toISOString();
   entry.inputQueue = entry.inputQueue.then(async () => {
     try {
-      for (let offset = 0; offset < data.length;) {
+      for (const piece of inputPieces(data, 16 * 1024)) {
         if (entry.run?.runId !== run.runId) { succeeded = false; break; }
-        let end = Math.min(offset + 16 * 1024, data.length);
-        const last = data.charCodeAt(end - 1);
-        if (end < data.length && last >= 0xD800 && last <= 0xDBFF) end--;
-        const result = await window.codingHub!.writeSession({ ...run, data: data.slice(offset, end) });
+        const result = await window.codingHub!.writeSession({ ...run, data: piece });
         if (!result.ok) { succeeded = false; if (entry.run?.runId === run.runId) reportInputError(id, result.error.message); break; }
-        offset = end;
       }
     } catch { succeeded = false; reportInputError(id, 'The native terminal connection was lost.'); }
   });
@@ -257,6 +283,6 @@ export function focusTerminal(id: string) {
 }
 export function releaseRemovedTerminals(ids: string[]) {
   const retained = new Set(ids);
-  for (const [id, entry] of terminals) if (!retained.has(id)) { entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); clearPastedImages(id); }
+  for (const [id, entry] of terminals) if (!retained.has(id)) { setWebGL(entry, false); entry.terminal.dispose(); terminals.delete(id); forgetActivity(id); clearPastedImages(id); clearTerminalTitle(id); }
   forgetChatsExcept(retained);
 }

@@ -97,7 +97,7 @@ The tile **frame** (1 px border) takes the state colour when the state is waitin
    - Alerts: `◆ CH2 needs approval · …` in the waiting colour, or the failed colour if anything has failed. It shows "no alerts" otherwise.
    - A host indicator: a 6 px green dot and "host · local".
 3. **Workflow center is dissolved.** Recovery becomes the failed tile's Retry / Open log actions. Search and Templates move into the command menu. Support / Releases move into Help.
-4. Keyboard: `Alt+1…4` focuses a channel; `G` then a letter opens a view (U Usage, H History, T Tasks, V Verification, D Design, O Coaching, C Changes). Every destination is also reachable from the command menu.
+4. Keyboard: `Alt+1…8` (`Cmd+1…8` on a Mac) focuses a channel; `G` then a letter opens a view (U Usage, H History, T Tasks, V Verification, D Design, O Coaching, C Changes). Every destination is also reachable from the command menu.
 
 Map `NavigationView` in `src/state/workspace-store.ts` onto these groups. The existing view keys (`workspace`, `diff`, `projects`, `usage`…) can stay; only the chrome changes.
 

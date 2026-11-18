@@ -1,6 +1,8 @@
 import type { CLIEngine } from '../../../shared/types';
 export interface ProbeResult { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean }
 export interface AuthenticationStatus { state: 'authenticated' | 'not-authenticated' | 'unknown'; checkedAt: string; message: string }
+/** The message of a login check the CLI did not answer in time (a busy computer), told apart from an unsupported one. */
+export const AUTH_TIMED_OUT = 'The CLI did not report its login in time. Try again once the computer is less busy.';
 
 /** Never return CLI auth output: it can contain email addresses, account IDs, or credentials. */
 export function classifyAuthentication(engine: CLIEngine, result: ProbeResult): AuthenticationStatus {
@@ -18,5 +20,6 @@ export function classifyAuthentication(engine: CLIEngine, result: ProbeResult): 
     if (/\b(?:not logged in|not authenticated|no stored credentials)\b/i.test(text)) return { ...base, state: 'not-authenticated', message: 'The CLI reports no login. Run codex login in your system terminal.' };
     if (result.exitCode === 0 && /\b(?:logged in|authenticated)\b/i.test(text)) return { ...base, state: 'authenticated', message: 'The CLI reports a configured login.' };
   }
+  if (result.timedOut) return { ...base, state: 'unknown', message: AUTH_TIMED_OUT };
   return { ...base, state: 'unknown', message: 'Authentication status could not be verified locally. The CLI manages login, provider settings, and model access when it starts.' };
 }

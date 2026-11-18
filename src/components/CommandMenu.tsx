@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { channelNameNow } from '../state/channel-names';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
@@ -32,10 +33,12 @@ export function CommandMenu() {
   const [chosenScope, setChosenScope] = useState<CommandScope>('all');
   const [selected, setSelected] = useState(0);
   const [hits, setHits] = useState<SearchHit[]>([]);
+  /** The local search stopped at its limits before it read everything, so a match may be missing. */
+  const [limited, setLimited] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const { sessions: all, rootDirectory, setView, arrange } = useWorkspaceStore();
+  const { sessions: all, rootDirectory, setView, arrange } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, rootDirectory: s.rootDirectory, setView: s.setView, arrange: s.arrange })));
   // Round Table partners start, stop and are answered with their lead's channel.
   const sessions = useMemo(() => channelsOf(all), [all]);
   const usage = useHubStore((state) => state.usage);
@@ -68,10 +71,10 @@ export function CommandMenu() {
   // search skips the project folder, so a large project cannot use up the search's limits before the notes are read.
   // Hits from the previous query are cleared at once, so Enter cannot open one while the new search is pending.
   useEffect(() => {
-    setHits([]);
+    setHits([]); setLimited(false);
     if (!open || !window.codingHub || !searchesFiles(scope, text)) return;
     let live = true;
-    const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: scope === 'memory' ? null : rootDirectory, includeOutput: false }).then((result) => { if (live) setHits(result.hits); }).catch(() => { if (live) setHits([]); }); }, 300);
+    const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: scope === 'memory' ? null : rootDirectory, includeOutput: false }).then((result) => { if (live) { setHits(result.hits); setLimited(result.limited); } }).catch(() => { if (live) setHits([]); }); }, 300);
     return () => { live = false; clearTimeout(timer); };
   }, [open, scope, text, rootDirectory]);
   const items = useMemo(() => {
@@ -90,7 +93,7 @@ export function CommandMenu() {
       { id: 'skills', label: 'Inspect skills and plugins', run: go('skills') },
       { id: 'help', label: 'Open help and AI guide', run: go('help') },
       { id: 'settings', label: 'Open workspace settings', run: go('settings') },
-      { id: 'tools', label: 'Open more tools (coaching, tasks, verification)', run: go('tools') },
+      { id: 'tools', label: 'Open more tools (coaching, verification)', run: go('tools') },
       { id: 'search', label: 'Search local workspace', run: () => { useWorkspaceStore.setState({ workflowTab: 'search' }); setView('workflow'); } },
       { id: 'recovery', label: 'Recover a failed session', run: () => { useWorkspaceStore.setState({ workflowTab: 'recovery' }); setView('workflow'); } },
       { id: 'templates', label: 'Apply a project template', run: () => { useWorkspaceStore.setState({ workflowTab: 'templates' }); setView('workflow'); } },
@@ -140,6 +143,7 @@ export function CommandMenu() {
               {item.shortcut && <kbd>{item.shortcut}</kbd>}
             </div>)}
           </div>)}
+          {limited && <p className="tr-command-empty" role="status">The search stopped before it read everything, so some files or notes may be missing. Type more, or search memory alone with #.</p>}
           {!items.length && <p className="tr-command-empty">{searchesFiles(scope, text) || scope === 'actions' || scope === 'channels' || !text ? 'No matches.' : 'Keep typing to search files and memory.'}</p>}
         </div>
         <footer className="tr-command-footer">↑↓ move · ⏎ run · Tab scope · Esc close</footer>

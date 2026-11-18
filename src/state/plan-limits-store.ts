@@ -13,10 +13,14 @@ export async function refreshPlanLimits(force = false) {
   finally { usePlanLimits.setState({ loading: false }); }
 }
 
-/** When a window resets, in the person's words: "in 3 h", "Oct 31, 8:00 AM", or as the CLI said it. */
+/**
+ * When a window resets, in the person's words: "in 3 h", "Oct 31, 8:00 AM", or as the CLI said it. Only ISO times are
+ * read as times (as alerts.ts does): Date.parse takes "Nov 4" as 2001. A reset already past says nothing until the next reading.
+ */
 export function resetText(window: LimitWindow, now = Date.now()) {
   if (!window.resets) return null;
-  const at = Date.parse(window.resets); if (Number.isNaN(at)) return window.resets;
+  const at = /^\d{4}-/.test(window.resets) ? Date.parse(window.resets) : NaN; if (Number.isNaN(at)) return window.resets;
+  if (at <= now) return null;
   const minutes = Math.round((at - now) / 60000);
   if (minutes < 60) return `in ${Math.max(1, minutes)} min`;
   if (minutes < 24 * 60) return `in ${Math.round(minutes / 60)} h`;

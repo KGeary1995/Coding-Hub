@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import type { ChannelControl, LinkedComputerEvent } from '../../../shared/remote';
 import { DESKTOP_IDLE_SECONDS, RemoteServer, type RemoteHost } from './remote-server';
-import { LinkedComputers, linkableAddress } from './linked-computers';
+import { INPUT_TIMEOUT, LINK_LIMIT, LinkedComputers, linkableAddress, tailnetOf } from './linked-computers';
+import { ChatReplayBuffer } from './chat-replay';
+import { save } from '../workbench/local-store';
 
 const cleanup: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const item of cleanup.splice(0).reverse()) await item(); });
@@ -396,5 +398,145 @@ describe('linked computers', () => {
     expect((await call('/api/chat', { action: 'table-open', sessionId: 'pc-chat', runId: RUN, partner: { sessionId: 'pc-chat', runId: RUN }, driver: 'claude', rounds: 1 })).status).toBe(403);
     // This window's tab answers there too.
     await mac.chat(PC, { action: 'interrupt', sessionId: 'pc-chat', runId: RUN }); expect(chats.at(-1)).toEqual({ action: 'interrupt', sessionId: 'pc-chat', runId: RUN });
+  });
+
+  const TOKEN = 'a'.repeat(43); const quiet = { output: () => {}, resize: () => {}, changed: () => {} };
+  const keep = (root: string, url: string) => save(root, 'linked-computers.json', [{ id: PC, name: 'Obsidian-Halo', url, token: TOKEN, linkedAt: new Date().toISOString() }]);
+
+  it('sends a linked computer’s key only to the address saved with it, and offers Drive addresses only on this tailnet', async () => {
+    const SPARE = '44444444-4444-4444-8444-444444444444'; const root = temporary(); keep(root, 'https://pc.tail1234.ts.net/');
+    // Someone who can write the Drive folder points the PC's record at their own Funnel name, on another tailnet.
+    const advertised = [{ id: PC, name: 'Obsidian-Halo', url: 'https://evil.tail9999.ts.net/' }, { id: SPARE, name: 'Spare', url: 'https://spare.tail9999.ts.net/' }];
+    const asked: string[] = [];
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input); asked.push(url);
+      if (url === 'https://pc2.tail1234.ts.net/api/hello') return new Response(JSON.stringify({ computer: { id: PC, name: 'Obsidian-Halo' } }));
+      return new Response('{}', { status: 503 });
+    }) as typeof fetch;
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => advertised, () => {}, quiet, fetcher); cleanup.push(() => mac.stop());
+    expect(tailnetOf('https://pc.tail1234.ts.net/')).toBe('tail1234.ts.net'); expect(tailnetOf('http://127.0.0.1:1/')).toBeNull();
+    expect(mac.access(PC)).toEqual({ name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: TOKEN });
+    expect(mac.status().find((item) => item.id === PC)?.url).toBe('https://pc.tail1234.ts.net/');
+    // Before this computer's tailnet is known, an unlinked computer is offered where Drive says.
+    expect(mac.status().find((item) => item.id === SPARE)?.url).toBe('https://spare.tail9999.ts.net/');
+    // Tailscale lists the PC under a new name: its key moves there; the other tailnet's names are no longer offered or asked.
+    mac.peers = async () => ['https://pc2.tail1234.ts.net/']; await mac.autoLink();
+    expect(mac.status().find((item) => item.id === SPARE)?.url).toBeNull();
+    expect(asked.some((url) => url.includes('tail9999'))).toBe(false);
+    expect(mac.access(PC)?.url).toBe('https://pc2.tail1234.ts.net/');
+  });
+
+  it('starts from a saved list with bad entries, keeping the good ones, and from one it cannot read at all', () => {
+    const root = temporary(); const at = new Date().toISOString();
+    save(root, 'linked-computers.json', [{ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at }, { id: MAC, name: 'Short key', url: 'https://mac.tail1234.ts.net/', token: 'short', linkedAt: at }, 'not a link', null]);
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet, (async () => new Response('{}', { status: 503 })) as typeof fetch); cleanup.push(() => mac.stop());
+    expect(() => mac.start()).not.toThrow();
+    expect(mac.status().map((item) => [item.id, item.linked])).toEqual([[PC, true]]); expect(mac.access(PC)?.token).toBe(TOKEN);
+    fs.writeFileSync(path.join(root, 'linked-computers.json'), '{ not json');
+    const broken = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet); cleanup.push(() => broken.stop());
+    expect(() => broken.start()).not.toThrow(); expect(broken.status()).toEqual([]);
+  });
+
+  it('refuses to save a key in the wrong format, or a link past the limit, and leaves the saved list as it was', () => {
+    const root = temporary(); const at = new Date().toISOString(); const id = (index: number) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`;
+    const full = Array.from({ length: LINK_LIMIT }, (_, index) => ({ id: id(index), name: `PC ${index}`, url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at }));
+    save(root, 'linked-computers.json', full); const before = fs.readFileSync(path.join(root, 'linked-computers.json'), 'utf8');
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet); cleanup.push(() => mac.stop());
+    const keep = (link: object) => (mac as unknown as { keep(link: object): void }).keep(link);
+    expect(() => keep({ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: 'x'.repeat(42), linkedAt: at })).toThrow(expect.objectContaining({ code: 'LINK_KEY' }));
+    expect(() => keep({ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at })).toThrow(expect.objectContaining({ code: 'LINK_LIMIT' }));
+    expect(fs.readFileSync(path.join(root, 'linked-computers.json'), 'utf8')).toBe(before);
+  });
+
+  it('sets a saved list it cannot read aside before saving over it, and saves nothing when it cannot', () => {
+    const root = temporary(); const file = path.join(root, 'linked-computers.json'); const at = new Date().toISOString(); fs.writeFileSync(file, '{ not json');
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet, (async () => new Response('{}', { status: 503 })) as typeof fetch); cleanup.push(() => mac.stop());
+    const keep = (link: object) => (mac as unknown as { keep(link: object): void }).keep(link);
+    const copy = vi.spyOn(fs, 'copyFileSync').mockImplementationOnce(() => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); });
+    expect(() => keep({ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at })).toThrow(expect.objectContaining({ code: 'LOCAL_DATA' }));
+    expect(fs.readFileSync(file, 'utf8')).toBe('{ not json'); copy.mockRestore();
+    keep({ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at });
+    expect(fs.readFileSync(file + '.unreadable', 'utf8')).toBe('{ not json'); expect(mac.access(PC)?.token).toBe(TOKEN);
+  });
+
+  it('asks no computer for a key past the limit, and hands back a key it refuses', async () => {
+    const root = temporary(); const at = new Date().toISOString(); const id = (index: number) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`;
+    save(root, 'linked-computers.json', Array.from({ length: LINK_LIMIT }, (_, index) => ({ id: id(index), name: `PC ${index}`, url: 'https://pc.tail1234.ts.net/', token: TOKEN, linkedAt: at })));
+    const asked: string[] = []; const token = 'short';
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); asked.push(`${url} ${new Headers(init?.headers).get('Authorization') ?? ''}`.trim());
+      if (url.endsWith('api/hello')) return new Response(JSON.stringify({ computer: { id: PC, name: 'Obsidian-Halo' } }));
+      if (url.endsWith('api/pair') || url.endsWith('api/auto-link')) return new Response(JSON.stringify({ token, device: { kind: 'computer' }, computer: { id: PC } }));
+      return new Response('{}');
+    }) as typeof fetch;
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/' }], () => {}, quiet, fetcher); cleanup.push(() => mac.stop());
+    await expect(mac.link(PC, 'CODE123456')).rejects.toMatchObject({ code: 'LINK_LIMIT' });
+    mac.peers = async () => ['https://pc.tail1234.ts.net/']; await mac.autoLink();
+    expect(asked).toEqual(['https://pc.tail1234.ts.net/api/hello']);
+    // With room again, a key in a format this Trace cannot use is given back to the computer that made it.
+    await mac.unlink(id(0)); asked.length = 0;
+    await expect(mac.link(PC, 'CODE123456')).rejects.toMatchObject({ code: 'LINK_KEY' });
+    expect(asked).toEqual(['https://pc.tail1234.ts.net/api/pair', 'https://pc.tail1234.ts.net/api/unpair Bearer short']);
+    expect(mac.access(PC)).toBeNull();
+  });
+
+  it('ignores sizes no terminal can have from a linked computer, rather than allocating them', () => {
+    const events: LinkedComputerEvent[] = [];
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [], (event) => events.push(event), quiet); cleanup.push(() => mac.stop()); mac.watch(PC);
+    const connection = { link: { id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/', token: TOKEN, linkedAt: '' }, channels: [] as { cols: number | null }[], mirrors: new Map(), chats: new ChatReplayBuffer(), fits: new Map() };
+    const event = (type: string, data: unknown) => (mac as unknown as { event(connection: unknown, type: string, data: unknown): void }).event(connection, type, data);
+    event('replay', { sessionId: 's', runId: 'r', data: 'x', cols: 200000, rows: 2000 }); event('replay', { sessionId: 's', runId: 'r', data: 'x', cols: -5, rows: 24 });
+    expect(connection.mirrors.size).toBe(0); expect(events).toEqual([]);
+    event('replay', { sessionId: 's', runId: 'r', data: 'x', cols: 100, rows: 30 }); expect(connection.mirrors.size).toBe(1);
+    event('resize', { sessionId: 's', runId: 'r', cols: 2000000, rows: 400 }); expect(events.map((item) => item.type)).toEqual(['replay']);
+    // A channel listed with an impossible size is still listed, without that size.
+    event('channels', [{ sessionId: 's', channel: 1, title: 'Claude Code', engine: 'claude', runId: 'r', running: true, attention: null, cols: 999999, rows: 24 }]);
+    expect(connection.channels).toEqual([expect.objectContaining({ sessionId: 's', cols: null, rows: 24 })]);
+    for (const mirror of connection.mirrors.values()) mirror.dispose();
+  });
+
+  it('knows its own tailnet from its Tailscale name, with no other computer online', async () => {
+    const SPARE = '44444444-4444-4444-8444-444444444444'; const asked: string[] = [];
+    const advertised = [{ id: SPARE, name: 'Spare', url: 'https://spare.tail9999.ts.net/' }, { id: PC, name: 'Obsidian-Halo', url: 'https://pc.tail1234.ts.net/' }];
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => advertised, () => {}, quiet, (async (input: string | URL | Request) => { asked.push(String(input)); return new Response('{}', { status: 503 }); }) as typeof fetch);
+    cleanup.push(() => mac.stop()); mac.tailnet = () => 'tail1234.ts.net';
+    expect(mac.status().find((item) => item.id === SPARE)?.url).toBeNull(); expect(mac.status().find((item) => item.id === PC)?.url).toBe('https://pc.tail1234.ts.net/');
+    await mac.autoLink(); await expect(mac.link(SPARE, '123456')).rejects.toMatchObject({ code: 'LINK_ADDRESS' });
+    expect(asked.some((url) => url.includes('tail9999'))).toBe(false); expect(asked).toContain('https://pc.tail1234.ts.net/api/hello');
+  });
+
+  it('gives a phone’s typing to a linked computer a time limit, but not the window’s, which queues keys behind each other', async () => {
+    const root = temporary(); keep(root, 'http://127.0.0.1:1/'); const signals: (AbortSignal | null | undefined)[] = [];
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet, (async (_input: string | URL | Request, init?: RequestInit) => { signals.push(init?.signal); return new Response('{}'); }) as typeof fetch);
+    cleanup.push(() => mac.stop());
+    await mac.input(PC, 's', 'r', 'y'); expect(signals).toEqual([undefined]);
+    const link = { id: PC, name: 'Obsidian-Halo', url: 'http://127.0.0.1:1/', token: TOKEN, linkedAt: '' };
+    (mac as unknown as { connections: Map<string, unknown> }).connections.set(PC, { link, channels: [{ sessionId: 's' }] });
+    await mac.write('s', 'r', 'y'); expect(signals[1]).toBeInstanceOf(AbortSignal); expect(INPUT_TIMEOUT).toBe(8000);
+    (mac as unknown as { connections: Map<string, unknown> }).connections.clear();
+  });
+
+  it('drops and closes a stream whose event never ends', async () => {
+    const root = temporary(); keep(root, 'http://127.0.0.1:1/'); let signal: AbortSignal | null | undefined;
+    const piece = new TextEncoder().encode('x'.repeat(8 * 1024 * 1024));
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (!String(input).includes('api/stream')) return new Response('{}');
+      signal ??= init?.signal; let sent = 0;
+      return new Response(new ReadableStream<Uint8Array>({ pull(controller) { if (sent++ === 0) controller.enqueue(new TextEncoder().encode('event: output\ndata: ')); else if (sent < 8) controller.enqueue(piece); } }));
+    }) as typeof fetch;
+    const mac = new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet, fetcher); cleanup.push(() => mac.stop()); mac.start();
+    await until(() => Boolean(mac.status()[0]?.error), 'the dropped stream');
+    expect(mac.status()[0].error).toBe('Obsidian-Halo sent more in one piece than Trace takes, so the connection was dropped.');
+    // The oversized stream itself is closed, not left open behind the next connection.
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('stops telling linked computers this one is in use once the window that watched them is gone', async () => {
+    const posts: string[] = [];
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [], () => {}, quiet, (async (input: string | URL | Request) => { posts.push(String(input)); return new Response('{}'); }) as typeof fetch, () => 0);
+    cleanup.push(() => mac.stop());
+    mac.watch(PC); expect((mac as unknown as { activeTimer: unknown }).activeTimer).not.toBeNull();
+    mac.unwatchAll(); expect((mac as unknown as { activeTimer: unknown }).activeTimer).toBeNull();
+    expect((mac as unknown as { watching: Set<string> }).watching.size).toBe(0);
   });
 });

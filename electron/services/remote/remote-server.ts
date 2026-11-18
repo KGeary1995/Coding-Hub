@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import net, { type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { z } from 'zod';
@@ -9,7 +9,7 @@ import type { AccountLabel } from '../../../shared/accounts';
 import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type ChatReplay, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteMe, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import type { ChatEnvelope, ChatRequest } from '../../../shared/chat';
 import { chatRequestSchema } from '../../../shared/schemas';
-import { ChatReplayBuffer } from './chat-replay';
+import { ChatReplayBuffer, forFollowers } from './chat-replay';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
 import { HubError } from '../cli/engine-adapter';
@@ -26,6 +26,8 @@ import { FROM_PHONE, remoteHistory, remoteMemory, remoteTasks, remoteUsage } fro
 /** What the remote needs from the rest of the app: the saved channels, the running CLIs, and a way to type into one. */
 /** A channel's live coaching as phones and linked computers see it: only while it has something to say. */
 const coached = (tip: import('../../../shared/coaching').LiveTip | null) => tip && (tip.tips.length || tip.review) ? { coaching: { id: tip.id, tips: tip.tips, review: tip.review } } : {};
+/** Today's usage, the plan limits last read, and the daily budgets (null when Settings cannot be read). */
+export type RemoteUsageSource = { today: DayUsage; limits: PlanLimits[]; budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null };
 export interface RemoteHost {
   /** `seatedAt`: a Round Table's partner, which has no channel of its own; the lead it sits with carries the table. */
   sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel; seatedAt?: string }[];
@@ -61,8 +63,8 @@ export interface RemoteHost {
    */
   screenService?(): boolean;
   openScreenService?(viewer: string): Promise<{ socket: Duplex; head: Buffer }>;
-  /** Today's usage, the plan limits last read, and the daily budgets (null when Settings cannot be read). */
-  usage?(): { today: DayUsage; limits: PlanLimits[]; budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null };
+  /** RemoteUsageSource; it may wait for a read of the CLI logs still under way, so the phone gets current numbers. */
+  usage?(): RemoteUsageSource | Promise<RemoteUsageSource>;
   /** The task board, and moving a card on it (as dragging it on the desktop does). */
   tasks?(): Task[];
   taskStatus?(id: string, status: Task['status']): Promise<void>;
@@ -72,7 +74,8 @@ export interface RemoteHost {
   resume?(key: string): Promise<void>;
   /** The memory project of each of this computer's channels (by its folder), each once, and that folder. */
   memoryProjects?(): { project: string; directory: string }[];
-  memoryNotes?(project: string): MemoryNote[];
+  /** May read the notes without holding the process (MemoryService.listLater). */
+  memoryNotes?(project: string): MemoryNote[] | Promise<MemoryNote[]>;
   /** A handoff the person wrote on a phone, as the desktop's Memory saves one. */
   writeMemory?(project: string, title: string, content: string): void;
 }
@@ -126,6 +129,19 @@ type Device = z.infer<typeof deviceSchema>;
 const settingsSchema = z.object({ enabled: z.boolean(), autoLink: z.boolean().optional() }).strict();
 const pairSchema = z.object({ code: z.string().min(1).max(40), name: z.string().max(200), machineId: z.uuid().optional() }).strict();
 const autoLinkSchema = z.object({ name: z.string().max(200), machineId: z.uuid() }).strict();
+/**
+ * Computers removed here, by the machine id they sent: Trace on such a computer links again only with a code. The id is
+ * the caller's own word, so a program that makes up a new one is not stopped by this; `onAutoLinked` is what shows it.
+ * A file of its own, so an older Trace still reads remote.json.
+ */
+const UNLINKED_FILE = 'remote-unlinked.json'; const UNLINKED_MAX = 200;
+const unlinkedSchema = z.array(z.uuid()).max(UNLINKED_MAX);
+/** A waiting prompt's text as phones and linked computers get it: a whole shell command can be kilobytes (linked computers take 2,000 characters). */
+const ATTENTION_LIMIT = 1000; const ALERT_BODY = 200;
+/** A phone's size on a channel no stream of it follows any more is given back after this (a reconnect takes about 2 s). */
+const ORPHAN_MS = 10000;
+/** At most one handoff from a device in this window: each one also syncs the project's memory. */
+const HANDOFF_INTERVAL = 5000;
 const phoneKeySchema = z.object({ name: z.string().max(200), relayKey: z.string().min(1).max(100) }).strict();
 const phoneKeyRevokeSchema = z.object({ relayKey: z.string().min(1).max(100) }).strict();
 const computerKeySchema = z.object({ id: z.uuid() }).strict();
@@ -137,6 +153,8 @@ const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict
 const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'Only Claude Code and Codex channels can be chats.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
+/** How much of a body past its limit is read and dropped so the sender gets the 413; past that the connection is cut. */
+const DROP_MAX = 64 * 1024 * 1024;
 /** A Windows computer's screen (Trace's screen service) asks no password of its own, so a phone needs the same setting as starting agents. */
 const SCREEN_REFUSED = 'This phone can’t see or control this computer’s screen. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
@@ -161,7 +179,9 @@ const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(
  * The phone remote. It listens only on this computer (127.0.0.1); a phone reaches it through `tailscale serve`, which
  * adds HTTPS and admits only devices on the person's tailnet. On top of that every request needs a device key, given
  * once to a phone that presents a short-lived pairing code shown on this computer. Only key hashes are stored, and a
- * key can be revoked at any time. A phone can read channel output, type into running CLIs and use chat channels; it
+ * key can be revoked at any time. With Link my computers automatically on (the default), another computer Tailscale says
+ * is signed in to the same login gets a computer's key without a code (`owner`); this computer is told each time
+ * (`onAutoLinked`), and Trace on a computer removed here needs a code again. A phone can read channel output, type into running CLIs and use chat channels; it
  * starts, stops, restarts or adds channels only once the person allows that for it (`canRun`, off by default). Another
  * of the person's computers, linked with a code made for computers, can always do those; phones see linked computers'
  * channels through this one (RemoteRelay).
@@ -190,6 +210,12 @@ export class RemoteServer {
    * call this computer directly when that one is off, so these origins are allowed alongside this computer's own.
    */
   allowedOrigins: () => string[] = () => [];
+  /** A computer linked itself without a code (see `owner`): the person here is told, so one they do not know is seen. */
+  onAutoLinked: (name: string, machineId: string) => void = () => {};
+  /** A start still listening: a second start (startup and a toggle at once) or a stop waits for it. */
+  private starting: Promise<void> | null = null; private stopping: Promise<void> | null = null;
+  /** When each device last wrote a handoff. */
+  private handoffs = new Map<string, number>();
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private channelsTimer: ReturnType<typeof setTimeout> | null = null; private sentChannels = '';
   tailscale: TailscaleState = { installed: false, running: false, host: null, serving: false, funnel: false, error: null };
@@ -200,14 +226,14 @@ export class RemoteServer {
    * Channels a phone is showing at its own size, like tmux: the CLI redraws for the phone, and the desktop's size is
    * kept to put back when the phone leaves the channel or disconnects, or the person types at the desktop.
    */
-  private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number }; cols: number; rows: number; forced: boolean }>();
-  /** Phone sizes asked for while the person was using this computer, applied once it goes idle. */
-  private wants = new Map<string, { device: string; runId: string; cols: number; rows: number }>();
+  private phoneSizes = new Map<string, { device: string; runId: string; desktop: { cols: number; rows: number }; cols: number; rows: number; forced: boolean; at: number }>();
+  /** Phone sizes asked for while the person was using this computer, applied once it goes idle. `at`: when asked. */
+  private wants = new Map<string, { device: string; runId: string; cols: number; rows: number; at: number }>();
   /**
    * Which of this computer's phones last asked for its size on a linked computer's channel. The linked computer sees all
    * of them as this one computer, so only that phone leaving gives the channel back; another phone leaving keeps it.
    */
-  private relaySizes = new Map<string, string>();
+  private relaySizes = new Map<string, { device: string; at: number }>();
   /** When each linked computer last said its person was using this computer's channels (`/api/active`). */
   private usedFrom = new Map<string, number>();
   private desktopTimer: ReturnType<typeof setInterval> | null = null;
@@ -259,22 +285,38 @@ export class RemoteServer {
   /** On unless turned off: the person's own computers link without a code (see `owner`). */
   get autoLink() { return this.settings().autoLink ?? true; }
   setAutoLink(autoLink: boolean) { save(this.root, 'remote.json', { ...this.settings(), autoLink }); return this.status(); }
+  private unlinked(): string[] { return load(this.root, UNLINKED_FILE, unlinkedSchema, []); }
+  /** Adds a removed computer to the list, or takes it off once it is linked with a code; written only when it changes. */
+  private setUnlinked(machineId: string, removed: boolean) {
+    const list = this.unlinked(); if (list.includes(machineId) === removed) return;
+    save(this.root, UNLINKED_FILE, removed ? [...list, machineId].slice(-UNLINKED_MAX) : list.filter((id) => id !== machineId));
+  }
 
   async setEnabled(enabled: boolean) { save(this.root, 'remote.json', { ...this.settings(), enabled }); if (enabled) await this.start(); else await this.stop(); }
   async start() {
+    // Waits for a start or stop under way, then looks again: a stop waiting on a start closes what that start opened.
+    while (this.starting || this.stopping) await (this.starting ?? this.stopping)!.catch(() => {});
     if (this.server || !this.enabled) return;
-    const server = http.createServer((request, response) => { void this.handle(request, response).catch(() => { if (!response.headersSent) this.send(response, 500, { error: 'The remote request failed.' }); else response.destroy(); }); });
+    this.starting = this.listen().finally(() => { this.starting = null; }); return this.starting;
+  }
+  private async listen() {
+    const server = http.createServer((request, response) => { void this.handle(request, response).catch((error) => { if (!response.headersSent) this.failed(response, error); else response.destroy(); }); });
     try {
       await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
       this.server = server; this.error = null;
       server.on('upgrade', (request, socket, head) => void this.upgrade(request, socket, head).catch(() => socket.destroy()));
       for (const run of this.host.running()) if (!this.replay.has(run.sessionId)) this.mirror(run.sessionId, run.runId);
-      this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); }, 25000);
+      this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); this.releaseOrphans(); }, 25000);
     } catch (error) {
       this.error = (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ? `Port ${this.port} on this computer is in use by another program.` : 'The phone remote could not start.';
     }
   }
   async stop() {
+    const stopping = this.stopping = this.close();
+    try { await stopping; } finally { if (this.stopping === stopping) this.stopping = null; }
+  }
+  private async close() {
+    await this.starting?.catch(() => {});
     if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
     for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenOwners.clear(); this.screenTickets.clear();
@@ -304,7 +346,7 @@ export class RemoteServer {
     // The phone app served by another of the person's computers may connect here directly (its own computer off), as
     // its other requests do (see handle()); it still needs a ticket of its own.
     const origin = request.headers.origin;
-    if (origin && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '') && !this.allowedOrigins().includes(origin.replace(/\/$/, '').toLowerCase())) return refuse(403, 'Forbidden');
+    if (origin && !this.ownOrigin(origin) && !this.allowedOrigins().includes(origin.replace(/\/$/, '').toLowerCase())) return refuse(403, 'Forbidden');
     const ticket = this.screenTickets.get(url.searchParams.get('ticket') ?? ''); this.screenTickets.delete(url.searchParams.get('ticket') ?? '');
     if (!ticket || ticket.expires < Date.now() || !this.devices().some((device) => device.id === ticket.device)) return refuse(401, 'Unauthorized');
     const key = request.headers['sec-websocket-key'];
@@ -325,7 +367,7 @@ export class RemoteServer {
       const receive = (chunk: Buffer) => {
         try {
           for (const event of reader.push(chunk)) {
-            if (event.type === 'data') server.write(event.data);
+            if (event.type === 'data') { if (!server.write(event.data)) socket.pause(); }
             else if (event.type === 'ping') socket.write(frame(event.data, 0xa));
             else { socket.write(frame(Buffer.alloc(0), 0x8)); end(); return; }
           }
@@ -333,7 +375,9 @@ export class RemoteServer {
       };
       if (head.length) receive(head);
       socket.on('data', receive);
-      server.on('data', (data: Buffer) => socket.write(frame(data)));
+      // Each side waits while the other is behind (a phone on a slow link), so screen data queues there, not in Trace.
+      server.on('data', (data: Buffer) => { if (!socket.write(frame(data))) server.pause(); });
+      socket.on('drain', () => server.resume()); server.on('drain', () => socket.resume());
       server.once('close', end); server.on('error', end); socket.once('close', end); socket.once('error', end);
     };
     if (service) {
@@ -357,7 +401,7 @@ export class RemoteServer {
   pair(kind: RemoteDeviceKind = 'phone') {
     if (!this.server) throw new HubError('REMOTE_OFF', 'Turn on phone access first.');
     if (this.devices().length >= 20) throw new HubError('REMOTE_LIMIT', 'Up to 20 phones and computers can be paired. Remove one first.');
-    const bytes = randomBytes(10); const code = [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('');
+    const code = Array.from({ length: 10 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
     this.pairing = { code, expires: Date.now() + PAIRING_MINUTES * 60000, attempts: 0, kind };
     return this.status();
   }
@@ -381,6 +425,8 @@ export class RemoteServer {
     const devices = this.devices(); const device = devices.find((item) => item.id === id); if (!device) throw new HubError('REMOTE_DEVICE', 'That phone is no longer paired.');
     // A linked computer's phones were given keys here through it (relayKey `<its id>:<phone>`): they go with it.
     const removed = new Set([id, ...devices.filter((item) => item.relayKey?.startsWith(id + ':')).map((item) => item.id)]);
+    // Trace on a computer removed here does not link itself again: Remove means a code is needed (see `owner`).
+    if (device.kind === 'computer' && device.machineId) this.setUnlinked(device.machineId, true);
     this.saveDevices(devices.filter((item) => !removed.has(item.id)));
     this.dropped(removed);
     // A phone of this computer was given keys on linked computers through this one: ask them to forget those too.
@@ -416,8 +462,10 @@ export class RemoteServer {
     }
     if (event.type === 'data') { this.output(event.sessionId, event.runId, event.data); return; }
     if (event.type === 'attention') {
-      this.attention.set(event.sessionId, { runId: event.runId, message: event.message }); this.broadcastChannels();
-      if (this.server) void this.alert(event.sessionId, 'waiting', `${this.channelLabel(event.sessionId)} needs you`, event.message).catch(() => {});
+      const message = event.message.length > ATTENTION_LIMIT ? event.message.slice(0, ATTENTION_LIMIT - 1) + '…' : event.message;
+      this.attention.set(event.sessionId, { runId: event.runId, message }); this.broadcastChannels();
+      // A push message is one 4 KB record; the desktop's own alert shows as much.
+      if (this.server) void this.alert(event.sessionId, 'waiting', `${this.channelLabel(event.sessionId)} needs you`, message.slice(0, ALERT_BODY)).catch(() => {});
       return;
     }
     // The phone shows why a CLI stopped the way the desktop does.
@@ -431,8 +479,8 @@ export class RemoteServer {
    * Every chat event the owning window gets: kept for replay, and sent to phones following that channel and to linked
    * computers (which pass it on to their own phones and tabs).
    */
-  onChat(envelope: ChatEnvelope) {
-    this.chats.record(envelope);
+  onChat(full: ChatEnvelope) {
+    const envelope = forFollowers(full); this.chats.record(envelope);
     const payload = `event: chat\ndata: ${eventJSON(envelope)}\n\n`;
     for (const stream of this.streams) if (stream.sessionId === envelope.sessionId || stream.all) this.write(stream, payload);
   }
@@ -448,6 +496,7 @@ export class RemoteServer {
   }
   private output(sessionId: string, runId: string, data: string) {
     const mirror = this.replay.get(sessionId); if (mirror?.runId === runId) mirror.write(data);
+    if (!this.streams.size) return;
     const payload = `event: output\ndata: ${eventJSON({ sessionId, runId, data })}\n\n`;
     for (const stream of this.streams) if (stream.sessionId === sessionId || stream.all) this.write(stream, payload);
   }
@@ -468,6 +517,7 @@ export class RemoteServer {
     for (const id of [...this.replay.keys()]) if (!current.has(id)) this.forget(id);
     for (const id of this.chats.sessionIds()) if (!current.has(id)) this.chats.forget(id);
     for (const id of [...this.attention.keys()]) if (!current.has(id)) this.attention.delete(id);
+    for (const id of [...this.failures.keys()]) if (!current.has(id)) this.failures.delete(id);
     for (const key of [...this.alerted.keys()]) if (!current.has(key.slice(0, key.lastIndexOf(':')))) this.alerted.delete(key);
     if (this.channelsTimer || !this.streams.size) return;
     this.channelsTimer = setTimeout(() => { this.channelsTimer = null; if (JSON.stringify(this.channels()) !== this.sentChannels) this.broadcastChannels(); }, 250);
@@ -505,7 +555,7 @@ export class RemoteServer {
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
     if (!run || !this.host.resize) throw new HubError('STALE_SESSION', 'This channel is not running.');
-    if (!force && !this.desktopAway(device)) { this.wants.set(sessionId, { device, runId, cols, rows }); this.watchDesktop(); return false; }
+    if (!force && !this.desktopAway(device)) { this.wants.set(sessionId, { device, runId, cols, rows, at: Date.now() }); this.watchDesktop(); return false; }
     this.wants.delete(sessionId); this.apply(device, sessionId, runId, cols, rows, force); return true;
   }
   /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
@@ -513,7 +563,7 @@ export class RemoteServer {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId); if (!run || !this.host.resize) return;
     const hold = this.phoneSizes.get(sessionId);
     const desktop = hold?.runId === runId ? hold.desktop : { cols: run.cols ?? 80, rows: run.rows ?? 24 };
-    this.phoneSizes.set(sessionId, { device, runId, desktop, cols, rows, forced });
+    this.phoneSizes.set(sessionId, { device, runId, desktop, cols, rows, forced, at: Date.now() });
     if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
     this.watchDesktop();
   }
@@ -535,7 +585,7 @@ export class RemoteServer {
   /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
   checkDesktop() {
     if (this.idle() === undefined) return;
-    for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced && this.idle(hold.device)! < 3) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows }); this.release(sessionId, hold.device, true); }
+    for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced && this.idle(hold.device)! < 3) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows, at: hold.at }); this.release(sessionId, hold.device, true); }
     for (const [sessionId, want] of [...this.wants]) if (this.idle(want.device)! >= DESKTOP_IDLE_SECONDS) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
     if (!this.wants.size && ![...this.phoneSizes.values()].some((hold) => !hold.forced) && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
   }
@@ -547,9 +597,20 @@ export class RemoteServer {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === hold.runId);
     if (run && this.host.resize) try { this.host.resize({ sessionId, runId: hold.runId }, hold.desktop.cols, hold.desktop.rows); this.resized(sessionId); } catch { /* The run ended. */ }
   }
+  /**
+   * Sizes held or waiting for a device no stream of which follows that channel any more, for longer than a reconnect
+   * takes: its request arrived after it went (locked, out of signal), so nothing else would give the channel back.
+   */
+  private releaseOrphans(now = Date.now()) {
+    const follows = (device: string, sessionId: string) => [...this.streams].some((stream) => stream.device === device && (stream.all || stream.sessionId === sessionId));
+    for (const [sessionId, want] of [...this.wants]) if (now - want.at > ORPHAN_MS && !follows(want.device, sessionId)) this.wants.delete(sessionId);
+    for (const [sessionId, hold] of [...this.phoneSizes]) if (now - hold.at > ORPHAN_MS && !follows(hold.device, sessionId)) this.release(sessionId, hold.device);
+    // A linked computer's channel: there the hold is this computer's, whose stream stays open, so only this one can give it back.
+    for (const [sessionId, hold] of [...this.relaySizes]) if (now - hold.at > ORPHAN_MS && !follows(hold.device, sessionId)) void this.relayRelease(sessionId, hold.device).catch(() => {});
+  }
   /** One of this computer's phones left a linked computer's channel: gives it back there only if that phone sized it. */
   private async relayRelease(sessionId: string, device: string) {
-    if (!this.relay || this.relaySizes.get(sessionId) !== device) return;
+    if (!this.relay || this.relaySizes.get(sessionId)?.device !== device) return;
     this.relaySizes.delete(sessionId); await this.relay.size(sessionId, '', null);
   }
 
@@ -610,10 +671,28 @@ export class RemoteServer {
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     response.end(JSON.stringify(body));
   }
-  private async body(request: http.IncomingMessage, limit = 16384) {
-    let size = 0; const chunks: Buffer[] = [];
-    for await (const chunk of request) { size += (chunk as Buffer).length; if (size > limit) throw new HubError('REMOTE_BODY', 'Request too large.'); chunks.push(chunk as Buffer); }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown;
+  /**
+   * A request's JSON body. Past the limit the rest is read and dropped rather than the connection cut, so the sender
+   * gets the 413 that says why (see `failed`); a sender still going DROP_MAX past it is cut off.
+   */
+  private body(request: http.IncomingMessage, limit = 16384) {
+    return new Promise<unknown>((resolve, reject) => {
+      let size = 0; const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => {
+        size += chunk.length; if (size <= limit) return void chunks.push(chunk);
+        chunks.length = 0; reject(new HubError('REMOTE_BODY', 'Request too large.')); if (size > limit + DROP_MAX) request.destroy();
+      });
+      request.on('end', () => { if (size > limit) return; try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { reject(new HubError('REMOTE_JSON', 'The request was not valid JSON.')); } });
+      request.on('error', reject); request.on('close', () => reject(new HubError('REMOTE_BODY', 'The request ended early.')));
+    });
+  }
+  /** A request that failed: too large or not JSON says so; anything else is a generic 500, as everywhere on the host. */
+  private failed(response: http.ServerResponse, error: unknown) {
+    const code = error instanceof HubError ? error.code : '';
+    // No `Connection: close`: closing while the sender is still sending resets the connection before it reads the 413.
+    if (code === 'REMOTE_BODY') return this.send(response, 413, { error: 'Request too large.' });
+    if (code === 'REMOTE_JSON') return this.send(response, 400, { error: 'The request was not valid JSON.' });
+    this.send(response, 500, { error: 'The remote request failed.' });
   }
   /** Makes a key for a phone or computer that proved itself, and keeps only its hash. */
   private issue(kind: RemoteDeviceKind, rawName: string, machineId: string | undefined) {
@@ -631,8 +710,11 @@ export class RemoteServer {
   /**
    * The request came through `tailscale serve` from a computer signed in to the same Tailscale login as this one.
    * Serve removes any Tailscale-User-* headers the sender wrote and sets its own from the tailnet's record of who is
-   * connecting; it sets none for tagged devices or Funnel (refused in `handle`). A program on this computer could call
-   * the loopback port with the header written in, but it already runs as the person and can read Trace's keys.
+   * connecting; it sets none for tagged devices or Funnel (refused in `handle`). It says nothing of the device type, so
+   * a phone on that login can ask too, and a program on this computer can call the loopback port with the header
+   * written in (one run by the person can read Trace's keys anyway). Hence each auto-link is shown here
+   * (`onAutoLinked`), and Trace on a computer removed here (the same machine id) is refused until it links with a code
+   * (`unlinked`). A caller that sends a new machine id is not refused: only the notification shows it.
    */
   private owner(request: http.IncomingMessage) {
     const login = request.headers['tailscale-user-login'];
@@ -654,14 +736,22 @@ export class RemoteServer {
     if (host === '127.0.0.1' || host === 'localhost') return true;
     return Boolean(this.tailscale.host) && host === this.tailscale.host!.toLowerCase();
   }
+  /**
+   * A page's origin is this server's own only when all of it matches: the loopback address and port it listens on, or
+   * HTTPS on its tailnet name. A page served on another local port (a dev server, say) is another site.
+   */
+  private ownOrigin(origin: string) {
+    const value = origin.replace(/\/$/, '').toLowerCase(); const port = this.address ?? this.port;
+    return value === `http://127.0.0.1:${port}` || value === `http://localhost:${port}` || Boolean(this.tailscale.host) && value === `https://${this.tailscale.host!.toLowerCase()}`;
+  }
 
   private async handle(request: http.IncomingMessage, response: http.ServerResponse) {
     if (!this.allowedHost(request.headers.host)) return this.send(response, 421, { error: 'Unknown host.' });
     // Tailscale Funnel would put the remote on the public internet; refuse rather than rely on the device key alone.
     if (request.headers['tailscale-funnel-request'] !== undefined) return this.send(response, 403, { error: 'The phone remote is not available through Tailscale Funnel.' });
     const origin = request.headers.origin;
-    const sibling = Boolean(origin) && !this.allowedHost(URL.canParse(origin!) ? new URL(origin!).host : '') && this.allowedOrigins().includes(origin!.replace(/\/$/, '').toLowerCase());
-    if (origin && !sibling && !this.allowedHost(URL.canParse(origin) ? new URL(origin).host : '')) return this.send(response, 403, { error: 'Cross-site request refused.' });
+    const sibling = Boolean(origin) && !this.ownOrigin(origin!) && this.allowedOrigins().includes(origin!.replace(/\/$/, '').toLowerCase());
+    if (origin && !sibling && !this.ownOrigin(origin)) return this.send(response, 403, { error: 'Cross-site request refused.' });
     if (sibling) {
       // The phone app from another of the person's computers, calling this one directly; it still needs its own key.
       response.setHeader('Access-Control-Allow-Origin', origin!); response.setHeader('Vary', 'Origin');
@@ -681,8 +771,13 @@ export class RemoteServer {
       if (!parsed.success || !pairing || pairing.expires < Date.now()) return this.send(response, 401, { error: 'This pairing code has expired. Start pairing again on the computer.' });
       if (++pairing.attempts > PAIRING_ATTEMPTS) { this.pairing = null; return this.send(response, 401, { error: 'Too many tries. Start pairing again on the computer.' }); }
       if (!same(hash(parsed.data.code.toUpperCase()), hash(pairing.code))) return this.send(response, 401, { error: 'That pairing code is not right.' });
+      const machineId = pairing.kind === 'computer' ? parsed.data.machineId : undefined;
+      // Full since the code was made: the code is kept, to use again once one is removed.
+      if (this.devices().filter((item) => !(machineId && item.kind === 'computer' && item.machineId === machineId)).length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one on the computer, then enter the code again.' });
       this.pairing = null;
-      return this.send(response, 200, this.issue(pairing.kind, parsed.data.name, pairing.kind === 'computer' ? parsed.data.machineId : undefined));
+      // Linked with a code: a computer removed before may link itself again from now on.
+      if (machineId) this.setUnlinked(machineId, false);
+      return this.send(response, 200, this.issue(pairing.kind, parsed.data.name, machineId));
     }
     // The person's other computers find this one on the tailnet and link to it without a code (see `owner`).
     if (request.method === 'GET' && url.pathname === '/api/hello') {
@@ -693,9 +788,12 @@ export class RemoteServer {
       if (!this.owner(request)) return this.send(response, 403, { error: 'Link with a code from Settings → Other computers.' });
       const parsed = autoLinkSchema.safeParse(await this.body(request));
       if (!parsed.success || parsed.data.machineId === this.identity?.id) return this.send(response, 400, { error: 'Not a computer to link.' });
+      if (this.unlinked().includes(parsed.data.machineId)) return this.send(response, 403, { error: 'This computer was removed there. Link it with a code from Settings → Other computers.' });
       const others = this.devices().filter((item) => !(item.kind === 'computer' && item.machineId === parsed.data.machineId));
       if (others.length >= 20) return this.send(response, 409, { error: 'Up to 20 phones and computers can be paired. Remove one first.' });
-      return this.send(response, 200, this.issue('computer', parsed.data.name, parsed.data.machineId));
+      const linked = this.issue('computer', parsed.data.name, parsed.data.machineId);
+      try { this.onAutoLinked(linked.device.name, parsed.data.machineId); } catch { /* Telling the person must not undo the link. */ }
+      return this.send(response, 200, linked);
     }
     if (!url.pathname.startsWith('/api/')) return this.send(response, 404, { error: 'Not found.' });
     const device = this.device(request); if (!device) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
@@ -733,6 +831,8 @@ export class RemoteServer {
         // A linked computer that closed (or lost the connection) gives back every channel it showed at its size.
         if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
+      // What was last broadcast is no longer what every stream has: the next change is sent even if it matches that.
+      this.sentChannels = '';
       this.opening(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // A chat's recent thread, ahead of its live events (written now, before any screen replay holds the stream back).
       for (const replay of all ? this.chats.sessionIds().filter((id) => this.local(id)).map((id) => this.chats.take(id)) : sessionId ? [this.chatReplay(sessionId, kind)] : [])
@@ -836,7 +936,7 @@ export class RemoteServer {
           const { sessionId, runId, cols, rows, force } = parsed.data;
           // `held`: whether the channel is now drawn at the phone's size (false while the desktop is in use).
           if (this.local(sessionId)) return this.send(response, 200, { ok: true, held: this.phoneSize(device.id, sessionId, runId, cols, rows, force) });
-          else if (kind === 'phone' && this.relay) { await this.relay.size(sessionId, runId, { cols, rows }); this.relaySizes.set(sessionId, device.id); }
+          else if (kind === 'phone' && this.relay) { await this.relay.size(sessionId, runId, { cols, rows }); this.relaySizes.set(sessionId, { device: device.id, at: Date.now() }); }
           else return this.send(response, 400, { error: 'Unknown channel.' });
         }
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be resized.' }); }
@@ -879,11 +979,12 @@ export class RemoteServer {
     const unpaired = kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.';
     if (request.method === 'GET' && url.pathname === '/api/usage') {
       if (!this.host.usage) return this.send(response, 409, { error: 'This computer cannot show its usage right now.' });
-      const { today, limits, budget } = this.host.usage(); return this.send(response, 200, remoteUsage(today, limits, budget));
+      const { today, limits, budget } = await this.host.usage(); return this.send(response, 200, remoteUsage(today, limits, budget));
     }
     if (request.method === 'GET' && url.pathname === '/api/tasks') {
       if (!this.host.tasks) return this.send(response, 409, { error: 'This computer cannot show its tasks right now.' });
-      return this.send(response, 200, remoteTasks(this.host.tasks(), this.host.sessions().map((session) => session.id)));
+      // Numbered as the channel list numbers them: a Round Table's seats have no channel of their own.
+      return this.send(response, 200, remoteTasks(this.host.tasks(), this.host.sessions().filter((session) => !session.seatedAt).map((session) => session.id)));
     }
     if (request.method === 'POST' && url.pathname === '/api/task-status') {
       // Reading the board is open to every paired device; moving a card takes the same permission as starting agents.
@@ -914,7 +1015,7 @@ export class RemoteServer {
     }
     if (request.method === 'GET' && url.pathname === '/api/memory') {
       if (!this.host.memoryProjects || !this.host.memoryNotes) return this.send(response, 409, { error: 'This computer cannot show its memory right now.' });
-      try { return this.send(response, 200, this.host.memoryProjects().map((project) => remoteMemory(project, this.host.memoryNotes!(project.project)))); }
+      try { const notes = this.host.memoryNotes; const memory = []; for (const project of this.host.memoryProjects()) memory.push(remoteMemory(project, await notes(project.project))); return this.send(response, 200, memory); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Memory could not be read.' }); }
     }
     if (request.method === 'POST' && url.pathname === '/api/memory') {
@@ -923,7 +1024,9 @@ export class RemoteServer {
       if (!this.current(device.id)) return this.send(response, 401, { error: unpaired });
       if (!this.host.memoryProjects || !this.host.writeMemory) return this.send(response, 409, { error: 'This computer cannot save handoffs right now.' });
       if (!this.host.memoryProjects().some((project) => project.project === parsed.data.project)) return this.send(response, 400, { error: 'Unknown project.' });
-      try { this.host.writeMemory(parsed.data.project, parsed.data.title, parsed.data.content); }
+      if (Date.now() - (this.handoffs.get(device.id) ?? 0) < HANDOFF_INTERVAL) return this.send(response, 429, { error: 'A handoff was just saved from here. Wait a few seconds before saving another.' });
+      // Counted once saved: a handoff that failed can be tried again at once.
+      try { this.host.writeMemory(parsed.data.project, parsed.data.title, parsed.data.content); this.handoffs.set(device.id, Date.now()); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The handoff could not be saved.' }); }
       return this.send(response, 200, { ok: true });
     }

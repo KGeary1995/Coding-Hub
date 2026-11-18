@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { openView, addChannel } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
@@ -120,5 +121,5 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
       if (window) console.error('Session events at failure:\n' + await window.evaluate(() => (window.events ?? []).slice(-60).map((event) => `${String(event.runId).slice(0, 8)} ${event.type}${event.type === 'data' ? ' ' + JSON.stringify(event.data.slice(-200)) : event.message ? ' ' + JSON.stringify(event.message) : ''}`).join('\n')));
     } catch { /* The window may already be gone. */ }
     throw error;
-  } finally { if (app) await app.close(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

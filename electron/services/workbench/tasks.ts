@@ -50,7 +50,8 @@ export class Tasks {
     if (request.action === 'task-status' || request.action === 'task-send') {
       const current = tasks.find((t) => t.id === request.id); if (!current) throw new HubError('TASK_MISSING', 'This task is no longer here.');
       let value: Task;
-      if (request.action === 'task-status') { const { outcome: _old, outcomeNote: _note, ...rest } = current; value = { ...rest, status: request.status, ...(request.outcome ? { outcome: request.outcome, ...(request.outcomeNote ? { outcomeNote: request.outcomeNote } : {}) } : {}) }; }
+      // Back in To do, a task is no longer sent: its send time and mark go, so nothing reads it as sent until it is sent again.
+      if (request.action === 'task-status') { const { outcome: _old, outcomeNote: _note, ...kept } = current; const { sentAt: _sent, sendId: _send, ...unsent } = kept; value = { ...(request.status === 'queued' ? unsent : kept), status: request.status, ...(request.outcome ? { outcome: request.outcome, ...(request.outcomeNote ? { outcomeNote: request.outcomeNote } : {}) } : {}) }; }
       else {
         if (!current.sessionId) throw new HubError('TASK_CHANNEL', 'Choose the channel to give this task to first.');
         // What was already changed when the task was sent is not this task's work.

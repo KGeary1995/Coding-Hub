@@ -1,7 +1,7 @@
 import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import type { PermissionLevel } from '../../../shared/types';
-import { apply, type Finding, findingsFor, MAX_FINDINGS, nextFindingId, parseAnswers, parseFindings, roomForFinding } from '../../../shared/findings';
+import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
 
 type Engine = 'claude' | 'codex';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
@@ -27,8 +27,16 @@ const RECENT = 8;
 const MAX_IMAGES = 10;
 /** The most image data (base64 characters) a waiting message keeps through a restart; the saved workspace carries it. */
 export const KEEP_IMAGES = 6_000_000;
+/** The longest waiting message a saved workspace holds (savedWorkspaceSchema `waiting`): messages joined past it are refused, not saved unsaveable. */
+export const KEEP_WAITING = 200_000;
+/** Refuses a message that would make the waiting ones longer than a workspace can save. */
+export function checkWaiting(queued: { text: string } | null, text: string) {
+  if (queued && queued.text.length + 2 + text.length > KEEP_WAITING) throw new HubError('TABLE_WAITING_LONG', `The messages waiting for the agents would be longer than ${KEEP_WAITING.toLocaleString('en-US')} characters. Send this one after they finish.`);
+}
 /** Tools a reviewer never gets to use: file edits, and leaving Claude's plan mode. */
 export const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode', 'File changes']);
+/** Whether a permission request is an edit, by the name shown or the tool's own name (Claude may show a display name). */
+export const isEdit = (event: { toolName: string; tool?: string }) => EDITS.has(event.toolName) || (event.tool !== undefined && EDITS.has(event.tool));
 /**
  * A read-only seat's request that is not an edit (a command, a web fetch) at Full access: allowed at once, as the
  * person's level says, instead of an approval card. Returns whether it was. Edits are declined before this.
@@ -56,6 +64,8 @@ interface Table {
   cwd: string; findings: Finding[];
   /** The files when the current turns were sent; and whether the answers are being read into the record (the next round waits for it). */
   turnStart: Promise<string | null> | null; reviewing: boolean;
+  /** Stop was pressed: the turns it ends are expected, not failures. Cleared with the person's next message. */
+  halted: boolean;
 }
 
 /**
@@ -119,7 +129,7 @@ export class RoundTables {
     if (lead.engine === partner.engine) throw new HubError('TABLE_ENGINES', 'A Round Table seats Claude Code and Codex: add the other agent.');
     if (leadRun.cwd !== partnerRun.cwd) throw new HubError('TABLE_FOLDER', 'Both agents must work in the same folder.');
     if (leadRun.owner !== owner || partnerRun.owner !== owner) throw new HubError('TABLE_OWNER', 'Both chats must be open in this window.');
-    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: false };
+    const table: Table = { owner, lead, partner, driver, rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: leadRun.cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: false, halted: false };
     if (saved.waiting !== undefined || saved.waitingImages?.length) table.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) };
     table.kept = Boolean(table.queued);
     this.tables.set(leadRunId, table); this.roles(table);
@@ -150,6 +160,7 @@ export class RoundTables {
     if (table.lead.busy || table.partner.busy || table.reviewing) {
       // Waiting messages go as one, and a message carries at most ten images: refused rather than dropped.
       if (table.queued && table.queued.images.length + images.length > MAX_IMAGES) throw new HubError('TABLE_IMAGES', `The waiting messages already have ${table.queued.images.length} images and a message carries at most ${MAX_IMAGES}. Send this one after the agents finish.`);
+      checkWaiting(table.queued, text);
       table.queued = table.queued ? { text: [table.queued.text, text].filter(Boolean).join('\n\n'), images: [...table.queued.images, ...images] } : { text, images };
       // Published at once, so the window saves it: a restart before the agents finish keeps the message.
       this.publish(table); return;
@@ -157,7 +168,7 @@ export class RoundTables {
     this.ask(table, text, images);
   }
   private ask(table: Table, text: string, images: ChatImage[]) {
-    table.round = 0; table.agreed = false; table.phase = 'answering'; this.snapshot(table);
+    table.round = 0; table.agreed = false; table.halted = false; table.phase = 'answering'; this.snapshot(table);
     // The person's messages reach the agents from here, not from the window, so they are remembered here.
     for (const seat of [table.lead, table.partner]) this.remember(seat.runId, { type: 'user', text, images: images.length });
     for (const seat of [table.lead, table.partner]) {
@@ -192,7 +203,7 @@ export class RoundTables {
    * both as soon as they have stopped (it was shown as sent, so it is not dropped).
    */
   stop(leadRunId: string) {
-    const table = this.leading(leadRunId); table.round = table.rounds;
+    const table = this.leading(leadRunId); table.round = table.rounds; table.halted = true;
     for (const seat of [table.lead, table.partner]) if (seat.busy) this.host.interrupt(seat.runId);
     table.phase = table.lead.busy || table.partner.busy ? table.phase : 'idle'; this.publish(table);
   }
@@ -205,10 +216,17 @@ export class RoundTables {
     for (const seat of [table.lead, table.partner]) { try { this.host.setReadOnly(seat.runId, false); } catch { /* Ended. */ } }
     this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: null, ...(byPerson ? { closed: true as const } : {}) } });
   }
-  /** A chat run ended: its table closes for now (the window seats both again once both run). */
+  /**
+   * A chat run ended: its table closes for now (the window seats both again once both run). The other seat, if still at
+   * work, is stopped first (as at a hierarchy table): it is not left working, with its read-only lifted, for a table
+   * that is gone.
+   */
   ended(runId: string) {
     this.recent.delete(runId);
-    const table = this.tableOf(runId); if (table) this.close(table.lead.runId, false);
+    const table = this.tableOf(runId); if (!table) return;
+    // Stopped before its read-only is lifted: the interrupt reaches the CLI ahead of the change of mode.
+    for (const seat of [table.lead, table.partner]) if (seat.busy && seat.runId !== runId) { try { this.host.interrupt(seat.runId); } catch { /* Ended. */ } }
+    this.close(table.lead.runId, false);
   }
 
   /**
@@ -222,7 +240,7 @@ export class RoundTables {
     const table = this.tableOf(runId); if (!table) return null;
     const seat = table.lead.runId === runId ? table.lead : table.partner;
     if (event.type === 'assistant') { const words = event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n'); if (words) seat.text = seat.text ? `${seat.text}\n${words}` : words; return null; }
-    if (event.type === 'permission' && seat.engine !== table.driver && EDITS.has(event.toolName)) {
+    if (event.type === 'permission' && seat.engine !== table.driver && isEdit(event)) {
       this.host.answer(runId, event.requestId, false);
       return `Trace declined ${event.toolName} for ${NAME[seat.engine]}: the reviewer does not edit files. Swap the driver to let it.`;
     }
@@ -232,10 +250,18 @@ export class RoundTables {
     if (seat.stale) {
       seat.busy = false; seat.stale = false; seat.text = '';
       if (!table.lead.busy && !table.partner.busy && !table.reviewing && table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); }
+      // The newcomer's old turn ended after the lead's summary came in: the summary goes to it now.
+      else if (!table.lead.busy && !table.partner.busy && table.phase === 'joining') this.settle(table, table.lead);
       else { if (!table.lead.busy && !table.partner.busy && table.phase !== 'joining') table.phase = 'idle'; this.publish(table); }
       return null;
     }
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
+    // A turn that failed (a usage limit, an API error) or was interrupted from the tile, not one the table's Stop ended,
+    // ends the discussion: the other agent is not sent "(no answer)" for every round left. Worded to fit either cause.
+    if (event.isError && !table.halted) {
+      table.round = table.rounds;
+      this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text: `${NAME[seat.engine]} ended its turn early, so the Round Table discussion ends here${event.error ? `: ${event.error}` : '.'}` } });
+    }
     this.settle(table, seat);
     return null;
   }
@@ -295,8 +321,8 @@ export class RoundTables {
     const changed: Finding[] = []; const at = new Date().toISOString();
     let full = 0;
     for (const found of parseFindings(reviewer.answer ?? '')) {
-      if (!roomForFinding(table.findings)) { full++; continue; }
-      const finding: Finding = { id: nextFindingId(table.findings), ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: table.round, at };
+      const id = makeRoomForFinding(table.findings); if (!id) { full++; continue; }
+      const finding: Finding = { id, ...found, status: 'open', response: '', check: '', reviewedAt: null, changedAt: null, round: table.round, at };
       table.findings.push(finding); changed.push(finding);
     }
     for (const [seat, role] of [[reviewer, 'reviewer'], [driver, 'driver']] as const) for (const { id, verb, note } of parseAnswers(seat.answer ?? '', role)) {
@@ -304,6 +330,8 @@ export class RoundTables {
     }
     // A full record (MAX_FINDINGS, none verified to make room) says so, rather than dropping findings without a word.
     if (full) this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text: `The review record is full (${MAX_FINDINGS} findings, none verified), so ${full} new ${full === 1 ? 'finding was' : 'findings were'} not recorded. Close the table to save the record to shared memory, then open it again.` } });
+    // So is a line that looks like a review line but could not be read.
+    const unread = unreadNotice([...unreadLines(reviewer.answer ?? '', 'reviewer'), ...unreadLines(driver.answer ?? '', 'driver')]); if (unread) this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text: unread } });
     if (!changed.length || !this.host.stateOf) { if (changed.length) this.publish(table); return; }
     const [before, after] = await Promise.all([table.turnStart ?? Promise.resolve(null), this.host.stateOf(table.cwd).catch(() => null)]);
     const short = after ? after.slice(0, 12) : null; const moved = before !== null && after !== null && before !== after;

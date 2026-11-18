@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { TOOL_RESULT_LIMIT, type ChatBlock, type ChatEvent, type ChatHistoryMessage } from '../../../shared/chat';
+import { nextTaskPrompt, SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 
 /** The end of a transcript that is read for a resumed conversation's earlier messages. */
 const READ_LIMIT = 8 * 1024 * 1024;
@@ -27,8 +28,61 @@ const parse = (line: string): Json | null => { try { return record(JSON.parse(li
  * and what the agent replied and ran, with the results of its tools. Context the CLI adds itself is left out.
  */
 export function chatHistory(engine: 'claude' | 'codex', file: string): Extract<ChatEvent, { type: 'history' }> {
+  const history = historyOf(engine, tail(file)); return { ...history, messages: history.messages.slice(-MESSAGES) };
+}
+
+/** The most a task read goes back through a transcript: far past any one task, short of holding a runaway file. */
+const TASK_READ_LIMIT = 256 * 1024 * 1024; const CHUNK = 1024 * 1024;
+/** Bytes that start another task's prompt: its send id, or the instruction every task prompt carries. */
+const NEXT_SEND = Buffer.from('Task t-'); const INSTRUCTION = Buffer.from(JSON.stringify(SIGNAL_INSTRUCTION).slice(1, -1));
+/** Offsets of the lines in `region` that contain any of `needles`, newest first. */
+function linesWith(region: Buffer, needles: Buffer[]): number[] {
+  const starts = new Set<number>();
+  for (const needle of needles) for (let at = region.lastIndexOf(needle); at >= 0; at = at > 0 ? region.lastIndexOf(needle, at - 1) : -1) starts.add(region.lastIndexOf(10, at) + 1);
+  return [...starts].sort((a, b) => b - a);
+}
+/**
+ * A task's part of a conversation, for the reply to it: the newest user message that carries `mark` (the task's send
+ * mark, "Task <sendId>:"), then the last MESSAGES messages of what followed, up to the next task's prompt, read from at
+ * most READ_LIMIT before that point (the task can have run for hours). The transcript is read backwards a piece at a
+ * time without holding the process, keeping only where lines of interest start. Tool results are left out (the reply is
+ * text). Null when no message carries the mark (or the file cannot be read).
+ */
+export async function taskHistory(engine: 'claude' | 'codex', file: string, mark: string): Promise<Extract<ChatEvent, { type: 'history' }> | null> {
+  // As the mark appears inside a JSON line.
+  const raw = Buffer.from(JSON.stringify(mark).slice(1, -1)); let handle: fs.promises.FileHandle;
+  try { handle = await fs.promises.open(file, 'r'); } catch { return null; }
+  const users = (line: string) => historyOf(engine, [line]).messages.filter((message) => message.role === 'user');
+  try {
+    const size = (await handle.stat()).size; let position = size;
+    // `carry`: the start of the piece read last, up to its first line break (a line that may begin in an earlier piece).
+    // Pieces are joined as bytes, so no character is split. `stop`: where the next task's prompt starts, if one was sent.
+    let carry = Buffer.alloc(0); let stop = size;
+    while (position > 0 && size - position < TASK_READ_LIMIT) {
+      const length = Math.min(CHUNK, position); position -= length; const piece = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(piece, 0, length, position); const block = Buffer.concat([piece.subarray(0, bytesRead), carry]);
+      const cut = position > 0 ? block.indexOf(10) + 1 : 0; if (position > 0 && cut === 0) { carry = block; continue; }
+      carry = block.subarray(0, cut); const region = block.subarray(cut); const offset = position + cut;
+      for (const start of linesWith(region, [raw, NEXT_SEND, INSTRUCTION])) {
+        const end = region.indexOf(10, start); const bytes = region.subarray(start, end < 0 ? region.length : end); const line = bytes.toString('utf8');
+        const said = users(line);
+        if (bytes.includes(raw) && said.some((message) => message.text.includes(mark))) return { type: 'history', messages: [...said.filter((message) => message.text.includes(mark)).slice(-1), ...await after(handle, offset + start + bytes.length + 1, stop)], results: {} };
+        if (said.some((message) => nextTaskPrompt(message.text, mark))) stop = offset + start;
+      }
+    }
+    return null;
+  } catch { return null; } finally { await handle.close().catch(() => {}); }
+  /** The last MESSAGES messages between `from` and `to`, read from at most READ_LIMIT before `to`, from the start of a whole line. */
+  async function after(file: fs.promises.FileHandle, from: number, to: number): Promise<ChatHistoryMessage[]> {
+    if (from >= to) return [];
+    const start = Math.max(from, to - READ_LIMIT); const buffer = Buffer.alloc(to - start); const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    const lines = buffer.subarray(0, bytesRead).toString('utf8').split('\n');
+    return historyOf(engine, start > from ? lines.slice(1) : lines).messages.slice(-MESSAGES);
+  }
+}
+
+function historyOf(engine: 'claude' | 'codex', lines: string[]): Extract<ChatEvent, { type: 'history' }> {
   const messages: ChatHistoryMessage[] = []; const results: Extract<ChatEvent, { type: 'history' }>['results'] = {};
-  const lines = tail(file);
   if (engine === 'claude') {
     for (const line of lines) {
       const event = parse(line); if (!event || event.isSidechain || event.isMeta) continue;
@@ -72,7 +126,7 @@ export function chatHistory(engine: 'claude' | 'codex', file: string): Extract<C
       }
     }
   }
-  return { type: 'history', messages: messages.slice(-MESSAGES), results };
+  return { type: 'history', messages, results };
 }
 
 /** A chat event as plain text for the run's saved output, so chats can be searched and exported like terminals. */

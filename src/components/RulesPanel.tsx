@@ -1,11 +1,26 @@
 import { useEffect, useState } from 'react';
 import { ProjectValidation } from './ProjectValidation';
 import { Check, FolderOpen, RefreshCw, Save, ShieldCheck } from 'lucide-react';
-import type { DeviceSyncStatus, SharedRules } from '../../shared/hub';
+import type { DeviceSyncStatus, RulesTarget, SharedRules } from '../../shared/hub';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { hubCall } from '../state/hub-store';
 
 const EXAMPLE = 'Preserve public APIs unless I explicitly request a breaking change.\nInspect existing code before adding a dependency.\nRun relevant tests after meaningful changes; report checks you could not run.\nDo not commit, push, deploy, or modify credentials unless I ask.\nBefore finishing, save a handoff with decisions, changed files, validation, and remaining work.';
+
+/**
+ * A project registered for shared rules that cannot be read (its folder was deleted, most often) can be removed from the
+ * list; the host refuses while the folder still exists, and never touches a file in it.
+ */
+export const forgettable = (target: RulesTarget, rules: SharedRules) => Boolean(target.error) && rules.directories.includes(target.directory);
+/**
+ * What the panel holds after a Remove. The host's write changes the revision, so saved rules that changed meanwhile (from
+ * another computer) would otherwise pass Save's RULES_CHANGED check: an untouched editor takes the new text, and a draft
+ * keeps the old revision, so Save is refused until the person reloads.
+ */
+export function afterForget(snapshot: SharedRules, next: SharedRules, draft: string): { snapshot: SharedRules; content: string; stale: boolean } {
+  if (next.content === snapshot.content) return { snapshot: next, content: draft, stale: false };
+  return draft === snapshot.content ? { snapshot: next, content: next.content, stale: false } : { snapshot: { ...next, revision: snapshot.revision }, content: draft, stale: true };
+}
 
 export function RulesPanel() {
   const { rootDirectory, sessions } = useWorkspaceStore();
@@ -50,6 +65,18 @@ export function RulesPanel() {
     } catch (e) { setError(e instanceof Error ? e.message : 'The project could not be added.'); }
     finally { setBusy(false); }
   }
+  /** Takes a missing project off the list, keeping the draft and the other selections as they are. */
+  async function forget(directory: string) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await hubCall({ action: 'rules-forget', directory }); const next = await fetchRules([...new Set([...workspaceDirectories, ...(snapshot?.targets.map((t) => t.directory) ?? [])])].filter((d) => d !== directory));
+      const kept = snapshot ? afterForget(snapshot, next, content) : { snapshot: next, content: next.content, stale: false };
+      setSnapshot(kept.snapshot); setContent(kept.content); setSelected(selected.filter((d) => d !== directory)); setNotice('Removed the missing project from shared rules.');
+      if (kept.stale) setError('Saved rules changed. Reload before saving. Your draft is still in the editor.');
+    }
+    catch (e) { setError(e instanceof Error ? e.message : 'The project could not be removed.'); }
+    finally { setBusy(false); }
+  }
   async function save() {
     if (!snapshot) return;
     setBusy(true); setError(''); setNotice('');
@@ -68,7 +95,7 @@ export function RulesPanel() {
     {error && <div className="hub-feedback error-message" role="alert">{error}</div>}{notice && <div className="hub-feedback success" role="status"><Check size={15} />{notice}</div>}
     {syncedFrom && snapshot?.targets.some((target) => !target.applied) && <div className="hub-warning" role="status">These rules came from {syncedFrom.name} ({new Date(syncedFrom.at).toLocaleString()}). Apply them to this computer’s projects below; until then those projects’ sessions do not start.</div>}
     <div className="rules-columns"><article className="hub-form"><header className="rules-editor-header"><div><h2>Your shared instructions</h2><span className="muted">Stable expectations for all selected projects</span></div><button className="quiet-button" disabled={busy || !!content.trim()} onClick={() => setContent(EXAMPLE)}>Use example rules</button></header><label htmlFor="shared-rules-editor">Rules for both engines</label><textarea id="shared-rules-editor" className="rules-editor" rows={18} maxLength={60000} value={content} disabled={busy || !snapshot} onChange={(e) => setContent(e.target.value)} placeholder={'Describe coding conventions, test requirements, approval boundaries, and handoff expectations.\n\nExample: Run relevant tests and report anything you could not verify.'} /><span className="muted">{content.length.toLocaleString()} / 60,000 characters · Markdown text</span><p>Save and apply replaces only Trace’s marked shared-rules section. Clearing the editor removes that section from selected projects.</p></article>
-      <div><article className="hub-form rules-targets"><h2>Apply to projects</h2><p>Each selected directory receives the same rules in both <code>CLAUDE.md</code> and <code>AGENTS.md</code>. Existing text and shared-memory instructions stay intact.</p>{snapshot?.targets.length ? snapshot.targets.map((target) => <label className="rules-target" key={target.directory}><input type="checkbox" checked={selected.includes(target.directory)} disabled={busy || !!target.error} onChange={(e) => setSelected(e.target.checked ? [...selected, target.directory] : selected.filter((d) => d !== target.directory))} /><span><code>{target.directory}</code><small className={target.error ? 'error-message' : ''}>{target.error ?? (target.applied && !dirty ? 'Current rules applied to both engines' : 'Needs current rules applied')}</small></span></label>) : <p>No project selected. Open a workspace or add a project. You can save a local rule draft first.</p>}</article>
+      <div><article className="hub-form rules-targets"><h2>Apply to projects</h2><p>Each selected directory receives the same rules in both <code>CLAUDE.md</code> and <code>AGENTS.md</code>. Existing text and shared-memory instructions stay intact.</p>{snapshot?.targets.length ? snapshot.targets.map((target) => <label className="rules-target" key={target.directory}><input type="checkbox" checked={selected.includes(target.directory)} disabled={busy || !!target.error} onChange={(e) => setSelected(e.target.checked ? [...selected, target.directory] : selected.filter((d) => d !== target.directory))} /><span><code>{target.directory}</code><small className={target.error ? 'error-message' : ''}>{target.error ?? (target.applied && !dirty ? 'Current rules applied to both engines' : 'Needs current rules applied')}</small>{forgettable(target, snapshot) && <button type="button" className="quiet-button" disabled={busy} onClick={(e) => { e.preventDefault(); void forget(target.directory); }}>Remove</button>}</span></label>) : <p>No project selected. Open a workspace or add a project. You can save a local rule draft first.</p>}</article>
       <article className="hub-form"><h2>When they take effect</h2><p>Restart running sessions after applying changes. When rules are set, the app checks that both engines’ instruction files contain the current version before starting a session.</p><p>Rules guide the agents; tests, CLI permissions, hooks, and CI enforce conditions mechanically. Higher-priority and more specific engine instructions still affect behavior.</p><button className="button secondary" onClick={() => useWorkspaceStore.setState({ activeView: 'help', helpTopicId: 'rules' })}>Read the rules guide</button></article></div></div>
   <ProjectValidation directories={[...new Set([...workspaceDirectories, ...(snapshot?.directories ?? [])])]} /></section>;
 }

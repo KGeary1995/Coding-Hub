@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelName, sessionTopic } from './channel-name';
+import { channelName, sessionTopic, terminalTitle } from './channel-name';
 
 describe('channel names', () => {
   it('names a channel after its folder until the person names it', () => {
@@ -15,5 +15,10 @@ describe('channel names', () => {
     expect(sessionTopic('⠋ Coding-Hub', 'codex', 'Coding-Hub')).toBeNull();
     expect(sessionTopic('me@mac:~/Coding-Hub', 'shell', 'Coding-Hub')).toBeNull();
     expect(sessionTopic('', 'claude', 'x')).toBeNull();
+  });
+  it('keeps a topic’s own first character and never ends it in half an emoji', () => {
+    for (const title of ['.env handling', '/review the PR', '~/.zshrc cleanup', '`npm test` fails on CI', '#123 fix', '$PATH broken']) expect(sessionTopic(`✳ ${title}`, 'claude', 'x')).toBe(title);
+    expect(sessionTopic('· * • Fix it', 'claude', 'x')).toBe('Fix it'); expect(terminalTitle('⠋⠙ Working')).toBe('Working');
+    const cut = sessionTopic('a'.repeat(79) + '😀 tail', 'claude', 'x')!; expect(cut.endsWith('😀')).toBe(true); expect(cut).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 });

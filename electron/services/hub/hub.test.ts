@@ -5,13 +5,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { claudeProjectKey, ConfigService, readConfig, updateConfig } from './config';
 import { MemoryService } from './memory';
-import { DriveMirror } from './drive';
+import { COMPARED_FILE, DriveMirror } from './drive';
 import { decisions, decisionTitle, itemTitle, openItems, resolvedTitle, retiredTitle } from '../../../shared/memory-items';
 import { memoryContext } from './auto-memory';
 import { DEFAULT_PREFERENCES, localDay, type UsageRecord } from '../../../shared/hub';
 import { parseUsage, repriced, TelemetryService, totalTokens, usageCost } from './telemetry';
 import { hubRequestSchema } from './service';
 import { backupFolder } from './file-backups';
+import { canSymlink } from './symlink.fixture';
 const roots: string[] = [];
 function setup() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-integrations-')); roots.push(root); const project = path.join(root, 'project'); fs.mkdirSync(project); return { root, project }; }
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -35,8 +36,11 @@ describe('native configuration management', () => {
     const { root, project } = setup(); const file = path.join(root, '.claude.json'); fs.writeFileSync(file, JSON.stringify({ mcpServers: { duplicate: { command: 'user' } }, projects: { [project]: { mcpServers: { duplicate: { command: 'local' } } } } }));
     const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); const server = inventory.servers.find((s) => s.transport.type === 'stdio' && s.transport.command === 'local')!; service.mutate({ action: 'remove-server', id: server.id }); const cfg = readConfig(file).data; expect(cfg.mcpServers.duplicate.command).toBe('user'); expect(cfg.projects[project].mcpServers.duplicate).toBeUndefined();
   });
-  it('keeps malformed config untouched and rejects symbolic links', () => {
-    const { root, project } = setup(); const file = path.join(project, '.mcp.json'); fs.writeFileSync(file, '{broken'); expect(() => updateConfig(file, null, () => {})).toThrow('preserved'); expect(fs.readFileSync(file, 'utf8')).toBe('{broken'); fs.unlinkSync(file); fs.symlinkSync(path.join(root, 'outside.json'), file); expect(() => readConfig(file)).toThrow('symbolic');
+  it('keeps malformed config untouched', () => {
+    const { project } = setup(); const file = path.join(project, '.mcp.json'); fs.writeFileSync(file, '{broken'); expect(() => updateConfig(file, null, () => {})).toThrow('preserved'); expect(fs.readFileSync(file, 'utf8')).toBe('{broken');
+  });
+  it.skipIf(!canSymlink)('rejects config files reached through symbolic links', () => {
+    const { root, project } = setup(); const file = path.join(project, '.mcp.json'); fs.symlinkSync(path.join(root, 'outside.json'), file); expect(() => readConfig(file)).toThrow('symbolic');
   });
   it('discovers instruction/skill files and disables a Codex skill without disturbing other settings', () => {
     const { root, project } = setup(); fs.writeFileSync(path.join(project, 'AGENTS.md'), 'Project instructions'); const skill = path.join(root, '.codex', 'skills', 'review'); fs.mkdirSync(skill, { recursive: true }); fs.writeFileSync(path.join(skill, 'SKILL.md'), '# Review skill'); fs.writeFileSync(path.join(root, '.codex', 'config.toml'), 'model="custom"\n'); const service = new ConfigService(root, path.join(root, '.claude'), path.join(root, '.codex')); const inventory = service.inventory(project); expect(inventory.extensions.some((s) => s.kind === 'memory' && s.preview === 'Project instructions')).toBe(true); const found = inventory.extensions.find((s) => s.kind === 'skill')!; service.mutate({ action: 'toggle-extension', id: found.id, enabled: false }); const cfg = readConfig(path.join(root, '.codex', 'config.toml')).data; expect(cfg.model).toBe('custom'); expect(cfg.skills.config).toEqual([{ path: skill, enabled: false }]);
@@ -46,14 +50,23 @@ describe('native configuration management', () => {
   });
 });
 describe('shared handoff memory and Drive mirror', () => {
-  it('syncs immutable notes in both directions and retries without duplication', () => {
-    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); local.write('shared', 'Claude', 'Next task', 'claude'); remote.write('shared', 'Codex', 'Tests passed', 'codex'); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); expect(drive.sync('shared')).toEqual({ uploaded: 1, downloaded: 1 }); expect(drive.sync('shared')).toEqual({ uploaded: 0, downloaded: 0 }); expect(local.list('shared')).toHaveLength(2); expect(remote.list('shared')).toHaveLength(2);
+  it('syncs immutable notes in both directions and retries without duplication', async () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); local.write('shared', 'Claude', 'Next task', 'claude'); remote.write('shared', 'Codex', 'Tests passed', 'codex'); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); expect(await drive.syncLater('shared')).toEqual({ uploaded: 1, downloaded: 1 }); expect(await drive.syncLater('shared')).toEqual({ uploaded: 0, downloaded: 0 }); expect(local.list('shared')).toHaveLength(2); expect(remote.list('shared')).toHaveLength(2);
   });
-  it('preserves both conflicting versions and remains usable offline', () => {
-    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); const note = local.write('shared', 'Local', 'Content', 'human'); remote.import({ ...note, content: 'Remote changed' }); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); expect(() => drive.sync('shared')).toThrow('conflicting'); expect(local.list('shared')[0].content).toBe('Content'); expect(remote.list('shared')[0].content).toBe('Remote changed'); fs.rmSync(folder, { recursive: true }); expect(() => drive.sync('shared')).toThrow('was not found. Start Google Drive for desktop'); expect(local.list('shared')).toHaveLength(1);
+  it('preserves both conflicting versions and remains usable offline', async () => {
+    const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder); const local = new MemoryService(path.join(root, 'local')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); const note = local.write('shared', 'Local', 'Content', 'human'); remote.import({ ...note, content: 'Remote changed' }); const drive = new DriveMirror(local, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })); await expect(drive.syncLater('shared')).rejects.toThrow('conflicting'); expect(local.list('shared')[0].content).toBe('Content'); expect(remote.list('shared')[0].content).toBe('Remote changed'); fs.rmSync(folder, { recursive: true }); await expect(drive.syncLater('shared')).rejects.toThrow('was not found. Start Google Drive for desktop'); expect(local.list('shared')).toHaveLength(1);
   });
   it('binds projects independently and refuses invalid paths or note overwrite', () => {
     const { root } = setup(); const memory = new MemoryService(path.join(root, 'memory')); memory.write('alpha', 'A', 'One', 'claude'); memory.write('beta', 'B', 'Two', 'codex'); expect(memory.list('alpha').map((n) => n.content)).toEqual(['One']); expect(() => memory.list('../alpha')).toThrow(); const note = memory.list('alpha')[0]; expect(() => memory.import({ ...note, content: 'Changed' })).toThrow('conflicts');
+  });
+  it('counts each project’s notes and reads a project again only when its folder changed', async () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'memory')); memory.write('alpha', 'A', 'One', 'claude'); memory.write('beta', 'B', 'Two', 'codex');
+    const read = vi.spyOn(memory, 'listLater');
+    expect((await memory.projectsLater()).map((item) => [item.key, item.notes])).toEqual(expect.arrayContaining([['alpha', 1], ['beta', 1]])); expect(read).toHaveBeenCalledTimes(2);
+    read.mockClear(); expect(await memory.projectsLater()).toHaveLength(2); expect(read).not.toHaveBeenCalled();
+    const added = memory.write('alpha', 'C', 'Three', 'human'); fs.utimesSync(path.join(memory.root, 'alpha'), new Date(), new Date(Date.now() + 5000));
+    const counted = await memory.projectsLater(); expect(read.mock.calls.map(([project]) => project)).toEqual(['alpha']);
+    expect(counted[0]).toEqual({ key: 'alpha', notes: 2, latest: added.createdAt });
   });
   it('installs both CLI MCP entries and appends instructions while preserving existing content', () => {
     const { root, project } = setup(); fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Existing instructions\n'); const memory = new MemoryService(path.join(root, 'memory')); memory.install(project, 'shared', '/app/memory-server.js', '/app/electron'); expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toContain('# Existing instructions\n'); expect(readConfig(path.join(project, '.mcp.json')).data.mcpServers['coding-hub-memory'].args).toContain('shared'); expect(readConfig(path.join(project, '.codex', 'config.toml')).data.mcp_servers['coding-hub-memory'].env.ELECTRON_RUN_AS_NODE).toBe('1'); expect(() => memory.install(project, 'shared', '/app/server', '/app/electron')).toThrow('already configured');
@@ -269,41 +282,42 @@ describe('structured telemetry', () => {
 });
 
 describe('memory revisions and Drive conflict review', () => {
-  it('carries decisions, open items, review records and resolutions between two computers through Drive, and into the next session', () => {
+  it('carries decisions, open items, review records and resolutions between two computers through Drive, and into the next session', async () => {
     const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
     const desk = new MemoryService(path.join(root, 'desk')); const laptop = new MemoryService(path.join(root, 'laptop'));
-    const sync = (memory: MemoryService) => new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })).sync('shared');
+    const sync = (memory: MemoryService) => new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder })).syncLater('shared');
     const decision = desk.write('shared', decisionTitle('Predictions from Barrett only'), 'The person decided.', 'claude');
     const item = desk.write('shared', itemTitle('Delete the exported CSV'), 'It holds chart numbers.', 'codex');
     desk.write('shared', 'Round Table review record: 1 finding, 0 verified', '- F1 (high), open: bug', 'human');
     desk.import({ id: randomUUID(), project: 'shared', title: 'From a later version', content: 'Body', author: 'claude', createdAt: new Date().toISOString(), laterField: 1 });
-    sync(desk); sync(laptop);
+    await sync(desk); await sync(laptop);
     expect(decisions(laptop.list('shared')).map((d) => d.text)).toEqual(['Predictions from Barrett only']); expect(openItems(laptop.list('shared')).map((i) => i.id)).toEqual([item.id]);
     expect(laptop.list('shared')).toHaveLength(4);
     // The next session on the laptop starts with them.
     const context = memoryContext('shared', laptop.list('shared')); expect(context).toContain(`${decision.id} · Predictions from Barrett only`); expect(context).toContain(`${item.id} · Delete the exported CSV`);
     // Resolved and retired on the laptop: gone on the desk after both sync, with every record kept.
     laptop.write('shared', resolvedTitle({ title: item.title }), 'Deleted.', 'claude', item.id); laptop.write('shared', retiredTitle(decisions(laptop.list('shared'))[0]), 'Changed.', 'claude', decision.id);
-    sync(laptop); sync(desk);
+    await sync(laptop); await sync(desk);
     expect(openItems(desk.list('shared'))).toEqual([]); expect(decisions(desk.list('shared'))).toEqual([]); expect(desk.list('shared')).toHaveLength(6);
   });
   it('keeps notes with fields a later Trace adds, rather than skipping them, and passes those fields on', () => {
     const { root } = setup(); const memory = new MemoryService(path.join(root, 'memory')); const copy = new MemoryService(path.join(root, 'copy'));
     const later = { id: randomUUID(), project: 'shared', title: 'From a later version', content: 'Body', author: 'codex', createdAt: new Date().toISOString(), laterField: { kept: true } };
     expect(memory.import(later)).toBe(true); const listed = memory.list('shared'); expect(listed.map((note) => note.id)).toEqual([later.id]);
-    copy.import(listed[0]); expect((copy.list('shared')[0] as Record<string, unknown>).laterField).toEqual({ kept: true });
+    copy.import(listed[0]); expect((copy.list('shared')[0] as unknown as Record<string, unknown>).laterField).toEqual({ kept: true });
   });
-  it('preserves originals and rejects stale conflict resolution while retaining both reviewed versions', () => {
+  it('preserves originals and rejects stale conflict resolution while retaining both reviewed versions', async () => {
     const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
     const memory = new MemoryService(path.join(root, 'memory')); const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory'));
     const original = memory.write('shared', 'Decision', 'Local content', 'claude'); const revision = memory.write('shared', 'Decision updated', 'Revised content', 'human', original.id);
     expect(revision.supersedes).toBe(original.id); expect(memory.list('shared')).toHaveLength(2);
-    remote.import({ ...original, content: 'Drive content' }); const mirror = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
-    expect(() => mirror.sync('shared')).toThrow('conflicting'); const conflict = mirror.conflicts('shared')[0];
-    expect(() => mirror.resolve('shared', original.id, '0'.repeat(64), conflict.remoteHash)).toThrow('changed');
-    mirror.resolve('shared', original.id, conflict.localHash, conflict.remoteHash);
-    expect(mirror.conflicts('shared')).toHaveLength(0); mirror.sync('shared');
-    expect(memory.list('shared').map((note) => note.content).sort()).toEqual(['Drive content', 'Local content', 'Revised content']);
+    // Another size than the local copy: a note of the same size on both sides is taken as the same without reading it.
+    remote.import({ ...original, content: 'Drive content, edited' }); const mirror = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
+    await expect(mirror.syncLater('shared')).rejects.toThrow('conflicting'); const conflict = (await mirror.conflicts('shared'))[0];
+    await expect(mirror.resolve('shared', original.id, '0'.repeat(64), conflict.remoteHash)).rejects.toThrow('changed');
+    await mirror.resolve('shared', original.id, conflict.localHash, conflict.remoteHash);
+    expect(await mirror.conflicts('shared')).toHaveLength(0); await mirror.syncLater('shared');
+    expect(memory.list('shared').map((note) => note.content).sort()).toEqual(['Drive content, edited', 'Local content', 'Revised content']);
     expect(remote.list('shared')).toHaveLength(3); expect(fs.readdirSync(remote.directory('shared')).some((name) => name.includes('conflict-backup'))).toBe(true);
   });
   it('leaves missing or invalid primary token counts unknown rather than displaying zero', () => {
@@ -342,29 +356,85 @@ it('refuses the next handoff before exceeding the readable project limit', () =>
 // 5,000 real files: Windows runners with on-access scanning take 6-10 s, past the 5 s default.
 }, 30_000);
 
-it('reads no note at all when both sides already hold the same notes', () => {
+it('reads no note at all when both sides already hold the same notes', async () => {
  const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
  for(let i=0;i<20;i++)local.write('shared',`Note ${i}`,'Ready for the next session','human');
- const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));drive.sync('shared');
- const scans=vi.spyOn(MemoryService.prototype,'list');expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).not.toHaveBeenCalled();
+ const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));await drive.syncLater('shared');
+ const scans=vi.spyOn(MemoryService.prototype,'list');const reads=vi.spyOn(MemoryService.prototype,'notesLater');
+ expect(await drive.syncLater('shared')).toEqual({uploaded:0,downloaded:0});expect(scans).not.toHaveBeenCalled();expect(reads).not.toHaveBeenCalled();
 });
 
-it('reads a note with the same content in different bytes on Drive once, not on every sync, and still copies new notes', async () => {
+it('after a start, reads only the notes that are new or differ in size, never a pair of the same size', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));const remote=new MemoryService(path.join(folder,'AI-Coding-Hub-Memory'));
+ for(let i=0;i<20;i++)local.write('shared',`Note ${i}`,'Ready for the next session','human');
+ await new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared');
+ // A new note on each side: the folders no longer match, which used to read all 20 pairs on the first sync after a start.
+ const added=local.write('shared','Added here','Body','human');const arrived=remote.write('shared','Added on Drive','Body','codex');
+ const reads=vi.spyOn(MemoryService.prototype,'notesLater');
+ expect(await new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared')).toEqual({uploaded:1,downloaded:1});
+ expect(reads.mock.calls.flatMap(([,ids])=>ids).sort()).toEqual([added.id,arrived.id].sort());
+});
+
+it('reads a note with the same content in different bytes on Drive once, remembered across restarts, and still copies new notes', async () => {
  const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));const remote=new MemoryService(path.join(folder,'AI-Coding-Hub-Memory'));
  const notes=Array.from({length:5},(_,i)=>local.write('shared',`Note ${i}`,'Ready for the next session','human'));
- const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));drive.sync('shared');
+ const start=()=>new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));const drive=start();await drive.syncLater('shared');
  // Another program rewrote the Drive copy with other line endings: the same note, a different size.
  const copy=path.join(remote.directory('shared'),notes[0].id+'.json');fs.writeFileSync(copy,fs.readFileSync(copy,'utf8').replace(/\n/g,'\r\n'));
- expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});
- const reads=vi.spyOn(MemoryService.prototype,'note');const scans=vi.spyOn(MemoryService.prototype,'list');
- expect(drive.sync('shared')).toEqual({uploaded:0,downloaded:0});expect(await drive.syncLater('shared')).toEqual({uploaded:0,downloaded:0});
- expect(reads).not.toHaveBeenCalled();expect(scans).not.toHaveBeenCalled();
+ const reads=vi.spyOn(MemoryService.prototype,'notesLater');const scans=vi.spyOn(MemoryService.prototype,'list');
+ expect(await drive.syncLater('shared')).toEqual({uploaded:0,downloaded:0});expect(reads.mock.calls.flatMap(([,ids])=>ids)).toEqual([notes[0].id,notes[0].id]);
+ reads.mockClear();expect(await drive.syncLater('shared')).toEqual({uploaded:0,downloaded:0});
+ // Trace restarts: the pair compared before is not read again.
+ expect(await start().syncLater('shared')).toEqual({uploaded:0,downloaded:0});expect(reads).not.toHaveBeenCalled();expect(scans).not.toHaveBeenCalled();
  // A new note on each side is the only one read, and both arrive.
- const added=local.write('shared','Added here','Body','human');remote.write('shared','Added on Drive','Body','codex');
- expect(await drive.syncLater('shared')).toEqual({uploaded:1,downloaded:1});expect(reads.mock.calls.map(([,id])=>id).filter((id)=>id!==added.id)).toHaveLength(1);
+ const added=local.write('shared','Added here','Body','human');const arrived=remote.write('shared','Added on Drive','Body','codex');
+ expect(await drive.syncLater('shared')).toEqual({uploaded:1,downloaded:1});expect(reads.mock.calls.flatMap(([,ids])=>ids).sort()).toEqual([added.id,arrived.id].sort());
  expect(local.list('shared')).toHaveLength(7);expect(remote.list('shared')).toHaveLength(7);
- // A copy that really differs is still caught.
- fs.writeFileSync(copy,fs.readFileSync(copy,'utf8').replace('Ready for the next session','Changed on Drive'));expect(()=>drive.sync('shared')).toThrow('conflicting');
+ // A copy that really differs is still caught, and neither copy is overwritten.
+ const changed=fs.readFileSync(copy,'utf8').replace('Ready for the next session','Changed on Drive');fs.writeFileSync(copy,changed);
+ await expect(start().syncLater('shared')).rejects.toThrow('conflicting');expect(fs.readFileSync(copy,'utf8')).toBe(changed);expect(local.note('shared',notes[0].id)?.content).toBe('Ready for the next session');
+});
+
+it('compares every pair again when the file of compared pairs is unreadable', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));const remote=new MemoryService(path.join(folder,'AI-Coding-Hub-Memory'));
+ const note=local.write('shared','Note','Ready for the next session','human');await new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared');
+ const copy=path.join(remote.directory('shared'),note.id+'.json');fs.writeFileSync(copy,fs.readFileSync(copy,'utf8').replace(/\n/g,'\r\n'));
+ fs.writeFileSync(path.join(local.root,COMPARED_FILE),'{"broken');
+ const reads=vi.spyOn(MemoryService.prototype,'notesLater');
+ expect(await new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared')).toEqual({uploaded:0,downloaded:0});expect(reads).toHaveBeenCalledTimes(2);
+ expect(Object.keys(JSON.parse(fs.readFileSync(path.join(local.root,COMPARED_FILE),'utf8')))).toHaveLength(1);
+});
+
+it('copies the other notes when one note conflicts, then reports the conflict', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));const remote=new MemoryService(path.join(folder,'AI-Coding-Hub-Memory'));
+ const note=local.write('shared','Local','Content','human');remote.import({...note,content:'Remote changed'});
+ const added=local.write('shared','Added here','Body','human');const arrived=remote.write('shared','Added on Drive','Body','codex');
+ await expect(new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared')).rejects.toThrow('conflicting');
+ expect(remote.note('shared',added.id)).not.toBeNull();expect(local.note('shared',arrived.id)).not.toBeNull();
+ expect(local.note('shared',note.id)?.content).toBe('Content');expect(remote.note('shared',note.id)?.content).toBe('Remote changed');
+});
+
+it('lists the Drive folder once for a batch of copied notes, not once per note', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
+ for(let i=0;i<12;i++)local.write('shared',`Note ${i}`,'Body','human');
+ // The spelling DriveMirror lists (fs.promises.realpath is the native resolver, which expands 8.3 short names such as RUNNER~1).
+ const target=path.join(fs.realpathSync.native(folder),'AI-Coding-Hub-Memory','shared');const readdir=fs.promises.readdir;let listed=0;
+ vi.spyOn(fs.promises,'readdir').mockImplementation(((dir: fs.PathLike, options?: unknown)=>{if(path.resolve(String(dir))===target)listed++;return (readdir as (d: fs.PathLike, o?: unknown)=>Promise<unknown>)(dir,options);}) as typeof fs.promises.readdir);
+ expect(await new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder})).syncLater('shared')).toEqual({uploaded:12,downloaded:0});
+ // Once to list both sides, once to count the notes before copying.
+ expect(listed).toBe(2);
+});
+
+it('runs one sync of a project at a time and joins requests made meanwhile, rather than refusing them', async () => {
+ const {root}=setup();const folder=path.join(root,'drive');fs.mkdirSync(folder);const local=new MemoryService(path.join(root,'local'));
+ local.write('shared','First','Body','human');const drive=new DriveMirror(local,()=>({...DEFAULT_PREFERENCES,driveDirectory:folder}));
+ // Requests made before a sync has started join it.
+ const first=drive.syncLater('shared');expect(drive.syncLater('shared')).toBe(first);await new Promise((resolve)=>setImmediate(resolve));
+ // Requests made while it runs wait for it, then run once together.
+ const written=local.write('shared','Written meanwhile','Body','human');const second=drive.syncLater('shared');const third=drive.syncLater('shared');
+ expect(second).not.toBe(first);expect(third).toBe(second);
+ const results=[await first,await second];expect(results[0].uploaded+results[1].uploaded).toBe(2);
+ expect(new MemoryService(path.join(folder,'AI-Coding-Hub-Memory')).note('shared',written.id)).not.toBeNull();
 });
 
 it('never guesses a rollout after overlapping same-directory Codex runs exit', () => {
@@ -399,12 +469,12 @@ describe('memory install regressions', () => {
   });
 });
 describe('Drive sync regressions', () => {
-  it('keeps syncing other notes when one Drive file is truncated', () => {
+  it('keeps syncing other notes when one Drive file is truncated', async () => {
     const { root } = setup(); const folder = path.join(root, 'drive'); fs.mkdirSync(folder);
     const memory = new MemoryService(path.join(root, 'memory')); const older = memory.write('shared', 'Older', 'First', 'human'); const newer = memory.write('shared', 'Newer', 'Second', 'human');
     const remote = new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')); fs.mkdirSync(remote.directory('shared'), { recursive: true }); fs.writeFileSync(path.join(remote.directory('shared'), newer.id + '.json'), '{"id":');
     const mirror = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
-    expect(() => mirror.sync('shared')).toThrow(); expect(remote.list('shared').map((note) => note.id)).toEqual([older.id]);
+    await expect(mirror.syncLater('shared')).rejects.toThrow(); expect(remote.list('shared').map((note) => note.id)).toEqual([older.id]);
   });
 });
 
@@ -418,17 +488,62 @@ describe('Claude context in use', () => {
 
 describe('a project full of notes', () => {
   const note = (title: string, minute: number) => ({ id: randomUUID(), project: 'full', title, content: 'Body', author: 'human' as const, createdAt: `2026-11-12T00:${String(minute).padStart(2, '0')}:00.000Z` });
-  it('moves its oldest handoff to the archive to take a new note, never an open item, and Drive sync does not bring it back', () => {
+  it('moves its oldest handoff to the archive to take a new note, never an open item, and Drive sync does not bring it back', async () => {
     const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 3);
     const oldest = note('Oldest handoff', 1); const item = note('Open item: still to do', 0); const middle = note('Middle handoff', 2);
     for (const each of [oldest, item, middle]) memory.import(each);
     const newest = note('Automatic summary', 3); expect(memory.import(newest)).toBe(true);
     expect(memory.list('full').map((n) => n.title).sort()).toEqual(['Automatic summary', 'Middle handoff', 'Open item: still to do']);
-    expect([...memory.archived('full')]).toEqual([oldest.id]); expect(memory.sizes('full').has(oldest.id)).toBe(true);
+    expect([...(await memory.listing('full')).archived]).toEqual([oldest.id]); expect((await memory.listing('full')).sizes.has(oldest.id)).toBe(true);
     // The Drive copy still holds the archived note: it is not downloaded into the full project again.
     const folder = path.join(root, 'drive'); new MemoryService(path.join(folder, 'AI-Coding-Hub-Memory')).import(oldest);
     const drive = new DriveMirror(memory, () => ({ ...DEFAULT_PREFERENCES, driveDirectory: folder }));
-    expect(drive.sync('full').downloaded).toBe(0); expect(memory.archived('full').has(oldest.id)).toBe(true);
+    expect((await drive.syncLater('full')).downloaded).toBe(0); expect((await memory.listing('full')).archived.has(oldest.id)).toBe(true);
+  });
+  it('counts again before writing when a note lands while Drive notes are copied into a nearly full project', async () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 3);
+    memory.import(note('Oldest handoff', 1)); memory.import(note('Second handoff', 2));
+    // A session summary is saved here after the folder was counted for the download, before its note is written.
+    const readdir = fs.promises.readdir; let calls = 0;
+    vi.spyOn(fs.promises, 'readdir').mockImplementation((async (...args: Parameters<typeof readdir>) => { const out = await (readdir as (...a: unknown[]) => Promise<unknown>)(...args); if (++calls === 1) memory.import(note('Session summary', 3)); return out; }) as typeof readdir);
+    expect(await memory.importLater('full', [note('From Drive', 4)])).toEqual({ imported: 1, failure: null }); vi.restoreAllMocks();
+    // Before: 4 notes in a project of 3, and from then on every read and write of it failed.
+    expect(fs.readdirSync(memory.directory('full')).filter((name) => name.endsWith('.json'))).toHaveLength(3);
+    expect(memory.list('full').map((n) => n.title).sort()).toEqual(['From Drive', 'Second handoff', 'Session summary']);
+  });
+  it('brings a project past its limit back under it with the next note, instead of refusing every read and write', async () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 3); const dir = memory.directory('full'); fs.mkdirSync(dir, { recursive: true });
+    for (const [title, minute] of [['One', 1], ['Two', 2], ['Open item: three', 0], ['Four', 3]] as const) { const each = note(title, minute); fs.writeFileSync(path.join(dir, each.id + '.json'), JSON.stringify(each)); }
+    expect(() => memory.list('full')).toThrow('exceeds');
+    memory.write('full', 'Five', 'Body', 'human');
+    expect(memory.list('full').map((n) => n.title).sort()).toEqual(['Five', 'Four', 'Open item: three']);
+    // The asynchronous path too.
+    const other = new MemoryService(path.join(root, 'other'), 3); const there = other.directory('full'); fs.mkdirSync(there, { recursive: true });
+    for (const [title, minute] of [['One', 1], ['Two', 2], ['Three', 3], ['Four', 4]] as const) { const each = note(title, minute); fs.writeFileSync(path.join(there, each.id + '.json'), JSON.stringify(each)); }
+    expect(await other.importLater('full', [note('Five', 5)])).toEqual({ imported: 1, failure: null });
+    expect((await other.listLater('full')).map((n) => n.title).sort()).toEqual(['Five', 'Four', 'Three']);
+  });
+  it('lists the other notes when one note file cannot be read', () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local')); const kept = memory.write('full', 'Kept', 'Body', 'human'); const locked = memory.write('full', 'Locked', 'Body', 'human');
+    const read = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, options?: unknown) => { if (String(file).endsWith(locked.id + '.json')) throw Object.assign(new Error('busy'), { code: 'EBUSY' }); return (read as (f: unknown, o?: unknown) => unknown)(file, options); }) as typeof fs.readFileSync);
+    expect(memory.list('full').map((n) => n.id)).toEqual([kept.id]);
+  });
+  it('checks notes copied from Drive as a local import does, and writes them normalised', async () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'));
+    const padded = { ...note('Padded title  ', 1), project: 'full' }; const invalid = { ...note('No content', 2), content: '' };
+    const result = await memory.importLater('full', [padded, invalid]); expect(result.imported).toBe(1); expect(String(result.failure)).toMatch(/not a valid note/);
+    expect(JSON.parse(fs.readFileSync(path.join(memory.directory('full'), padded.id + '.json'), 'utf8')).title).toBe('Padded title');
+  });
+  it('makes room once for a batch of notes copied from Drive, moving only handoffs to the archive', async () => {
+    const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 3);
+    const oldest = note('Oldest handoff', 1); const item = note('Open item: still to do', 0); const second = note('Second handoff', 2);
+    for (const each of [oldest, item, second]) memory.import(each);
+    expect(await memory.importLater('full', [note('New one', 3), note('New two', 4)])).toEqual({ imported: 2, failure: null });
+    expect([...(await memory.listing('full')).archived].sort()).toEqual([oldest.id, second.id].sort()); expect(memory.list('full').map((n) => n.title).sort()).toEqual(['New one', 'New two', 'Open item: still to do']);
+    // Only open items and decisions: nothing more is written, and the person is told why.
+    const kept = new MemoryService(path.join(root, 'kept'), 2); kept.import(note('Open item: one', 1)); kept.import(note('Decision: two', 2));
+    const result = await kept.importLater('full', [note('One more', 5)]); expect(result.imported).toBe(0); expect(String(result.failure)).toMatch(/Resolve or retire/); expect(kept.list('full')).toHaveLength(2);
   });
   it('says what to do when every note is an open item or decision', () => {
     const { root } = setup(); const memory = new MemoryService(path.join(root, 'local'), 2);

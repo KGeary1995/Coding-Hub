@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import type { DeliveryStatus, DeliveryResult } from '../../../shared/productivity';
 import { directory } from './local-store';
@@ -12,7 +11,9 @@ import { hostEnvironment } from '../cli/discovery';
 import { parseStatus } from '../repository/git';
 import { noHookGitOptions, readOnlyGitOptions } from '../repository/git-safety';
 import { validateRelativePath } from '../repository/filesystem';
-const run = promisify(execFile);
+import { execFileTree, stopTree } from '../repository/process-tree';
+/** Remote URLs can carry a token (`https://user:token@host`, `https://token@host`); never show it. */
+const redact = (text: string) => text.replace(/https?:\/\/[^\s/@'"]+@/g, 'https://[redacted]@');
 const reference = { directory: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/) };
 const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-git-inspect'), directory: reference.directory }).strict(),
@@ -25,14 +26,20 @@ export class Delivery {
  private busy = new Set<string>();
  constructor(private confirm: (title: string, detail: string) => Promise<boolean>, private ready: () => void) {}
  private async command(cwd: string, file: string, args: string[], timeout = 15000) {
-  try { const result = await run(file, args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }, windowsHide: true, encoding: 'buffer', timeout, maxBuffer: 4 * 1024 * 1024 }); return Buffer.from(result.stdout); }
-  catch (error) { const code = (error as NodeJS.ErrnoException).code; throw new HubError('DELIVERY_FAILED', code === 'ENOENT' ? `${file} was not found on PATH.` : 'The command failed or timed out. Check local Git/GitHub authentication, hooks, branch protection, and remote access. Refresh before retrying.'); }
+  // A commit hook or push that runs past the limit is ended with everything it started (execFileTree).
+  try { return (await execFileTree(file, args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 })).stdout; }
+  catch (error) {
+   const code = (error as NodeJS.ErrnoException).code; if (code === 'ENOENT') throw new HubError('DELIVERY_FAILED', `${file} was not found on PATH.`);
+   // What Git or gh said (a hook's message, a refused push, an existing pull request), so nobody has to rerun it in a terminal.
+   const said = redact(Buffer.concat([Buffer.from((error as { stderr?: Buffer }).stderr ?? []), Buffer.from((error as { stdout?: Buffer }).stdout ?? [])]).toString('utf8')).trim().slice(-1500);
+   throw new HubError('DELIVERY_FAILED', `${(error as { killed?: boolean }).killed ? 'The command timed out.' : 'The command failed.'} Check local Git/GitHub authentication, hooks, branch protection, and remote access. Refresh before retrying.${said ? `\n\n${file} said:\n${said}` : ''}`);
+  }
  }
  /** Streams command output into the review hash; whole-repository diffs can exceed any reasonable buffer. */
  private hashOutput(cwd: string, args: string[], hash: ReturnType<typeof createHash>, timeout = 15000) {
   return new Promise<void>((resolve, reject) => {
    const child = spawn('git', args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' }, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-   const timer = setTimeout(() => child.kill(), timeout);
+   const timer = setTimeout(() => stopTree(child.pid), timeout);
    child.stdout.on('data', (chunk: Buffer) => hash.update(chunk));
    child.on('error', (error) => { clearTimeout(timer); reject(new HubError('DELIVERY_FAILED', (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'git was not found on PATH.' : 'The command failed or timed out. Refresh before retrying.')); });
    child.on('close', (code) => { clearTimeout(timer); if (code === 0) resolve(); else reject(new HubError('DELIVERY_FAILED', 'Git could not read the pending changes or timed out. Refresh before retrying.')); });
@@ -47,15 +54,15 @@ export class Delivery {
   // has confirmed anything. The confirmed commit and push below run the repository's hooks as usual.
   const safe = await readOnlyGitOptions(root);
   // --no-optional-locks: never take index.lock while agents may be running their own git commands.
-  const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks',...safe,'status','--porcelain=v2','-z','--branch','--untracked-files=all']), root);
+  const status = parseStatus(await this.command(root, 'git', ['--no-optional-locks',...safe,'status','--porcelain=v2','-z','--branch','--untracked-files=all','--ignore-submodules=dirty']), root);
   if (status.limited) throw new HubError('DELIVERY_LIMIT', 'Too many changes for a safe delivery review. Use local Git tools.');
   const hash = createHash('sha256').update(JSON.stringify(status));
-  await this.hashOutput(root, [...safe,'diff','--no-ext-diff','--no-textconv','--binary'], hash); hash.update('\0cached\0'); await this.hashOutput(root, [...safe,'diff','--cached','--no-ext-diff','--no-textconv','--binary'], hash);
+  await this.hashOutput(root, [...safe,'diff','--no-ext-diff','--no-textconv','--binary','--ignore-submodules=dirty'], hash); hash.update('\0cached\0'); await this.hashOutput(root, [...safe,'diff','--cached','--no-ext-diff','--no-textconv','--binary','--ignore-submodules=dirty'], hash);
   let reviewedBytes = 0;
   for (const item of status.changes.filter((change) => change.untracked)) {
    // Git lists an untracked nested repository or worktree as a directory with a trailing slash.
    if (item.path.endsWith('/')) { validateRelativePath(item.path.slice(0, -1)); hash.update(JSON.stringify({path:item.path,kind:'directory'})); continue; }
-   validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', 'An untracked file exceeds the review limit. Use local Git tools.'); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
+   validateRelativePath(item.path); const file = path.join(root, item.path); if (fs.lstatSync(file).isSymbolicLink()) hash.update(JSON.stringify({path:item.path,kind:'link',value:fs.readlinkSync(file)})); else { reviewedBytes += fs.statSync(file).size; if (fs.statSync(file).size > 4 * 1024 * 1024 || reviewedBytes > 16 * 1024 * 1024) throw new HubError('DELIVERY_LIMIT', `Untracked files can be reviewed here up to 4 MiB each and 16 MiB in all; ${item.path} goes past that. Add it to .gitignore, or use local Git tools.`); hash.update(JSON.stringify({path:item.path,kind:'file',digest:createHash('sha256').update(fs.readFileSync(file)).digest('hex')})); } }
   const remotes = (await this.command(root, 'git', ['remote'])).toString().trim().split(/\r?\n/).filter(Boolean);
   for (const remote of remotes) hash.update(JSON.stringify({remote,urls:(await this.command(root, 'git', ['remote', 'get-url', '--all', remote])).toString(),pushUrls:(await this.command(root, 'git', ['remote', 'get-url', '--push', '--all', remote])).toString()}));
   return { directory: root, branch: status.branch, head: status.head, revision: hash.digest('hex'), renames: Object.fromEntries(status.changes.filter((item) => item.originalPath).map((item) => [item.path, item.originalPath!])), staged: status.changes.filter((item) => !item.untracked && item.indexStatus !== ' ').map((item) => item.path), unstaged: status.changes.filter((item) => (item.untracked && !item.path.endsWith('/')) || (!item.untracked && item.worktreeStatus !== ' ')).map((item) => item.path), remotes };
@@ -88,7 +95,7 @@ export class Delivery {
    this.ready(); if ((await this.inspect(cwd)).revision !== status.revision) throw new HubError('DELIVERY_STALE', 'The repository changed while confirmation was open. Nothing was executed.');
    try {
     if (request.action === 'flow-git-pr') { temp = fs.mkdtempSync(path.join(os.tmpdir(),'hub-pr-')); const body = path.join(temp,'body.md'); fs.writeFileSync(body, request.body, { mode: 0o600 }); args.push('--body-file',body); }
-    const output = (await this.command(cwd,file,args,120000)).toString().slice(-4096).replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/g, 'https://[redacted]@');
+    const output = redact((await this.command(cwd,file,args,120000)).toString().slice(-4096));
     const candidate = request.action === 'flow-git-pr' ? output.trim().split('\n').at(-1) ?? '' : '';
     const url = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(candidate) ? candidate : null;
     return { output: output || 'Command completed successfully. Refresh to review current state.', url };

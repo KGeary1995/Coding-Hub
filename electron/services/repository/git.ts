@@ -65,7 +65,7 @@ export class RepositoryGit {
       if (error instanceof HubError && error.code === 'GIT_FAILED') throw new HubError('NOT_A_REPOSITORY', 'This directory is not an accessible Git working tree. File browsing is still available.');
       throw error;
     }
-    const output = await git(root, ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=none']);
+    const output = await git(root, ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=dirty']);
     return parseStatus(output, root);
   }
 
@@ -98,7 +98,7 @@ export class RepositoryGit {
       return result;
     }
     const paths = change.originalPath ? [change.originalPath, pathname] : [pathname];
-    const output = await git(status.root, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--submodule=short', '--src-prefix=a/', '--dst-prefix=b/', '--unified=3', ...(area === 'staged' ? ['--cached'] : []), '--', ...paths]);
+    const output = await git(status.root, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--submodule=short', '--ignore-submodules=dirty', '--src-prefix=a/', '--dst-prefix=b/', '--unified=3', ...(area === 'staged' ? ['--cached'] : []), '--', ...paths]);
     try { result.patch = new TextDecoder('utf-8', { fatal: true }).decode(output); }
     catch { throw new HubError('DIFF_ENCODING', 'This Git diff uses an unsupported text encoding. Inspect it with your local Git tools.'); }
     result.binary = /^Binary files .* differ$/m.test(result.patch);

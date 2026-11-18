@@ -16,9 +16,53 @@ const EMPTY: ChatThread = { runId: null, items: [], results: {}, busy: false, mo
 export const useChatStore = create<{ threads: Record<string, ChatThread> }>(() => ({ threads: {} }));
 const thread = (sessionId: string) => useChatStore.getState().threads[sessionId] ?? EMPTY;
 function update(sessionId: string, change: (current: ChatThread) => ChatThread) {
+  // Streamed text not drawn yet goes in first, so the thread keeps the order things arrived in.
+  if (pendingDeltas.has(sessionId)) flushChatDeltas(sessionId);
   useChatStore.setState((state) => ({ threads: { ...state.threads, [sessionId]: change(state.threads[sessionId] ?? EMPTY) } }));
 }
 let counter = 0; const nextId = () => `chat-${++counter}`;
+
+/** The index of a reply in a thread, looked up from the end (the reply being streamed is the newest), or -1. */
+function assistantAt(items: ChatItem[], id: string) { for (let index = items.length - 1; index >= 0; index--) { const item = items[index]; if (item.kind === 'assistant' && item.id === id) return index; } return -1; }
+
+/**
+ * Streamed text arrives in many small pieces, and each one used to replace the thread and draw it all again. Pieces are
+ * gathered per thread (and run, and reply) and applied together once a frame; any other change to that thread applies
+ * them first. A hidden window draws no frames, so a timer applies them too.
+ */
+const pendingDeltas = new Map<string, { runId: string | null; texts: Map<string, string> }>();
+let flushScheduled = false; let flushFrame = 0; let flushTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleFlush() {
+  if (flushScheduled) return; flushScheduled = true;
+  const run = () => { if (flushScheduled) flushChatDeltas(); };
+  if (typeof requestAnimationFrame === 'function') flushFrame = requestAnimationFrame(run);
+  flushTimer = setTimeout(run, 100);
+}
+/** Applies streamed text not drawn yet: one thread's, or every thread's. Exported for tests. */
+export function flushChatDeltas(sessionId?: string) {
+  // Whichever of the frame and the timer fires first cancels the other, so a leftover one never flushes a newer batch off-frame.
+  if (sessionId === undefined) {
+    flushScheduled = false; clearTimeout(flushTimer); flushTimer = undefined;
+    if (flushFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(flushFrame); flushFrame = 0;
+  }
+  const ids = sessionId === undefined ? [...pendingDeltas.keys()] : pendingDeltas.has(sessionId) ? [sessionId] : [];
+  if (!ids.length) return;
+  useChatStore.setState((state) => {
+    const threads = { ...state.threads };
+    for (const id of ids) {
+      const pending = pendingDeltas.get(id)!; pendingDeltas.delete(id);
+      const current = threads[id] ?? EMPTY; if (current.runId !== pending.runId) continue;
+      const items = [...current.items];
+      for (const [messageId, text] of pending.texts) {
+        const index = assistantAt(items, messageId);
+        if (index < 0) items.push({ kind: 'assistant', order: ++counter, id: messageId, blocks: [], streaming: text });
+        else { const item = items[index] as Extract<ChatItem, { kind: 'assistant' }>; items[index] = { ...item, streaming: item.streaming + text }; }
+      }
+      threads[id] = { ...current, items, busy: true };
+    }
+    return { threads };
+  });
+}
 
 /**
  * A chat run started. A fresh conversation starts an empty thread; a resumed one keeps what this window showed, with a
@@ -30,12 +74,20 @@ export function chatStarted(sessionId: string, runId: string, resumed: boolean) 
     : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', order: ++counter, id: nextId(), text: 'Resumed a saved conversation. Earlier messages are in Claude’s history; new ones appear here.', error: false }] : [] });
 }
 export function chatEnded(sessionId: string) { update(sessionId, (current) => ({ ...current, busy: false, items: current.items.map((item) => item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' } : item) })); }
-/** Frees the conversations (with their images) of channels no longer in the workspace. */
-export function forgetChatsExcept(sessionIds: Iterable<string>) {
-  const kept = new Set(sessionIds); const threads = useChatStore.getState().threads;
-  if (Object.keys(threads).every((id) => kept.has(id))) return;
-  useChatStore.setState({ threads: Object.fromEntries(Object.entries(threads).filter(([id]) => kept.has(id))) });
+/**
+ * Another computer's chat threads share this store under `computerId:sessionId` keys (linkedChatKey); this computer's
+ * session ids never hold a colon.
+ */
+const isLinked = (key: string) => key.includes(':');
+function keepThreads(keep: (key: string) => boolean) {
+  const threads = useChatStore.getState().threads; for (const key of pendingDeltas.keys()) if (!keep(key)) pendingDeltas.delete(key);
+  if (Object.keys(threads).every(keep)) return;
+  useChatStore.setState({ threads: Object.fromEntries(Object.entries(threads).filter(([key]) => keep(key))) });
 }
+/** Frees the conversations (with their images) of channels no longer in the workspace. Linked computers' threads stay. */
+export function forgetChatsExcept(sessionIds: Iterable<string>) { const kept = new Set(sessionIds); keepThreads((key) => isLinked(key) || kept.has(key)); }
+/** Frees the threads of linked computers no longer listed; this computer's own threads stay. */
+export function forgetLinkedChatsExcept(computerIds: Iterable<string>) { const prefixes = [...computerIds].map((id) => `${id}:`); keepThreads((key) => !isLinked(key) || prefixes.some((prefix) => key.startsWith(prefix))); }
 
 /** The person's message, shown at once; images as data URLs for the thread. */
 /** `busy`: the message went to this chat's agent, which now answers (a hierarchy table passes it to another seat). */
@@ -52,10 +104,15 @@ export function chatFailed(sessionId: string, text: string) { update(sessionId, 
 /** Claude's side of the conversation, from the host. */
 export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
   if (thread(sessionId).runId !== runId) return;
+  // Streamed text: gathered and applied once a frame (flushChatDeltas).
+  if (event.type === 'delta') {
+    const pending = pendingDeltas.get(sessionId) ?? { runId, texts: new Map<string, string>() }; pendingDeltas.set(sessionId, pending);
+    pending.texts.set(event.messageId, (pending.texts.get(event.messageId) ?? '') + event.text); scheduleFlush(); return;
+  }
   update(sessionId, (current) => {
     const items = [...current.items];
     const assistant = (id: string) => {
-      const index = items.findIndex((item) => item.kind === 'assistant' && item.id === id);
+      const index = assistantAt(items, id);
       if (index >= 0) return index;
       items.push({ kind: 'assistant', order: ++counter, id, blocks: [], streaming: '' }); return items.length - 1;
     };
@@ -64,8 +121,6 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
       case 'table': return { ...current, table: event.table };
       // The channel's setting, not the thread (handled where chat events arrive).
       case 'permissions': case 'context-window': return current;
-      case 'delta': { const index = assistant(event.messageId); const item = items[index] as Extract<ChatItem, { kind: 'assistant' }>; items[index] = { ...item, streaming: item.streaming + event.text }; return { ...current, items, busy: true };
-      }
       case 'assistant': {
         // Claude sends each block of a reply (thinking, text, a tool call) as its own message with the same id.
         const index = assistant(event.messageId); const item = items[index] as Extract<ChatItem, { kind: 'assistant' }>; const blocks = [...item.blocks];
@@ -96,6 +151,8 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
         const settled = items.map((item) => item.kind === 'assistant' && item.streaming ? { ...item, blocks: [...item.blocks, { type: 'text' as const, text: item.streaming }], streaming: '' } : item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' as const } : item);
         return { ...current, busy: false, items: event.isError && event.error ? [...settled, { kind: 'notice', order: ++counter, id: nextId(), text: event.error, error: true }] : settled };
       }
+      // A newer Trace on a linked computer may send events this version does not know: they leave the thread as it is.
+      default: return current;
     }
   });
 }

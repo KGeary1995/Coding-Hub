@@ -7,7 +7,8 @@ export const useHubStore = create<{ usage: UsageRecord[]; preferences: HubPrefer
 }));
 export async function hubCall<T extends HubResponse>(request: HubRequest): Promise<T> {
   if (!window.codingHub) throw new Error('This feature requires the desktop host.');
-  const result = await window.codingHub.hub(request); if (!result.ok) throw new Error(result.error.message); return result.value as T;
+  // The host's error code goes with the message, for a caller that acts on it (MEMORY_PARTIAL, INVALID_HUB_REQUEST).
+  const result = await window.codingHub.hub(request); if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code }); return result.value as T;
 }
 /** New tokens (see newTokens in shared/hub): input outside the cache, plus output. */
 export const tokens = (u: UsageRecord) => newTokens(u);

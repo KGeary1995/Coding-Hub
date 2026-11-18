@@ -27,6 +27,13 @@ const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-template-apply'), id: z.uuid(), directory: z.string().max(4096), applyRules: z.boolean(), applyChecks: z.boolean() }).strict(),
  z.object({ action: z.literal('flow-template-delete'), id: z.uuid() }).strict(),
 ]);
+/**
+ * A template keeps a Round Table's seats and settings, not its work: the task, plan, review record and waiting message
+ * belong to the project it was saved from.
+ */
+function tableShape(workspace: SavedWorkspace) {
+ for (const session of workspace.sessions) if (session.roundTable) { const { chain: _chain, findings: _findings, waiting: _waiting, waitingImages: _images, ...table } = session.roundTable; session.roundTable = table; }
+}
 export class Workflows {
  private busy = false;
  get running() { return this.busy; }
@@ -51,6 +58,7 @@ export class Workflows {
    if (templates.length >= 50) throw new HubError('TEMPLATE_LIMIT', 'Up to 50 templates are supported.');
    const workspace = structuredClone(request.workspace);
    for (const session of workspace.sessions) { if (isAgentConfig(session.config)) delete session.config.resumeId; delete session.preparedRequest; }
+   tableShape(workspace);
    const value: ProjectTemplate = { id: randomUUID(), name: request.name, description: request.description, workspace, rules: request.includeRules ? this.rules.read([]).content : '', checks: request.includeChecks ? this.verification.data().profiles.filter((profile) => profile.directory === workspace.rootDirectory).slice(0, 20).map(({ name, steps, timeoutSeconds }) => ({ name, steps, timeoutSeconds })) : [], createdAt: new Date().toISOString() };
    templateSchema.parse(value); save(this.root, 'project-templates.json', [value, ...templates]); return value;
   }
@@ -66,38 +74,54 @@ export class Workflows {
    const checks = request.applyChecks ? selected.checks : [];
    if (checks.length + this.verification.data().profiles.length > 100) throw new HubError('TEMPLATE_CHECKS', 'There is no room for these verification profiles.');
    const detail = `${selected.name}\nProject: ${cwd}\nAll template tiles will use this project. No CLI launches or checks run automatically.\n${request.applyRules ? 'This replaces the canonical shared rules and applies them to this project. Other registered projects may require reapplication.\n' + selected.rules : 'Existing shared rules are retained and applied to this project.'}\nVerification profiles: ${checks.map((item) => item.name).join(', ') || 'None'}`;
+   // The workspace is built and checked before anything is written, so a template that cannot be applied changes nothing.
+   workspace.rootDirectory = cwd; workspace.focusedSessionId = null;
+   const ids = new Map<string, string>();
+   workspace.sessions = workspace.sessions.map((session) => { const id = randomUUID(); ids.set(session.id, id); return { ...session, id, binding: session.binding.mode === 'workspace' ? { mode: 'workspace' as const } : { mode: 'independent' as const, cwd }, createdAt: new Date().toISOString() }; });
+   // A Round Table's seats get new ids too (they have no tile of their own); an older template may still hold the table's work.
+   tableShape(workspace);
+   for (const session of workspace.sessions) if (session.roundTable) session.roundTable = { ...session.roundTable, partner: ids.get(session.roundTable.partner) ?? session.roundTable.partner, ...(session.roundTable.planner ? { planner: ids.get(session.roundTable.planner) ?? session.roundTable.planner } : {}) };
+   workspace.tiles = workspace.tiles.map((tile) => ({ ...tile, sessionId: ids.get(tile.sessionId)! }));
+   const checked = savedWorkspaceSchema.safeParse(workspace); if (!checked.success) throw new HubError('TEMPLATE_INVALID', `This template cannot be applied: ${checked.error.issues[0]?.message ?? 'its layout is not valid'}. Nothing was changed. Delete it and save the workspace as a template again.`);
    if (!await this.confirm('Apply project template', detail)) return null;
    if (JSON.stringify(this.templates().find((item) => item.id === selected.id)) !== JSON.stringify(selected)) throw new HubError('TEMPLATE_CHANGED', 'The template changed after review.');
    this.rules.save(request.applyRules ? selected.rules : instructions.content, instructions.revision, instructions.targets);
    for (const item of checks) await this.verification.execute({ action: 'verification-save', ...item, directory: cwd });
-   workspace.rootDirectory = cwd; workspace.focusedSessionId = null;
-   const ids = new Map<string, string>();
-   workspace.sessions = workspace.sessions.map((session) => { const id = randomUUID(); ids.set(session.id, id); return { ...session, id, binding: session.binding.mode === 'workspace' ? { mode: 'workspace' as const } : { mode: 'independent' as const, cwd }, createdAt: new Date().toISOString() }; });
-   workspace.tiles = workspace.tiles.map((tile) => ({ ...tile, sessionId: ids.get(tile.sessionId)! })); return savedWorkspaceSchema.parse(workspace) as SavedWorkspace;
+   return checked.data as SavedWorkspace;
   } finally { this.busy = false; }
  }
  private log(id: string) { try { return this.storage.readLog({ runId: id }).text; } catch { return 'Recorded output is unavailable.'; } }
- private search(query: string, project: string | null, output: boolean): SearchResults {
-  const needle = query.toLowerCase(); const hits: SearchHit[] = []; let visited = 0; let bytes = 0; let limited = false;
-  const add = (kind: SearchHit['kind'], title: string, location: string, text: string, view: SearchHit['view'], noteId?: string) => {
+ /**
+  * Asynchronous reads: the command menu searches after each typing pause, and a synchronous walk held the main process
+  * for 0.2-0.5 s each time. The project and memory notes each have their own budget, and up to 30 places are kept for
+  * memory hits, so a large project no longer hides every note.
+  */
+ private async search(query: string, project: string | null, output: boolean): Promise<SearchResults> {
+  const needle = query.toLowerCase(); let limited = false;
+  type Budget = { visited: number; bytes: number; hits: SearchHit[] };
+  const budget = (): Budget => ({ visited: 0, bytes: 0, hits: [] }); const files = budget(); const memory = budget(); const rest = budget();
+  const add = (into: Budget, kind: SearchHit['kind'], title: string, location: string, text: string, view: SearchHit['view'], noteId?: string) => {
    const index = text.toLowerCase().indexOf(needle); if (index < 0 && !`${title} ${location}`.toLowerCase().includes(needle)) return;
-   if (hits.length >= 100) { limited = true; return; }
-   hits.push({ id: randomUUID(), kind, title, location, snippet: text.slice(Math.max(0, index - 100), Math.max(0, index - 100) + 350), view, ...(noteId ? { noteId } : {}) });
+   if (into.hits.length >= 100) { limited = true; return; }
+   into.hits.push({ id: randomUUID(), kind, title, location, snippet: text.slice(Math.max(0, index - 100), Math.max(0, index - 100) + 350), view, ...(noteId ? { noteId } : {}) });
   };
-  const scan = (folder: string, depth: number, callback: (file: string) => void) => {
-   if (depth > 10 || visited >= 3000 || bytes >= 8 * 1024 * 1024) { limited = true; return; }
-   let entries: fs.Dirent[]; try { if (fs.lstatSync(folder).isSymbolicLink()) return; entries = fs.readdirSync(folder, { withFileTypes: true }); } catch { return; }
+  const spent = (into: Budget) => into.visited >= 3000 || into.bytes >= 8 * 1024 * 1024;
+  const scan = async (into: Budget, folder: string, depth: number, callback: (file: string) => Promise<void>) => {
+   if (depth > 10 || spent(into)) { limited = true; return; }
+   let entries: fs.Dirent[]; try { if ((await fs.promises.lstat(folder)).isSymbolicLink()) return; entries = await fs.promises.readdir(folder, { withFileTypes: true }); } catch { return; }
    for (const entry of entries) {
-    if (++visited > 3000 || bytes >= 8 * 1024 * 1024) { limited = true; break; }
+    if (++into.visited > 3000 || into.bytes >= 8 * 1024 * 1024) { limited = true; break; }
     if (entry.isSymbolicLink() || /^(node_modules|\.git|\.claude|\.codex|\.ssh|\.aws|\.cache|dist|dist-electron|release|vendor|target|\.venv|venv|coverage)$/i.test(entry.name) || /^(\.env|auth\.json|credentials|\.credentials|.*\.(pem|key|pfx|p12))/i.test(entry.name)) continue;
-    const file = path.join(folder, entry.name); if (entry.isDirectory()) scan(file, depth + 1, callback); else if (entry.isFile()) callback(file);
+    const file = path.join(folder, entry.name); if (entry.isDirectory()) await scan(into, file, depth + 1, callback); else if (entry.isFile()) await callback(file);
    }
   };
-  const read = (file: string) => { try { const size = fs.statSync(file).size; if (size > 131072 || bytes + size > 8 * 1024 * 1024) { limited = true; return ''; } bytes += size; const text = fs.readFileSync(file, 'utf8'); return text.includes('\0') ? '' : text; } catch { return ''; } };
-  if (project) { const cwd = directory(project); scan(cwd, 0, (file) => { if (/\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|html|rs|py|toml|yaml|yml|txt|go|cs)$/i.test(file)) add('file', path.basename(file), file, read(file), 'files'); }); }
-  scan(path.join(this.root, 'memory'), 0, (file) => { if (!file.endsWith('.json')) return; try { const note = JSON.parse(read(file)); if (typeof note.content === 'string') add('memory', String(note.title ?? 'Handoff'), String(note.project ?? ''), note.content, 'memory', typeof note.id === 'string' ? note.id : undefined); } catch {} });
-  add('rules', 'Shared rules', 'Canonical local document', this.rules.read([]).content, 'rules');
-  if (output) for (const run of this.storage.history().slice(0, 100)) { if (bytes >= 8 * 1024 * 1024) { limited = true; break; } const text = this.log(run.runId).slice(-65536); bytes += Buffer.byteLength(text); add('output', `${run.engine} · ${new Date(run.startedAt).toLocaleString()}`, run.cwd, text, 'history'); }
+  const read = async (into: Budget, file: string) => { try { const size = (await fs.promises.stat(file)).size; if (size > 131072 || into.bytes + size > 8 * 1024 * 1024) { limited = true; return ''; } into.bytes += size; const text = await fs.promises.readFile(file, 'utf8'); return text.includes('\0') ? '' : text; } catch { return ''; } };
+  if (project) { const cwd = directory(project); await scan(files, cwd, 0, async (file) => { if (/\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|html|rs|py|toml|yaml|yml|txt|go|cs)$/i.test(file)) add(files, 'file', path.basename(file), file, await read(files, file), 'files'); }); }
+  await scan(memory, path.join(this.root, 'memory'), 0, async (file) => { if (!file.endsWith('.json')) return; try { const note = JSON.parse(await read(memory, file)); if (typeof note.content === 'string') add(memory, 'memory', String(note.title ?? 'Handoff'), String(note.project ?? ''), note.content, 'memory', typeof note.id === 'string' ? note.id : undefined); } catch {} });
+  add(rest, 'rules', 'Shared rules', 'Canonical local document', this.rules.read([]).content, 'rules');
+  if (output) for (const run of this.storage.history().slice(0, 100)) { if (rest.bytes >= 8 * 1024 * 1024) { limited = true; break; } const text = this.log(run.runId).slice(-65536); rest.bytes += Buffer.byteLength(text); add(rest, 'output', `${run.engine} · ${new Date(run.startedAt).toLocaleString()}`, run.cwd, text, 'history'); }
+  const kept = files.hits.slice(0, 100 - Math.min(memory.hits.length, 30)); const hits = [...kept, ...memory.hits, ...rest.hits].slice(0, 100);
+  if (hits.length < files.hits.length + memory.hits.length + rest.hits.length) limited = true;
   return { hits, limited };
  }
 }

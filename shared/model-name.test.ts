@@ -9,5 +9,6 @@ it('names models the way people say them', () => {
   expect(modelLabel('gpt-6.1-sol')).toBe('GPT-6.1 Sol');
   expect(modelLabel('gpt-6.1')).toBe('GPT-6.1');
   expect(modelLabel('opus')).toBe('Opus');
+  expect(modelLabel('opus[1m]')).toBe('Opus (1M)'); expect(modelLabel('Sonnet[1M]')).toBe('Sonnet (1M)'); expect(modelLabel('GPT-6.1-SOL')).toBe('GPT-6.1 Sol');
   expect(modelLabel('some-custom-model')).toBe('some-custom-model');
 });

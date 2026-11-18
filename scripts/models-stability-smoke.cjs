@@ -4,6 +4,7 @@ const os=require('node:os');
 const path=require('node:path');
 const {_electron}=require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async()=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-')));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
  const fixture=await fs.readFile(path.join(__dirname,'fixtures/interactive-cli.cjs'),'utf8');
@@ -52,5 +53,5 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
   const result=await app.evaluate(async({BrowserWindow})=>BrowserWindow.getAllWindows().find(window=>window.getTitle()==='Trace').webContents.executeJavaScript('window.codingHub.workbench({action:\"host-health\"})'));assert.equal(result.ok,true);const health=result.value;assert.ok(health.events.some(event=>event.event==='renderer-process-gone'&&['crashed','killed'].includes(event.reason)));assert.ok(!JSON.stringify(health).includes('MODEL_OVERRIDE'));
   await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'host-health'})).previousShutdown,'clean');assert.equal((await native(page,'loadWorkspace')).workspace.sessions[1].config.model,'fixture-hidden-model');
   assert.deepEqual(errors,[]);console.log('PASS: full paginated/hidden CLI model catalog, exact selected model and raw effort delivery, repeated Claude prompt submission using physical Enter through Xterm/IPC/native PTY, software terminal default, private lifecycle diagnostics, renderer crash recovery with Claude process cleanup, saved model persistence and clean restart. Fixture CLIs; the reported Windows host crash cause is not reproduced.');
- }finally{if(app)await app.close().catch(()=>{});await fs.rm(root,{recursive:true,force:true});}
+ }finally{if(app)await app.close().catch(()=>{});await removeFolder(root);}
 })().catch(error=>{console.error(error);process.exitCode=1;});

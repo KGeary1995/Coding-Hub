@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import { HubError } from '../cli/engine-adapter';
 import type { CheckName, CheckResult, ProjectAudit } from '../../../shared/project-checks';
 import { CLEAR_RUN_AS_NODE, hostEnvironment } from '../cli/discovery';
+import { stopTree } from './process-tree';
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('inspect'), directory: z.string().max(4096) }).strict(), z.object({ action: z.literal('run'), directory: z.string().max(4096), script: z.enum(['test', 'typecheck', 'lint']) }).strict()]);
 export class ProjectChecks {
   private child: ChildProcess | null = null;
@@ -62,5 +63,6 @@ export class ProjectChecks {
       child.on('close', (exitCode) => { clearTimeout(timer); if (this.child === child) this.child = null; resolve({ script: request.script, exitCode, output, truncated, timedOut }); });
     });
   }
-  stop() { if (!this.child?.pid) return; try { if (process.platform === 'win32') execFile('taskkill', ['/pid', String(this.child.pid), '/t', '/f'], { windowsHide: true }, () => {}); else process.kill(-this.child.pid, 'SIGKILL'); } catch { this.child.kill(); } }
+  /** The whole tree, with taskkill from System32 rather than whichever one PATH finds first (stopTree). */
+  stop() { if (!this.child?.pid) return; stopTree(this.child.pid); }
 }

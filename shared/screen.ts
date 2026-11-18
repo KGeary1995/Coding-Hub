@@ -40,11 +40,16 @@ export const SCREEN_CLIPBOARD_LIMIT = 1024 * 1024;
  * ending the session. Counted as noVNC sends it: line ends as CRLF, then UTF-8, then a NUL.
  */
 export function fitPaste(text: string, limit = SCREEN_CLIPBOARD_LIMIT): string {
-  const encoder = new TextEncoder(); const size = (value: string) => encoder.encode(value.replace(/\r\n|\r|\n/g, '\r\n')).length + 1;
-  if (size(text) <= limit) return text;
-  const characters = Array.from(text); let fits = 0; let over = characters.length;
-  while (over - fits > 1) { const middle = (fits + over) >> 1; if (size(characters.slice(0, middle).join('')) <= limit) fits = middle; else over = middle; }
-  return characters.slice(0, fits).join('');
+  // One pass, character by character (a long paste was encoded again some twenty times, on the window's thread).
+  let bytes = 1; let previous = 0;
+  for (let index = 0; index < text.length;) {
+    const point = text.codePointAt(index)!; const width = point > 0xffff ? 2 : 1;
+    // A line end becomes CRLF: a lone CR or LF counts two bytes, the LF of a CRLF nothing more.
+    const size = point === 0x0a ? (previous === 0x0d ? 0 : 2) : point === 0x0d ? 2 : point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+    if (bytes + size > limit) return text.slice(0, index);
+    bytes += size; previous = point; index += width;
+  }
+  return text;
 }
 export type ScreenResponse = ScreenOpened | ScreenCredentials | ScreenShareStatus | null;
 export type ScreenEvent =

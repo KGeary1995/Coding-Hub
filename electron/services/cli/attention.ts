@@ -57,7 +57,8 @@ export class AttentionServer {
   start() {
     return new Promise<void>((resolve, reject) => {
       const server = http.createServer((request, response) => this.handle(request, response));
-      server.once('error', reject);
+      // Kept for the server's life: a later error with no listener would be thrown in the main process.
+      server.on('error', (error) => { if (this.server !== server) reject(error); });
       server.listen(0, '127.0.0.1', () => { this.server = server; this.port = (server.address() as AddressInfo).port; resolve(); });
     });
   }

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { EngineInfo, RunningSession } from '../../../shared/ipc';
+import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
 import { AutoMemory, isSessionSummary, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
 import type { MemoryNote } from '../../../shared/hub';
@@ -26,7 +26,7 @@ function repository(root: string, name: string, origin?: string) {
 }
 const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.310', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, supportsAppendSystemPrompt: true, supportsMcpConfig: true, error: null });
 const track = (auto: AutoMemory) => { pending.push(auto); return auto; };
-const run = (engine: 'claude' | 'codex', cwd: string): RunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 } as RunningSession);
+const run = (engine: 'claude' | 'codex', cwd: string): AgentRunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 });
 
 describe('memory keys', () => {
   it('normalizes SSH and HTTPS remotes to the same identity', () => {
@@ -68,7 +68,11 @@ describe('launch context', () => {
     expect(text).toContain('Summary 50'); expect(text).toContain('Summary 40'); expect(text).not.toContain('Summary 30');
     expect(isSessionSummary(summary(1))).toBe(true); expect(isSessionSummary(curated)).toBe(false); expect(isSessionSummary({ title: 'Session summary: mine', content: 'Written by hand.' })).toBe(false);
   });
-  it('adds the memory server and context to Claude and Codex launches without touching project files', () => {
+  it('never cuts a note in the middle of an emoji, which would leave text Codex cannot read as TOML', () => {
+    const note: MemoryNote = { id: randomUUID(), project: 'app-1', title: 'Emoji at the cut', content: 'x'.repeat(1199) + '🧪' + 'y'.repeat(100), author: 'claude', createdAt: new Date().toISOString() };
+    const text = memoryContext('app-1', [note]); expect(text).toContain('x'.repeat(1199) + ' …'); expect(JSON.stringify(text)).not.toMatch(/\\ud[89ab]/i);
+  });
+  it('adds the memory server and context to Claude and Codex launches without touching project files', async () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
     const key = projectMemoryKey(project); memory.write(key, 'Earlier decision', 'Use the existing router.', 'codex');
     const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/app/memory-server.js', executable: '/app/electron', scratch: path.join(root, 'scratch') }));
@@ -85,7 +89,38 @@ describe('launch context', () => {
     const chosen = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), chosen, 'chosen-project');
     expect(chosen.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, 'chosen-project', 'codex', project])}`);
     expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Chosen note'); expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).not.toContain('Earlier decision');
-    expect(memory.projects().map((item) => item.key).sort()).toEqual(['chosen-project', key].sort());
+    expect((await memory.projectsLater()).map((item) => item.key).sort()).toEqual(['chosen-project', key].sort());
+  });
+  it('waits for other computers’ notes and reads them before the launch, without reading notes while it prepares', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
+    const synced: string[] = []; const refreshed: string[] = [];
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), refresh: (project) => refreshed.push(project), sync: async (project) => { synced.push(project); memory.write(project, 'From another computer', 'Synced before launch.', 'codex'); } }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      // Two channels of one project start together (a restored workspace): both readied, then both prepared.
+      await Promise.all([auto.ready(project), auto.ready(project)]);
+      const list = vi.spyOn(memory, 'list');
+      const launch = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), launch); auto.prepare(run('codex', project), '', info('codex'), { args: [] });
+      expect(synced).toEqual([key, key]); expect(refreshed).toEqual([]); expect(list).not.toHaveBeenCalled(); expect(launch.args[launch.args.indexOf('--append-system-prompt') + 1]).toContain('Synced before launch.');
+      // Dropped after a while even with no launch to use it; a launch after that reads the notes itself and starts a sync for the next one.
+      vi.advanceTimersByTime(30_001); expect((auto as unknown as { readied: Map<string, unknown> }).readied.size).toBe(0);
+      auto.prepare(run('claude', project), '', info('claude'), { args: [] }); expect(list).toHaveBeenCalledTimes(1); expect(refreshed).toEqual([key]);
+    } finally { vi.useRealTimers(); }
+  });
+  it('starts with the local notes when the sync before a launch fails or takes too long', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
+    memory.write(key, 'Local note', 'Written here.', 'claude');
+    const failing = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), sync: () => Promise.reject(new Error('Drive offline')) }));
+    await failing.ready(project); const local = { args: [] as string[] }; failing.prepare(run('claude', project), '', info('claude'), local);
+    expect(local.args[local.args.indexOf('--append-system-prompt') + 1]).toContain('Written here.');
+    const slow = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), syncMilliseconds: 50, sync: () => new Promise(() => {}) }));
+    const started = Date.now(); await slow.ready(project, 'chosen'); expect(Date.now() - started).toBeLessThan(2000);
+  });
+  it('removes memory config files left by runs of an earlier start, and nothing else', () => {
+    const root = temp(); const scratch = path.join(root, 'scratch'); fs.mkdirSync(scratch); const memory = new MemoryService(path.join(root, 'memory'));
+    const stale = path.join(scratch, `${randomUUID()}.mcp.json`); const other = path.join(scratch, 'notes.txt'); fs.writeFileSync(stale, '{}'); fs.writeFileSync(other, 'kept');
+    track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch }));
+    return vi.waitFor(() => { expect(fs.existsSync(stale)).toBe(false); expect(fs.existsSync(other)).toBe(true); });
   });
   it('pulls newer shared notes before building the launch context and starts without them when sync fails', () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
@@ -122,7 +157,7 @@ describe('session summaries', () => {
     fs.writeFileSync(path.join(project, 'app.txt'), 'changed\n'); git(project, 'commit', '-am', 'Change app'); fs.writeFileSync(path.join(project, 'new.txt'), 'new');
     const transcript = path.join(root, 't.jsonl'); fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Added new.txt' }] } }) + '\n');
     const note = await auto.finish(active.runId, transcript);
-    expect(note?.author).toBe('claude'); expect(note?.content).toContain('?? new.txt'); expect(note?.content).not.toContain('before.txt'); expect(note?.content).toContain('Change app'); expect(note?.content).toContain('Added new.txt');
+    expect(note?.author).toBe('claude'); expect(note?.content).toContain('Files changed in the repository while the session ran (git status; may include other channels’ work in this folder):\n- ?? new.txt'); expect(note?.content).toContain('?? new.txt'); expect(note?.content).not.toContain('before.txt'); expect(note?.content).toContain('Change app'); expect(note?.content).toContain('Added new.txt');
     expect(written).toEqual([projectMemoryKey(project)]); expect(fs.existsSync(path.join(root, 'scratch', `${active.runId}.mcp.json`))).toBe(false);
     const idle = run('codex', project); auto.prepare(idle, '', info('codex'), { args: [] }); await new Promise((resolve) => setTimeout(resolve, 300));
     expect(await auto.finish(idle.runId, null)).toBeNull();

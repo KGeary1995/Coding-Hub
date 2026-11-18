@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { FILE_PREVIEW_LIMIT, RepositoryFiles } from './filesystem';
 import { RepositoryGit } from './git';
@@ -39,6 +39,14 @@ describe('scoped project filesystem', () => {
     await expect(files.list(10, { ...request, path: '', executable: 'shell' })).rejects.toThrow();
     files.closeOwner(10);
     await expect(files.list(10, { ...request, path: '' })).rejects.toThrow('no longer available');
+  });
+
+  it('keeps Git metadata out of reach by its Windows short name, stream syntax or trailing dot', async () => {
+    const { directory, files, request } = await fixture(true); await writeFile(path.join(directory, '.git', 'config'), '[remote "origin"]\n\turl = https://user:token@example.invalid/repo\n', { flag: 'a' });
+    const names = ['.git./config', '.GIT /config', ...(process.platform === 'win32' ? ['GIT~1/config', '.git::$INDEX_ALLOCATION/config', '.git:$I30:$INDEX_ALLOCATION/config'] : [])];
+    for (const relative of names) await expect(files.read(10, { ...request, path: relative })).rejects.toThrow();
+    // GIT~1 exists only where the volume makes 8.3 short names (not on Dev Drive, ReFS or with them turned off).
+    if (process.platform === 'win32') { if (existsSync(path.join(directory, 'GIT~1'))) await expect(files.list(10, { ...request, path: 'GIT~1' })).rejects.toMatchObject({ code: 'INVALID_PATH' }); await expect(files.read(10, { ...request, path: 'HEAD::$DATA' })).rejects.toMatchObject({ code: 'INVALID_PATH' }); }
   });
 
   it('cancels an in-flight open when its owning view closes', async () => {

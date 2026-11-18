@@ -4,7 +4,7 @@ import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
 import { isAgentConfig } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
-import { migrateWorkspace } from '../../shared/workspace-migration';
+import { arrangeChannels, migrateWorkspace } from '../../shared/workspace-migration';
 
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -72,20 +72,9 @@ export function channelsFullNote(sessions: Session[]) {
     : `This computer already has ${MAX_CHANNELS} channels. Close one there first.`;
 }
 
+/** The channels the person sees, laid out as the host lays out a migrated workspace (one copy of the rule). */
 export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
-  const sessions = channelsOf(all);
-  // Columns wrap after four; the grid keeps two rows, so five to eight channels sit three or four across.
-  const columns = mode === 'rows' ? 1 : mode === 'columns' ? Math.min(4, sessions.length) : sessions.length <= 2 ? sessions.length : Math.ceil(sessions.length / 2);
-  const width = 12 / columns;
-  return sessions.map((session, index) => ({
-    sessionId: session.id,
-    x: (index % columns) * width,
-    y: Math.floor(index / columns) * 12,
-    w: width,
-    h: 12,
-    minW: 3,
-    minH: 10,
-  }));
+  return arrangeChannels(channelsOf(all).map((session) => session.id), mode);
 }
 
 /**
@@ -154,6 +143,19 @@ interface WorkspaceState {
   toggleFocus: (id: string) => void;
 }
 
+/** A session after one of its events; the same object when the event changes nothing. */
+function applied(session: Session, event: Exclude<SessionEvent, { type: 'data' }>): Session {
+  if (session.id !== event.sessionId) return session;
+  if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null } : session;
+  if (event.runId !== session.runId) return session;
+  if (event.type === 'answered') return session.attention && session.attention.at <= event.at ? { ...session, attention: null } : session;
+  if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
+  if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
+  if (event.type === 'error') return session.error === event.message ? session : { ...session, error: event.message };
+  if (event.type === 'conversation') return session.config.engine === 'claude' && !session.config.chat && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
+  return session;
+}
+
 const initialSessions = [createSession('claude'), createSession('codex')];
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -196,29 +198,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const answered = (session: Session) => session.id === id && session.attention && (!sentAt || session.attention.at <= sentAt);
     return state.sessions.some(answered) ? { sessions: state.sessions.map((session) => answered(session) ? { ...session, attention: null } : session) } : state;
   }),
-  applyEvent: (event) => set((state) => event.type === 'data' ? state : ({ sessions: state.sessions.map((session) => {
-    if (session.id !== event.sessionId) return session;
-    if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null } : session;
-    if (event.runId !== session.runId) return session;
-    if (event.type === 'answered') return session.attention && session.attention.at <= event.at ? { ...session, attention: null } : session;
-    if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
-    if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
-    if (event.type === 'error') return { ...session, error: event.message };
-    if (event.type === 'conversation') return session.config.engine === 'claude' && !session.config.chat && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
-    return session;
-  }) })),
+  // The same state when nothing changed (an `answered` after each Claude tool call, say), so nothing redraws for it.
+  applyEvent: (event) => set((state) => { if (event.type === 'data') return state; let changed = false; const sessions = state.sessions.map((session) => { const next = applied(session, event); if (next !== session) changed = true; return next; }); return changed ? { sessions } : state; }),
   setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null } : session) })),
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();
-    const slot = state.sessions.length >= MAX_CHANNELS ? state.sessions.find((session) => session.status !== 'running' && session.status !== 'starting') : null;
+    // Only a channel the person sees, and never one that leads a Round Table (its seats and saved findings would go with it).
+    const slot = state.sessions.length >= MAX_CHANNELS ? channelsOf(state.sessions).find((session) => session.status !== 'running' && session.status !== 'starting' && !session.roundTable) : null;
     if (state.sessions.length >= MAX_CHANNELS && !slot) return false;
     const session = createSession(run.engine, { mode: 'independent', cwd: run.cwd }); session.config = structuredClone(run.config);
     const sessions = slot ? state.sessions.map((item) => item.id === slot.id ? session : item) : [...state.sessions, session];
     set({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null, activeView: 'workspace' });
     return true;
   },
-  addChatSession: (engine) => { useWorkspaceStore.getState().addSession(engine); useWorkspaceStore.setState((state) => { const last = state.sessions.at(-1); return last && last.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === last.id && isAgentConfig(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : {}; }); },
+  // Only the session just added becomes a chat: with eight already, none is added, and the last one is left as it was.
+  addChatSession: (engine) => { const before = new Set(get().sessions.map((session) => session.id)); get().addSession(engine); set((state) => { const added = state.sessions.find((session) => !before.has(session.id)); return added && added.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === added.id && isAgentConfig(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : state; }); },
   addSession: (engine, sourceSessionId) => set((state) => {
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
@@ -234,7 +229,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const seats = hiddenSeats(state.sessions, id); const gone = new Set([id, ...seats.flatMap((seat) => !live(seat) ? [seat.id] : [])]);
     const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => {
       if (!session.roundTable) return session;
-      if (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) return { ...session, roundTable: undefined };
+      // Findings not yet saved to shared memory stay on the record (Needs you saves them), as a closed table's do.
+      if (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) return session.roundTable.findings?.length ? session : { ...session, roundTable: undefined };
       return session;
     });
     return {

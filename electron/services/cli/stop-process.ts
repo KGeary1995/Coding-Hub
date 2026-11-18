@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import type { IPty } from 'node-pty';
 import { HubError } from './engine-adapter';
+import { skipConsoleProcessLookup } from './native-pty';
 export interface StopDependencies { platform?: NodeJS.Platform; killTree?: (pid: number) => Promise<void>; isAlive?: (pid: number) => boolean; signalGroup?: (pid: number, signal: NodeJS.Signals) => void; waitMilliseconds?: number }
 export function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; } }
 function windowsTree(pid: number): Promise<void> {
@@ -20,8 +21,9 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
     try { await (dependencies.killTree ?? windowsTree)(pty.pid); }
     catch { if (!exited && alive(pty.pid)) throw new HubError('STOP_FAILED', 'Windows could not stop the CLI process tree. Retry Stop or check the session PID in Task Manager.'); }
     // node-pty rejects every signal on Windows (and a deferred rejection throws later, outside this
-    // try); only the argument-less kill closes the pseudoconsole.
-    if (!exited) try { pty.kill(); } catch { /* Process already exited. */ }
+    // try); only the argument-less kill closes the pseudoconsole. The tree is already gone, so node-pty
+    // must not look up and end the console's processes by id itself (see skipConsoleProcessLookup).
+    if (!exited) try { skipConsoleProcessLookup(pty); pty.kill(); } catch { /* Process already exited. */ }
     const reported = await wait(dependencies.waitMilliseconds ?? 5000);
     if (alive(pty.pid)) throw new HubError('STOP_FAILED', 'The CLI process is still running after Stop. Check its displayed PID in Task Manager before restarting.');
     return !reported;

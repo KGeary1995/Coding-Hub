@@ -109,11 +109,13 @@ export class LiveCoach {
   /** Forgets every coached prompt, here and on disk. */
   clear() { this.tips = []; this.context.clear(); try { fs.rmSync(this.saved, { force: true }); } catch { /* Gone already. */ } return this.list(); }
   private get file() { return path.join(this.root, 'live.json'); }
-  enabled(): boolean { try { return JSON.parse(fs.readFileSync(this.file, 'utf8')).enabled !== false; } catch { return true; } }
+  /** Read once: only setEnabled writes it, and it was read from disk for every channel each time phones listed them. */
+  private on: boolean | undefined;
+  enabled(): boolean { if (this.on === undefined) { try { this.on = JSON.parse(fs.readFileSync(this.file, 'utf8')).enabled !== false; } catch { this.on = true; } } return this.on; }
   setEnabled(enabled: boolean) {
     fs.mkdirSync(this.root, { recursive: true, mode: 0o700 }); const temporary = path.join(this.root, randomUUID() + '.tmp');
     try { fs.writeFileSync(temporary, JSON.stringify({ enabled }), { flag: 'wx', mode: 0o600 }); fs.renameSync(temporary, this.file); } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
-    return this.list();
+    this.on = enabled; return this.list();
   }
   list(): LiveCoaching { return { enabled: this.enabled(), tips: this.tips.slice(0, LIVE_TIPS), week: coachingWeek(this.tips, this.now()) }; }
   /** A channel's last coached prompt, while live coaching is on. */

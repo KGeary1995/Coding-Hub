@@ -22,6 +22,10 @@ describe('Needs you', () => {
     const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
     expect(needsYou([], [], [], { lead: { ...table, waiting: 'Also update the docs.', waitingKept: true }, other: { ...table, waiting: 'In flight' } })).toMatchObject([{ kind: 'table-waiting', sessionId: 'lead', detail: 'Also update the docs.', action: 'answer' }]);
   });
+  it('counts a kept message’s images on a linked computer, which gets how many, not their data', () => {
+    const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false, waiting: '', waitingKept: true };
+    expect(needsYou([], [], [], { linked: { ...table, waitingImageCount: 2 } })[0]?.detail).toBe('2 images');
+  });
   it('says how long something has waited', () => {
     const now = Date.parse('2026-11-10T12:00:00.000Z');
     expect(waited('2026-11-10T11:56:00.000Z', now)).toBe('4 min'); expect(waited('2026-11-10T09:00:00.000Z', now)).toBe('3 h'); expect(waited('2026-11-07T12:00:00.000Z', now)).toBe('3 d'); expect(waited(null)).toBe('');

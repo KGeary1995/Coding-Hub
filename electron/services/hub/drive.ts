@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { z } from 'zod';
 import type { DriveStatus, HubPreferences, MemoryConflict, MemoryNote } from '../../../shared/hub';
 import { MemoryService, noteSchema } from './memory';
 import { HubError } from '../cli/engine-adapter';
@@ -16,87 +17,135 @@ export function driveFolderProblem(directory: string, isAbsolute: (value: string
   return `${directory} was not found. Start Google Drive for desktop, or choose the folder it keeps on this computer.`;
 }
 
-/** Google Drive for desktop owns authentication and cloud transport. Only curated notes sync. */
+/** Pairs compared before, kept beside the local notes: by Drive project folder, then note id, "size here:size on Drive". */
+export const COMPARED_FILE = '.drive-compared.json';
+const comparedSchema = z.record(z.string(), z.record(z.string(), z.string().regex(/^\d+:\d+$/)));
+const CONFLICT = 'A Drive note has conflicting contents. No notes were overwritten. Review that file before syncing.';
+const hash = (note: MemoryNote) => createHash('sha256').update(JSON.stringify(note)).digest('hex');
+
+/**
+ * Google Drive for desktop owns authentication and cloud transport. Only curated notes sync. Everything that touches
+ * the Drive folder runs without holding the main process: Drive answers each file in about half a millisecond and
+ * downloads files it has not cached, so reading a project's notes there froze the window and terminals for seconds.
+ */
 export class DriveMirror {
-  private syncing = false;
   constructor(private local: MemoryService, private preferences: () => HubPreferences) {}
   status(): DriveStatus { const p = this.preferences(); const problem = driveFolderProblem(p.driveDirectory); return { connected: !problem, clientConfigured: !!p.driveDirectory, persistent: true, folderId: p.folderId, problem }; }
-  private mirror(): MemoryService {
-    if (!this.status().connected) throw new HubError('DRIVE_OFFLINE', 'Drive folder is unavailable. Local handoffs remain available.');
-    const mirror = new MemoryService(path.join(fs.realpathSync(this.preferences().driveDirectory), 'AI-Coding-Hub-Memory'));
-    if (fs.realpathSync(mirror.root) === fs.realpathSync(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a folder outside local memory.');
-    return mirror;
-  }
-  conflicts(project: string): MemoryConflict[] {
-    const mirror = this.mirror(); const local = new Map(this.local.list(project).map((note) => [note.id, note]));
-    const hash = (note: MemoryNote) => createHash('sha256').update(JSON.stringify(note)).digest('hex');
-    return mirror.list(project).filter((note) => local.has(note.id) && hash(local.get(note.id)!) !== hash(note)).map((remote) => ({ id: remote.id, local: local.get(remote.id)!, remote, localHash: hash(local.get(remote.id)!), remoteHash: hash(remote) }));
-  }
-  resolve(project: string, id: string, localHash: string, remoteHash: string) {
-    if (this.syncing) throw new HubError('DRIVE_BUSY', 'Sync is already running.');
-    const conflict = this.conflicts(project).find((item) => item.id === id);
-    if (!conflict || conflict.localHash !== localHash || conflict.remoteHash !== remoteHash) throw new HubError('MEMORY_CHANGED', 'Conflict changed. Refresh before resolving.');
-    const mirror = this.mirror(); const file = path.join(mirror.directory(project), id + '.json');
-    if (fs.lstatSync(file).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Conflict file cannot be a link.');
-    const before = fs.readFileSync(file, 'utf8');
-    if (createHash('sha256').update(JSON.stringify(noteSchema.parse(JSON.parse(before)))).digest('hex') !== remoteHash) throw new HubError('MEMORY_CHANGED', 'Drive conflict changed. Refresh before resolving.');
-    // Both content versions remain: the original local ID plus a new remote-version ID.
-    const preserved: MemoryNote = { ...conflict.remote, id: randomUUID(), title: ('Drive conflict: ' + conflict.remote.title).slice(0, 200), supersedes: id };
-    this.local.import(preserved); mirror.import(preserved);
-    fs.writeFileSync(file + '.conflict-backup-' + randomUUID(), before, { flag: 'wx', mode: 0o600 });
-    const temporary = file + '.tmp-' + randomUUID();
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(conflict.local, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-      const currentLocal = this.local.list(project).find((note) => note.id === id);
-      if (!currentLocal || createHash('sha256').update(JSON.stringify(currentLocal)).digest('hex') !== localHash || fs.readFileSync(file, 'utf8') !== before) throw new HubError('MEMORY_CHANGED', 'Drive file changed during resolution. Both versions remain preserved; refresh.');
-      fs.renameSync(temporary, file);
-    } finally { try { fs.unlinkSync(temporary); } catch { /* Already renamed. */ } }
-  }
-  /** Copies already compared and found the same, by Drive project folder and note id, as "size here:size on Drive". */
-  private same = new Map<string, Map<string, string>>();
-  /**
-   * The 30-second check. The folder listings and file sizes are read without holding the process (a Drive folder with
-   * 1,200 notes took 0.7 s to list), and sync() then reads only the notes that differ.
-   */
-  async syncLater(project: string) {
-    const mirror = this.mirror(); const [here, there] = await Promise.all([this.local.sizesLater(project), mirror.sizesLater(project)]);
-    return this.sync(project, { here, there });
-  }
-  /** `sizes`: both sides' note sizes when the caller has read them already (syncLater). */
-  sync(project: string, sizes?: { here: Map<string, number>; there: Map<string, number> }) {
-    if (this.syncing) throw new HubError('DRIVE_BUSY', 'A memory sync is already in progress.');
+  /** The Drive copy of the notes. Offline or misplaced folders throw; local notes stay usable. */
+  private async mirror(): Promise<MemoryService> {
     const problem = this.status().problem;
     if (problem) throw new HubError('DRIVE_OFFLINE', `${problem} Local handoffs remain available.`);
-    this.syncing = true;
-    try {
-      const root = fs.realpathSync(this.preferences().driveDirectory);
-      const mirror = new MemoryService(path.join(root, 'AI-Coding-Hub-Memory'));
-      if (fs.realpathSync(mirror.root) === fs.realpathSync(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a shared folder outside the local memory directory.');
-      // Notes are immutable files named by their id: the same names and sizes on both sides means nothing to sync, and no
-      // note is read. This runs on the main process, and reading every note there (a Drive folder downloads files it has
-      // not cached) freezes the window and terminals: 636 notes took 2.4 to 4.6 s on every tick (2026-11-14), because
-      // one note had the same content on both sides in different bytes. So a note is read only when it is on one side,
-      // or its sizes are a pair not yet compared; a note changed on one side almost always changes size.
-      const here = sizes?.here ?? this.local.sizes(project); const there = sizes?.there ?? mirror.sizes(project);
-      const key = path.join(mirror.root, project); const same = this.same.get(key) ?? new Map<string, string>(); this.same.set(key, same);
-      if (here.size === there.size && [...here].every(([id, size]) => there.get(id) === size)) { for (const [id, size] of here) same.set(id, `${size}:${size}`); return { uploaded: 0, downloaded: 0 }; }
-      // A note either computer archived (moved aside when the project was full) is neither compared nor copied again.
-      const archivedHere = this.local.archived(project); const archivedThere = mirror.archived(project);
-      // One unreadable or conflicting file must not stop every other note from syncing.
-      let failure: unknown = null;
-      // Preflight conflicts before writing either side. Immutable notes make retries idempotent.
-      for (const [id, size] of here) {
-        const other = there.get(id); if (other === undefined || archivedHere.has(id) || archivedThere.has(id) || same.get(id) === `${size}:${other}`) continue;
-        const local = this.local.note(project, id); const remote = mirror.note(project, id);
-        if (local && remote) { if (JSON.stringify(local) !== JSON.stringify(remote)) throw new HubError('MEMORY_CONFLICT', 'A Drive note has conflicting contents. No notes were overwritten. Review that file before syncing.'); same.set(id, `${size}:${other}`); }
+    const root = path.join(await fs.promises.realpath(this.preferences().driveDirectory), 'AI-Coding-Hub-Memory');
+    await fs.promises.mkdir(root, { recursive: true, mode: 0o700 });
+    if (await fs.promises.realpath(root) === await fs.promises.realpath(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a shared folder outside the local memory directory.');
+    // Made once per folder: its constructor checks the folder synchronously.
+    let mirror = this.mirrors.get(root); if (!mirror) this.mirrors.set(root, mirror = new MemoryService(root));
+    return mirror;
+  }
+  private mirrors = new Map<string, MemoryService>();
+  /** Whether Drive has a folder for this project, or null when Drive cannot be read (not mounted yet, say). */
+  async hasProject(project: string): Promise<boolean | null> {
+    let mirror: MemoryService; try { mirror = await this.mirror(); } catch { return null; }
+    try { return (await fs.promises.stat(await mirror.directoryLater(project))).isDirectory(); } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? false : null; }
+  }
+  async conflicts(project: string): Promise<MemoryConflict[]> {
+    const mirror = await this.mirror(); const [mine, theirs] = await Promise.all([this.local.listLater(project), mirror.listLater(project)]);
+    const local = new Map(mine.map((note) => [note.id, note]));
+    return theirs.filter((note) => local.has(note.id) && hash(local.get(note.id)!) !== hash(note)).map((remote) => ({ id: remote.id, local: local.get(remote.id)!, remote, localHash: hash(local.get(remote.id)!), remoteHash: hash(remote) }));
+  }
+  /** Keeps both versions of a conflicting note. Waits for a sync of the project that is running. */
+  resolve(project: string, id: string, localHash: string, remoteHash: string): Promise<void> {
+    return this.exclusive(project, async () => {
+      const conflict = (await this.conflicts(project)).find((item) => item.id === id);
+      if (!conflict || conflict.localHash !== localHash || conflict.remoteHash !== remoteHash) throw new HubError('MEMORY_CHANGED', 'Conflict changed. Refresh before resolving.');
+      const mirror = await this.mirror(); const file = path.join(mirror.directory(project), id + '.json');
+      if (fs.lstatSync(file).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Conflict file cannot be a link.');
+      const before = fs.readFileSync(file, 'utf8');
+      if (hash(noteSchema.parse(JSON.parse(before)) as MemoryNote) !== remoteHash) throw new HubError('MEMORY_CHANGED', 'Drive conflict changed. Refresh before resolving.');
+      // Both content versions remain: the original local ID plus a new remote-version ID.
+      const preserved: MemoryNote = { ...conflict.remote, id: randomUUID(), title: ('Drive conflict: ' + conflict.remote.title).slice(0, 200), supersedes: id };
+      this.local.import(preserved); const { failure } = await mirror.importLater(project, [preserved]); if (failure) throw failure;
+      fs.writeFileSync(file + '.conflict-backup-' + randomUUID(), before, { flag: 'wx', mode: 0o600 });
+      const temporary = file + '.tmp-' + randomUUID();
+      try {
+        fs.writeFileSync(temporary, JSON.stringify(conflict.local, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+        const currentLocal = this.local.note(project, id);
+        if (!currentLocal || hash(currentLocal) !== localHash || fs.readFileSync(file, 'utf8') !== before) throw new HubError('MEMORY_CHANGED', 'Drive file changed during resolution. Both versions remain preserved; refresh.');
+        fs.renameSync(temporary, file);
+      } finally { try { fs.unlinkSync(temporary); } catch { /* Already renamed. */ } }
+    });
+  }
+  /** Each project's work, one job at a time: a sync and a resolution never touch the same folder together. */
+  private queues = new Map<string, Promise<void>>();
+  private exclusive<T>(project: string, job: () => Promise<T>): Promise<T> {
+    const next = (this.queues.get(project) ?? Promise.resolve()).then(job, job);
+    const done = next.then(() => {}, () => {}); this.queues.set(project, done);
+    void done.then(() => { if (this.queues.get(project) === done) this.queues.delete(project); });
+    return next;
+  }
+  /** A sync waiting for its project's running one: later requests join it, as it reads both folders after they were made. */
+  private waiting = new Map<string, Promise<{ uploaded: number; downloaded: number }>>();
+  /**
+   * Syncs one project's notes with Drive, without holding the process. A request while one runs waits for it and then
+   * runs once more (joined by any other request in that time), so a note written meanwhile is not left for the next tick.
+   */
+  syncLater(project: string): Promise<{ uploaded: number; downloaded: number }> {
+    const waiting = this.waiting.get(project); if (waiting) return waiting;
+    const run = this.exclusive(project, () => { this.waiting.delete(project); return this.run(project); });
+    this.waiting.set(project, run); return run;
+  }
+  /** Pairs already compared and found the same, read once from COMPARED_FILE and kept up to date in it. */
+  private comparing: Promise<Map<string, Map<string, string>>> | null = null;
+  private compared() {
+    return this.comparing ??= fs.promises.readFile(path.join(this.local.root, COMPARED_FILE), 'utf8')
+      .then((text) => new Map(Object.entries(comparedSchema.parse(JSON.parse(text))).map(([folder, pairs]) => [folder, new Map(Object.entries(pairs))])))
+      .catch(() => new Map<string, Map<string, string>>()); // Missing or unreadable: compared again once.
+  }
+  private saving: Promise<void> = Promise.resolve();
+  /** Written beside the notes (temporary file, then renamed), one write at a time. Only a cache: a failed write is compared again next start. */
+  private saveCompared(all: Map<string, Map<string, string>>) {
+    this.saving = this.saving.then(async () => {
+      const file = path.join(this.local.root, COMPARED_FILE); const temporary = path.join(this.local.root, `.${randomUUID()}.tmp`);
+      const text = JSON.stringify(Object.fromEntries([...all].map(([folder, pairs]) => [folder, Object.fromEntries(pairs)])));
+      try { await fs.promises.writeFile(temporary, text, { flag: 'wx', mode: 0o600 }); await fs.promises.rename(temporary, file); }
+      catch { /* Compared again after the next start. */ }
+      finally { await fs.promises.unlink(temporary).catch(() => { /* Renamed. */ }); }
+    });
+    return this.saving;
+  }
+  private async run(project: string) {
+    const mirror = await this.mirror();
+    const [here, there] = await Promise.all([this.local.listing(project), mirror.listing(project)]);
+    // Notes are immutable files named by their id, so a note with the same size on both sides is the same note, and
+    // is not read. A note whose sizes differ (another program rewrote its line endings, say) is read once on each
+    // side; when the two hold the same note, the pair of sizes is kept in COMPARED_FILE so it is never read again.
+    const all = await this.compared(); const folder = path.join(mirror.root, project); const known = all.get(folder) ?? new Map<string, string>();
+    const same = new Map<string, string>(); const differ: string[] = [];
+    // A note either computer archived (moved aside when the project was full) is neither compared nor copied again.
+    for (const [id, size] of here.sizes) {
+      const other = there.sizes.get(id); if (other === undefined || other === size || here.archived.has(id) || there.archived.has(id)) continue;
+      if (known.get(id) === `${size}:${other}`) same.set(id, `${size}:${other}`); else differ.push(id);
+    }
+    // One unreadable or conflicting file must not stop every other note from syncing; neither is ever overwritten.
+    let conflict: HubError | null = null; let failure: unknown = null;
+    if (differ.length) {
+      const [locals, remotes] = await Promise.all([this.local.notesLater(project, differ), mirror.notesLater(project, differ)]);
+      for (const id of differ) {
+        const local = locals.get(id); const remote = remotes.get(id);
+        if (local && remote) { if (JSON.stringify(local) === JSON.stringify(remote)) same.set(id, `${here.sizes.get(id)}:${there.sizes.get(id)}`); else conflict ??= new HubError('MEMORY_CONFLICT', CONFLICT); }
         // One copy cannot be read (truncated, half-synced): both files stay, and it is reported after the rest has synced.
         else if (local || remote) failure ??= new HubError('MEMORY_CONFLICT', 'A remote handoff conflicts with a local ID. Both files were preserved; inspect the remote note before importing.');
       }
-      let uploaded = 0; let downloaded = 0;
-      for (const id of there.keys()) if (!here.has(id) && !archivedThere.has(id)) { try { const note = mirror.note(project, id); if (note && this.local.import(note)) downloaded++; } catch (error) { failure ??= error; } }
-      for (const id of here.keys()) if (!there.has(id) && !archivedHere.has(id)) { try { const note = this.local.note(project, id); if (note && mirror.import(note)) uploaded++; } catch (error) { failure ??= error; } }
-      if (failure) throw failure;
-      return { uploaded, downloaded };
-    } finally { this.syncing = false; }
+    }
+    if (same.size !== known.size || [...same].some(([id, pair]) => known.get(id) !== pair)) { if (same.size) all.set(folder, same); else all.delete(folder); await this.saveCompared(all); }
+    const copy = async (from: MemoryService, to: MemoryService, ids: string[]) => {
+      if (!ids.length) return 0;
+      try { const notes = [...(await from.notesLater(project, ids)).values()].filter((note): note is MemoryNote => note !== null); const { imported, failure: failed } = await to.importLater(project, notes); failure ??= failed; return imported; }
+      catch (error) { failure ??= error; return 0; }
+    };
+    const downloaded = await copy(mirror, this.local, [...there.sizes.keys()].filter((id) => !here.sizes.has(id) && !there.archived.has(id)));
+    const uploaded = await copy(this.local, mirror, [...here.sizes.keys()].filter((id) => !there.sizes.has(id) && !here.archived.has(id)));
+    if (conflict ?? failure) throw conflict ?? failure;
+    return { uploaded, downloaded };
   }
 }
