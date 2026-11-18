@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
-import { codexWindow, parseClaudeUsage, type PlanLimits } from '../../../shared/plan-limits';
+import { codexWindows, parseClaudeUsage, type PlanLimits } from '../../../shared/plan-limits';
 import type { ClaudeAccountProfile } from '../../../shared/accounts';
 import { findExecutable, hostEnvironment, type Executable } from '../cli/discovery';
 
@@ -43,9 +43,9 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
         if (message.id === 1) { child.stdin.write(JSON.stringify({ method: 'initialized' }) + '\n' + JSON.stringify({ id: 2, method: 'account/rateLimits/read', params: null }) + '\n'); continue; }
         if (message.id !== 2) continue;
         if (message.error) { finish({ windows: [], plan: null, error: text(message.error.message) || 'Codex did not report usage limits.' }); return; }
-        const limits = (message.result?.rateLimits ?? {}) as { primary?: Parameters<typeof codexWindow>[0] | null; secondary?: Parameters<typeof codexWindow>[0] | null; planType?: unknown };
-        const windows = [limits.primary, limits.secondary].filter((window): window is Parameters<typeof codexWindow>[0] => Boolean(window)).map(codexWindow).sort((a, b) => (a.label === 'Session' ? -1 : 0) - (b.label === 'Session' ? -1 : 0));
-        finish({ windows, plan: text(limits.planType) || null, error: windows.length ? null : 'This Codex account has no usage limits to show.' });
+        const limits = (message.result?.rateLimits ?? {}) as { primary?: unknown; secondary?: unknown; planType?: unknown };
+        const given = [limits.primary, limits.secondary].filter(Boolean); const windows = codexWindows(given);
+        finish({ windows, plan: text(limits.planType) || null, error: windows.length ? null : given.length ? 'Codex reported its usage limits in a form Trace does not read. Update Trace.' : 'This Codex account has no usage limits to show.' });
       }
     });
     child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'trace', title: 'Trace', version: '1' }, capabilities: null } }) + '\n');

@@ -24,12 +24,18 @@ const PORTABLE = ['prices', 'terminalFontSize', 'terminalWebGL', 'automaticMemor
 const settingsSchema = preferencesSchema.pick({ prices: true, terminalFontSize: true, terminalWebGL: true, automaticMemory: true });
 const rulesSchema = z.object({ content: z.string().max(60000) }).strict();
 const machineSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100) }).strict();
+/**
+ * Not strict: a field a newer Trace adds to a usage record is dropped here, instead of the whole computer's usage file
+ * being refused (older versions on the person's other computers still read what this one writes).
+ */
 const usageSchema = z.object({
   conversationId: z.string().max(200).optional(), source: z.enum(['claude-session-jsonl', 'codex-rollout-jsonl']).optional(), confidence: z.literal('reported').optional(),
   costBasis: z.enum(['configured-model-rates', 'unpriced']).optional(), incomplete: z.literal(true).optional(), eventCount: z.number().int().min(0).optional(), runId: z.string().min(1).max(100), sessionId: z.string().min(1).max(100),
   engine: z.enum(['claude', 'codex']), model: z.string().max(200), cwd: z.string().max(4096), timestamp: z.iso.datetime(), input: z.number().min(0), output: z.number().min(0), cached: z.number().min(0),
-  cacheWrite: z.number().min(0), reasoning: z.number().min(0).nullable(), context: z.object({ used: z.number().min(0), limit: z.number().min(0) }).strict().nullable(), cost: z.number().min(0).nullable(),
-}).strict();
+  cacheWrite: z.number().min(0), reasoning: z.number().min(0).nullable(), context: z.object({ used: z.number().min(0), limit: z.number().min(0) }).nullable(), cost: z.number().min(0).nullable(),
+});
+/** This computer's usage is gathered (a full rebuild of every run's totals) and published at most this often. */
+const USAGE_EVERY = 5 * 60_000;
 const hashes = z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(LINEAGE);
 const documentSchema = <T extends z.ZodType>(value: T) => z.object({ version: z.literal(1), machine: machineSchema, updatedAt: z.iso.datetime(), value }).strict();
 /**
@@ -78,6 +84,8 @@ function writeJson(file: string, value: unknown) {
 export class DeviceSync {
   readonly machine: Machine;
   private syncing = false; private error: string | null = null; private identityError: string | null = null;
+  /** The sync folder whose sub-folders were last made, and when (and for which folder) this computer's usage was last gathered. */
+  private prepared: string | null = null; private usageChecked = { at: 0, folder: '' };
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
   private addresses = new Map<string, { id: string; name: string; url: string | null }>();
@@ -101,8 +109,12 @@ export class DeviceSync {
     if (this.identityError) throw new HubError('SYNC_IDENTITY', this.identityError);
     let drive: string; try { drive = fs.realpathSync(preferences.driveDirectory); if (!fs.statSync(drive).isDirectory()) return null; } catch { return null; }
     const folder = path.join(drive, SYNC_FOLDER);
-    for (const sub of ['', 'templates', 'usage', 'computers']) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
-    return folder;
+    // Every tick is a call on the Drive volume: the sub-folders are made once, and afterwards only looked at (lstat sees a
+    // link or junction as no folder). One that went, or became a link, sends the tick through the full check below.
+    const subs = ['', 'templates', 'usage', 'computers'];
+    if (this.prepared === folder && subs.every((sub) => { try { return fs.lstatSync(path.join(folder, sub)).isDirectory(); } catch { return false; } })) return folder;
+    for (const sub of subs) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
+    this.prepared = folder; return folder;
   }
   private value<D extends SyncedDocument>(document: D): SyncedValue[D] {
     if (document === 'rules') return { content: this.rules.content() } as SyncedValue[D];
@@ -147,7 +159,9 @@ export class DeviceSync {
       // A shared file that cannot be read (half-synced, damaged) still counts as present: it is never taken as a deletion.
       try { const item = readJson(path.join(directory, name), templateSchema) as ProjectTemplate | null; if (item && item.id === id) remote.set(id, item); else unreadable++; } catch { unreadable++; }
     }
-    if (state.folder !== folder) { state.folder = folder; state.templates = []; }
+    // Deleting a template here always saves the file (empty when none is left), so a missing file is lost data (removed by
+    // hand, a restore without it), not deletions: start a new baseline, which takes the shared templates back.
+    if (state.folder !== folder || !fs.existsSync(path.join(this.root, 'project-templates.json'))) { state.folder = folder; state.templates = []; }
     const known = new Set(state.templates); const localIds = new Set(local.map((item) => item.id));
     // Removed here since the last sync: remove it for every computer.
     for (const id of known) if (!localIds.has(id) && present.has(id)) { fs.unlinkSync(path.join(directory, id + '.json')); present.delete(id); remote.delete(id); }
@@ -163,11 +177,19 @@ export class DeviceSync {
     state.templates = next.map((item) => item.id);
     if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared template file${unreadable === 1 ? '' : 's'} could not be read; copies on this computer were kept.`);
   }
-  private usage(folder: string, state: State) {
-    const records = this.localUsage().filter((record) => !record.machine).slice(0, 2000).flatMap(({ days: _days, ...record }) => { const parsed = usageSchema.safeParse(record); return parsed.success ? [parsed.data] : []; });
-    // The cache names the folder too, so a new Drive folder (or a deleted usage file) gets this computer's history again.
-    const own = path.join(folder, 'usage', this.machine.id + '.json'); const hash = digest([folder, records]);
-    if (hash !== state.usage || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: records }); state.usage = hash; }
+  private usage(folder: string, state: State, now: boolean) {
+    const own = path.join(folder, 'usage', this.machine.id + '.json');
+    // Rebuilding every run's totals takes tens of milliseconds, and while an agent works they change on every tick: gather
+    // and publish them every few minutes (at once for Sync now, a new Drive folder or a deleted usage file), not each tick.
+    if (now || this.usageChecked.folder !== folder || Date.now() - this.usageChecked.at >= USAGE_EVERY || !fs.existsSync(own)) {
+      const records = this.localUsage().filter((record) => !record.machine).slice(0, 2000).flatMap(({ days: _days, ...record }) => { const parsed = usageSchema.safeParse(record); return parsed.success ? [parsed.data] : []; });
+      // The cache names the folder too, so a new Drive folder (or a deleted usage file) gets this computer's history again.
+      const hash = digest([folder, records]);
+      // With no record of the last publish (a lost device-sync.json), a file that already holds these records is kept.
+      if (state.usage === null) try { const current = readJson(own, usageDocument); if (current && digest(current.machine) === digest(this.machine) && digest(current.value) === digest(records)) state.usage = hash; } catch { /* Rewritten below. */ }
+      if (hash !== state.usage || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: records }); state.usage = hash; }
+      this.usageChecked = { at: Date.now(), folder };
+    }
     const directory = path.join(folder, 'usage'); const present = new Set<string>();
     for (const name of fs.readdirSync(directory)) {
       const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match || match[1] === this.machine.id) continue;
@@ -206,7 +228,8 @@ export class DeviceSync {
     const seen = new Set<string>();
     return [...this.remoteUsage.values()].flatMap((item) => item.records).filter((record) => !seen.has(record.runId) && Boolean(seen.add(record.runId)));
   }
-  sync() {
+  /** `now`: the person asked (Sync now), so this computer's usage is published at once rather than on its few-minute cadence. */
+  sync(now = false) {
     if (this.syncing) return this.status();
     let folder: string | null; try { folder = this.folder(); } catch (error) { this.error = (error as Error).message; return this.status(); }
     if (!folder) return this.status();
@@ -214,8 +237,8 @@ export class DeviceSync {
     try {
       const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
-      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state), () => this.addressBook(folder)]) {
-        try { step(); } catch (error) { this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
+      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder)]) {
+        try { step(); } catch (error) { this.prepared = null; this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);
     } catch (error) { this.error = error instanceof HubError ? error.message : 'Sync failed. It will retry.'; }

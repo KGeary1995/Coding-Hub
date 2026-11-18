@@ -74,6 +74,11 @@ const SUMMARIES_IN_CONTEXT = 2;
 /** A summary with no file changes and no commits is worth writing only if the agent's last message says something. */
 const SHORT_MESSAGE = 200;
 
+/**
+ * Cuts text to `limit` UTF-16 units without splitting an emoji's surrogate pair: a lone half is escaped by JSON.stringify
+ * into a \ud83e sequence that TOML refuses, which would break Codex's developer_instructions.
+ */
+const clip = (text: string, limit: number) => { if (text.length <= limit) return text; const cut = text.slice(0, limit); return (/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut) + ' …'; };
 /** Recent notes as launch context. Notes are data from earlier sessions, never instructions. */
 export function memoryContext(key: string, notes: MemoryNote[]): string {
   const header = [
@@ -103,7 +108,7 @@ export function memoryContext(key: string, notes: MemoryNote[]): string {
   const shown = notes.filter((item) => !replaced.has(item.id) && !isItemNote(item));
   const curated = shown.filter((item) => !isSessionSummary(item)); const summaries = shown.filter(isSessionSummary).slice(0, SUMMARIES_IN_CONTEXT);
   for (const note of [...curated, ...summaries].slice(0, 8)) {
-    const body = note.content.length > 1200 ? note.content.slice(0, 1200) + ' …' : note.content;
+    const body = clip(note.content, 1200);
     const entry = `\n\n## ${note.title}\n_${note.author}, ${note.createdAt.slice(0, 16).replace('T', ' ')} UTC_\n${body}`;
     if (text.length + entry.length > CONTEXT_LIMIT) break;
     text += entry;
@@ -134,7 +139,8 @@ async function git(cwd: string, args: string[]): Promise<string[]> {
   const safe = await readOnlyGitOptions(cwd);
   return new Promise((resolve) => execFile('git', ['--no-optional-locks', ...safe, '-C', cwd, ...args], { timeout: 8000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map((line) => line.trimEnd()).filter(Boolean))));
 }
-const changedFiles = (cwd: string) => git(cwd, ['status', '--porcelain=v1', '--untracked-files=normal']);
+/** `--ignore-submodules=dirty` wins over any submodule setting, so a submodule's own config never runs here (see readOnlyGitOptions). */
+const changedFiles = (cwd: string) => git(cwd, ['status', '--porcelain=v1', '--untracked-files=normal', '--ignore-submodules=dirty']);
 
 /** A `-c developer_instructions` override replaces the user's own; keep theirs (user, then project) first. */
 function codexInstructions(cwd: string, context: string): string {
@@ -146,7 +152,15 @@ function codexInstructions(cwd: string, context: string): string {
 }
 
 interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void>; /** A hidden Round Table seat: the leading channel's summary covers the table. */ seat?: boolean }
-export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void }
+export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void;
+  /** Brings a project's notes up to date from other computers (Drive) before a launch reads them; see ready(). */
+  sync?: (key: string) => Promise<unknown>; syncMilliseconds?: number }
+/** How long a launch waits for other computers' notes (Drive offline or slow): it then starts with the local ones. */
+export const SYNC_BEFORE_LAUNCH_MS = 1500;
+/** Notes ready() read are used by a prepare() that follows within this time; an older read is stale. */
+const READY_FOR_MS = 30000;
+/** Memory MCP config files prepare() writes, one per run: `<runId>.mcp.json`. */
+const RUN_CONFIG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mcp\.json$/i;
 /** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
 export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
 
@@ -203,7 +217,31 @@ export class AutoMemory {
   private runs = new Map<string, Tracked>();
   private pending = new Set<Promise<MemoryNote | null>>();
   private noticed = new Set<string>();
-  constructor(private options: AutoMemoryOptions) {}
+  /** Notes read by ready() for launches about to be prepared, by memory key. */
+  private readied = new Map<string, { notes: MemoryNote[]; at: number }>();
+  constructor(private options: AutoMemoryOptions) {
+    // No run is active yet, so every run's MCP config file left in the scratch folder (a crash, a forced quit) is stale.
+    // Listed now, before any launch can write one; removed in the background.
+    let names: string[] = []; try { names = fs.readdirSync(options.scratch).filter((name) => RUN_CONFIG.test(name)); } catch { /* No scratch folder yet. */ }
+    for (const name of names) void fs.promises.rm(path.join(options.scratch, name), { force: true }).catch(() => { /* Retried at the next start. */ });
+  }
+
+  /**
+   * Readies a launch's memory context without holding the process: waits for `sync` (other computers' notes, at most
+   * `syncMilliseconds`), then reads the project's notes asynchronously for the prepare() that follows. Never throws; a
+   * launch it could not ready is prepared from the local notes, read then.
+   */
+  async ready(cwd: string, chosenKey?: string): Promise<void> {
+    if (!this.options.enabled()) return;
+    try {
+      const key = chosenKey ?? projectMemoryKey(cwd); const sync = this.options.sync;
+      if (sync) { let timer: ReturnType<typeof setTimeout> | undefined; await Promise.race([Promise.resolve().then(() => sync(key)).catch(() => { /* Local notes only. */ }), new Promise((resolve) => { timer = setTimeout(resolve, this.options.syncMilliseconds ?? SYNC_BEFORE_LAUNCH_MS); })]); clearTimeout(timer); }
+      // Kept for every launch of the project in the next READY_FOR_MS (channels of a restored workspace or a Round Table
+      // start together), then dropped, also when no launch came (cancelled, sign-in needed), so no note list lingers.
+      const entry = { notes: await this.options.memory.listLater(key), at: Date.now() }; this.readied.set(key, entry);
+      setTimeout(() => { if (this.readied.get(key) === entry) this.readied.delete(key); }, READY_FOR_MS).unref?.();
+    } catch { /* prepare() reads the notes itself. */ }
+  }
 
   private notice(id: string, message: string) { if (this.noticed.has(id)) return; this.noticed.add(id); try { this.options.onNotice?.(message); } catch { /* Notices are best effort. */ } }
 
@@ -256,9 +294,11 @@ export class AutoMemory {
       key = chosenKey ?? projectMemoryKey(run.cwd);
       // The home folder is no project: everything started there would share (and mix) one set of notes.
       if (!chosenKey && samePath(run.cwd, os.homedir())) this.notice(`home:${run.cwd}`, `A channel runs in your home folder, so its shared memory (${key}) holds notes from everything started there. Open that channel's Settings and choose its project under Shared memory project, or start it in the project's own folder.`);
-      // Pull newer handoffs from other computers first; offline Drive leaves the local notes.
-      try { this.options.refresh?.(key); } catch { /* Local notes only. */ }
-      context = memoryContext(key, this.options.memory.list(key));
+      // ready() already pulled newer handoffs from other computers and read the notes. Without it, the notes are read here
+      // and the sync only starts (its notes reach the next launch); offline Drive leaves the local notes.
+      const readied = this.readied.get(key);
+      if (readied && Date.now() - readied.at < READY_FOR_MS) context = memoryContext(key, readied.notes);
+      else { try { this.options.refresh?.(key); } catch { /* Local notes only. */ } context = memoryContext(key, this.options.memory.list(key)); }
     } catch { return; }
     const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key, run.engine, run.cwd], env: { ELECTRON_RUN_AS_NODE: '1' } };
     const configured = this.configured(run.engine, run.cwd);
@@ -302,7 +342,7 @@ export class AutoMemory {
    */
   seated(runIds: string[]) { for (const runId of runIds) { const tracked = this.runs.get(runId); if (tracked) tracked.seat = true; } }
   /** A run that was prepared but never started: no summary, and its MCP config file goes. */
-  abandon(runId: string) { this.runs.delete(runId); try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder. */ } }
+  abandon(runId: string) { this.runs.delete(runId); try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed at the next start. */ } }
   /** Resolves once background Git checks started by prepare() have finished. */
   async settled() { await Promise.all([...this.runs.values()].map((run) => run.ready)); }
 
@@ -319,7 +359,7 @@ export class AutoMemory {
   private async summarize(runId: string, located: string | null | Promise<string | null>): Promise<MemoryNote | null> {
     const tracked = this.runs.get(runId); if (!tracked) return null; this.runs.delete(runId);
     const transcript = await located;
-    try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed with the scratch folder later. */ }
+    try { fs.rmSync(path.join(this.options.scratch, `${runId}.mcp.json`), { force: true }); } catch { /* Removed at the next start. */ }
     if (!this.options.enabled() || tracked.seat) return null;
     await tracked.ready;
     const before = new Set(tracked.files); const after = await changedFiles(tracked.cwd);
@@ -332,10 +372,11 @@ export class AutoMemory {
     const minutes = Math.max(1, Math.round((Date.now() - tracked.startedAt) / 60000));
     const name = tracked.engine === 'claude' ? 'Claude Code' : 'Codex';
     const lines = [`Automatic summary of a ${minutes}-minute ${name} session${tracked.model ? ` (${tracked.model})` : ''} in ${tracked.cwd}.`, ''];
-    lines.push('Files changed during the session (git status):', ...(changed.length ? changed.slice(0, 50).map((line) => `- ${line}`) : ['- none']));
+    // Git status covers the whole repository: other channels working in the same folder show here too, so say so.
+    lines.push('Files changed in the repository while the session ran (git status; may include other channels’ work in this folder):', ...(changed.length ? changed.slice(0, 50).map((line) => `- ${line}`) : ['- none']));
     if (changed.length > 50) lines.push(`- …and ${changed.length - 50} more`);
     if (commits.length) lines.push('', 'Commits made during the session:', ...commits.map((line) => `- ${line}`));
-    if (message) lines.push('', 'Last message from the agent:', message.length > 4000 ? message.slice(0, 4000) + ' …' : message);
+    if (message) lines.push('', 'Last message from the agent:', clip(message, 4000));
     const note = this.options.memory.write(tracked.key, `Session summary: ${name}, ${new Date().toISOString().slice(0, 10)}`, lines.join('\n'), tracked.engine);
     this.options.onWrite?.(tracked.key);
     return note;
