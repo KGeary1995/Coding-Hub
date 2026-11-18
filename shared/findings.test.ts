@@ -80,7 +80,8 @@ describe('lines in common Markdown forms', () => {
   it('reads a line of many # or * at once, however long', () => {
     for (const line of ['#'.repeat(200), `${'#'.repeat(200)} FINDING high x`, `${'#'.repeat(5000)} text`, '*'.repeat(20000), `${'*'.repeat(20000)} FIXED F1`]) {
       const start = performance.now(); parseFindings(line); parseAnswers(line, 'driver'); parseChallenges(line); parseChallengeAnswers(line); unreadLines(line, 'reviewer');
-      expect(performance.now() - start, line.slice(0, 20)).toBeLessThan(50);
+      // A pattern that backtracks takes seconds to minutes here; the bound leaves room for a busy Windows runner (55 ms seen).
+      expect(performance.now() - start, line.slice(0, 20)).toBeLessThan(1000);
     }
     expect(parseFindings('###### 1. **FINDING** high: y')).toEqual([{ severity: 'high', evidence: '', text: 'y' }]); expect(parseFindings('### FINDING high — x')).toHaveLength(1);
   });

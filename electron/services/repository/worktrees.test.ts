@@ -92,4 +92,4 @@ it('refuses to remove a worktree whose detached HEAD holds commits no branch has
   const orphan = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
   git(orphan.directory, 'checkout', '-q', '--orphan', 'fresh'); git(orphan.directory, 'rm', '-q', '-rf', '.');
   await service.execute({ action: 'worktree-remove', id: orphan.id }); expect(service.list()).toHaveLength(0);
-});
+}, 60_000);

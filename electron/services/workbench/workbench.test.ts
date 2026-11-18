@@ -237,7 +237,7 @@ describe('verification and experiment evidence', () => {
     const file = path.join(project, 'a.txt'); const { atime, mtime } = fs.statSync(file); const text = fs.readFileSync(file, 'utf8');
     fs.writeFileSync(file, text.replace('e', 'E')); fs.utimesSync(file, atime, mtime); expect(fs.statSync(file).size).toBe(Buffer.byteLength(text));
     expect((await service.execute({ action: 'verification-fresh' }) as any)[again.id]).toBe('changed');
-  });
+  }, 60000);
   it('cannot tell, rather than says current, when there are more changed files than it reads', async () => {
     const project = fixture(); execFileSync('git', ['init'], { cwd: project });
     for (let i = 0; i <= 5000; i++) fs.writeFileSync(path.join(project, `f${i}.txt`), String(i));

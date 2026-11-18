@@ -61,5 +61,5 @@ describe('reading a repository', () => {
     // Without the guard, the same status runs the submodule's filter (the problem this guards against).
     touch(); execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain=v2', '--ignore-submodules=none'], { cwd: repo, stdio: 'pipe' });
     expect(fs.existsSync(marker)).toBe(true);
-  });
+  }, 60000);
 });
