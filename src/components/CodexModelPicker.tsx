@@ -23,21 +23,21 @@ export function CodexModelPicker({ id, config, directory, onChange }: { id: stri
     onChange({ ...config, model, reasoningEffort: unsupported ? null : config.reasoningEffort });
   }
   return <>
-    <label className="model-control">Model
+    <label className="model-control ui-field">Model
       <input aria-label="codex model" placeholder="CLI default — no override" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) chooseModel(model); }} spellCheck={false} />
       <datalist id={`models-${id}`}>{catalog?.models.map((item) => <option key={item.model} value={item.model}>{item.displayName}{item.isDefault ? ' · catalog default' : ''}{item.hidden ? ' · additional model' : ''}</option>)}</datalist>
-      <small>{busy ? 'Loading models from your local Codex CLI…' : catalog ? `${catalog.models.length} models reported by Codex. Type to search, or enter an exact custom ID.` : 'Enter an exact model ID or leave blank for CLI defaults.'}</small>
-      <button type="button" className="quiet-button" disabled={busy} onClick={() => setRevision((value) => value + 1)}>Refresh Codex models</button>
-      {error && <small className="error-message" role="alert">{error}</small>}
+      <small className="ui-hint">{busy ? 'Loading models from your local Codex CLI…' : catalog ? `${catalog.models.length} models reported by Codex. Type to search, or enter an exact custom ID.` : 'Enter an exact model ID or leave blank for CLI defaults.'}</small>
+      <button type="button" className="quiet-button small" disabled={busy} onClick={() => setRevision((value) => value + 1)}>Refresh Codex models</button>
+      {error && <small className="ui-hint error-message" role="alert">{error}</small>}
     </label>
-    <label>Reasoning effort
+    <label className="ui-field">Reasoning effort
       <select aria-label="Reasoning effort" value={config.reasoningEffort ?? ''} onChange={(event) => { setNotice(''); onChange({ ...config, reasoningEffort: event.target.value || null }); }}>
         <option value="">CLI default</option>{efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
         {config.reasoningEffort && !efforts.includes(config.reasoningEffort) && <option value={config.reasoningEffort}>{config.reasoningEffort} · saved override, not listed</option>}
       </select>
-      {selected && <small>{selected.description}</small>}
-      {notice && <small role="status">{notice}</small>}
-      <small>Catalog discovery sends no task. The CLI still verifies account/model access at launch; a catalog default is not necessarily your configured default.</small>
+      {selected && <small className="ui-hint">{selected.description}</small>}
+      {notice && <small className="ui-hint" role="status">{notice}</small>}
+      <small className="ui-hint">Catalog discovery sends no task. The CLI still verifies account/model access at launch; a catalog default is not necessarily your configured default.</small>
     </label>
   </>;
 }

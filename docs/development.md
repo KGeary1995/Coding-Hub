@@ -22,7 +22,7 @@ npm start        # full production build, then electron . --production
 npm run dev:web  # renderer only in a browser: no host, no sessions
 ```
 
-If node-pty fails to load (`FAULT: The terminal process could not start`), run `npm run rebuild:native`.
+If node-pty fails to load (a channel shows Failed with `The terminal process could not start`), run `npm run rebuild:native`.
 
 To keep a development copy away from your real data, set `CODING_HUB_STORAGE_DIR` to an absolute path. A new storage folder has no saved preferences, so on Windows its notes still go to your real Google Drive folder (`G:\My Drive\Coding Hub`) until you choose another in Settings: to prevent that, also set `CODING_HUB_DEFAULT_DRIVE_DIR` to a scratch folder. An empty value means no folder, but PowerShell and cmd cannot set an empty variable (they remove it instead); Git Bash (`CODING_HUB_DEFAULT_DRIVE_DIR= npm run dev`) and Node can. Electron's profile can be moved with `--user-data-dir=<dir>`.
 

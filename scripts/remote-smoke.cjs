@@ -78,7 +78,7 @@ ${terminalFixture}
     const tile = page.locator('.session-tile').nth(1);
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await tile.getByRole('button', { name: 'Start session', exact: true }).click();
-    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'running' }).waitFor();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'Working' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();

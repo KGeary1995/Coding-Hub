@@ -1,8 +1,9 @@
 /**
  * A question in place, before an action that cannot be undone (closing a running channel, removing a task): the action
  * and Keep, where the button was. Keep has focus, so Enter, Escape or a second stray click leaves things as they are.
+ * Keep comes last; the action is the solid red button, the only place that form is used, unless the caller names its own.
  */
-export function ConfirmStep({ question, action, onConfirm, onCancel, className = 'quiet-button', actionClassName = className, busy = false }: { question: string; action: string; onConfirm: () => void; onCancel: () => void; className?: string; actionClassName?: string; busy?: boolean }) {
+export function ConfirmStep({ question, action, onConfirm, onCancel, className = 'button small', actionClassName = `${className} danger solid`, busy = false }: { question: string; action: string; onConfirm: () => void; onCancel: () => void; className?: string; actionClassName?: string; busy?: boolean }) {
   return <span className="confirm-step" role="group" aria-label={question} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onCancel(); } }}>
     <span className="confirm-step-question">{question}</span>
     <button type="button" className={actionClassName} disabled={busy} onClick={onConfirm}>{action}</button>

@@ -57,13 +57,13 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await page.evaluate(() => window.events.filter((event) => event.type === 'data').some((event) => event.data.includes('ECHO:'))), false, 'Start must not auto-answer trust prompts or send coaching');
     await tile.getByRole('button', { name: 'Send coaching request', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));
-    // The channel tile: state chip, a scope trace drawn from real output, and a detail row that waits for the header.
-    assert.equal(await tile.getByRole('status', { name: 'Channel 3 run', exact: true }).textContent(), '●RUN');
+    // The channel tile: state badge, an output trace drawn from real output, and a detail row that waits for the header.
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 working', exact: true }).textContent(), 'Working');
     await page.waitForFunction(() => { const ys = [...document.querySelectorAll('.session-tile')[2].querySelector('.tr-scope-trace').getAttribute('d').matchAll(/ (-?[\d.]+)/g)].map((match) => Number(match[1])); return new Set(ys).size > 1; });
     await page.mouse.move(1, 1);
     const detail = tile.locator('.tr-tile-detail');
     await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '0');
-    // Shown, the row has its own height and stays clear of the header's state chip and action buttons.
+    // Shown, the row has its own height and stays clear of the header's state badge and action buttons.
     const detailShown = async () => {
       await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
       await page.waitForFunction(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.opacity === '1' && style.transform === 'none'; });
@@ -80,7 +80,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // An approval request shows on the tile until the person answers in the terminal.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
-    assert.equal(await tile.getByRole('status', { name: 'Channel 3 hold', exact: true }).textContent(), '◆HOLD');
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 needs you', exact: true }).textContent(), 'Needs you');
     assert.equal(await tile.getAttribute('data-state'), 'waiting');
     const toast = page.locator('.tr-toast.waiting');
     assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);

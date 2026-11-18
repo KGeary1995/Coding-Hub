@@ -24,11 +24,11 @@ export function PastedImages({ sessionId }: { sessionId: string }) {
   return (
     <div className="pasted-images" role="region" aria-label="Pasted images">
       {attached.length > 0 && <div className="pasted-group">
-        <span className="pasted-heading">Attached · sent with your next message</span>
+        <span className="pasted-heading">Attached to your next message</span>
         <ul>{attached.map((image) => thumb(image))}</ul>
       </div>}
       {sent.length > 0 && <div className="pasted-group sent">
-        <span className="pasted-heading">Sent{sent.length === 1 ? ` ${time(sent[0].sentAt!)}` : ''}<button className="quiet-button pasted-clear" title="Hide the sent images (the CLI keeps what it was given)" onClick={() => clearSentImages(sessionId)}>Clear</button></span>
+        <span className="pasted-heading">Sent{sent.length === 1 ? ` ${time(sent[0].sentAt!)}` : ''}<button className="quiet-button small pasted-clear" title="Hide the sent images (the CLI keeps what it was given)" onClick={() => clearSentImages(sessionId)}>Clear</button></span>
         <ul>{sent.slice().reverse().map((image) => thumb(image, true))}</ul>
       </div>}
       <dialog ref={dialog} className="pasted-viewer" onClose={() => setOpen(null)} onClick={(event) => { if (event.target === event.currentTarget) setOpen(null); }}>

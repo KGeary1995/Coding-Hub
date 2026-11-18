@@ -1,9 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
-export interface MenuItem { label: string; detail?: string; onSelect: () => void; disabled?: boolean; current?: boolean }
+/** `icon` is drawn before the label: a view's icon (the one its page heading shows) or an engine's avatar. */
+export interface MenuItem { label: string; detail?: string; icon?: ReactNode; onSelect: () => void; disabled?: boolean; current?: boolean }
 
-/** A button that opens a keyboard-navigable menu (arrows, Home/End, Escape). Selecting an item closes it. */
-export function MenuButton({ label, ariaLabel, items, className = '', active = false, disabled = false, title }: { label: ReactNode; ariaLabel: string; items: MenuItem[]; className?: string; active?: boolean; disabled?: boolean; title?: string }) {
+/**
+ * A button that opens a keyboard-navigable menu (arrows, Home/End, Escape). Selecting an item closes it. Without a
+ * `buttonClassName` the button is a top-bar item, drawn like a tab; with one it is that shared button (`button primary`).
+ */
+export function MenuButton({ label, ariaLabel, items, className = '', buttonClassName = '', active = false, disabled = false, title }: { label: ReactNode; ariaLabel: string; items: MenuItem[]; className?: string; buttonClassName?: string; active?: boolean; disabled?: boolean; title?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -27,10 +31,10 @@ export function MenuButton({ label, ariaLabel, items, className = '', active = f
     else if (event.key === 'Escape' || event.key === 'Tab') { if (event.key === 'Escape') { event.preventDefault(); button.current?.focus(); } setOpen(false); }
   }
   return <div className={`tr-menu ${className}`} ref={root} onKeyDown={onKeyDown}>
-    <button ref={button} className={`tr-menu-button ${active ? 'active' : ''}`} aria-label={ariaLabel} title={title} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{label}<span aria-hidden="true" className="tr-caret">▾</span></button>
+    <button ref={button} className={`tr-menu-button ${buttonClassName} ${active ? 'active' : ''}`} aria-label={ariaLabel} title={title} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{label}<span aria-hidden="true" className="tr-caret">▾</span></button>
     {open && <div className="tr-menu-list" role="menu" id={id} aria-label={ariaLabel}>
       {items.map((item) => <button key={item.label} role="menuitem" className={item.current ? 'current' : ''} aria-current={item.current ? 'page' : undefined} disabled={item.disabled} onClick={() => { setOpen(false); item.onSelect(); }}>
-        <span>{item.label}</span>{item.detail && <small>{item.detail}</small>}
+        {item.icon}<span>{item.label}</span>{item.detail && <small>{item.detail}</small>}
       </button>)}
     </div>}
   </div>;

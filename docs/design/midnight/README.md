@@ -44,10 +44,12 @@ The window background carries one soft light from the top: `radial-gradient(1200
 | Token | Value | Use |
 |---|---|---|
 | `--tr-line-faint` | `#131e36` | row dividers |
-| `--tr-line` | `#1a2947` | card borders, dividers |
-| `--tr-line-control` | `#344c7d` | control borders |
-| `--tr-line-strong` | `#4a67a3` | overlay borders, hovered control |
-| `--tr-tile-border` | `#1c2d4f` | channel tile frame |
+| `--tr-line` | `#22355c` | card borders, dividers |
+| `--tr-line-control` | `#4e6ba9` | control borders (3:1 against every surface up to `--tr-hover`) |
+| `--tr-line-strong` | `#6584c8` | overlay borders, hovered control (3:1 against `--tr-raised`) |
+| `--tr-tile-border` | `#263b66` | channel tile frame |
+
+Corrected on 2026-11-18, when the contrast of every token was measured: `--tr-line-control` was `#344c7d`, which is 2.1:1 on a card and 2.3:1 on a well, below the 3:1 a control's outline needs. `--tr-line-strong` was `#4a67a3`, which the new control line nearly equals, so it moved up to stay the visibly stronger of the two.
 
 ### Text
 | Token | Value | Use |
@@ -56,7 +58,7 @@ The window background carries one soft light from the top: `radial-gradient(1200
 | `--tr-fg` | `#dbe4f5` | body |
 | `--tr-fg-muted` | `#b9c6de` | secondary body |
 | `--tr-fg-dim` | `#94a5c4` | labels, descriptions |
-| `--tr-fg-faint` | `#7f91b3` | hints, placeholders (4.5:1 on card and hover) |
+| `--tr-fg-faint` | `#8192b4` | hints, placeholders (4.5:1 on card, hover and a selected row; was `#7f91b3`, 4.49:1 on `--tr-raised`) |
 | `--tr-fg-off` | `#3a4d73` | marks that are not text (idle trace, drag handle) |
 | `--tr-on-light` | `#06101f` | text on a light or engine-coloured fill |
 | `--tr-on-accent` | `#ffffff` | text on `--tr-accent-solid` |
@@ -112,7 +114,7 @@ Only these sizes exist: **11, 12, 13, 14, 15, 18, 22, 28, 32**. Titles of 22 px 
 - **Card:** `background: linear-gradient(180deg, var(--tr-surface), var(--tr-surface-2))`, `1px solid var(--tr-line)`, `--tr-shadow-card: inset 0 1px 0 rgba(120,160,255,.06), 0 1px 2px rgba(0,0,0,.4)`.
 - **Highlighted card or tile:** border `--tr-accent-line` and `--tr-glow-accent: 0 0 0 1px rgba(76,154,255,.12), 0 0 28px rgba(46,110,255,.14)`.
 - **Overlay:** `--tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6), 0 0 0 1px rgba(76,154,255,.16)` over the scrim `--tr-scrim: rgba(3,6,14,.72)`. No blur (it is costly over terminals).
-- **Focus:** `outline: 2px solid var(--tr-accent); outline-offset: 2px` on every control and tile.
+- **Focus:** `outline: 2px solid var(--tr-accent); outline-offset: 2px` on every control. A channel tile draws the same ring on its own edge (`outline-offset: -2px`): 2 px outside it, the grid's scroll box cut the ring off on the tile's outer sides.
 - **Motion:** unchanged (80 / 160 / 240 / 400 ms, `--tr-ease`). Hover and focus changes take 160 ms. Reduced motion turns every transition off.
 - **Layout:** top bar 44 px, status bar 28 px, tile header 34 px, page padding 24 px, grid gap 16 px, tile gap 8 px.
 - **Higher contrast** (`:root[data-contrast="high"]`, Settings → Display) must keep working: it raises control and tile borders and the dimmest marks, as today.
@@ -157,8 +159,8 @@ Existing class names are kept where they exist; new parts take the `ui-` prefix.
 
 ## 4. The frame
 
-- **Top bar** (44 px, `--tr-panel`, bottom border `--tr-line`): the keycap and "Trace" (display 700, 15 px), the project switcher (a secondary button with a chevron), the tabs Workspace · Changes · Tasks · Projects, Insight, then at the right the layout segments, the command field, Help, Agent setup and **+ Channel** (the one primary button). The chosen tab is a pill: `--tr-accent-soft`, `--tr-accent-line`, `--tr-fg-strong`.
-- **Status bar** (28 px, `--tr-panel`, top border): one item per channel (engine dot, `CH1`, state word in its colour), the project and branch, today's tokens and cost, plan limits, alerts, the host. Items are separated by 16 px, not by borders. Nothing is cut off at 1100 px: lower-priority items (saved state, host) leave first, then plan limits collapse to their worst value.
+- **Top bar** (44 px, `--tr-panel`, bottom border `--tr-line`): the keycap and "Trace" (display 700, 15 px), the project switcher (a secondary button with a folder mark and a chevron; the mark tells it from the chosen tab beside it, whose fill and border are nearly the same), the tabs Workspace · Changes · Tasks · Projects, Insight, then at the right the layout segments, the command field, Help, Agent setup and **+ Channel** (the one primary button). The chosen tab is a pill: `--tr-accent-soft`, `--tr-accent-line`, `--tr-fg-strong`.
+- **Status bar** (28 px, `--tr-panel`, top border): one item per channel (engine dot, `CH1`, state word in its colour) and the project at the left; at the right the host, the saved state, today's tokens and cost, plan limits, Needs you and alerts. Items are separated by 16 px, not by borders. Nothing is cut off at 1100 px. What gives way, in order: the host, the saved state, each channel's tokens, the lesser plan limit (plan limits collapse to their worst value), the project, the state words (their glyphs stay), then today's total; the items that leave sit beside the gap, so none shows where one was. The branch is not shown: no renderer state holds it, and section 8 keeps this work in the renderer.
 - **Menus and the command menu:** card surface, radius 14, overlay shadow; rows 36 px, radius 8, 4 px inside the menu's padding; the chosen row is `--tr-raised`.
 - **Notices (toasts):** card surface, radius 12, a 3 px left edge in the state's colour, overlay shadow.
 - **Dialogs and confirm steps:** card surface, radius 14, title in `--tr-t-section`, actions right-aligned with the primary last.
@@ -166,10 +168,10 @@ Existing class names are kept where they exist; new parts take the `ui-` prefix.
 ## 5. A channel tile
 
 - A card with radius 10 and frame `--tr-tile-border`; the terminal well is `--tr-term`.
-- **Header** (34 px, `--tr-surface`): drag handle, the engine avatar (20 px, in the engine's colour), `CH1`, the channel's name (13/600, takes the spare width and is the last thing to shorten), the model (12 px, dim), the account badge, the action for the state (Start, Answer, Retry …), the state badge.
+- **Header** (34 px, `--tr-surface`): drag handle, the engine avatar (20 px, in the engine's colour), `CH1`, the channel's name (13/600, takes the spare width and is the last thing to shorten), what it is working on (12 px, dim; the first thing to shorten), the model (12 px, dim), the account badge, the action for the state, the state badge. The action is a small button (24 px): Start tinted with the engine's colour, Answer in the solid waiting colour, Retry in the primary form, Write handoff tinted with the limit colour, Open log and Review changes in the secondary form.
 - **State badge:** a `.ui-badge` with a dot, in plain words: Idle, Starting, Working, Needs you, Finished, Failed, Near limit.
 - **Selected or focused:** border `--tr-accent-line` and `--tr-glow-accent`. **Needs you:** border and glow in `--tr-st-waiting`. **Failed:** border `--tr-danger`. No corner brackets, no reticle.
-- **Detail row** (pointer on the header, or keyboard focus in it): small buttons (24 px) for Settings, Task, Duplicate, Maximize, Close; Stop is the danger form.
+- **Detail row** (pointer on the header, or keyboard focus in it): the channel's facts (process, folder, cost, context), then small buttons (24 px) for Settings, Task, Duplicate, Maximize, Close; Stop is the danger form. On a tile under 680 px wide the buttons keep only their icons. A fact with no room leaves whole, the last one first; nothing is cut mid-word.
 - **Footer** (24 px): the context meter, tokens, the output trace and rate, in 12 px with tabular numbers.
 - **Before a channel starts:** the engine avatar (40 px), the engine's name (`--tr-t-section`), one line, the folder as a secondary button, a primary **Start**.
 

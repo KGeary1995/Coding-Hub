@@ -34,13 +34,14 @@ export function Toasts() {
       const message = alert.state === 'waiting' ? session.attention?.message : session.error?.split('\n')[0] ?? `${session.title} stopped with an error.`;
       return <article key={key} className={`tr-toast ${alert.state}`}>
         <header><span aria-hidden="true">{meta.glyph}</span><strong>{alert.text}</strong>
-          <button className="tr-toast-close" aria-label={`Dismiss ${channel} notification`} onClick={() => setDismissed([...dismissed, key])}><X size={14} /></button></header>
+          <button className="tr-toast-close icon-button small" aria-label={`Dismiss ${channel} notification`} onClick={() => setDismissed([...dismissed, key])}><X /></button></header>
         <p title={message}>{message}</p>
+        {/* Actions sit at the right, the main one last. */}
         <footer>
           {alert.state === 'waiting'
-            ? <button className="tr-toast-action waiting" aria-label={`Answer ${channel} in its terminal`} onClick={() => jumpToChannel(session.id)}>Answer<kbd aria-hidden="true">Alt {alert.channel}</kbd></button>
-            : <><button className="tr-toast-action" aria-label={`Retry ${channel}`} onClick={() => { setView('workspace'); void startSession(session.id); }}>Retry</button>
-              <button className="tr-toast-action ghost" aria-label={`Open log for ${channel}`} onClick={() => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); }}>Open log</button></>}
+            ? <button className="tr-toast-action button small waiting" aria-label={`Answer ${channel} in its terminal`} onClick={() => jumpToChannel(session.id)}>Answer<kbd aria-hidden="true">Alt {alert.channel}</kbd></button>
+            : <><button className="tr-toast-action quiet-button small" aria-label={`Open log for ${channel}`} onClick={() => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); }}>Open log</button>
+              <button className="tr-toast-action button small primary" aria-label={`Retry ${channel}`} onClick={() => { setView('workspace'); void startSession(session.id); }}>Retry</button></>}
         </footer>
       </article>;
     })}
@@ -52,7 +53,7 @@ function LoadNotice() {
   const notice = useWorkspaceStore((state) => state.loadNotice);
   if (!notice) return null;
   return <article className="tr-toast" aria-label="Workspace loaded">
-    <header><strong>Workspace loaded</strong><button className="tr-toast-close" aria-label="Dismiss the workspace notice" onClick={() => useWorkspaceStore.setState({ loadNotice: null })}><X size={14} /></button></header>
+    <header><strong>Workspace loaded</strong><button className="tr-toast-close icon-button small" aria-label="Dismiss the workspace notice" onClick={() => useWorkspaceStore.setState({ loadNotice: null })}><X /></button></header>
     <p>{notice}</p>
   </article>;
 }

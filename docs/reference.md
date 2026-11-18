@@ -141,22 +141,24 @@ The app installs as **Trace** (Trace.app, Trace.exe, Start Menu and desktop shor
 ## Channel tiles
 
 Each session is a channel (CH1–CH4, in grid order). From top to bottom, a tile shows:
-- **Header:** the channel badge in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, the Claude account it runs on (also a coloured stripe down the tile's left edge), `ctx` (context used: a percentage for Codex; for Claude Code, the tokens in context after the last reply, with no percentage because Claude Code does not record its window size) and `tok` (the channel's new tokens today, across restarts of the channel and of Trace: input outside the prompt cache, plus output; hover for the cache reads it leaves out). Then the action for the current state, and the state chip.
-- **Detail row:** point at the header, or tab into it, to show a 30 px row under the header with the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Conversation, Settings, Task, Duplicate, Maximize and Close buttons. While shown it lies over the top of the terminal, and it goes when the pointer leaves the header and the row. When a notice sits under the header (a failed channel's error line, a prepared request, an approval in a chat channel), or the channel's settings are open, the row takes its own space and stays shown, so it never covers the notice's buttons.
-- **The terminal.**
-- **Scope strip (the tile's foot):** the context gauge, the channel's tokens today, and the terminal's output per second over the last two minutes. The trace only ever shows real output.
+- **Header:** the engine's mark and the channel number in the engine's colour, the name (the channel's folder, unless you renamed it in its settings), what it is working on (the title its CLI gives its terminal, such as Claude Code's task summary), the model, and the Claude account it runs on (also a coloured stripe down the tile's left edge). Then the action for the current state, and the state badge. On a narrow tile the topic shortens first, then the model, then the account; the name goes last.
+- **Detail row:** point at the header, or tab into it, to show a 30 px row under the header with the process ID, folder, cost and context, and the Interrupt, Stop (or Restart), Conversation, Settings, Task, Duplicate, Maximize and Close buttons. While shown it lies over the top of the terminal, and it goes when the pointer leaves the header and the row. When a notice sits under the header (a failed channel's error line, a prepared request, an approval in a chat channel), or the channel's settings are open, the row takes its own space and stays shown, so it never covers the notice's buttons. On tiles under 680 px wide the buttons show only their icons.
+- **The terminal.** Before a channel starts, this area shows the engine, one line about it, the channel's folder (which opens the channel's settings, or Projects when no project is open) and **Start**.
+- **Footer:** the context meter with its share (a percentage for Codex; for Claude Code, the tokens in context after the last reply, with no percentage because Claude Code does not record its window size), the channel's new tokens today (across restarts of the channel and of Trace: input outside the prompt cache, plus output; hover for the cache reads it leaves out), and the terminal's output per second over the last two minutes. The trace only ever shows real output.
 
-On tiles 400 px wide or narrower, the topic and a failed channel's **Open log** are hidden so the state chip stays in view (Open log is still in the failure notice and in Workflow center → Recovery).
+On tiles 400 px wide or narrower, the topic and a failed channel's **Open log** are hidden so the state badge stays in view (Open log is still in the failure notice and in Workflow center → Recovery).
 
-| State | Chip | Action |
+The state badge is a dot and a word, in the state's colour:
+
+| State | Badge | Action |
 |---|---|---|
-| idle | ○ IDLE | **▶ Start** (or Enter on the tile) |
-| starting | ◌ ARMING (pulses) | — |
-| working | ● RUN | — |
-| waiting | ◆ HOLD (frame turns magenta) | **Answer** jumps to the terminal |
-| finished | ✓ STOP | **Review changes** (G C) |
-| failed | ✕ FAULT (frame turns red) | **Retry** and **Open log** |
-| limit | ▲ CLIP (context or budget ≥ 80%) | **Write handoff** opens Shared memory |
+| idle | Idle | **Start** (or Enter on the tile) |
+| starting | Starting (pulses) | — |
+| working | Working (in the engine's colour) | — |
+| waiting | Needs you (frame turns magenta) | **Answer** jumps to the terminal |
+| finished | Finished | **Review changes** (G C) |
+| failed | Failed (frame turns red) | **Retry** and **Open log** |
+| limit | Near limit (context or budget ≥ 80%) | **Write handoff** opens Shared memory |
 
 With the tile focused, Enter starts an idle channel or moves into its terminal.
 
@@ -218,7 +220,7 @@ A task given to the table (from Tasks, or typed) is done only on `APPROVED`; whi
 
 ## Approval alerts
 
-When Claude Code or Codex stops to ask for your approval, its tile turns to HOLD, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal, or, for Claude Code, when it reports that a tool finished or its turn ended, so a prompt you answered before the alert arrived does not stay on HOLD.
+When Claude Code or Codex stops to ask for your approval, its tile turns to Needs you, shows the request, and offers **Answer** in its header, which focuses that terminal. You answer the CLI's own prompt; the app never types an answer for you. The alert clears when you type in that terminal, or, for Claude Code, when it reports that a tool finished or its turn ended, so a prompt you answered before the alert arrived does not stay on Needs you.
 
 - **Claude Code 2.1.63 or later:** the app adds HTTP hooks (Notification, PostToolUse and Stop) that report to a local endpoint (127.0.0.1) only the app knows. Tool results sent to it are never read.
 - **Codex:** the app turns on its approval notifications and reads them from the terminal output.

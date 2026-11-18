@@ -14,9 +14,11 @@ import type { SearchHit, SearchResults } from '../../shared/productivity';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
 type Group = 'actions' | 'channels' | 'files' | 'memory';
-interface Item { id: string; group: Group; label: string; glyph: string; color?: string; meta?: ReactNode; metaClass?: string; shortcut?: string; run: () => void }
+/** `tone` colours a channel's glyph: its state, or its engine while it works (the tr-state classes in shell.css). */
+interface Item { id: string; group: Group; label: string; glyph: string; tone?: string; meta?: ReactNode; metaClass?: string; shortcut?: string; run: () => void }
 
 const GROUP_ORDER: Group[] = ['actions', 'channels', 'files', 'memory'];
+const GROUP_LABEL: Record<Group, string> = { actions: 'Actions', channels: 'Channels', files: 'Files', memory: 'Memory' };
 const viewKey = (view: NavigationView) => Object.entries(VIEW_KEYS).find(([, target]) => target === view)?.[0];
 
 /** The label with the matched text in bold and underlined. */
@@ -107,8 +109,8 @@ export function CommandMenu() {
     const all: Item[] = actions.map((action) => { const key = viewKey(action.id as NavigationView); return { ...action, group: 'actions' as const, glyph: '>', ...(key ? { shortcut: `G ${key.toUpperCase()}` } : {}) }; });
     sessions.forEach((session, index) => {
       const state = channelState(session, usageFor(session, usage)); const meta = CHANNEL_STATES[state];
-      all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${channelNameNow(session)}`, glyph: meta.glyph, color: meta.color === 'engine' ? `var(--tr-ch-${session.config.engine})` : meta.color,
-        meta: state === 'waiting' ? `hold · ${session.attention?.message ?? 'approval'}` : meta.word.toLowerCase(), metaClass: state, shortcut: index < MAX_CHANNELS ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
+      all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${channelNameNow(session)}`, glyph: meta.glyph, tone: state === 'working' ? session.config.engine : state,
+        meta: state === 'waiting' ? `${meta.word} · ${session.attention?.message ?? 'approval'}` : meta.word, metaClass: state, shortcut: index < MAX_CHANNELS ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
     });
     for (const hit of hits) {
       const memory = hit.kind !== 'file';
@@ -127,17 +129,17 @@ export function CommandMenu() {
     else if (event.key === 'Enter') { event.preventDefault(); run(items[selected]); }
   };
   const groups = GROUP_ORDER.map((group) => ({ group, entries: items.map((item, index) => ({ item, index })).filter(({ item }) => item.group === group) })).filter(({ entries }) => entries.length);
-  return <><button className="command-trigger" aria-label="Search or run a command" title="Search or run a command (Ctrl ⇧ P)" onClick={() => setOpen(true)}><Search className="command-trigger-icon" size={14} aria-hidden="true" /><span>Search or run a command</span><kbd aria-hidden="true">Ctrl ⇧ P</kbd></button>
+  return <><button className="command-trigger" aria-label="Search or run a command" title="Search or run a command (Ctrl ⇧ P)" onClick={() => setOpen(true)}><Search className="command-trigger-icon" size={16} aria-hidden="true" /><span>Search or run a command</span><kbd aria-hidden="true">Ctrl ⇧ P</kbd></button>
     {open && <div className="command-backdrop tr-scrim" onClick={() => setOpen(false)}>
       <section ref={dialog} className="command-menu tr-command" role="dialog" aria-modal="true" aria-label="Workspace commands" onClick={(event) => event.stopPropagation()}>
-        <div className="tr-command-input"><span aria-hidden="true">›</span>
+        <div className="tr-command-input"><Search size={16} aria-hidden="true" />
           <input ref={field} role="combobox" aria-expanded="true" aria-controls="tr-command-results" aria-activedescendant={items[selected] ? `tr-cmd-${items[selected].id}` : undefined} aria-label="Search commands" placeholder="Search actions, channels, files and memory" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onKeyDown} spellCheck={false} />
           <span className="tr-command-count tnum">{items.length} {items.length === 1 ? 'result' : 'results'}</span></div>
-        <div className="tr-command-scopes" role="group" aria-label="Search scope">{COMMAND_SCOPES.map((item) => <button key={item.id} className={scope === item.id ? 'active' : ''} aria-pressed={scope === item.id} title={item.prefix ? `Type ${item.prefix} first to search ${item.label.toLowerCase()}` : undefined} onClick={() => { setChosenScope(item.id); setInput(text); field.current?.focus(); }}>{item.label}{item.prefix && <kbd aria-hidden="true">{item.prefix}</kbd>}</button>)}</div>
+        <div className="tr-command-scopes"><div className="tr-seg" role="group" aria-label="Search scope">{COMMAND_SCOPES.map((item) => <button key={item.id} className={scope === item.id ? 'active' : ''} aria-pressed={scope === item.id} title={item.prefix ? `Type ${item.prefix} first to search ${item.label.toLowerCase()}` : undefined} onClick={() => { setChosenScope(item.id); setInput(text); field.current?.focus(); }}>{item.label}{item.prefix && <kbd aria-hidden="true">{item.prefix}</kbd>}</button>)}</div></div>
         <div className="tr-command-results" id="tr-command-results" role="listbox" aria-label="Results" ref={list}>
-          {groups.map(({ group, entries }) => <div key={group} role="group" aria-label={group}><div className="tr-command-group" aria-hidden="true">{group}</div>
+          {groups.map(({ group, entries }) => <div key={group} role="group" aria-label={group}><div className="tr-command-group" aria-hidden="true">{GROUP_LABEL[group]}</div>
             {entries.map(({ item, index }) => <div key={item.id} id={`tr-cmd-${item.id}`} role="option" aria-selected={index === selected} className="tr-command-row" onMouseMove={() => setSelected(index)} onClick={() => run(item)}>
-              <span className="tr-command-glyph" style={item.color ? { color: item.color } : undefined} aria-hidden="true">{item.glyph}</span>
+              <span className={`tr-command-glyph tr-state ${item.tone ?? ''}`} aria-hidden="true">{item.glyph}</span>
               <span className="tr-command-label"><Highlight label={item.label} text={text} /></span>
               {item.meta && <span className={`tr-command-meta ${item.metaClass ?? ''}`}>{item.meta}</span>}
               {item.shortcut && <kbd>{item.shortcut}</kbd>}
@@ -146,7 +148,7 @@ export function CommandMenu() {
           {limited && <p className="tr-command-empty" role="status">The search stopped before it read everything, so some files or notes may be missing. Type more, or search memory alone with #.</p>}
           {!items.length && <p className="tr-command-empty">{searchesFiles(scope, text) || scope === 'actions' || scope === 'channels' || !text ? 'No matches.' : 'Keep typing to search files and memory.'}</p>}
         </div>
-        <footer className="tr-command-footer">↑↓ move · ⏎ run · Tab scope · Esc close</footer>
+        <footer className="tr-command-footer"><span><kbd>↑↓</kbd> move</span><span><kbd>⏎</kbd> run</span><span><kbd>Tab</kbd> scope</span><span><kbd>Esc</kbd> close</span></footer>
       </section>
     </div>}</>;
 }

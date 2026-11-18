@@ -10,6 +10,7 @@ import { linkedTerminal } from '../../runtime/linked-terminals';
 import { workbench } from '../../runtime/workbench';
 import { useLinkedStore } from '../../state/linked-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
+import { CHANNEL_STATES } from '../../state/channel-state';
 import { LinkedScreen } from './LinkedScreen';
 import { LinkedTipStrip } from '../tile/LiveTipStrip';
 
@@ -100,7 +101,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => { setConfirmClose(false); void control('close'); }}><span className="tr-detail-label">{busy === 'close' ? 'Closing' : 'Close'}</span></button>
           <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => setConfirmClose(false)}><span className="tr-detail-label">Keep</span></button></span>
         : <button className="tr-detail-button icon" title={`Close this channel on ${computer.name}`} aria-label={`Close channel ${channel.channel} on ${computer.name}`} disabled={Boolean(busy)} onClick={() => setConfirmClose(true)}><X size={13} /></button>}
-      <span className="tr-state-chip" role="status">{state === 'idle' ? '○ IDLE' : state === 'waiting' ? '◆ HOLD' : '● RUN'}</span>
+      <span className="tr-state-chip ui-badge" role="status"><i className="dot" aria-hidden="true" />{CHANNEL_STATES[state].word}</span>
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}

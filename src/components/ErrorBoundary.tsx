@@ -15,7 +15,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; label: strin
     return <div className="view-failed" role="alert">
       <strong>{this.props.label} could not be shown.</strong>
       <span>{this.state.error.message || 'An error occurred while drawing it.'} The rest of Trace keeps running.</span>
-      <button type="button" className="quiet-button" onClick={() => this.setState({ error: null })}>Try again</button>
+      <button type="button" className="button small" onClick={() => this.setState({ error: null })}>Try again</button>
     </div>;
   }
 }

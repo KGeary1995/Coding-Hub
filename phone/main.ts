@@ -1,8 +1,9 @@
-import '@fontsource/chakra-petch/400.css';
-import '@fontsource/chakra-petch/600.css';
-import '@fontsource/chakra-petch/700.css';
-import '@fontsource/ibm-plex-sans-condensed/400.css';
-import '@fontsource/ibm-plex-sans-condensed/600.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/plus-jakarta-sans/800.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
@@ -89,7 +90,8 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
 let shownChat: string | null = null;
 
 const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
-const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
+/** The state in the words the computer's tiles use (src/state/channel-state.ts); the phone knows three of the seven. */
+const word = { waiting: 'Needs you', running: 'Working', idle: 'Idle' } as const;
 
 /** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
 function mark(big = false) {
@@ -308,7 +310,7 @@ function renderList() {
       h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
       h('span', { className: 'name' }, channel.title, account(channel), (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
       // A Round Table is two agents in one channel, not a single chat.
-      h('span', { className: 'tag' }, channel.table ? `Round Table · ${word[state(channel)]}` : channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
+      h('span', { className: 'tag' }, channel.table ? `Round Table · ${word[state(channel)].toLowerCase()}` : channel.chat ? `Chat · ${word[state(channel)].toLowerCase()}` : word[state(channel)]),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention && h('span', { className: 'ask' }, channel.attention)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;

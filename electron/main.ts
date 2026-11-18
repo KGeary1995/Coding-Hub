@@ -444,7 +444,7 @@ function createWindow() {
     height: 980,
     minWidth: 900,
     minHeight: 640,
-    backgroundColor: '#101214',
+    backgroundColor: '#060a14',
     title: 'Trace',
     autoHideMenuBar: true,
     webPreferences: {

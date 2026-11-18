@@ -21,10 +21,11 @@ export function NeedsYouCell() {
   const go = (item: NeedsYouItem) => { setOpen(false); if (item.action === 'save-findings' && item.sessionId) { /* As closing a table does: the findings, then any tasks still waiting there back to To do, then the record. */ void forgetTable(item.sessionId); }
     else if (item.action === 'tasks') useWorkspaceStore.getState().setView('tasks'); else if (item.action === 'handoff') useWorkspaceStore.getState().setView('memory'); else if (item.sessionId) jumpToChannel(item.sessionId); };
   return <div className="needs-you" ref={box}>
-    <button className="tr-sb-cell needs-you-cell" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} title="Everything waiting for you">Needs you · {items.length}</button>
+    {/* The separator is not drawn (the count is a pill), but it stays in the button's name: "Needs you · 2". */}
+    <button className="tr-sb-cell needs-you-cell" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} title="Everything waiting for you">Needs you<span className="needs-you-sep"> · </span><span className="ui-count waiting">{items.length}</span></button>
     {open && <div className="needs-you-list" role="dialog" aria-label="Needs you"><ol>{items.map((item) => <li key={item.key} className={`needs-you-${item.kind}`}>
       <div><strong>{item.title}</strong>{item.since && <small className="tnum"> · waiting {waited(item.since)}</small>}<p>{item.detail}</p></div>
-      <button className="quiet-button" onClick={() => go(item)}>{ACTION[item.action]}</button>
+      <button className="button small" onClick={() => go(item)}>{ACTION[item.action]}</button>
     </li>)}</ol></div>}
   </div>;
 }
