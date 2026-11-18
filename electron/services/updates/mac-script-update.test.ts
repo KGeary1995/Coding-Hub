@@ -1,9 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isNewerVersion, latestMacRelease, latestMacVersion, macUpdateScript, parseMacFeed } from './mac-script-update';
+import { isNewerVersion, latestMacRelease, latestMacVersion, macUpdateScript, parseMacFeed, runningApp, startMacUpdate } from './mac-script-update';
+
+// Only spawn is replaced (startMacUpdate never runs a real update here); execFileSync stays real for the bash checks.
+vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), spawn: vi.fn() }));
+
+// A bash that runs scripts as macOS would: on Windows Git Bash at its own path (the first `bash` on PATH can be
+// WSL's, which cannot see Windows folders), elsewhere the system's. None found: the checks that run bash are skipped.
+const bash = (() => {
+  const candidate = process.platform === 'win32' ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map((root) => path.join(root!, 'Git', 'bin', 'bash.exe')).find((file) => fs.existsSync(file)) : 'bash';
+  if (!candidate) return null;
+  try { execFileSync(candidate, ['--version']); return candidate; } catch { return null; }
+})();
 
 const ARM = 'A'.repeat(86) + '=='; const INTEL = 'B'.repeat(86) + '==';
 describe('updating a Mac that cannot update itself', () => {
@@ -17,10 +28,17 @@ describe('updating a Mac that cannot update itself', () => {
     expect(script.indexOf('openssl dgst')).toBeLessThan(script.indexOf('hdiutil attach'));
     expect(script.indexOf('CFBundleShortVersionString')).toBeLessThan(script.indexOf("quit app \"Trace\""));
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-')), 'update.sh'); fs.writeFileSync(file, script);
-    try { execFileSync('bash', ['-n', file]); } finally { fs.rmSync(path.dirname(file), { recursive: true, force: true }); }
+    try { if (bash) execFileSync(bash, ['-n', file]); } finally { fs.rmSync(path.dirname(file), { recursive: true, force: true }); }
     expect(() => macUpdateScript('1.15.0; rm -rf /', 47821, {})).toThrow();
     // A checksum that is not one (an injection attempt) is left out, and the script then stops before anything.
     expect(macUpdateScript('1.15.0', 47821, { x64: "x'; rm -rf / #" })).toContain("SHA=''");
+  });
+  it('replaces and reopens the Trace.app that is running, wherever it is, and cleans up its download', () => {
+    expect(runningApp('/Users/me/Apps/Trace.app/Contents/MacOS/Trace')).toBe('/Users/me/Apps/Trace.app');
+    expect(runningApp('/opt/electron/electron')).toBe('/Applications/Trace.app'); expect(runningApp("/Users/me/it's/Trace.app/Contents/MacOS/Trace")).toBe('/Applications/Trace.app');
+    const script = macUpdateScript('1.15.0', 47821, { arm64: ARM }, '/Users/me/Apps/Trace.app');
+    expect(script).toContain("APP='/Users/me/Apps/Trace.app'"); expect(script).toContain(`trap 'rm -rf "$DMG" "$STAGE"' EXIT`);
+    expect(() => macUpdateScript('1.15.0', 47821, {}, "/Applications/x'; rm -rf ~; '.app")).toThrow();
   });
   it('reads the latest version and each chip’s disk image checksum from the Mac update feed, with or without update zips', async () => {
     // As 1.21.0 published it (an unsigned build): disk images only.
@@ -48,13 +66,6 @@ describe('a copy from the disk image that fails part way', () => {
   // Runs the script itself in bash: the download and checksum pass, the disk image mounts, and ditto copies only
   // Info.plist (naming the right version) before it fails. The Mac tools are shell functions put at the top of the
   // script, which bash prefers to any program whatever PATH holds (Git Bash's own wrapper puts its curl first).
-  // A bash that runs scripts as macOS would: on Windows Git Bash at its own path (the first `bash` on PATH can be
-  // WSL's, which cannot see Windows folders), elsewhere the system's. None found: skipped.
-  const bash = (() => {
-    const candidate = process.platform === 'win32' ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map((root) => path.join(root!, 'Git', 'bin', 'bash.exe')).find((file) => fs.existsSync(file)) : 'bash';
-    if (!candidate) return null;
-    try { execFileSync(candidate, ['--version']); return candidate; } catch { return null; }
-  })();
   it.skipIf(!bash)('never reaches the point where Trace is quit and replaced, and detaches the disk image', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-run-')); const mount = path.join(root, 'volume'); const marks = path.join(root, 'marks');
     fs.mkdirSync(path.join(mount, 'Trace.app', 'Contents', 'MacOS'), { recursive: true }); fs.mkdirSync(marks);
@@ -86,5 +97,18 @@ describe('a copy from the disk image that fails part way', () => {
       // Trace was never asked to quit, so nothing was moved or replaced.
       for (const name of ['osascript', 'pkill', 'open', 'xattr']) expect(fs.existsSync(path.join(marks, name)), said).toBe(false);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+describe('starting the update script', () => {
+  const platform = process.platform;
+  afterEach(() => { Object.defineProperty(process, 'platform', { value: platform }); vi.mocked(spawn).mockReset(); });
+  it('returns the script’s process, so Trace knows when a script that gave up has ended', () => {
+    const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-mac-update-'));
+    try {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const child = { unref: vi.fn() } as unknown as ChildProcess; vi.mocked(spawn).mockReturnValue(child);
+      expect(startMacUpdate(storage, '1.15.0', 47821, { arm64: ARM, x64: INTEL }, '/Applications/Trace.app/Contents/MacOS/Trace')).toBe(child);
+      expect(child.unref).toHaveBeenCalled(); expect(vi.mocked(spawn)).toHaveBeenCalledWith('/bin/bash', [path.join(storage, 'trace-update.sh')], { detached: true, stdio: 'ignore' });
+    } finally { fs.rmSync(storage, { recursive: true, force: true }); }
   });
 });

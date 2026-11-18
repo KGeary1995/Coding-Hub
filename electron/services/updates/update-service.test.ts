@@ -29,6 +29,16 @@ describe('Windows update lifecycle', () => {
     expect(updater.checkForUpdates).toHaveBeenCalled(); expect(updater.downloadUpdate).toHaveBeenCalled(); expect(prepareRestart).toHaveBeenCalledWith(true);
     expect(updater.quitAndInstall).not.toHaveBeenCalled(); vi.advanceTimersByTime(1500); expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
   });
+  it('reports a failed restart asked for by a linked computer, rather than staying in "restarting"', async () => {
+    vi.useFakeTimers(); const { service, updater, dependencies } = fixture(); updater.quitAndInstall.mockImplementationOnce(() => { throw new Error('Installer missing'); });
+    await service.remoteInstall(); vi.advanceTimersByTime(1500);
+    expect(dependencies.installationFailed).toHaveBeenCalledOnce(); expect(service.status().phase).toBe('error');
+  });
+  it('keeps checking on schedule while a found update waits to be downloaded, so a newer one is noticed', async () => {
+    vi.useFakeTimers(); const { service, updater } = fixture();
+    service.start(); await vi.advanceTimersByTimeAsync(30_000); expect(service.status().phase).toBe('available');
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000); expect(updater.checkForUpdates).toHaveBeenCalledTimes(2); service.close();
+  });
   it('says so when a linked computer asks and it is already up to date', async () => {
     const { service, updater } = fixture(); updater.checkForUpdates.mockImplementationOnce(async () => { updater.emit('update-not-available'); });
     expect(await service.remoteInstall()).toMatch(/already the latest/); expect(updater.downloadUpdate).not.toHaveBeenCalled();

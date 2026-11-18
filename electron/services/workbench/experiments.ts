@@ -5,12 +5,21 @@ import { load, save } from './local-store';
 import { HubError } from '../cli/engine-adapter';
 const experiment = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), hypothesis: z.string().trim().min(1).max(1000), criterion: z.string().trim().min(1).max(1000), promptA: z.string().trim().min(1).max(2000), promptB: z.string().trim().min(1).max(2000), createdAt: z.iso.datetime() }).strict();
 const trial = z.object({ id: z.uuid(), experimentId: z.uuid(), variant: z.enum(['A', 'B']), runId: z.uuid().nullable(), minutes: z.number().min(0).max(1440), rework: z.number().int().min(0).max(1000), outcome: z.enum(['successful', 'partial', 'failed']), evidence: z.string().trim().min(1).max(2000), createdAt: z.iso.datetime() }).strict();
-const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('experiment-list') }).strict(), experiment.omit({ id: true, createdAt: true }).extend({ action: z.literal('experiment-save') }).strict(), trial.omit({ id: true, createdAt: true }).extend({ action: z.literal('trial-add') }).strict()]);
+const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('experiment-list') }).strict(), experiment.omit({ id: true, createdAt: true }).extend({ action: z.literal('experiment-save') }).strict(), trial.omit({ id: true, createdAt: true }).extend({ action: z.literal('trial-add') }).strict(), z.object({ action: z.literal('experiment-delete'), id: z.uuid() }).strict(), z.object({ action: z.literal('trial-delete'), id: z.uuid() }).strict()]);
 export class Experiments {
   constructor(private root: string, private knownRun: (id: string) => boolean) {}
   private data(): ExperimentsData { return load(this.root, 'experiments.json', z.object({ experiments: z.array(experiment).max(100), trials: z.array(trial).max(1000) }).strict(), { experiments: [], trials: [] }); }
   execute(input: unknown): ExperimentsData | Experiment | Trial {
     const request = schema.parse(input); const data = this.data(); if (request.action === 'experiment-list') return data;
+    // Deleting is how a wrong record is corrected, and frees room under the limits. An experiment's trials go with it.
+    if (request.action === 'experiment-delete') {
+      if (!data.experiments.some((e) => e.id === request.id)) throw new HubError('EXPERIMENT_MISSING', 'That experiment was already deleted. Reopen Experiments to see the current list.');
+      const next = { experiments: data.experiments.filter((e) => e.id !== request.id), trials: data.trials.filter((t) => t.experimentId !== request.id) }; save(this.root, 'experiments.json', next); return next;
+    }
+    if (request.action === 'trial-delete') {
+      if (!data.trials.some((t) => t.id === request.id)) throw new HubError('TRIAL_MISSING', 'That trial was already deleted. Reopen Experiments to see the current list.');
+      const next = { ...data, trials: data.trials.filter((t) => t.id !== request.id) }; save(this.root, 'experiments.json', next); return next;
+    }
     if (request.action === 'experiment-save') { if (data.experiments.length >= 100) throw new HubError('EXPERIMENT_LIMIT', 'Up to 100 experiments are supported.'); const { action: _action, ...fields } = request; const record = { ...fields, id: randomUUID(), createdAt: new Date().toISOString() }; save(this.root, 'experiments.json', { ...data, experiments: [...data.experiments, record] }); return record; }
     if (!data.experiments.some((e) => e.id === request.experimentId)) throw new HubError('EXPERIMENT_MISSING', 'Select an available experiment.');
     if (request.runId && !this.knownRun(request.runId)) throw new HubError('EXPERIMENT_RUN', 'Choose a recorded local session run.');

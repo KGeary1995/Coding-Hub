@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import TOML from '@iarna/toml';
 import { z } from 'zod';
 import type { DiagnosticReport } from '../../../shared/workbench';
-import { discoverEngine, hostEnvironment } from '../cli/discovery';
+import { discoverEngine, freshHostEnvironment } from '../cli/discovery';
 import type { ClaudeProfiles } from '../cli/claude-profiles';
 import { directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
@@ -14,7 +14,8 @@ export class Diagnostics {
   async execute(input: unknown): Promise<DiagnosticReport> {
     const request = z.object({ action: z.literal('diagnose'), engine: z.enum(['claude', 'codex']), directory: z.string().max(4096).nullable(), profileId: z.uuid().optional() }).strict().parse(input);
     if (request.engine !== 'claude' && request.profileId) throw new HubError('INVALID_REQUEST', 'Profiles are supported for Claude only.');
-    const env = this.profiles.environment(hostEnvironment(), request.profileId);
+    // Read now, so a CLI installed while Trace runs (a new PATH folder) is found on the first try.
+    const env = this.profiles.environment(await freshHostEnvironment(), request.profileId);
     const engine = await discoverEngine(request.engine, env);
     const report: DiagnosticReport = { engine: request.engine, checkedAt: new Date().toISOString(), steps: [] };
     report.steps.push({ name: 'CLI installation and flags', state: engine.info.available ? 'passed' : 'failed', message: engine.info.available ? `${engine.info.version} · ${engine.info.executable}` : engine.info.error ?? 'CLI not detected.', recovery: 'Install or repair the official CLI and restart the app from a terminal where it works.' });
@@ -27,7 +28,8 @@ export class Diagnostics {
     report.steps.push({ name: 'Local configuration syntax', state: error ? 'failed' : 'passed', message: error || `${count} configuration files parsed. Semantic model/provider settings are checked by the CLI.`, recovery: 'Fix the local JSON/TOML file; clear app model/reasoning overrides to test CLI defaults.' });
     let cwd = homedir(); let valid = true;
     try { if (request.directory) cwd = directory(request.directory); } catch { valid = false; }
-    report.steps.push({ name: 'Working directory', state: valid ? 'passed' : 'failed', message: valid ? request.directory ? cwd : 'No project selected; terminal test uses the home directory.' : 'Project directory is missing or unreadable.', recovery: 'Choose an existing folder in Projects or use an independent session directory.' });
+    // The folder as the person chose it, not where a link or junction leads: the export hides that spelling.
+    report.steps.push({ name: 'Working directory', state: valid ? 'passed' : 'failed', message: valid ? request.directory ? request.directory : 'No project selected; terminal test uses the home directory.' : 'Project directory is missing or unreadable.', recovery: 'Choose an existing folder in Projects or use an independent session directory.' });
     let terminal = false;
     if (valid) terminal = await new Promise<boolean>((resolve) => {
       let done = false; let output = ''; let pty: import('node-pty').IPty | undefined;

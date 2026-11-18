@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { DOWNLOADS_URL } from '../../../shared/updates';
 import { HubError } from '../cli/engine-adapter';
 
@@ -40,15 +40,19 @@ export async function latestMacRelease(fetcher: typeof fetch = fetch): Promise<M
 /** The newest version in the public feed's latest-mac.yml, or null when it cannot be read. */
 export async function latestMacVersion(fetcher: typeof fetch = fetch): Promise<string | null> { return (await latestMacRelease(fetcher))?.version ?? null; }
 
+/** An absolute .app path the script can quote: no quotes, backslashes, `$`, backticks or line breaks. */
+const SAFE_APP = /^\/[^'"\\$`\r\n]*\.app$/;
 /**
  * Installs Trace `version` on a Mac that cannot update itself (a copy not signed with Trace's Developer ID). Everything
  * is downloaded and checked before Trace is touched: the release's disk image for this Mac's chip, whose sha512 must
  * match the feed's (`sha512`), so a damaged or replaced download is never installed. After the swap it waits until the
  * new Trace answers on its own port (`port`, which linked computers and phones reach it through); if it does not within
- * two minutes, the old app is put back and opened. It writes what it did to /tmp/trace-update.log.
+ * two minutes, the old app is put back and opened. It writes what it did to /tmp/trace-update.log. `app`: the running
+ * Trace.app, which is the one replaced and reopened (a copy outside /Applications was quit and never opened again).
  */
-export function macUpdateScript(version: string, port: number, sha512: MacRelease['sha512']): string {
+export function macUpdateScript(version: string, port: number, sha512: MacRelease['sha512'], app = '/Applications/Trace.app'): string {
   if (!/^\d+\.\d+\.\d+$/.test(version) || !Number.isInteger(port)) throw new Error('Invalid version or port.');
+  if (!SAFE_APP.test(app)) throw new Error('Invalid application path.');
   const sum = (value: string | undefined) => value && /^[A-Za-z0-9+/=]{80,100}$/.test(value) ? value : '';
   return `#!/bin/bash
 set -u
@@ -56,7 +60,9 @@ exec >>/tmp/trace-update.log 2>&1; echo "== $(date) updating to ${version}"
 V=${version}; ARCH=x64; SHA='${sum(sha512.x64)}'; [ "$(uname -m)" = arm64 ] && { ARCH=arm64; SHA='${sum(sha512.arm64)}'; }
 [ -n "$SHA" ] || { echo "the feed lists no checksum for this Mac's download; Trace left as it was"; exit 1; }
 WORK=$(mktemp -d /tmp/trace-update.XXXXXX) || { echo "no work folder; Trace left as it was"; exit 1; }
-DMG="$WORK/Trace-$V.dmg"; STAGE="$WORK/stage"; APP=/Applications/Trace.app; OLD="$WORK/Trace-previous.app"
+DMG="$WORK/Trace-$V.dmg"; STAGE="$WORK/stage"; APP='${app}'; OLD="$WORK/Trace-previous.app"
+# The download and staged copy go whatever happens; the previous app (OLD) stays if a failure leaves it there.
+trap 'rm -rf "$DMG" "$STAGE"' EXIT
 answers() { for i in $(seq 1 120); do code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:${port}/api/hello); [ "$code" != "000" ] && return 0; sleep 1; done; return 1; }
 restore() { echo "$1; restoring the previous version"; pkill -x Trace; sleep 2; rm -rf "$APP"; mv "$OLD" "$APP"; open -a "$APP"; exit 1; }
 curl -fsSL -o "$DMG" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace-$V-macOS-$ARCH.dmg" || { echo "download failed; Trace left as it was"; exit 1; }
@@ -80,12 +86,15 @@ rm -rf "$WORK"; echo "updated to $V"
 `;
 }
 
+/** The app bundle a Mac runs Trace from (…/Trace.app/Contents/MacOS/Trace); /Applications/Trace.app when it cannot tell. */
+export function runningApp(executable: string) { const bundle = /^(\/.+\.app)\/Contents\/MacOS\/[^/]+$/.exec(executable)?.[1]; return bundle && SAFE_APP.test(bundle) ? bundle : '/Applications/Trace.app'; }
+
 /**
  * Starts the script on its own, so it carries on when it quits Trace: written to Trace's storage folder and run
- * detached from Trace's process.
+ * detached from Trace's process. Returns the script's process, so a script that gives up early stops blocking new jobs.
  */
-export function startMacUpdate(storage: string, version: string, port: number, sha512: MacRelease['sha512']) {
+export function startMacUpdate(storage: string, version: string, port: number, sha512: MacRelease['sha512'], executable = process.execPath): ChildProcess {
   if (process.platform !== 'darwin') throw new HubError('UPDATES_DISABLED', 'Only a Mac installs updates this way.');
-  const file = path.join(storage, 'trace-update.sh'); fs.writeFileSync(file, macUpdateScript(version, port, sha512), { mode: 0o700 });
-  const child = spawn('/bin/bash', [file], { detached: true, stdio: 'ignore' }); child.unref();
+  const file = path.join(storage, 'trace-update.sh'); fs.writeFileSync(file, macUpdateScript(version, port, sha512, runningApp(executable)), { mode: 0o700 });
+  const child = spawn('/bin/bash', [file], { detached: true, stdio: 'ignore' }); child.unref(); return child;
 }

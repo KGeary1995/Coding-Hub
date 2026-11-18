@@ -76,7 +76,8 @@ export class UpdateService {
   private fail() { if (this.state.phase === 'installing') this.dependencies.installationFailed?.(); this.set({ phase: 'error', message: 'Update failed. Check your connection and that a stable GitHub release includes its installer and update feed (latest.yml, or latest-mac.yml on a Mac), then retry.' }); }
   start() {
     if (!this.dependencies.enabled || !this.state.automaticChecks || this.timer || this.interval) return;
-    const check = () => { if (!this.busy && ['idle', 'current', 'error'].includes(this.state.phase)) void this.execute({ action: 'check' }).catch(() => {}); };
+    // 'available' too: a release found but not downloaded yet may have been replaced by a newer one since.
+    const check = () => { if (!this.busy && ['idle', 'current', 'available', 'error'].includes(this.state.phase)) void this.execute({ action: 'check' }).catch(() => {}); };
     this.timer = setTimeout(() => { this.timer = undefined; check(); }, 30_000);
     this.interval = setInterval(check, 4 * 60 * 60 * 1000);
     this.timer.unref?.(); this.interval.unref?.();
@@ -103,7 +104,8 @@ export class UpdateService {
       if (!await this.dependencies.prepareRestart(true)) throw new HubError('UPDATE_FAILED', 'Trace there could not get ready to restart.');
       const version = this.state.availableVersion;
       this.set({ phase: 'installing', message: 'Restarting to install the update…' });
-      setTimeout(() => this.dependencies.updater.quitAndInstall(false, true), 1500);
+      // A throw here would otherwise leave Trace refusing everything as 'restarting' until restarted by hand.
+      setTimeout(() => { try { this.dependencies.updater.quitAndInstall(false, true); } catch { this.fail(); } }, 1500);
       return `Installing Trace ${version ?? 'update'} there. It restarts and is back in about a minute.`;
     } catch (error) {
       if (error instanceof HubError) throw error;

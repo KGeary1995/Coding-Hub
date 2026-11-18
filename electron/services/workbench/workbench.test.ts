@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { Backups, resolveStorageRoot } from './backups';
@@ -15,6 +15,10 @@ import { repositoryState } from './repository-state';
 import { movedTask } from '../../../src/state/task-move';
 import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
 import { Experiments } from './experiments';
+import { DeviceSync, SYNC_FOLDER } from '../hub/device-sync';
+import { RulesService } from '../hub/rules';
+import { DEFAULT_PREFERENCES, type HubPreferences } from '../../../shared/hub';
+import type { Experiment, ExperimentsData, Trial } from '../../../shared/workbench';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
 function fixture() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-enterprise-')); roots.push(root); return root; }
@@ -62,6 +66,61 @@ describe('backup and restore integrity', () => {
     await expect(service.execute({ action: 'backup-import' })).rejects.toMatchObject({ code: 'BACKUP_PATH' }); expect(resolveStorageRoot(root, profile)).toBe(root); expect(fs.existsSync(path.join(profile, 'storage-location.json'))).toBe(false);
     manifest.entries[0].path = 'preferences.json'; manifest.entries[0].hash = '0'.repeat(64); fs.writeFileSync(file, gzipSync(JSON.stringify(manifest)));
     await expect(service.execute({ action: 'backup-import' })).rejects.toMatchObject({ code: 'BACKUP_HASH' });
+  });
+  it('backs up a usage database over 16 MiB, and names a plain file that is too large', async () => {
+    const root = fixture(); const active = path.join(root, 'data'); fs.mkdirSync(path.join(active, 'telemetry'), { recursive: true });
+    const db = new DatabaseSync(path.join(active, 'telemetry/usage.db')); db.exec('CREATE TABLE usage(value BLOB)'); db.prepare('INSERT INTO usage VALUES(?)').run(randomBytes(17 * 1024 * 1024)); db.close();
+    const service = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
+    const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any; expect(created.record.bytes).toBeGreaterThan(17 * 1024 * 1024);
+    const restored = await service.execute({ action: 'backup-restore', id: created.record.id }) as any; expect(fs.statSync(path.join(restored.restoredPath, 'telemetry/usage.db')).size).toBeGreaterThan(17 * 1024 * 1024);
+    fs.mkdirSync(path.join(active, 'memory')); fs.writeFileSync(path.join(active, 'memory/huge.json'), Buffer.alloc(17 * 1024 * 1024));
+    await expect(service.execute({ action: 'backup-create', includeLogs: false })).rejects.toThrow('memory/huge.json');
+  }, 60000);
+  it('keeps this computer’s identity, phones and linked computers through a restore, and never puts them in a backup', async () => {
+    const root = fixture(); const active = path.join(root, 'data'); fs.mkdirSync(active); const machine = JSON.stringify({ id: randomUUID(), name: 'Desk' });
+    fs.writeFileSync(path.join(active, 'machine.json'), machine); fs.writeFileSync(path.join(active, 'remote-devices.json'), '[]'); fs.writeFileSync(path.join(active, 'linked-computers.json'), '[]'); fs.writeFileSync(path.join(active, 'remote-unlinked.json'), '[]'); fs.writeFileSync(path.join(active, 'device-sync.json'), '{}'); fs.writeFileSync(path.join(active, 'preferences.json'), '{}');
+    const service = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
+    const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any; expect(created.record.files).toBe(1);
+    fs.writeFileSync(path.join(active, 'remote.json'), JSON.stringify({ enabled: true }));
+    const restored = await service.execute({ action: 'backup-restore', id: created.record.id }) as any;
+    expect(fs.readFileSync(path.join(restored.restoredPath, 'machine.json'), 'utf8')).toBe(machine); expect(JSON.parse(fs.readFileSync(path.join(restored.restoredPath, 'remote.json'), 'utf8'))).toEqual({ enabled: true });
+    expect(fs.existsSync(path.join(restored.restoredPath, 'linked-computers.json'))).toBe(true); expect(fs.existsSync(path.join(restored.restoredPath, 'remote-devices.json'))).toBe(true);
+    // Computers removed here still need a code to link again; the sync baseline belongs to the old data, not this computer.
+    expect(fs.existsSync(path.join(restored.restoredPath, 'remote-unlinked.json'))).toBe(true); expect(fs.existsSync(path.join(restored.restoredPath, 'device-sync.json'))).toBe(false);
+  });
+  it('after a restore, sync neither deletes templates made since the backup nor replaces newer shared rules', async () => {
+    const root = fixture(); const drive = path.join(root, 'drive'); fs.mkdirSync(drive);
+    const computer = (storage: string) => { fs.mkdirSync(storage, { recursive: true }); let preferences: HubPreferences = { ...DEFAULT_PREFERENCES, prices: [], driveDirectory: drive, syncDevices: true }; const rules = new RulesService(storage); return { rules, sync: new DeviceSync(storage, () => preferences, (next) => { preferences = next; }, rules, () => []) }; };
+    const setRules = (rules: RulesService, content: string) => rules.save(content, rules.read([]).revision, []);
+    const desk = path.join(root, 'desk'); const a = computer(desk); const b = computer(path.join(root, 'laptop'));
+    // The desk's (empty) template list is in the backup, so a restore does not by itself start a new template baseline.
+    fs.writeFileSync(path.join(desk, 'project-templates.json'), '[]');
+    setRules(a.rules, 'Shared start.'); a.sync.sync(); b.sync.sync(); expect(b.rules.content()).toBe('Shared start.');
+    const service = new Backups(desk, desk, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
+    const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any;
+    // After the backup the laptop adds a template and edits the rules, and the desk takes both.
+    const id = randomUUID(); const sessions = [randomUUID()];
+    const template = { id, name: 'Later', description: '', rules: '', checks: [], createdAt: new Date().toISOString(), workspace: { version: 1, rootDirectory: null, layoutMode: 'columns', focusedSessionId: null, sessions: sessions.map((session) => ({ id: session, title: 'Claude', createdAt: new Date().toISOString(), config: { engine: 'claude', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, binding: { mode: 'workspace' } })), tiles: sessions.map((sessionId) => ({ sessionId, x: 0, y: 0, w: 6, h: 12, minW: 3, minH: 10 })) } };
+    fs.writeFileSync(path.join(root, 'laptop', 'project-templates.json'), JSON.stringify([template])); setRules(b.rules, 'Laptop edit.'); b.sync.sync(); a.sync.sync();
+    expect(a.rules.content()).toBe('Laptop edit.'); expect(fs.existsSync(path.join(desk, 'device-sync.json'))).toBe(true);
+    const restored = await service.execute({ action: 'backup-restore', id: created.record.id }) as any;
+    const after = computer(restored.restoredPath); const status = after.sync.sync(); b.sync.sync();
+    const shared = path.join(drive, SYNC_FOLDER, 'templates', id + '.json');
+    expect(fs.existsSync(shared)).toBe(true); expect(JSON.parse(fs.readFileSync(path.join(root, 'laptop', 'project-templates.json'), 'utf8')).map((item: { id: string }) => item.id)).toEqual([id]);
+    expect(JSON.parse(fs.readFileSync(path.join(restored.restoredPath, 'project-templates.json'), 'utf8')).map((item: { id: string }) => item.id)).toEqual([id]);
+    expect(status.conflicts).toEqual([expect.objectContaining({ document: 'rules' })]); expect(b.rules.content()).toBe('Laptop edit.'); expect(after.rules.content()).toBe('Shared start.');
+  });
+  it('deletes a backup, so the 50-backup limit is not a dead end', async () => {
+    const root = fixture(); const active = path.join(root, 'data'); fs.mkdirSync(active); fs.writeFileSync(path.join(active, 'preferences.json'), '{}');
+    let allow = false; const service = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true, confirmDelete: async () => allow });
+    const created = await service.execute({ action: 'backup-create', includeLogs: false }) as any; const file = path.join(active, 'backups', created.record.id + '.hub-backup.gz');
+    expect(await service.execute({ action: 'backup-delete', id: created.record.id })).toBeNull(); expect(fs.existsSync(file)).toBe(true);
+    allow = true; expect(await service.execute({ action: 'backup-delete', id: created.record.id })).toEqual([]); expect(fs.existsSync(file)).toBe(false);
+    await expect(service.execute({ action: 'backup-delete', id: created.record.id })).rejects.toMatchObject({ code: 'BACKUP_MISSING' });
+    // With no host confirmation wired, the window alone cannot delete one.
+    const unconfirmed = new Backups(active, active, path.join(root, 'profile'), '1.6.0', { ready: async () => {}, exportFile: async () => null, importFile: async () => null, confirmRestore: async () => true });
+    const kept = await unconfirmed.execute({ action: 'backup-create', includeLogs: false }) as any;
+    await expect(unconfirmed.execute({ action: 'backup-delete', id: kept.record.id })).rejects.toMatchObject({ code: 'BACKUP_DELETE_UNAVAILABLE' }); expect(fs.existsSync(path.join(active, 'backups', kept.record.id + '.hub-backup.gz'))).toBe(true);
   });
 });
 describe('native history and task scope', () => {
@@ -124,6 +183,9 @@ describe('native history and task scope', () => {
     expect((await tasks.execute({ action: 'task-save', id: other.id, title: 'Styles, renamed', directory: root, sessionId: other.sessionId, scope: ['src/a.ts'], status: 'active', notes: '', verificationId: null }) as any).outcome).toBe('stopped');
     expect((await tasks.execute({ action: 'task-send', id: other.id }) as any).task.outcome).toBeUndefined();
     await tasks.execute({ action: 'task-status', id: other.id, status: 'review', outcome: 'quiet' }); expect((await tasks.execute({ action: 'task-status', id: other.id, status: 'done' }) as any).outcome).toBeUndefined();
+    // Dropped back to To do, a task no longer counts as sent; the next send gives it a new time and mark.
+    const resent = (await tasks.execute({ action: 'task-send', id: other.id }) as any).task; expect(resent.sentAt).toBeTruthy(); expect(resent.sendId).toBeTruthy();
+    const dropped = await tasks.execute({ action: 'task-status', id: other.id, status: 'queued' }) as any; expect(dropped.sentAt).toBeUndefined(); expect(dropped.sendId).toBeUndefined(); expect(tasks.list().find((t) => t.id === other.id)!.sentAt).toBeUndefined();
     // A pull request belongs to the task it was opened for, and only a GitHub pull request address is taken; the details give branch and commit.
     await tasks.execute({ action: 'task-pr', id: saved.id, url: 'https://github.com/owner/repo/pull/7' }); await expect(tasks.execute({ action: 'task-pr', id: other.id, url: 'https://example.com/not-a-pr' })).rejects.toBeTruthy();
     const listed = tasks.list(); expect(listed.find((t) => t.id === saved.id)!.pullRequest).toBe('https://github.com/owner/repo/pull/7'); expect(listed.find((t) => t.id === other.id)!.pullRequest).toBeUndefined();
@@ -182,10 +244,34 @@ describe('verification and experiment evidence', () => {
     expect(await repositoryState(project)).toBeNull();
     fs.rmSync(path.join(project, 'f5000.txt')); expect(await repositoryState(project)).toMatch(/^[0-9a-f]{64}$/);
   }, 60000);
+  it('reads changed files without blocking the main process, and still sees a content change', async () => {
+    const project = fixture(); execFileSync('git', ['init'], { cwd: project });
+    for (let i = 0; i < 40; i++) fs.writeFileSync(path.join(project, `f${i}.txt`), 'x'.repeat(200_000));
+    const reads = vi.spyOn(fs, 'readFileSync'); const stats = vi.spyOn(fs, 'statSync');
+    try {
+      const before = await repositoryState(project); expect(before).toMatch(/^[0-9a-f]{64}$/);
+      const touched = [...reads.mock.calls, ...stats.mock.calls].filter(([file]) => String(file).startsWith(project)); expect(touched).toEqual([]);
+      fs.writeFileSync(path.join(project, 'f7.txt'), 'y'.repeat(200_000)); expect(await repositoryState(project)).not.toBe(before);
+    } finally { reads.mockRestore(); stats.mockRestore(); }
+  }, 60000);
   it('requires real run references and prevents counting one run twice in an experiment', () => {
     const root = fixture(); const id = randomUUID(); const service = new Experiments(root, (run) => run === id);
     const experiment = service.execute({ action: 'experiment-save', name: 'Scope', hypothesis: 'Explicit scope reduces rework', criterion: 'Tests pass with no fixes', promptA: 'Fix it', promptB: 'Fix this function and verify tests' }) as any;
     const trial = { action: 'trial-add', experimentId: experiment.id, variant: 'A', runId: id, minutes: 5, rework: 1, outcome: 'partial', evidence: 'One failing test corrected' }; service.execute(trial); expect(() => service.execute(trial)).toThrow('already'); expect(() => service.execute({ ...trial, runId: randomUUID() })).toThrow('recorded');
+  });
+  it('deletes a trial, or an experiment with its trials, and answers with the list', () => {
+    const root = fixture(); const service = new Experiments(root, () => true); const fields = { name: 'Scope', hypothesis: 'h', criterion: 'c', promptA: 'a', promptB: 'b' };
+    const kept = service.execute({ action: 'experiment-save', ...fields }) as Experiment; const gone = service.execute({ action: 'experiment-save', ...fields, name: 'Other' }) as Experiment;
+    const trial = (experimentId: string) => service.execute({ action: 'trial-add', experimentId, variant: 'A', runId: null, minutes: 5, rework: 0, outcome: 'successful', evidence: 'Tests pass' }) as Trial;
+    const first = trial(kept.id); const second = trial(kept.id); trial(gone.id);
+    const afterTrial = service.execute({ action: 'trial-delete', id: first.id }) as ExperimentsData;
+    expect(afterTrial.trials.map((t) => t.id)).not.toContain(first.id); expect(afterTrial.trials).toHaveLength(2);
+    const afterExperiment = service.execute({ action: 'experiment-delete', id: gone.id }) as ExperimentsData;
+    expect(afterExperiment).toEqual({ experiments: [kept], trials: [second] }); expect(service.execute({ action: 'experiment-list' })).toEqual(afterExperiment);
+    // An id that is gone (deleted from another window) says so; the saved data is left as it was.
+    expect(() => service.execute({ action: 'trial-delete', id: first.id })).toThrow(expect.objectContaining({ code: 'TRIAL_MISSING' }));
+    expect(() => service.execute({ action: 'experiment-delete', id: gone.id })).toThrow(expect.objectContaining({ code: 'EXPERIMENT_MISSING' }));
+    expect(() => service.execute({ action: 'trial-delete', id: 'not-an-id' })).toThrow(); expect(service.execute({ action: 'experiment-list' })).toEqual(afterExperiment);
   });
 });
 

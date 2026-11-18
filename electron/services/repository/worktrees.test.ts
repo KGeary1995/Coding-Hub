@@ -69,3 +69,27 @@ it('deletes a removed worktree branch, and earlier leftover ones, only when thei
   await service.execute({ action: 'worktree-remove', id: tree.id });
   expect(git('branch', '--list', tree.branch)).toContain(tree.branch); expect(git('branch', '--list', 'coding-hub/00000000-0000-4000-8000-000000000000')).toBe('');
 });
+it('cleans up the worktree and branch a failed checkout leaves, and keeps no record of it', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repository }).toString();
+  git('init'); writeFileSync(path.join(repository, 'app.txt'), 'committed'); writeFileSync(path.join(repository, '.gitattributes'), '*.txt filter=broken\n'); git('add', '.'); git('commit', '-m', 'baseline');
+  // A required filter that fails: Git has made the folder and branch when the checkout stops.
+  git('config', 'filter.broken.smudge', 'false'); git('config', 'filter.broken.required', 'true');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  await expect(service.execute({ action: 'worktree-create', directory: repository })).rejects.toMatchObject({ code: 'WORKTREE_GIT_FAILED' });
+  expect(service.list()).toEqual([]); expect(git('branch', '--list', 'coding-hub/*')).toBe(''); expect(git('worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1);
+});
+it('refuses to remove a worktree whose detached HEAD holds commits no branch has', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-worktrees-')); roots.push(root); const repository = path.join(root, 'repo'); mkdirSync(repository);
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd }).toString();
+  git(repository, 'init'); writeFileSync(path.join(repository, 'app.txt'), 'committed'); git(repository, 'add', '.'); git(repository, 'commit', '-m', 'baseline');
+  const service = new WorktreeService(path.join(root, 'storage'), () => false);
+  const tree = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  git(tree.directory, 'checkout', '-q', '--detach'); git(tree.directory, 'commit', '-q', '--allow-empty', '-m', 'detached work');
+  await expect(service.execute({ action: 'worktree-remove', id: tree.id })).rejects.toMatchObject({ code: 'WORKTREE_DIRTY' }); expect(service.list()).toHaveLength(1);
+  git(tree.directory, 'checkout', '-q', '-b', 'kept'); await service.execute({ action: 'worktree-remove', id: tree.id }); expect(service.list()).toHaveLength(0);
+  // A clean branch with no commit yet (checkout --orphan) is not a detached HEAD, and is removed as before.
+  const orphan = await service.execute({ action: 'worktree-create', directory: repository }) as ManagedWorktree;
+  git(orphan.directory, 'checkout', '-q', '--orphan', 'fresh'); git(orphan.directory, 'rm', '-q', '-rf', '.');
+  await service.execute({ action: 'worktree-remove', id: orphan.id }); expect(service.list()).toHaveLength(0);
+});

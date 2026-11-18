@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -46,11 +46,29 @@ describe('reviewed Git delivery',{timeout:30000},()=>{
  it('pushes the reviewed branch to a local bare remote without force',async()=>{
   const cwd=root();const remote=root();git(remote,'init','--bare');git(cwd,'init','-b','main');fs.writeFileSync(path.join(cwd,'file.txt'),'baseline');git(cwd,'add','.');git(cwd,'commit','-m','Baseline');git(cwd,'remote','add','origin',remote);const service=new Delivery(async()=>true,()=>{});const state=await service.inspect(cwd);await service.execute({action:'flow-git-push',directory:cwd,revision:state.revision,remote:'origin'});expect(git(remote,'rev-parse','main')).toBe(git(cwd,'rev-parse','HEAD'));
  });
+ it('says why Git refused a push, and names an untracked file too large to review',async()=>{
+  const cwd=root();const other=root();const remote=root();git(remote,'init','--bare');
+  for(const dir of [other,cwd]){git(dir,'init','-b','main');fs.writeFileSync(path.join(dir,'file.txt'),dir);git(dir,'add','.');git(dir,'commit','-m','Diverged');git(dir,'remote','add','origin',remote);}
+  git(other,'push','origin','main');const service=new Delivery(async()=>true,()=>{});const state=await service.inspect(cwd);
+  await expect(service.execute({action:'flow-git-push',directory:cwd,revision:state.revision,remote:'origin'})).rejects.toThrow(/git said:[\s\S]*rejected/);
+  fs.writeFileSync(path.join(cwd,'big.bin'),Buffer.alloc(5*1024*1024));await expect(service.inspect(cwd)).rejects.toThrow('big.bin');
+ });
 });
 describe('durable workflow records and bounded search',()=>{
  it('captures reusable parameters without requests/resume IDs and applies fresh identities and project rules',async()=>{
   const data=root();const project=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>true);const original=workspace(project);const item=await service.execute({action:'flow-template-save',name:'Paired review',description:'Two agents',workspace:original,includeRules:true,includeChecks:true}) as any;
    expect(item.workspace.sessions[1].config.resumeId).toBeUndefined();expect(item.workspace.sessions[0].preparedRequest).toBeUndefined();const applied=await service.execute({action:'flow-template-apply',id:item.id,directory:target,applyRules:false,applyChecks:true}) as SavedWorkspace;expect(applied.rootDirectory).toBe(target);expect(applied.sessions[0].id).not.toBe(original.sessions[0].id);expect(applied.sessions[0].budget?.tokens).toBe(100);expect(new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>false).templates()).toHaveLength(1);
+  }finally{storage.close();}
+ });
+ it('applies a template saved while a channel led a hierarchy Round Table, with its seats and without the table’s work',async()=>{
+  const data=root();const project=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>true);
+   const original=workspace(project);const [lead,reviewer]=original.sessions;const planner={...lead,id:randomUUID(),title:'Planner'};original.sessions.push(planner);original.tiles=[{...original.tiles[0],w:12}];
+   lead.roundTable={partner:reviewer.id,driver:'claude',rounds:2,kind:'hierarchy',planner:planner.id,chain:{step:'reviewing',task:'Private task',plan:'Private plan',report:'',reviewRound:1,finalRound:0,verdict:null,note:''},findings:[{id:'F1',severity:'high',evidence:'a.ts:1',text:'Private finding',status:'open',response:'',check:'',reviewedAt:null,changedAt:null,round:1,at:new Date().toISOString()}],waiting:'Private message'};
+   const item=await service.execute({action:'flow-template-save',name:'Hierarchy',description:'',workspace:original,includeRules:false,includeChecks:false}) as any;
+   expect(JSON.stringify(item.workspace)).not.toMatch(/Private/);
+   const applied=await service.execute({action:'flow-template-apply',id:item.id,directory:target,applyRules:false,applyChecks:false}) as SavedWorkspace;
+   const table=applied.sessions[0].roundTable!;const ids=applied.sessions.map((session)=>session.id);
+   expect(ids).not.toContain(reviewer.id);expect(table).toEqual({partner:ids[1],driver:'claude',rounds:2,kind:'hierarchy',planner:ids[2]});expect(applied.tiles.map((tile)=>tile.sessionId)).toEqual([ids[0]]);
   }finally{storage.close();}
  });
  it('refuses a template of Gemini channels only (saved by 1.19 or 1.20) before it writes any rules or checks',async()=>{
@@ -69,6 +87,16 @@ describe('durable workflow records and bounded search',()=>{
   fs.mkdirSync(path.join(data,'memory','demo'),{recursive:true});fs.writeFileSync(path.join(data,'memory','demo','note.json'),JSON.stringify({title:'Note',project:'demo',content:'needle handoff'}));fs.writeFileSync(path.join(data,'design-annotations.json'),JSON.stringify([{snapshotId:randomUUID(),text:'needle annotation'}]));const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const current=rules.read([]);rules.save('needle rules',current.revision,[]);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),new Verification(data,async()=>false),rules,storage,async()=>false);const result=await service.execute({action:'flow-search',query:'needle',directory:project,includeOutput:false}) as any;
   expect(result.hits.map((hit:any)=>hit.kind).sort()).toEqual(['file','memory','rules']);expect(JSON.stringify(result)).not.toContain('needle secret');expect(JSON.stringify(result)).not.toContain('needle escaped');
   }finally{storage.close();}
+ });
+ it('still finds memory notes when a large project uses up its own search budget, without synchronous reads',async()=>{
+  const data=root();const project=root();for(let i=0;i<120;i++)fs.writeFileSync(path.join(project,`f${i}.md`),'needle '+'x'.repeat(120_000));
+  fs.mkdirSync(path.join(data,'memory','demo'),{recursive:true});fs.writeFileSync(path.join(data,'memory','demo','note.json'),JSON.stringify({id:randomUUID(),title:'Note',project:'demo',content:'needle handoff'}));
+  const storage=new WorkspaceStorage(data);const reads=vi.spyOn(fs,'readFileSync');const lists=vi.spyOn(fs,'readdirSync');
+  try{const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),new Verification(data,async()=>false),new RulesService(data),storage,async()=>false);
+   const result=await service.execute({action:'flow-search',query:'needle',directory:project,includeOutput:false}) as any;
+   expect(result.limited).toBe(true);expect(result.hits.some((hit:any)=>hit.kind==='file')).toBe(true);expect(result.hits.filter((hit:any)=>hit.kind==='memory')).toHaveLength(1);
+   expect([...reads.mock.calls,...lists.mock.calls].filter(([file])=>String(file).startsWith(project)||String(file).includes('memory'))).toEqual([]);
+  }finally{reads.mockRestore();lists.mockRestore();storage.close();}
  });
 });
 describe('usage targets and release evidence',()=>{
@@ -132,5 +160,23 @@ describe('diagnostic helper regressions',()=>{
  it('does not send a generic CLI exit to the project picker',()=>{
   expect(recoveryAdvice('CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project directory.',1,true).view).toBe('accounts');
   expect(recoveryAdvice('The working directory does not exist or is not accessible.',null,true).view).toBe('projects');
+ });
+ it('hides a folder however the report spells it, and only as a whole folder name',()=>{
+  expect(redactDiagnostic('D:\\clients\\acme-corp','C:\\Users\\kg','D:\\clients\\acme-corp\\')).toBe('<project>');
+  expect(redactDiagnostic('C:/Users/kg/AppData/x','C:\\Users\\kg',null)).toBe('~/AppData/x');
+  expect(redactDiagnostic('C:\\Users\\kgeary\\x','C:\\Users\\kg',null)).toBe('C:\\Users\\kgeary\\x');
+  expect(redactDiagnostic('/home/kg/app and /home/kg','/home/kg',null)).toBe('~/app and ~');
+  expect(redactDiagnostic('/usr/bin','/home/kg','/')).toBe('/usr/bin');
+  expect(redactDiagnostic('Could not open C:\\Users\\kgeary.','C:\\Users\\kgeary',null)).toBe('Could not open ~.');
+  expect(redactDiagnostic('Could not read D:\\work\\client-x. Try again.','C:\\Users\\kg','D:\\work\\client-x')).toBe('Could not read <project>. Try again.');
+  expect(redactDiagnostic('/Users/kg.','/Users/kg',null)).toBe('~.');expect(redactDiagnostic('/Users/kg.old/x','/Users/kg',null)).toBe('/Users/kg.old/x');
+ });
+ it('picks advice from words that name a cause, not from any output that contains them',()=>{
+  const exit=(tail:string)=>recoveryAdvice(`CLI exited with code 1.\n${tail}`,1,true).title;
+  for(const tail of ['The author field is missing in package.json','listening on port 14290','bash: jq: No such file or directory','Updated AGENTS.md then crashed: out of memory'])expect(exit(tail),tail).toBe('Investigate CLI exit 1');
+  expect(exit('Error: 401 Unauthorized')).toContain('account');expect(exit('API Error: 429 rate limit')).toContain('account');expect(exit('Not logged in. Please run /login')).toContain('account');
+  expect(recoveryAdvice('Apply the current Shared rules to this project before starting a session.',null,true).view).toBe('rules');
+  expect(exit('error: unknown option --foo')).toContain('configuration');
+  expect(exit('OAuth token has expired')).toContain('account');expect(exit('Your token expired')).toContain('account');
  });
 });

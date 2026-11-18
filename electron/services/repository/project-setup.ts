@@ -1,18 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
 import { z } from 'zod';
 import type { ProjectResponse } from '../../../shared/projects';
 import { findGitHub } from '../cli/account-connections';
 import { hostEnvironment, type Executable } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
+import { noHooksPath } from './git-safety';
+import { execFileTree } from './process-tree';
 const directory = z.string().min(1).max(4096).refine((value) => path.isAbsolute(value) && !value.includes('\0'));
 const owner = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/);
 const folder = z.string().regex(/^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,99}$/).refine((value) => !value.endsWith('.') && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value), 'Choose a regular folder name.');
 const repository = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.][A-Za-z0-9_.-]{0,99}$/);
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('github-list'), owner: owner.optional() }).strict(), z.object({ action: z.literal('github-clone'), repository, parent: directory }).strict(), z.object({ action: z.literal('create'), parent: directory, name: folder, initializeGit: z.boolean() }).strict(), z.object({ action: z.literal('validate'), directory }).strict()]);
-const repoSchema = z.array(z.object({ nameWithOwner: repository, description: z.string().max(10000).nullable(), isPrivate: z.boolean(), updatedAt: z.string().max(100) }).strict()).max(100);
-function execute(file: string, args: string[], cwd?: string): Promise<string> { return new Promise((resolve, reject) => execFile(file, args, { cwd, env: hostEnvironment(), timeout: 120_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true }, (error, stdout) => error ? reject(new HubError('PROJECT_COMMAND_FAILED', 'The CLI operation failed or timed out. Check Git/GitHub CLI installation, login, network access, and repository permissions.')) : resolve(stdout))); }
+const CLONE_TIMEOUT = 30 * 60_000;
+const repoSchema =z.array(z.object({ nameWithOwner: repository, description: z.string().max(10000).nullable(), isPrivate: z.boolean(), updatedAt: z.string().max(100) }).strict()).max(100);
+/** A timed-out clone must not go on in the background (gh runs git): execFileTree ends the whole tree. */
+async function execute(file: string, args: string[], cwd?: string, timeout = 120_000): Promise<string> {
+  try { return (await execFileTree(file, args, { cwd, env: hostEnvironment(), timeout, maxBuffer: 2 * 1024 * 1024, windowsHide: true })).stdout.toString('utf8'); }
+  catch { throw new HubError('PROJECT_COMMAND_FAILED', 'The CLI operation failed or timed out. Check Git/GitHub CLI installation, login, network access, and repository permissions.'); }
+}
 export class ProjectSetup {
   private busy = false;
   get active() { return this.busy; }
@@ -37,10 +43,11 @@ export class ProjectSetup {
       try {
         if (request.action === 'github-clone') {
           const gh = await (this.dependencies.findGitHub ?? findGitHub)();
-          await run(gh.file, ['repo', 'clone', request.repository, target, '--', '--config', 'core.hooksPath='], parent);
+          // A large repository takes far longer than two minutes; the limit ends the clone outright, so it must not be short.
+          await run(gh.file, ['repo', 'clone', request.repository, target, '--', '--config', `core.hooksPath=${noHooksPath()}`], parent, CLONE_TIMEOUT);
           // `git clone --config` persists the setting; restore normal hooks once the clone's own checkout is done.
           await run('git', ['-C', target, 'config', '--unset', 'core.hooksPath'], parent);
-        } else if (request.initializeGit) await run('git', ['-c', 'core.hooksPath=', 'init', '-b', 'main', '--', target], parent);
+        } else if (request.initializeGit) await run('git', ['-c', `core.hooksPath=${noHooksPath()}`, 'init', '-b', 'main', '--', target], parent);
       } catch { throw new HubError('PROJECT_SETUP_FAILED', `Setup could not finish. The folder and any partial files were preserved at ${target}. Check CLI installation, login, network access, and permissions. You can browse and open this folder.`); }
       return { directory: this.canonical(target) };
     } finally { this.busy = false; }

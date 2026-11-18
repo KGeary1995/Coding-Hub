@@ -97,6 +97,11 @@ describe('live coaching', () => {
     live.observe(run(), config(), user('Add a footer to every page with the version number'));
     expect(published).toHaveLength(0); expect(live.list().enabled).toBe(false);
   });
+  it('reads its on/off switch from disk once, not on every check', () => {
+    const { live } = coach(); const reads = vi.spyOn(fs, 'readFileSync');
+    try { for (let i = 0; i < 5; i++) live.latest('channel'); expect(reads.mock.calls.filter(([file]) => String(file).endsWith('live.json')).length).toBeLessThanOrEqual(1); live.setEnabled(false); expect(live.enabled()).toBe(false); }
+    finally { reads.mockRestore(); }
+  });
   it('has Claude review every prompt, Codex channels too, and Codex only when Claude Code is not installed', async () => {
     const { live, published, review, codexReview, installed } = coach(); const codexRun = { ...run(), engine: 'codex' as const, runId: 'run-2' };
     live.observe(codexRun, { engine: 'codex', model: '' } as unknown as CLIEngineConfig, { type: 'event_msg', payload: { type: 'user_message', message: 'fix the login' } });
