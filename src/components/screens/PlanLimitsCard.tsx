@@ -1,20 +1,23 @@
-import { RefreshCw } from 'lucide-react';
+import { Gauge, RefreshCw } from 'lucide-react';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
 
-/** Every account's subscription limits, as bars: Claude's session and weekly limits, and Codex's. */
+/** A limit's meter colour: green with room, amber near it, red at it (plan-limits-store's levels). */
+const TONE = { ok: 'success', warning: 'warning', critical: 'danger' } as const;
+
+/** Every account's subscription limits, as meters: Claude's session and weekly limits, and Codex's. */
 export function PlanLimitsCard() {
   const { limits, loading } = usePlanLimits();
-  return <section className="tr-plan-limits" aria-labelledby="plan-limits-title">
-    <header><h2 id="plan-limits-title">Plan limits</h2><span className="tr-usage-meta">From each CLI · no tokens used{limits[0] ? ` · checked ${new Date(limits[0].checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</span>
-      <button className="tr-ghost-button" onClick={() => void refreshPlanLimits(true)} disabled={loading}><RefreshCw size={13} className={loading ? 'spin' : ''} />Check now</button></header>
-    {!limits.length && <p className="tr-usage-meta">{loading ? 'Checking…' : 'No Claude Code or Codex found to check.'}</p>}
+  return <section className="ui-card tr-plan-limits" aria-labelledby="plan-limits-title">
+    <div className="ui-card-head"><Gauge aria-hidden="true" /><h2 id="plan-limits-title">Plan limits</h2><span className="tr-plan-meta">From each CLI · no tokens used{limits[0] ? ` · checked ${new Date(limits[0].checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+      <div className="ui-card-actions"><button className="button secondary small" onClick={() => void refreshPlanLimits(true)} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} />Check now</button></div></div>
+    {!limits.length && <p className="tr-plan-meta">{loading ? 'Checking…' : 'No Claude Code or Codex found to check.'}</p>}
     <div className="tr-plan-accounts">{limits.map((item) => <div key={`${item.engine}-${item.account}`} className="tr-plan-account">
-      <h3><i className="tr-engine-square" style={{ background: `var(--tr-ch-${item.engine})` }} aria-hidden="true" />{item.engine === 'claude' ? 'Claude' : 'Codex'}{item.account !== 'Default' ? ` · ${item.account}` : item.signedInAs ? ` · ${item.signedInAs}` : ''}{item.plan ? <span className="tr-usage-meta"> {item.plan}</span> : null}</h3>
-      {item.error ? <p className="tr-usage-meta">{item.error}</p> : item.windows.map((window, index) => <div key={`${index}:${window.label}`} className={`tr-plan-window ${limitLevel(window.usedPercent)}`}>
+      <h3><i className={`tr-engine-square ${item.engine}`} aria-hidden="true" />{item.engine === 'claude' ? 'Claude' : 'Codex'}{item.account !== 'Default' ? ` · ${item.account}` : item.signedInAs ? ` · ${item.signedInAs}` : ''}{item.plan ? <span className="ui-badge neutral">{item.plan}</span> : null}</h3>
+      {item.error ? <p className="tr-plan-meta">{item.error}</p> : item.windows.map((window, index) => <div key={`${index}:${window.label}`} className={`tr-plan-window ${limitLevel(window.usedPercent)}`}>
         <span className="tr-plan-label">{window.label}</span>
-        <span className="tr-plan-bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={window.usedPercent} aria-label={`${window.label} used`}><i style={{ width: `${Math.min(100, window.usedPercent)}%` }} /></span>
+        <span className={`ui-meter ${TONE[limitLevel(window.usedPercent)]}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={window.usedPercent} aria-label={`${window.label} used`}><i style={{ width: `${Math.min(100, window.usedPercent)}%` }} /></span>
         <span className="tnum">{Math.round(window.usedPercent)}%</span>
-        <span className="tr-usage-meta">{resetText(window) ? `resets ${resetText(window)}` : ''}</span>
+        <span className="tr-plan-meta">{resetText(window) ? `resets ${resetText(window)}` : ''}</span>
       </div>)}
     </div>)}</div>
   </section>;

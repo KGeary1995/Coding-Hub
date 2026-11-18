@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
+import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
@@ -87,7 +87,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     {table && runId && hierarchy && <ChainBar table={table} busy={busy} plannerName="The planner" builderName="The builder" onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     {table && runId && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
-      {!items.length && <p className="chat-empty">{live ? `Ask ${agent} anything. The conversation is the same one as on the computer.` : 'This chat is not running. Start it to write to it.'}</p>}
+      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" /><p>{live ? `Ask ${agent} anything. The conversation is the same one as on the computer.` : 'This chat is not running. Start it to write to it.'}</p></div>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
         : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={planner.results} agent="Claude" author="claude" role="Planner" answer={answerPlanner} view={setViewing} />
@@ -107,6 +107,6 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
           : <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}
       </div>
     </form>
-    {viewing && <div className="phone-image" role="dialog" aria-label="Image"><button type="button" className="quiet" onClick={() => setViewing(null)}>Close</button><img src={viewing} alt="" /></div>}
+    {viewing && <div className="phone-image" role="dialog" aria-label="Image"><button type="button" className="button secondary" onClick={() => setViewing(null)}>Close</button><img src={viewing} alt="" /></div>}
   </div>;
 }

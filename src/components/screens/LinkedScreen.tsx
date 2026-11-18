@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { LockKeyhole, MousePointer2, RotateCcw, X } from 'lucide-react';
+import { AlertCircle, LockKeyhole, MousePointer2, RotateCcw, X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
 import type { LinkedComputer, LinkedScreenState } from '../../../shared/remote';
 import { fitPaste, type ScreenKind } from '../../../shared/screen';
@@ -175,7 +175,7 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
   return <section className="linked-screen" aria-label={`${computer.name} screen`}>
     <header className="linked-screen-bar">
       <strong>Screen</strong>
-      <span className={`storage-status ${status === 'connected' ? 'saved' : ''}`} role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : status === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}</span>
+      <span className="linked-computer-status" role="status">{status === 'connected' ? (control ? 'Controlling' : 'Viewing') : status === 'signin' ? 'Sign in' : status === 'connecting' ? 'Connecting…' : status === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}</span>
       <span className="tr-spacer" />
       <button className="tr-detail-button" aria-pressed={control} title={control ? 'Mouse and keyboard reach the other computer' : 'Only watching: nothing is sent'} onClick={() => setControl((value) => !value)}><MousePointer2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">{control ? 'Control' : 'View only'}</span></button>
       {lockUnknown && <button className="tr-detail-button" aria-pressed={unlockOpen} title={`Wake ${computer.name} and type your password at its lock screen`} onClick={() => setUnlockOpen((value) => !value)}><LockKeyhole size={13} className="tr-detail-icon" /><span className="tr-detail-label">Unlock</span></button>}
@@ -185,22 +185,22 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <button className="tr-detail-button" onClick={retry}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Reconnect</span></button>
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>
     </header>
-    {message && <p className="session-error" role="alert">{message}</p>}
-    {windowsLocked && <div className="linked-screen-signin linked-screen-unlock" role="status"><p><LockKeyhole size={13} aria-hidden="true" /> <strong>{computer.name} is locked.</strong> Windows takes no keys or clicks from other programs at its lock screen, so typing here does nothing until it is unlocked there, at the computer. To keep it from locking while you are away, set Settings → Accounts → Sign-in options → “If you’ve been away” to Never there.</p></div>}
-    {showUnlock && <form className="linked-screen-signin linked-screen-unlock" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
-      <p><LockKeyhole size={13} aria-hidden="true" /> {locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} With only Screen Sharing turned on there, macOS 26 also takes no keys from Trace at its lock screen, so unlock it at the Mac. If its Remote Management is on with Control allowed, Trace can try to wake it and type your password.</p>
-      <label>Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} onChange={(event) => setUnlockPassword(event.target.value)} /></label>
+    {message && <p className="ui-banner danger" role="alert"><AlertCircle aria-hidden="true" /><span>{message}</span></p>}
+    {windowsLocked && <div className="linked-screen-unlock ui-banner warning" role="status"><LockKeyhole aria-hidden="true" /><span><strong>{computer.name} is locked.</strong> Windows takes no keys or clicks from other programs at its lock screen, so typing here does nothing until it is unlocked there, at the computer. To keep it from locking while you are away, set Settings → Accounts → Sign-in options → “If you’ve been away” to Never there.</span></div>}
+    {showUnlock && <form className="linked-screen-signin linked-screen-unlock ui-card" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
+      <p className="ui-banner warning"><LockKeyhole aria-hidden="true" /><span>{locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} With only Screen Sharing turned on there, macOS 26 also takes no keys from Trace at its lock screen, so unlock it at the Mac. If its Remote Management is on with Control allowed, Trace can try to wake it and type your password.</span></p>
+      <label className="ui-field">Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} onChange={(event) => setUnlockPassword(event.target.value)} /></label>
       <span className="linked-screen-actions">
-        <button className="tr-action start" type="submit" disabled={!unlockPassword || unlocking}>{unlocking ? 'Unlocking…' : 'Wake and unlock'}</button>
+        <button className="button primary" type="submit" disabled={!unlockPassword || unlocking}>{unlocking ? 'Unlocking…' : 'Wake and unlock'}</button>
         {savedLogin.current && <button className="tr-detail-button" type="button" disabled={unlocking} onClick={() => void unlock(savedLogin.current ?? '')}><span className="tr-detail-label">Use saved password</span></button>}
       </span>
     </form>}
-    {status === 'signin' && <form className="linked-screen-signin" onSubmit={signIn}>
+    {status === 'signin' && <form className="linked-screen-signin ui-card" onSubmit={signIn}>
       <p>{named ? `Sign in as a user on ${computer.name}: the name and password you use to log in there.` : `Enter the screen-sharing password set on ${computer.name}.`}</p>
-      {named && <label>User name <input autoFocus value={username} autoComplete="off" spellCheck={false} onChange={(event) => setUsername(event.target.value)} /></label>}
-      <label>Password <input type="password" autoFocus={!named} value={password} autoComplete="off" onChange={(event) => setPassword(event.target.value)} /></label>
+      {named && <label className="ui-field">User name <input autoFocus value={username} autoComplete="off" spellCheck={false} onChange={(event) => setUsername(event.target.value)} /></label>}
+      <label className="ui-field">Password <input type="password" autoFocus={!named} value={password} autoComplete="off" onChange={(event) => setPassword(event.target.value)} /></label>
       <label className="linked-screen-toggle"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> Save on this computer (encrypted)</label>
-      <button className="tr-action start" type="submit" disabled={!password || (named && !username)}>Sign in</button>
+      <button className="button primary" type="submit" disabled={!password || (named && !username)}>Sign in</button>
     </form>}
     {/* The paste field sits inside the view, so releasing Ctrl while it has focus still releases ⌘ there. */}
     <div ref={view} className="linked-screen-view" hidden={status === 'signin'}>

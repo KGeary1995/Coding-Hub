@@ -1,196 +1,208 @@
-/* Chat channels (components/chat): the transcript, composer, markdown, tool calls and Round Table. The phone app loads this
-   file too (phone/chat.tsx). */
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.tr-detail-button { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.tr-detail-button.icon { padding: 0 5px; }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.tr-detail-icon { display: none; }
-/* Narrow tiles (four channels at 125%, or beside the explorer): icon buttons, so every control stays in the row.
-   The label stays in the accessibility tree as the button's name. */
-@container (max-width: 560px) {
-  /* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-  .tr-detail-button { padding: 0 5px; }
-  /* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-  .tr-detail-icon { display: block; }
-  /* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-  .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.tr-detail-button:hover:not(:disabled), .tr-detail-button.selected { background: var(--tr-hover); color: var(--tr-fg-strong); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.tr-detail-button.stop { border-color: var(--tr-st-failed); color: var(--tr-stop-fg); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
+/* Chat channels (components/chat): the transcript, composer, markdown, tool calls and Round Table ("Midnight",
+   docs/design/midnight/README.md). The phone app loads this file but not ui.css (phone/chat.tsx), so every part of the
+   thread it shows is drawn here, field focus included. */
+
+/* shared-candidate: the small quiet button of a tile's detail row, a linked computer's bar and a transcript's bar
+   (SessionTile, LinkedComputerView, LinkedScreen, TranscriptView; the phone does not use it). tile.css tunes it in a tile. */
+.tr-detail-button { flex: none; height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); white-space: nowrap; }
+.tr-detail-button svg { flex: none; width: 14px; height: 14px; }
+.tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
+.tr-detail-button:hover:not(:disabled), .tr-detail-button:is(.selected, [aria-pressed="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.tr-detail-button.stop { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.tr-detail-button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
 .tr-detail-button:disabled { opacity: .45; }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.pasted-viewer { max-width: min(92vw, 1600px); max-height: 92vh; padding: 0; border: 1px solid var(--tr-line-strong); background: var(--tr-term); color: var(--tr-fg); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.pasted-viewer::backdrop { background: rgb(0 0 0 / .7); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.pasted-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); font: 400 12px/16px var(--tr-font-mono); }
-/* Here, not in ui.css: the phone app's chat view (phone/chat.tsx) loads only this file and needs it. */
-.pasted-viewer img { display: block; max-width: min(92vw, 1600px); max-height: calc(92vh - 34px); object-fit: contain; }
+/* Narrow tiles: a button with an icon keeps only the icon (its label stays its name); one without (Close, Keep) keeps its words. */
+@container (max-width: 560px) {
+  .tr-detail-button:has(.tr-detail-icon) { width: 24px; padding: 0; justify-content: center; }
+  .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+[data-contrast="high"] .tr-detail-button:not(.stop) { color: var(--tr-fg); }
+
+/* A pasted image, enlarged (desktop chat): an overlay. */
+.pasted-viewer { max-width: min(92vw, 1600px); max-height: 92vh; padding: 0; overflow: hidden; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); }
+.pasted-viewer::backdrop { background: var(--tr-scrim); }
+.pasted-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 4px 16px; border-bottom: 1px solid var(--tr-line); font: 600 13px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.pasted-viewer img { display: block; max-width: min(92vw, 1600px); max-height: calc(92vh - 38px); object-fit: contain; background: var(--tr-term); }
+
+/* ---------- The thread ---------- */
 .chat-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tr-term); }
-.chat-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 12px; color: var(--tr-fg); font: 400 14px/1.55 var(--tr-font-ui); }
-.chat-empty { margin: auto; max-width: 340px; text-align: center; color: var(--tr-fg-dim); }
-.chat-message.user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.chat-user-text { margin: 0; padding: 8px 12px; border-radius: var(--tr-r-panel); background: var(--tr-raised); color: var(--tr-fg-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-images { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.chat-image { padding: 0; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); overflow: hidden; background: none; cursor: zoom-in; }
+.chat-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 16px; color: var(--tr-fg); font: 400 14px/22px var(--tr-font-ui); }
+/* Before the first message: an empty state in the middle of the thread. */
+.chat-empty { margin: auto; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); }
+.chat-empty > svg { flex: none; width: 44px; height: 44px; padding: 12px; border-radius: 50%; background: var(--tr-accent-soft); color: var(--tr-accent); }
+.chat-empty p { margin: 0; }
+.chat-message.user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.chat-user-text { margin: 0; padding: 8px 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-raised); color: var(--tr-fg-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-images { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.chat-image { padding: 0; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); overflow: hidden; background: none; cursor: zoom-in; }
 .chat-image img { display: block; max-width: 260px; max-height: 200px; object-fit: contain; }
 .chat-message.assistant { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .chat-markdown { min-width: 0; overflow-wrap: anywhere; }
 .chat-markdown > :first-child { margin-top: 0; }
 .chat-markdown > :last-child { margin-bottom: 0; }
 .chat-markdown p, .chat-markdown ul, .chat-markdown ol, .chat-markdown blockquote { margin: 0 0 8px; }
-.chat-markdown ul, .chat-markdown ol { padding-left: 22px; }
-.chat-markdown h3, .chat-markdown h4, .chat-markdown h5, .chat-markdown h6 { margin: 12px 0 6px; color: var(--tr-fg-strong); font-size: 15px; }
-.chat-markdown code { padding: 1px 4px; border-radius: var(--tr-r-control); background: var(--tr-surface); font: 400 12.5px var(--tr-font-mono); }
-.chat-markdown blockquote { padding-left: 10px; border-left: 3px solid var(--tr-line-strong); color: var(--tr-fg-muted); }
-.chat-code { margin: 0 0 8px; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); font: 400 12.5px/1.5 var(--tr-font-mono); }
+/* The markers are named: the desktop's base styles take them off every list. */
+.chat-markdown ul, .chat-markdown ol { padding-left: 24px; }
+.chat-markdown ul { list-style: disc; }
+.chat-markdown ol { list-style: decimal; }
+.chat-markdown h3, .chat-markdown h4, .chat-markdown h5, .chat-markdown h6 { margin: 16px 0 8px; color: var(--tr-fg-strong); font: 600 15px/20px var(--tr-font-ui); }
+.chat-markdown code { padding: 0 4px; border-radius: var(--tr-r-small); background: var(--tr-well); font: 400 12px var(--tr-font-mono); }
+.chat-markdown blockquote { padding-left: 12px; border-left: 3px solid var(--tr-line); color: var(--tr-fg-muted); }
+.chat-code { margin: 0 0 8px; padding: 8px 12px; overflow-x: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 12px/20px var(--tr-font-mono); }
 .chat-code code { padding: 0; background: none; }
 /* A link is a button: it shows its address, with Copy and (for web addresses) Open in browser, under the text. Its
    text stays part of a selection, so a copied paragraph keeps its addresses. */
-.chat-link { padding: 0; border: 0; background: none; font: inherit; text-align: inherit; text-decoration: underline; text-underline-offset: 2px; color: var(--tr-ch-codex); cursor: pointer; -webkit-user-select: text; user-select: text; }
-.chat-link-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; padding: 6px 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-surface); }
+.chat-link { padding: 0; border: 0; background: none; font: inherit; text-align: inherit; text-decoration: underline; text-underline-offset: 2px; color: var(--tr-accent); cursor: pointer; -webkit-user-select: text; user-select: text; }
+.chat-link-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0; padding: 8px 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-surface); }
 .chat-link-menu .chat-link-address { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; background: none; padding: 0; }
 .chat-link-menu small { color: var(--tr-fg-dim); }
 .chat-table { overflow-x: auto; margin-bottom: 8px; }
-.chat-table table { border-collapse: collapse; font-size: 13px; }
-.chat-table th, .chat-table td { padding: 4px 10px; border: 1px solid var(--tr-line); text-align: left; }
-.chat-table th { background: var(--tr-surface); }
-.chat-streaming .chat-markdown > :last-child::after { content: '▍'; color: var(--tr-ch-claude); animation: chat-blink 1s steps(2) infinite; }
+.chat-table table { border-collapse: collapse; font: 400 13px/20px var(--tr-font-ui); }
+.chat-table th, .chat-table td { padding: 4px 12px; border: 1px solid var(--tr-line-faint); text-align: left; }
+.chat-table th { background: var(--tr-surface); color: var(--tr-fg-dim); font-weight: 600; font-size: 12px; }
+.chat-streaming .chat-markdown > :last-child::after { content: '▍'; color: var(--tr-accent); animation: chat-blink 1s steps(2) infinite; }
 .chat-thinking { color: var(--tr-fg-dim); font-size: 13px; }
-.chat-thinking summary { cursor: pointer; }
+.chat-thinking summary { width: max-content; cursor: pointer; color: var(--tr-fg-dim); }
 .chat-thinking p { margin: 4px 0 0; white-space: pre-wrap; }
-.chat-tool { border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); font-size: 13px; }
-.chat-tool summary { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; list-style: none; min-width: 0; }
+/* A tool call: a row in a well; it opens to its input and result. */
+.chat-tool { border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 13px/20px var(--tr-font-ui); }
+.chat-tool summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 12px; cursor: pointer; list-style: none; color: var(--tr-fg); }
 .chat-tool summary::-webkit-details-marker { display: none; }
+.chat-tool summary strong { color: var(--tr-fg-strong); font-weight: 600; }
+.chat-chevron { flex: none; width: 14px; height: 14px; color: var(--tr-fg-dim); transition: transform var(--tr-d-fast) var(--tr-ease); }
 .chat-tool[open] .chat-chevron { transform: rotate(90deg); }
-.chat-tool-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 12.5px var(--tr-font-mono); }
-.chat-tool-state { color: var(--tr-fg-dim); font: 400 11px var(--tr-font-mono); }
-.chat-tool.error { border-color: var(--tr-st-failed); }
-.chat-tool.error .chat-tool-state { color: var(--tr-st-failed); }
-.chat-tool.running .chat-tool-state { color: var(--tr-ch-claude); }
-.chat-tool pre { margin: 0; padding: 8px 10px; max-height: 280px; overflow: auto; border-top: 1px solid var(--tr-line); font: 400 12px/1.45 var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-tool-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 12px var(--tr-font-mono); }
+/* Its state in the state's colour: running is active (the accent), done finished, failed failed. */
+.chat-tool-state { flex: none; color: var(--tr-success); font: 500 12px/16px var(--tr-font-ui); }
+.chat-tool.running .chat-tool-state { color: var(--tr-accent); }
+.chat-tool.error { border-color: color-mix(in srgb, var(--tr-danger) 40%, transparent); }
+.chat-tool.error .chat-tool-state { color: var(--tr-danger); }
+.chat-tool pre { margin: 0; padding: 8px 12px; max-height: 280px; overflow: auto; border-top: 1px solid var(--tr-line-faint); font: 400 12px/18px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-diff .removed { background: var(--tr-del-bg); }
 .chat-diff .added { background: var(--tr-add-bg); }
-.chat-permission { position: relative; padding: 10px 12px; border: 1px solid var(--tr-st-waiting); border-radius: var(--tr-r-panel); background: color-mix(in srgb, var(--tr-st-waiting) 7%, transparent); box-shadow: var(--tr-glow-waiting); }
-.chat-permission p { margin: 0 0 6px; }
-.chat-permission pre { margin: 0 0 8px; padding: 6px 8px; border-radius: var(--tr-r-control); background: var(--tr-term); font: 400 12px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* An approval: a card that needs the person, framed and glowing in the waiting colour as a tile is. */
+.chat-permission { position: relative; padding: 12px 16px; border: 1px solid var(--tr-st-waiting); border-radius: var(--tr-r-panel); background: linear-gradient(180deg, var(--tr-surface), var(--tr-surface-2)); box-shadow: var(--tr-shadow-card), var(--tr-glow-waiting); }
+.chat-permission p { margin: 0 0 8px; }
+.chat-permission p strong { color: var(--tr-fg-strong); }
+.chat-permission pre { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 12px/18px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.chat-permission.allowed, .chat-permission.denied, .chat-permission.closed { border-color: var(--tr-line); background: none; }
-.chat-permission-answer { color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); }
-.chat-notice { margin: 0; color: var(--tr-fg-dim); font-size: 12.5px; text-align: center; }
-.chat-notice.error { color: var(--tr-st-failed); }
-.chat-working { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--tr-fg-dim); font-size: 13px; }
-.chat-dots { display: inline-flex; gap: 3px; }
-.chat-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--tr-ch-claude); animation: chat-pulse 1.2s infinite; }
+.chat-permission.allowed, .chat-permission.denied, .chat-permission.closed { border-color: var(--tr-line); box-shadow: var(--tr-shadow-card); }
+.chat-permission-answer { color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); }
+.chat-notice { margin: 0; color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); text-align: center; }
+.chat-notice.error { color: var(--tr-danger); }
+.chat-working { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); }
+.chat-dots { display: inline-flex; gap: 4px; }
+.chat-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--tr-accent); animation: chat-pulse 1.2s infinite; }
 .chat-dots i:nth-child(2) { animation-delay: .2s; }
 .chat-dots i:nth-child(3) { animation-delay: .4s; }
-.chat-composer { flex-shrink: 0; padding: 8px 12px 12px; border-top: 1px solid var(--tr-line); display: flex; flex-direction: column; gap: 6px; }
-.chat-attachments { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; overflow-x: auto; }
+
+/* ---------- The composer: the shared field and buttons, 40 px tall ---------- */
+.chat-composer { flex-shrink: 0; padding: 12px; border-top: 1px solid var(--tr-line); background: var(--tr-surface); display: flex; flex-direction: column; gap: 8px; }
+.chat-attachments { display: flex; gap: 8px; margin: 0; padding: 8px 0 0; list-style: none; overflow-x: auto; }
 .chat-attachments li { position: relative; flex-shrink: 0; }
-.chat-attachments img { display: block; height: 56px; max-width: 110px; object-fit: cover; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); }
-.chat-attachments button { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
+.chat-attachments img { display: block; height: 56px; max-width: 110px; object-fit: cover; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); }
+.chat-attachments button { position: absolute; top: -8px; right: -8px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
 .chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
 /* What the agent may do without asking; full access stands out, since nothing is asked then. */
-.chat-permissions { flex-shrink: 0; height: 38px; max-width: 120px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-muted); font: inherit; font-size: 12px; }
+.chat-permissions { flex-shrink: 0; height: 40px; max-width: 132px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background-color: var(--tr-well); color: var(--tr-fg-muted); font: 500 13px/16px var(--tr-font-ui); }
 .chat-permissions.edits { color: var(--tr-fg); }
 .chat-permissions.full { color: var(--tr-st-limit); border-color: var(--tr-st-limit); }
-@container (max-width: 420px) { .chat-permissions { max-width: 84px; } }
-.chat-input-row textarea { flex: 1; min-height: 38px; resize: none; padding: 9px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-strong); font: 400 14px/1.4 var(--tr-font-ui); }
-.chat-input-row textarea:focus { outline: none; border-color: var(--tr-ch-claude); }
-.chat-icon { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; padding: 0; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-panel); color: var(--tr-fg-muted); }
-.chat-icon.send:not(:disabled) { background: var(--tr-ch-claude); border-color: transparent; color: var(--tr-on-light); }
-.chat-icon.stop { color: var(--tr-stop-fg); }
+@container (max-width: 420px) { .chat-permissions { max-width: 88px; } }
+.chat-input-row textarea { flex: 1; min-height: 40px; resize: none; padding: 8px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); color: var(--tr-fg-strong); font: 400 14px/22px var(--tr-font-ui); }
+.chat-input-row textarea::placeholder { color: var(--tr-fg-faint); opacity: 1; }
+/* A long hint stays on one line in a narrow tile: wrapped, it made the empty box grow and show a scroll bar. */
+.chat-input-row textarea:placeholder-shown { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chat-input-row :is(textarea, select):focus { border-color: var(--tr-accent); outline: 3px solid var(--tr-accent-soft); outline-offset: 0; }
+/* The composer's buttons: secondary icon buttons; Send is the one primary; Stop is the danger form. */
+.chat-icon { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; padding: 0; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-hover); color: var(--tr-fg); }
+.chat-icon:hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
+.chat-icon.send:not(:disabled) { border-color: var(--tr-accent-solid); background: var(--tr-accent-solid); color: var(--tr-on-accent); }
+.chat-icon.send:hover:not(:disabled) { border-color: var(--tr-accent-solid-hover); background: var(--tr-accent-solid-hover); }
+.chat-icon.stop, .chat-icon.stop:hover:not(:disabled) { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
 .chat-icon:disabled { opacity: .45; }
 @keyframes chat-blink { to { opacity: 0; } }
 @keyframes chat-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .chat-dots i, .chat-streaming .chat-markdown > :last-child::after { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .chat-dots i, .chat-streaming .chat-markdown > :last-child::after { animation: none; } .chat-chevron { transition: none; } }
 /* A terminal channel's whole conversation (TranscriptView), shown in place of its terminal. */
-.transcript-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; color: var(--tr-fg-muted); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); }
+.transcript-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg-muted); font: var(--tr-t-small); }
 
-/* Round Table: the person, Claude Code and Codex in one thread. Each agent's messages carry its engine colour down the left. */
-.table-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/18px var(--tr-font-ui); }
+/* ---------- Round Table: the person, Claude Code and Codex in one thread ---------- */
+/* Each seat's colour is one property, so its dot, its avatar and its name always agree. */
+.seat-you { --tone: var(--tr-you); }
+.seat-claude { --tone: var(--tr-ch-claude); }
+.seat-codex { --tone: var(--tr-ch-codex); }
+.seat-planner { --tone: var(--tr-ch-planner); }
+/* With its lists open (challenges, findings) the bar scrolls in itself past 60% of the chat, so the thread keeps its room in a small tile. */
+.table-bar { max-height: 60%; overflow-y: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
 .table-bar strong { color: var(--tr-fg-strong); font-weight: 600; }
-.table-seats { display: inline-flex; }
-.table-seats i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--tr-surface); margin-left: -4px; }
-.table-seats i:first-child { margin-left: 0; }
-.seat-you { background: var(--tr-fg-muted); }
-.seat-claude { background: var(--tr-ch-claude); }
-.seat-codex { background: var(--tr-ch-codex); }
+/* Who sits at the table: overlapping round marks, each ringed in the bar's colour. */
+.table-seats { display: inline-flex; padding-left: 4px; }
+.table-seats i { width: 14px; height: 14px; margin-left: -4px; border: 2px solid var(--tr-surface); border-radius: 50%; background: var(--tone); }
 .table-roles { color: var(--tr-fg-muted); }
-.table-rounds { display: inline-flex; align-items: center; gap: 6px; color: var(--tr-fg-muted); }
-.table-rounds select { height: 26px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-term); color: var(--tr-fg); font: 400 13px var(--tr-font-mono); }
-.table-status { margin-left: auto; color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); }
-.table-bar .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
-.table-seated { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg-muted); font: 400 13px/18px var(--tr-font-ui); }
-.chat-author { margin: 0; font: 600 11px/14px var(--tr-font-mono); letter-spacing: .06em; text-transform: uppercase; }
-.chat-message.assistant.table-claude, .chat-message.assistant.table-codex { padding-left: 10px; border-left: 2px solid; }
-.chat-message.assistant.table-claude { border-color: var(--tr-ch-claude); }
-.table-claude .chat-author { color: var(--tr-ch-claude); }
-.chat-message.assistant.table-codex { border-color: var(--tr-ch-codex); }
-.table-codex .chat-author { color: var(--tr-ch-codex); }
-/* Flight Deck Lite: Round Table seats are hexagons, the person in lavender. */
-.table-seats { gap: 3px; }
-.table-seats i { width: 13px; height: 15px; margin-left: 0; border: 0; border-radius: 0; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
-.table-seats i:first-child { margin-left: 0; }
-.seat-you { background: var(--tr-you); }
-.table-bar { text-transform: uppercase; letter-spacing: .06em; }
-.table-bar select, .table-status { text-transform: none; }
+.table-partner, .table-tokens { color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
+.table-partner b, .table-tokens b { font-weight: 600; }
+/* The hidden partner's state: it has no tile, so a request waiting on it shows here in the waiting colour. */
+.table-partner.waiting { color: var(--tr-st-waiting); }
+.seat-text-claude { color: var(--tr-ch-claude); }
+.seat-text-codex { color: var(--tr-ch-codex); }
+.table-rounds { display: inline-flex; align-items: center; gap: 8px; color: var(--tr-fg-muted); font: 500 12px/16px var(--tr-font-ui); }
+.table-rounds select { height: 24px; min-height: 24px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background-color: var(--tr-well); color: var(--tr-fg); font: 500 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
+.table-status { margin-left: auto; color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); }
+.table-waiting { color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-ui); }
+.table-seated { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg-muted); font: 400 13px/20px var(--tr-font-ui); }
+/* A message's author: a small avatar and the name in the seat's colour. The words below line up with the name. */
+.chat-author { display: flex; align-items: center; gap: 12px; margin: 0; color: var(--tone, var(--tr-fg)); font: 600 13px/20px var(--tr-font-ui); }
+.table-you { --tone: var(--tr-you); }
+.table-claude { --tone: var(--tr-ch-claude); }
+.table-codex { --tone: var(--tr-ch-codex); }
+.table-planner { --tone: var(--tr-ch-planner); }
+.seat-hex { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
+.chat-author .seat-hex { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); }
+.chat-author .seat-hex svg { width: 12px; height: 12px; }
+.chat-message.assistant:is(.table-claude, .table-codex, .table-planner) { padding-left: 32px; }
+.chat-message.assistant:is(.table-claude, .table-codex, .table-planner) > .chat-author { margin-left: -32px; }
 /* A chat on another computer (its tab here, or the phone): the same thread; an enlarged image covers the view. */
 .remote-chat { flex: 1; min-height: 0; }
 .remote-chat .phone-image { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--tr-scrim); }
+.remote-chat .phone-image > button { align-self: flex-end; }
 .remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
-.table-tokens { color: var(--tr-fg-dim); font: 400 12px var(--tr-font-mono); text-transform: none; }
-.table-tokens b { font-weight: 500; }
-.seat-text-claude { color: var(--tr-ch-claude); }
-.seat-text-codex { color: var(--tr-ch-codex); }
-/* The hidden partner's state: it has no tile, so a request waiting on it shows here in the waiting colour. */
-.table-partner { color: var(--tr-fg-muted); font: 400 12px var(--tr-font-mono); text-transform: none; }
-.table-partner b { font-weight: 500; }
-.table-partner.waiting { color: var(--tr-st-waiting); }
-/* Round Table messages (canvas direction 11): a hexagon seat and the speaker's name, with their role. */
-.seat-hex { display: inline-block; width: 11px; height: 12px; margin-right: 6px; vertical-align: -1px; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
-.seat-hex.seat-claude { background: var(--tr-ch-claude); }
-.seat-hex.seat-codex { background: var(--tr-ch-codex); }
-.seat-hex.seat-you { background: var(--tr-you); }
-.chat-message.user.table-you { align-items: flex-end; }
-.table-you .chat-author { color: var(--tr-you); }
-.at-table .chat-message.assistant.table-claude, .at-table .chat-message.assistant.table-codex { border-left-width: 1px; }
-/* The Round Table's review record, on its own line under the bar. */
-.table-findings { flex-basis: 100%; text-transform: none; letter-spacing: normal; }
-.table-findings ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
-.table-findings small { display: block; color: var(--tr-fg-muted); }
+/* The Round Table's review record and lists, each on its own line under the bar. */
+.table-findings, .chain-challenges { flex-basis: 100%; font: 400 12px/20px var(--tr-font-ui); }
+.table-findings summary, .chain-challenges summary, .chain-models summary { width: max-content; font: 500 12px/20px var(--tr-font-ui); }
+/* No list numbers: each finding and challenge shows its own id (F1, C1), on the phone as on the desktop. */
+.table-findings ol, .chain-challenges ol { list-style: none; }
+.table-findings ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+.table-findings small, .chain-challenges small { display: block; color: var(--tr-fg-dim); }
 .table-findings .finding-open strong { color: var(--tr-st-limit); }
 .table-findings .finding-verified { opacity: .7; }
-/* A hierarchy Round Table: its steps, current one marked, and its seats' models. */
-.chain-steps { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font-size: 12px; }
-.chain-steps li { padding: 2px 6px; border: 1px solid var(--tr-line); color: var(--tr-fg-dim); }
+.table-findings code { font-size: 11px; }
+/* A hierarchy Round Table: its steps (the current one is active, in the accent), and its seats' models. */
+.chain-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; font: 500 12px/16px var(--tr-font-ui); }
+.chain-steps li { height: 20px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-chip); color: var(--tr-fg-dim); }
 .chain-steps li.past { color: var(--tr-fg-muted); }
-.chain-steps li.current { color: var(--tr-fg-strong); border-color: var(--tr-st-waiting); }
-.chain-models { text-transform: none; letter-spacing: normal; }
-.chain-models label { display: inline-flex; gap: 6px; align-items: center; margin-right: 10px; }
-.chain-models input { width: 16ch; }
-
-/* A hierarchy table's planner: its own colour, so its messages and seat read apart from the builder (both Claude). */
-.seat-hex.seat-planner, .table-seats .seat-planner { background: var(--tr-ch-planner); }
-.chat-message.assistant.table-planner { padding-left: 10px; border-left: 1px solid var(--tr-ch-planner); }
-.table-planner .chat-author { color: var(--tr-ch-planner); }
+.chain-steps li.current { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); font-weight: 600; }
+.chain-models { font: 400 12px/16px var(--tr-font-ui); color: var(--tr-fg-muted); }
+/* Open, the fields take a line of their own under the bar's first line, so Close stays at its end. A details box lays
+   its content out as a block, whatever its own display, so the fields are spaced by margins, not by a gap. */
+.chain-models[open] { flex-basis: 100%; order: 1; }
+.chain-bar > :is(.chain-challenges, .table-waiting, .chain-seats, .table-findings) { order: 2; }
+.chain-models label { display: inline-flex; gap: 8px; align-items: center; margin: 8px 12px 0 0; }
+.chain-models input { width: 20ch; height: 24px; min-height: 24px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg); font: 400 12px/16px var(--tr-font-mono); }
+.chain-models small { display: block; margin-top: 4px; color: var(--tr-fg-dim); }
 /* Who sits at a hierarchy table and what each is doing now. */
-.chain-seats { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; margin: 0; padding: 0; list-style: none; text-transform: none; letter-spacing: normal; font: 400 12px var(--tr-font-mono); color: var(--tr-fg-dim); }
-.chain-seats li { display: flex; align-items: center; gap: 6px; }
-.chain-seats strong { font-weight: 600; }
-.chain-seats .working strong { color: var(--tr-fg-strong); }
-.chain-seats .seat-claude + strong { color: var(--tr-ch-claude); }
-.chain-seats .seat-codex + strong { color: var(--tr-ch-codex); }
-.chain-seats .seat-planner + strong { color: var(--tr-ch-planner); }
+.chain-seats { display: flex; flex-wrap: wrap; gap: 4px 16px; width: 100%; margin: 0; padding: 0; list-style: none; font: 400 12px/20px var(--tr-font-ui); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.chain-seats li { display: flex; align-items: center; gap: 8px; }
+.chain-seats strong { font-weight: 600; color: var(--tone, var(--tr-fg)); }
+.chain-seats .seat-claude + strong { --tone: var(--tr-ch-claude); }
+.chain-seats .seat-codex + strong { --tone: var(--tr-ch-codex); }
+.chain-seats .seat-planner + strong { --tone: var(--tr-ch-planner); }
+.chain-seats .working { color: var(--tr-fg-strong); }
 /* Codex's challenges to the plan, with the planner's answers. */
-.chain-challenges { width: 100%; text-transform: none; letter-spacing: normal; font-size: 12px; }
 .chain-challenges ol { margin: 4px 0 0; padding-left: 20px; }
-.chain-challenges li { margin: 2px 0; }
-.chain-challenges small { display: block; color: var(--tr-fg-dim); }
+.chain-challenges li { margin: 4px 0; }
 .chain-challenges .accepted small { color: var(--tr-fg-muted); }
-.chain-next-tasks { width: 100%; margin: 4px 0 0; padding-left: 20px; text-transform: none; letter-spacing: normal; font-size: 12px; }
+/* Tasks waiting their turn are numbered: they start in this order. */
+.chain-next-tasks { width: 100%; margin: 4px 0 0; padding-left: 20px; list-style: decimal; font: 400 12px/20px var(--tr-font-ui); }
 .chain-next-tasks li button { margin-left: 8px; }
+[data-contrast="high"] :is(.table-status, .table-partner, .table-tokens, .chain-seats, .chain-steps li, .chat-thinking, .chat-notice:not(.error), .chat-working, .chat-tool-summary) { color: var(--tr-fg); }
+[data-contrast="high"] :is(.chat-tool, .chat-code, .chain-steps li) { border-color: var(--tr-line-strong); }

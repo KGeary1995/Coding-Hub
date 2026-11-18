@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LoaderCircle, Plus, Sparkles } from 'lucide-react';
+import { LoaderCircle, Plus, Radio, Sparkles } from 'lucide-react';
 import type { PromptExample } from '../../shared/coaching';
 import { askAboutTip, clearLiveCoaching, loadLiveCoaching, setLiveCoaching, useLiveCoaching } from '../state/coaching-store';
 import type { CoachingWeek, TipKind } from '../../shared/coaching';
@@ -24,12 +24,13 @@ export function LiveCoachingCard({ save }: { save: (text: string, outcome: Promp
   useEffect(() => { void loadLiveCoaching(); }, []);
   const sessions = useWorkspaceStore((state) => state.sessions);
   const [saved, setSaved] = useState<string[]>([]); const [error, setError] = useState(''); const [clearing, setClearing] = useState(false);
-  return <article className="storage-card live-coaching"><h2>Live coaching</h2>
+  return <article className="storage-card live-coaching"><div className="ui-card-head"><Radio aria-hidden="true" /><h2>Live coaching</h2><span className={`ui-badge dot ${enabled ? 'success' : 'neutral'}`}>{enabled ? 'On' : 'Off'}</span></div>
     <p>Trace checks each prompt you send in a Claude Code or Codex channel and shows tips under that channel. The checks run on this computer. Ask AI sends that prompt, and the end of the reply before it, to Claude Haiku through your Claude account (or to Codex when Claude Code is not installed), which uses a little of that plan and counts in your usage. Another computer's channels are coached there, and shown on its tab here and on your phone.</p>
     <label className="update-checkbox"><input type="checkbox" aria-label="Live coaching" checked={enabled} onChange={(event) => void setLiveCoaching(event.target.checked).catch((e) => setError(e.message))} />Coach my prompts as I send them</label>
     {error && <p role="alert" className="error-message">{error}</p>}
-    {week && <WeekSummary week={week} />}
-    {enabled && !tips.length && <p className="muted">No prompts yet. Send one in a channel and its tips appear here.</p>}
+    {/* With nothing coached this week and nothing in the feed, the empty state below says so once. */}
+    {week && !(enabled && !tips.length && !week.prompts) && <WeekSummary week={week} />}
+    {enabled && !tips.length &&<div className="ui-empty"><Sparkles aria-hidden="true" /><h3>No prompts yet</h3><p>Send one in a channel and its tips appear here.</p></div>}
     {tips.length > 0 && (clearing ? <ConfirmStep question={`Clear all ${tips.length} coached ${tips.length === 1 ? 'prompt' : 'prompts'}?`} action="Clear" onConfirm={() => { setClearing(false); void clearLiveCoaching().catch((e) => setError(e.message)); }} onCancel={() => setClearing(false)} /> : <button className="quiet-button" onClick={() => setClearing(true)}>Clear coached prompts</button>)}
     <div className="live-feed">{tips.map((tip) => {
       const number = channelNumber(sessions, tip.sessionId);
@@ -39,8 +40,8 @@ export function LiveCoachingCard({ save }: { save: (text: string, outcome: Promp
         {tip.review ? <><p>{tip.review.advice}</p>{tip.review.rewrite.trim() !== tip.prompt.trim() && <details><summary>Suggested rewrite</summary><pre>{tip.review.rewrite}</pre></details>}</> : tip.tips.length ? <ul>{tip.tips.map((text) => <li key={text}>{text}</li>)}</ul> : <p className="muted">No local tips for this prompt.</p>}
         {errors[tip.id] && <p className="error-message">{errors[tip.id]}</p>}
         <div className="hub-toolbar">
-          {!tip.review && <button className="button secondary" disabled={asking.includes(tip.id)} onClick={() => void askAboutTip(tip.id)}>{asking.includes(tip.id) ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{asking.includes(tip.id) ? 'Asking Claude' : 'Ask AI'}</button>}
-          <button className="button secondary" disabled={saved.includes(tip.id)} onClick={() => void save(tip.prompt.slice(0, 2000), 'partial', (tip.review?.advice ?? tip.tips.join(' ')).slice(0, 500)).then(() => setSaved([...saved, tip.id])).catch((e) => setError(e.message))}><Plus size={13} />{saved.includes(tip.id) ? 'Saved' : 'Save as example'}</button>
+          {!tip.review && <button className="button secondary" disabled={asking.includes(tip.id)} onClick={() => void askAboutTip(tip.id)}>{asking.includes(tip.id) ? <LoaderCircle className="spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{asking.includes(tip.id) ? 'Asking Claude' : 'Ask AI'}</button>}
+          <button className="button secondary" disabled={saved.includes(tip.id)} onClick={() => void save(tip.prompt.slice(0, 2000), 'partial', (tip.review?.advice ?? tip.tips.join(' ')).slice(0, 500)).then(() => setSaved([...saved, tip.id])).catch((e) => setError(e.message))}><Plus aria-hidden="true" />{saved.includes(tip.id) ? 'Saved' : 'Save as example'}</button>
         </div>
       </article>;
     })}</div>

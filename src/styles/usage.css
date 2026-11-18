@@ -1,109 +1,101 @@
-/* Usage and Session history: the usage screen, plan limits, session and native history. */
-.history-panel { padding: 35px 0; }
-.history-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 25px; }
-.history-heading h1 { display: flex; align-items: center; gap: 12px; }
-.history-heading p { color: var(--tr-fg-dim); font-size: 14px; line-height: 1.7; }
-.history-workbench { display: grid; grid-template-columns: 300px minmax(0, 1fr); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); overflow: hidden; background: var(--tr-surface); margin-bottom: 22px; height: 620px; }
-.history-list { overflow-y: auto; border-right: 1px solid var(--tr-line-control); background: var(--tr-hover); padding: 9px; }
-.history-run { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 9px; border: 1px solid transparent; background: transparent; color: var(--tr-fg-muted); padding: 15px 12px; border-radius: var(--tr-r-control); cursor: pointer; margin-bottom: 6px; }
-.history-run-title { display: flex; align-items: center; gap: 7px; font-size: 14px; }
-.run-badge { font-size: 12px; font-weight: 400; padding: 4px 6px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); color: var(--tr-fg-dim); margin-left: auto; white-space: nowrap; }
-.run-badge.running { color: var(--tr-fg-muted); border-color: var(--tr-line-strong); }
-.run-badge.interrupted { color: var(--tr-st-limit); border-color: var(--tr-st-limit); }
-.history-model, .history-date { font-size: 12px; color: var(--tr-fg-dim); }
-.history-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--tr-font-mono); font-size: 12px; color: var(--tr-fg-muted); }
-.history-output { min-width: 0; display: flex; flex-direction: column; }
-.history-output header { display: flex; align-items: center; gap: 15px; padding: 20px 23px; border-bottom: 1px solid var(--tr-line); }
-.history-output header > div { min-width: 0; }
-.history-output h2 { margin: 9px 0; font-size: 15px; color: var(--tr-fg); }
-.history-output code { display: block; font-size: 12px; color: var(--tr-fg-dim); overflow-wrap: anywhere; }
-.history-metadata { padding: 12px 23px; display: flex; flex-wrap: wrap; gap: 16px; color: var(--tr-fg); font-size: 12px; border-bottom: 1px solid var(--tr-line); }
-.history-output pre { flex: 1; min-height: 0; margin: 0; padding: 23px; overflow: auto; font-family: var(--tr-font-mono); font-size: 14px; line-height: 1.7; color: var(--tr-fg-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
-.history-output .history-notice, .history-output .error-message { margin: 12px 18px; }
-@media (max-width: 1180px) { .history-workbench { grid-template-columns: 250px minmax(0, 1fr); } }
-/* Here, not in ui.css: it overrides `.history-panel` (styles/usage.css), `.repository-panel` (styles/changes.css), so it loads after them. */
-.feature-panel, .repository-panel, .history-panel { padding: 30px 0; max-width: 1440px; width: 100%; align-self: center; }
-/* Here, not in ui.css: it overrides `.history-output pre` (styles/usage.css), so it loads after it. */
-.history-output > pre, .file-preview pre { background: var(--tr-panel); color: var(--tr-fg-strong); }
+/* Usage and Session history: only what the shared parts (ui.css) do not draw: the chart, the engine split, plan-limit rows,
+   the sessions table's cells, and Session history's two panes. */
 
-/* Shared screen controls */
-.tr-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); }
-.tr-seg > button { height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-muted); font: 400 14px/1 var(--tr-font-ui); }
-.tr-seg > button:hover { color: var(--tr-fg-strong); background: var(--tr-hover); }
-.tr-seg > button.active { background: var(--tr-control-on); color: var(--tr-fg-strong); font-weight: 600; }
+/* shared-candidate: an engine's colour on the small legend square; ui.css's .tr-engine-square has none of its own. */
+:is(.tr-usage, .tr-plan-limits) .tr-engine-square.claude, .tr-split > i.claude { background: var(--tr-ch-claude); }
+:is(.tr-usage, .tr-plan-limits) .tr-engine-square.codex, .tr-split > i.codex { background: var(--tr-ch-codex); }
 
-/* 05 Usage */
-.tr-usage { display: flex; flex-direction: column; gap: 16px; padding: 16px 4px 24px; }
-.tr-usage-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.tr-usage-head h1 { margin: 0 8px 0 0; font: 600 24px/28px var(--tr-font-ui); color: var(--tr-fg-strong); }
-.tr-usage-meta { font: var(--tr-t-meta); color: var(--tr-fg-faint); }
-.tr-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); }
-.tr-kpi { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-left: 1px solid var(--tr-line); }
-.tr-kpi:first-child { border-left: 0; }
-.tr-kpi-label { font: var(--tr-t-meta); color: var(--tr-fg-dim); }
-.tr-kpi strong { font: var(--tr-t-metric); color: var(--tr-fg-strong); }
-.tr-kpi-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-dim); }
-.tr-usage-mid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
-.tr-chart { min-width: 0; padding: 12px 16px 10px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-term); }
-.tr-chart-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-bottom: 12px; font: var(--tr-t-meta); color: var(--tr-fg-muted); }
-.tr-chart-readout strong { font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
-.tr-chart-caption { margin-left: auto; color: var(--tr-fg-faint); }
-.tr-chart-plot { position: relative; height: 220px; display: flex; padding-left: 44px; }
-.tr-chart-axis { position: absolute; left: 0; top: 0; bottom: 18px; width: 100%; pointer-events: none; }
-.tr-chart-axis span { position: absolute; left: 0; width: 100%; transform: translateY(50%); font: 400 11px/1 var(--tr-font-mono); color: var(--tr-fg-faint); border-bottom: 1px solid var(--tr-line-faint); padding-bottom: 0; }
-.tr-chart-axis span:last-child { border-bottom-color: var(--tr-line-strong); }
-.tr-chart-bars { position: relative; flex: 1; display: flex; gap: 10px; padding-bottom: 18px; }
-.tr-chart-col { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; border: 0; padding: 0; background: none; opacity: .72; }
-.tr-chart-col.hot { opacity: 1; background: #111817; }
-.tr-chart-col:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
-.tr-chart-stack { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 1px; }
+/* Usage: totals in a row, the chart beside the engine split, then the sessions. */
+.tr-usage .ui-page-actions { flex-wrap: wrap; justify-content: flex-end; }
+.tr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 16px; }
+/* A sub-line such as "0 at 80%+ context, last report" wraps in a narrow card rather than losing its end. */
+.tr-kpis .ui-stat > small { white-space: normal; }
+.tr-chart-caption { font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.tr-chart-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; margin-bottom: 12px; font: var(--tr-t-small); color: var(--tr-fg-muted); font-variant-numeric: tabular-nums; }
+.tr-chart-readout strong { font: var(--tr-t-heading); color: var(--tr-fg-strong); }
+/* The plot is a well (--tr-term); the axis box sits inside its padding, 20 px above the bottom for the day numbers. */
+.tr-chart-plot { position: relative; height: 240px; display: flex; padding: 16px 16px 12px 48px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); }
+.tr-chart-axis { position: absolute; left: 12px; right: 16px; top: 16px; bottom: 32px; pointer-events: none; }
+.tr-chart-axis span { position: absolute; left: 0; width: 100%; transform: translateY(50%); border-bottom: 1px solid var(--tr-line-faint); font: 400 11px/14px var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-faint); }
+.tr-chart-axis span:last-child { border-bottom-color: var(--tr-line); }
+/* A column is at most 96 px wide, so one day (Today) is a bar in the middle and not a slab across the plot. */
+.tr-chart-bars { position: relative; flex: 1; display: flex; justify-content: space-around; gap: 8px; padding-bottom: 20px; }
+.tr-chart-col { position: relative; flex: 1; min-width: 0; max-width: 96px; display: flex; flex-direction: column; justify-content: flex-end; border: 0; border-radius: var(--tr-r-small) var(--tr-r-small) 0 0; padding: 0; background: none; opacity: .72; }
+/* The day in the readout: a faint band, so that with no tokens it does not read as a bar of its own. */
+.tr-chart-col.hot { opacity: 1; background: color-mix(in srgb, var(--tr-hover) 50%, transparent); }
+.tr-chart-stack { width: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--tr-r-small) var(--tr-r-small) 0 0; }
 .tr-chart-stack i { display: block; min-height: 1px; }
+.tr-chart-stack i + i { border-top: 1px solid var(--tr-term); }
 .tr-chart-stack i.claude { background: var(--tr-ch-claude); }
 .tr-chart-stack i.codex { background: var(--tr-ch-codex); }
-.tr-chart-x { position: absolute; left: 0; right: 0; bottom: -18px; text-align: center; font: 400 11px/14px var(--tr-font-mono); color: var(--tr-fg-faint); }
-.tr-usage-side { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); }
-.tr-usage-side h2 { margin: 4px 0 0; font: 600 11px/14px var(--tr-font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--tr-fg-dim); }
-.tr-split { height: 10px; display: flex; gap: 1px; background: var(--tr-line-faint); }
+.tr-chart-x { position: absolute; left: 0; right: 0; bottom: -20px; text-align: center; font: 400 11px/14px var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-faint); }
+.tr-usage-side { display: flex; flex-direction: column; gap: 12px; }
+.tr-usage-side .ui-card-head { margin-bottom: 0; }
+.tr-usage-side h3 { margin-top: 8px; font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.tr-usage-side .ui-hint { margin-top: auto; }
+.tr-split { height: 8px; display: flex; overflow: hidden; border-radius: var(--tr-r-chip); background: var(--tr-well); }
 .tr-split i { display: block; min-width: 0; }
-.tr-side-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg); }
-.tr-side-row > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
-.tr-side-row .tnum { font: var(--tr-t-meta); color: var(--tr-fg-muted); }
-.tr-side-row .hot { color: var(--tr-st-limit); }
-.tr-side-note { margin: 0; font: 400 12px/16px var(--tr-font-ui); color: var(--tr-fg-faint); }
-.tr-usage-table-wrap { border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); overflow-x: auto; }
-.tr-table { width: 100%; border-collapse: collapse; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg); }
-.tr-table thead th { height: 32px; padding: 0 12px; background: var(--tr-surface); text-align: left; font: 400 11px/1 var(--tr-font-mono); color: var(--tr-fg-dim); white-space: nowrap; }
-.tr-table tbody td { height: 40px; padding: 0 12px; border-top: 1px solid var(--tr-line); white-space: nowrap; }
-.tr-table tbody tr:hover { background: #111817; }
-.tr-table .num { text-align: right; font: 400 12px/16px var(--tr-font-mono); font-variant-numeric: tabular-nums; }
+.tr-split i + i { border-left: 2px solid var(--tr-well); }
+.tr-side-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; font: var(--tr-t-control); color: var(--tr-fg); }
+.tr-side-row > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
+.tr-side-row .tnum { color: var(--tr-fg-muted); }
+.tr-usage-table-wrap { overflow-x: auto; }
+.tr-usage-sessions td { white-space: nowrap; }
+.tr-cell-channel { display: inline-flex; align-items: center; gap: 8px; }
+.tr-cell-state, .tr-cell-date, .tr-cell-machine, .tr-cell-mono .dim { color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.tr-cell-session { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .tr-cell-mono { font: var(--tr-t-meta); color: var(--tr-fg-muted); }
-.tr-cell-mono.dim { color: var(--tr-fg-faint); }
-.tr-cell-channel { display: inline-flex; align-items: center; gap: 6px; font: 600 12px/1 var(--tr-font-mono); }
-.tr-cell-session { max-width: 280px; overflow: hidden; text-overflow: ellipsis; font: 400 14px/20px var(--tr-font-ui); }
-.tr-peak { display: inline-flex; align-items: center; gap: 8px; font: var(--tr-t-meta); }
-.tr-peak-bar { position: relative; width: 80px; height: 4px; background: var(--tr-line-faint); }
-.tr-peak-bar i { display: block; height: 100%; background: var(--tr-fg-off); }
-.tr-peak-bar.hot i { background: var(--tr-st-limit); }
-.tr-peak-bar::after { content: ""; position: absolute; left: 80%; top: -1px; width: 1px; height: 6px; background: var(--tr-st-limit); }
-@container shell (max-width: 1180px) { .tr-usage-mid { grid-template-columns: minmax(0, 1fr); } .tr-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .tr-kpi:nth-child(4) { border-left: 0; } .tr-kpi:nth-child(n + 4) { border-top: 1px solid var(--tr-line); } }
+.tr-peak { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.tr-peak .ui-meter { width: 80px; }
 
-/* Plan limits on Usage: one row per limit, a bar that turns amber and then red as it fills. */
-.tr-plan-limits { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel, 8px); background: var(--tr-panel); }
-.tr-plan-limits > header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.tr-plan-limits h2 { margin: 0; font: var(--tr-t-heading); font-size: 16px; }
-.tr-plan-limits > header .tr-ghost-button { margin-left: auto; }
-.tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px 24px; }
-.tr-plan-account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 14px; }
-.tr-plan-window { display: grid; grid-template-columns: 9em 1fr 3em auto; align-items: center; gap: 10px; padding: 3px 0; font-size: 13px; }
-.tr-plan-bar { height: 6px; border-radius: var(--tr-r-control); background: var(--tr-line); overflow: hidden; }
-.tr-plan-bar i { display: block; height: 100%; background: var(--tr-add); }
-.tr-plan-window.warning .tr-plan-bar i { background: var(--tr-st-limit); }
-.tr-plan-window.critical .tr-plan-bar i { background: var(--tr-st-failed); }
-.tr-cell-machine { color: var(--tr-fg-dim); }
+/* Plan limits on Usage: one meter per limit, green with room, amber near it, red at it. */
+.tr-plan-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+p.tr-plan-meta { margin: 0; white-space: normal; }
+.tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px 32px; }
+.tr-plan-accounts:empty { display: none; }
+/* One grid per account, shared by its rows, so every meter is the same length and the percentages line up whatever the
+   reset words are. */
+.tr-plan-account { display: grid; grid-template-columns: 112px minmax(0, 1fr) 40px auto; column-gap: 12px; align-content: start; }
+.tr-plan-account > :is(h3, p) { grid-column: 1 / -1; }
+.tr-plan-account h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 600 13px/20px var(--tr-font-ui); }
+.tr-plan-window { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 28px; font: var(--tr-t-control); color: var(--tr-fg-muted); }
+.tr-plan-window > .tnum { text-align: right; color: var(--tr-fg-strong); }
 
-/* Usage: the title like the other pages; the plan-limits heading and every stat label as mono labels; segments tracked. */
-.tr-usage-head h1 { text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
-/* Here, not in ui.css: it overrides `.tr-kpi-label` (styles/usage.css), so it loads after it. */
-#plan-limits-title, .tr-kpi-label, .coaching-metrics article > span { font: 600 12px/1.4 var(--tr-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--tr-fg-dim); }
-.tr-seg > button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
-.tr-seg > button.active, .tr-seg > button[aria-pressed="true"] { background: var(--tr-ch-codex); color: var(--tr-on-light); }
+/* Session history: the page fills the window and its two panes scroll inside it, so a long output never pushes the list
+   or itself off screen. Below 520 px of height the page scrolls as a whole instead. */
+.history-panel { flex: 1 0 0; min-height: 520px; display: flex; flex-direction: column; }
+/* An error or a notice above the panes keeps the cards' distance from them. */
+:is(.history-panel, .native-history) > .ui-banner { margin-bottom: 16px; }
+.history-none { flex: 1; }
+.history-workbench { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; }
+.history-runs, .history-record { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.history-list { flex: 1; min-height: 0; overflow-y: auto; }
+.history-run { flex: none; align-items: flex-start; }
+.history-run-title { display: flex; align-items: center; gap: 8px; }
+.history-run-title .ui-badge { margin-left: auto; }
+.history-path { font: var(--tr-t-meta); color: var(--tr-fg-muted); }
+.history-model { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.history-record .ui-card-head > .ui-badge { margin-left: auto; }
+.history-cwd { display: block; margin-bottom: 8px; font: var(--tr-t-meta); color: var(--tr-fg-dim); overflow-wrap: anywhere; }
+.history-metadata { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; font: var(--tr-t-small); color: var(--tr-fg-muted); }
+.history-metadata > .button { margin-left: auto; }
+.history-record > .ui-banner { margin-bottom: 12px; }
+.history-restore p { margin: 0 0 8px; }
+.history-record > pre { flex: 1; min-height: 120px; margin: 0; padding: 12px 16px; overflow: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); color: var(--tr-fg); font: var(--tr-t-term); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Higher contrast: the wells inside a card take the stronger line, as rows do. */
+[data-contrast="high"] :is(.history-record > pre, .tr-chart-plot) { border-color: var(--tr-line-strong); }
+@container shell (max-width: 860px) { .history-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: 240px minmax(0, 1fr); } }
+/* CLI conversation history (NativeHistory): the search field with its icon, and each conversation's lines. */
+.native-history-search { position: relative; max-width: 480px; margin-bottom: 16px; }
+.native-history-search > svg { position: absolute; left: 12px; top: 8px; width: 16px; height: 16px; color: var(--tr-fg-faint); pointer-events: none; }
+.native-history-search input { width: 100%; padding-left: 40px; }
+.native-history-date { font: var(--tr-t-small); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.native-history-path { display: block; font: var(--tr-t-meta); color: var(--tr-fg-muted); overflow-wrap: anywhere; }
+.native-history-meta { margin: 4px 0 12px; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.native-history-prefs { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--tr-line-faint); }
+.native-history-prefs[open] > summary { margin-bottom: 12px; }
+/* The name field takes the spare width, so a conversation's name is read whole. */
+.native-history-prefs form > input { flex: 1 1 240px; max-width: 480px; }
+
+/* Not Usage's: Files' preview (styles/changes.css owns .file-preview), left here so it keeps its look until that owner moves it. */
+.file-preview pre { background: var(--tr-panel); color: var(--tr-fg-strong); }

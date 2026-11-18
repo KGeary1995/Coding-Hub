@@ -1,28 +1,38 @@
-/* Tasks. */
-.task-panel { display: flex; flex-direction: column; gap: 14px; }
-.task-panel .task-form { max-width: 760px; margin: 0; padding: 20px; }
-.task-panel .task-form details { margin: 4px 0 8px; }
-.task-howto { margin: 0; padding: 14px 14px 14px 34px; max-width: 760px; background: var(--tr-surface); border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); line-height: 1.7; }
-.task-panel .task-board > section { background: var(--tr-surface); border-color: var(--tr-line-strong); min-height: 120px; }
-.task-panel .task-board h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--tr-fg-strong); padding-bottom: 8px; border-bottom: 1px solid var(--tr-line-strong); }
-.task-panel .task-board h2 small { display: inline; margin-left: 6px; text-transform: none; letter-spacing: 0; color: var(--tr-fg-dim); font-weight: 400; }
-.task-panel .task-board article { background: var(--tr-panel); border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); cursor: grab; }
-.task-panel .task-board article.warned { border-color: var(--tr-st-failed); }
-.task-panel .task-board article p { margin: 6px 0; font-size: 12px; }
-.task-panel .task-board article ul { margin: 4px 0; padding-left: 16px; }
-.task-panel .task-board strong { font-size: 14px; color: var(--tr-fg-strong); }
-.task-panel .task-board code { display: inline; color: var(--tr-fg-strong); background: var(--tr-raised); border-radius: var(--tr-r-control); padding: 1px 4px; }
-.task-panel .task-board small { margin-top: 5px; color: var(--tr-fg-muted); }
-.task-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
-.task-actions .quiet-button { display: inline-flex; align-items: center; gap: 4px; }
-@media (max-width: 1350px) { .task-panel .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.task-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.task-board > section { background: var(--tr-hover); border: 1px solid var(--border); padding: 12px; border-radius: var(--tr-r-control); }
-.task-board h2 { text-transform: capitalize; }
-.task-board article { background: var(--tr-panel); padding: 12px; margin-top: 12px; border-radius: var(--tr-r-control); }
-.task-board small, .task-board code { display: block; overflow-wrap: anywhere; font-size: 12px; }
-@media (max-width: 1180px) { .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Tasks: the board's four quiet columns (a panel step below the cards on them), each task a card, and the form.
+   The page fills the window and the board takes what is left, so the columns end together and each is a whole drop target. */
+.task-panel { flex: 1 0 auto; display: flex; flex-direction: column; }
+.task-panel > .ui-banner { margin-bottom: 16px; }
+.task-howto { max-width: 760px; margin: 0 0 16px; padding: 16px 16px 16px 40px; font: var(--tr-t-body); color: var(--tr-fg-muted); }
+.task-howto li + li { margin-top: 8px; }
+.task-howto strong { color: var(--tr-fg-strong); }
+.task-form { max-width: 760px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.task-form .ui-card-head { margin-bottom: 0; }
+.task-form-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
+.task-form details[open] > summary { margin-bottom: 12px; }
+.task-form details > .ui-field + .ui-field { margin-top: 12px; }
+.task-board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.task-board > .task-column { min-height: 160px; display: flex; flex-direction: column; gap: 12px; background: var(--tr-panel); box-shadow: none; }
+.task-column .ui-card-head { margin-bottom: 0; }
+.task-column-hint, .task-column-empty { margin: -8px 0 0; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.task-column-empty { margin: 0; padding: 16px 0; text-align: center; color: var(--tr-fg-faint); }
+.task-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; cursor: grab; }
+.task-card.warned { border-color: var(--tr-danger); }
+.task-title { font: var(--tr-t-heading); color: var(--tr-fg-strong); overflow-wrap: anywhere; }
+.task-badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.task-badges .ui-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.task-card p { margin: 0; font: var(--tr-t-small); overflow-wrap: anywhere; }
+/* Not a warning or a failed outcome (.error-message): those keep the danger colour. */
+.task-card p:not(.error-message) { color: var(--tr-fg-muted); }
+.task-card small { font: var(--tr-t-small); color: var(--tr-fg-dim); overflow-wrap: anywhere; }
+.task-card ul { margin: 4px 0 0; padding-left: 16px; }
+.task-card code { font: var(--tr-t-meta); color: var(--tr-fg); overflow-wrap: anywhere; }
+.task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--tr-line-faint); }
+.task-actions .task-worktree { width: auto; min-height: 24px; height: 24px; padding-left: 8px; border-radius: var(--tr-r-small); font-size: 12px; }
+/* "Remove this task and its notes?" is read whole: in a narrow card the question takes its own line above Remove and Keep. */
+.task-actions .confirm-step { flex: 1 1 100%; flex-wrap: wrap; }
+.task-actions .confirm-step-question { flex: 1 1 100%; white-space: normal; }
+@container shell (max-width: 1180px) { .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* A task's details, folded under its card. */
-.task-everything dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 6px 0 0; }
-.task-everything dt { color: var(--tr-fg-muted); }
+.task-everything dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; font: var(--tr-t-small); }
+.task-everything dt { color: var(--tr-fg-dim); }
 .task-everything dd { margin: 0; overflow-wrap: anywhere; }

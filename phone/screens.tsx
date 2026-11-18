@@ -20,13 +20,24 @@ function useRoute<T>(path: string): [T | null, string, () => void] {
   return [value, error, () => setLoad((count) => count + 1)];
 }
 
-/** A segmented gauge: 10 cells, filled to `ratio`, in `color` (the limit colour past 80%). */
-function Gauge({ ratio, color, label }: { ratio: number; color: string; label: string }) {
-  const filled = Math.round(Math.max(0, Math.min(1, ratio)) * 10);
-  return <div className="gauge" role="img" aria-label={label}>{Array.from({ length: 10 }, (_, index) => <i key={index} style={{ background: index < filled ? (ratio >= 0.8 ? 'var(--tr-st-limit)' : color) : undefined }} />)}</div>;
+/** An engine's mark, as on the desktop's tiles (lucide's Asterisk, SquareTerminal and SquareChevronRight). Fixed markup, not data. */
+export const ENGINE_ICON: Record<'claude' | 'codex' | 'shell', string> = {
+  claude: '<path d="M12 6v12"/><path d="M17.196 9 6.804 15"/><path d="m6.804 9 10.392 6"/>',
+  codex: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+  shell: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 4 4-4 4"/>',
+};
+export const iconSvg = (paths: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+function EngineMark({ engine }: { engine: 'claude' | 'codex' | 'shell' }) { return <span className={`avatar small ${engine}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(ENGINE_ICON[engine]) }} />; }
+
+/** A meter: a 6 px track filled to `ratio` in `tone` (an engine), or in the limit colour from 80%. */
+function Meter({ ratio, tone, label }: { ratio: number; tone: string; label: string }) {
+  const share = Math.max(0, Math.min(1, ratio));
+  return <div className={`meter ${ratio >= 0.8 ? 'near' : tone}`} role="img" aria-label={label}><i style={{ width: `${share * 100}%` }} /></div>;
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) { return <section className="phone-card"><h2>{title}</h2>{children}</section>; }
+function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) { return <section className="phone-card"><h2>{title}{count !== undefined && <span className="count neutral">{count}</span>}</h2>{children}</section>; }
+/** No data yet: the card keeps its place, with one line saying why. */
+function Empty({ children }: { children: ReactNode }) { return <div className="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg><p>{children}</p></div>; }
 
 function UsageScreen() {
   const [usage, error, reload] = useRoute<RemoteUsage>('/api/usage');
@@ -36,18 +47,18 @@ function UsageScreen() {
   const budgetShare = usage.budget?.tokens ? total / usage.budget.tokens : usage.budget?.dollars && usage.cost !== null ? usage.cost / usage.budget.dollars : null;
   return <>
     <Section title="Σ Today">
-      <p className="metric">{compact(total)} <small>tok</small>{usage.cost !== null && <span className="metric-side">${usage.cost.toFixed(2)}</span>}</p>
-      <p className="dim mono"><span style={{ color: 'var(--tr-ch-claude)' }}>■</span> Claude {compact(usage.tokens.claude)} · <span style={{ color: 'var(--tr-ch-codex)' }}>■</span> Codex {compact(usage.tokens.codex)}{usage.complete ? '' : ' · still reading logs'}</p>
-      {budgetShare !== null && <><p className="dim mono">Daily budget {Math.round(budgetShare * 100)}%{usage.budget?.dollars ? ` of $${usage.budget.dollars}` : usage.budget?.tokens ? ` of ${compact(usage.budget.tokens)} tok` : ''}</p><Gauge ratio={budgetShare} color="var(--tr-ch-codex)" label={`Daily budget ${Math.round(budgetShare * 100)}% used`} /></>}
+      <div className="metrics"><p className="metric">{compact(total)} <small>tok</small></p>{usage.cost !== null && <span className="metric-side">${usage.cost.toFixed(2)}</span>}</div>
+      <p className="split"><span className="claude"><i />Claude {compact(usage.tokens.claude)}</span><span className="codex"><i />Codex {compact(usage.tokens.codex)}</span>{!usage.complete && <span className="dim">Still reading logs</span>}</p>
+      {budgetShare !== null && <div className="budget"><p className="measure"><span>Daily budget{usage.budget?.dollars ? ` of $${usage.budget.dollars}` : usage.budget?.tokens ? ` of ${compact(usage.budget.tokens)} tok` : ''}</span><b>{Math.round(budgetShare * 100)}%</b></p><Meter ratio={budgetShare} tone="accent" label={`Daily budget ${Math.round(budgetShare * 100)}% used`} /></div>}
     </Section>
     <Section title="Plan limits">
-      {!usage.limits.length && <p className="dim">No limits reported yet.</p>}
+      {!usage.limits.length && <Empty>No limits reported yet.</Empty>}
       {usage.limits.map((limit) => <div key={`${limit.engine}-${limit.account}`} className="limit">
-        <p><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="dim"> {limit.plan}</span>}</p>
+        <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
         {limit.error && <p className="dim">{limit.error}</p>}
-        {limit.windows.map((window) => <div key={window.label} className="limit-row"><span className="mono">{window.label} {Math.round(window.usedPercent)}%</span><Gauge ratio={window.usedPercent / 100} color={limit.engine === 'claude' ? 'var(--tr-ch-claude)' : 'var(--tr-ch-codex)'} label={`${window.label} ${Math.round(window.usedPercent)}% used`} /></div>)}
+        {limit.windows.map((window) => <div key={window.label}><p className="measure"><span>{window.label}</span><b>{Math.round(window.usedPercent)}%</b></p><Meter ratio={window.usedPercent / 100} tone={limit.engine} label={`${window.label} ${Math.round(window.usedPercent)}% used`} /></div>)}
       </div>)}
-      <button type="button" className="quiet" onClick={reload}>Refresh</button>
+      <div className="card-actions"><button type="button" className="quiet" onClick={reload}>Refresh</button></div>
     </Section>
   </>;
 }
@@ -60,13 +71,13 @@ function TasksScreen({ canRun }: { canRun: boolean }) {
   if (!tasks) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="error" role="alert">{note}</p>}
-    {!tasks.length && <p className="dim">No tasks. Give a channel a task on the computer (Task on its tile).</p>}
-    {COLUMNS.map((column) => { const list = tasks.filter((task) => task.status === column.status); return list.length ? <Section key={column.status} title={`${column.label} · ${list.length}`}>
-      {list.map((task) => <article key={task.id} className="task">
-        <p><strong>{task.title}</strong></p>
-        <p className="dim mono">{task.channel ? `CH${task.channel} · ` : ''}{when(task.updatedAt)}{task.files.length ? ` · ${task.files.length} file${task.files.length === 1 ? '' : 's'}` : ''}</p>
-        {canRun && column.status !== 'done' && <div className="row">{column.status === 'review' && <button type="button" className="primary small" onClick={() => void move(task, 'done')}>Mark done</button>}{column.status === 'todo' && <button type="button" className="small" onClick={() => void move(task, 'working')}>Start working</button>}</div>}
-      </article>)}
+    {!tasks.length && <Empty>No tasks. Give a channel a task on the computer (Task on its tile).</Empty>}
+    {COLUMNS.map((column) => { const list = tasks.filter((task) => task.status === column.status); return list.length ? <Section key={column.status} title={column.label} count={list.length}>
+      <div className="rows">{list.map((task) => <article key={task.id} className="task"><div>
+        <strong>{task.title}</strong>
+        <p className="meta">{task.channel ? `CH${task.channel} · ` : ''}{when(task.updatedAt)}{task.files.length ? ` · ${task.files.length} file${task.files.length === 1 ? '' : 's'}` : ''}</p>
+        {canRun && (column.status === 'review' || column.status === 'todo') && <div className="row">{column.status === 'review' && <button type="button" className="primary small" onClick={() => void move(task, 'done')}>Mark done</button>}{column.status === 'todo' && <button type="button" className="small" onClick={() => void move(task, 'working')}>Start working</button>}</div>}
+      </div></article>)}</div>
     </Section> : null; })}
   </>;
 }
@@ -78,11 +89,12 @@ function HistoryScreen({ canRun }: { canRun: boolean }) {
   if (!items) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="dim" role="status">{note}</p>}
-    {!items.length && <p className="dim">No conversations yet.</p>}
-    <ul className="history">{items.map((item) => <li key={item.key} className={`history-item engine-${item.engine}`}>
-      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="dim mono">{item.engine === 'claude' ? 'Claude Code' : 'Codex'} · {item.folder} · {when(item.modified)}</p></div>
+    {!items.length && <Empty>No conversations yet.</Empty>}
+    {items.length > 0 && <ul className="history rows">{items.map((item) => <li key={item.key} className={`history-item engine-${item.engine}`}>
+      <EngineMark engine={item.engine} />
+      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{item.engine === 'claude' ? 'Claude Code' : 'Codex'} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
       {canRun && <button type="button" className="small" onClick={() => void resume(item)}>Resume</button>}
-    </li>)}</ul>
+    </li>)}</ul>}
     {!canRun && items.length > 0 && <p className="dim">To resume a conversation from this phone, turn on Can start and stop agents for it on the computer (Settings → Phone access).</p>}
   </>;
 }
@@ -92,7 +104,7 @@ function MemoryScreen() {
   useEffect(() => { if (projects?.length && !projects.some((item) => item.project === project)) setProject(projects[0].project); }, [projects]);
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!projects) return <p className="dim">Loading…</p>;
-  if (!projects.length) return <p className="dim">No projects with channels on this computer yet.</p>;
+  if (!projects.length) return <Empty>No projects with channels on this computer yet.</Empty>;
   const shown = projects.find((item) => item.project === project) ?? projects[0];
   const save = async () => { setNote(''); try { await post('/api/memory', { project: shown.project, title: title.trim(), content: content.trim() }); setTitle(''); setContent(''); setNote('Handoff saved. Both agents see it in their next session.'); reload(); } catch (e) { setNote((e as Error).message); } };
   return <>
@@ -103,7 +115,7 @@ function MemoryScreen() {
       <button type="button" className="primary" disabled={!title.trim() || !content.trim()} onClick={() => void save()}>Save handoff</button>
       {note && <p className="dim" role="status">{note}</p>}
     </Section>
-    {shown.notes.map((item) => <details key={item.id} className="phone-card note"><summary><strong>{item.title}</strong><span className="dim mono"> {item.author} · {when(item.createdAt)}</span></summary><p className="note-body">{item.content}</p></details>)}
+    {shown.notes.map((item) => <details key={item.id} className="phone-card note"><summary><strong>{item.title}</strong><span className="meta">{item.author} · {when(item.createdAt)}</span></summary><p className="note-body">{item.content}</p></details>)}
   </>;
 }
 

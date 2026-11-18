@@ -9,7 +9,7 @@ import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
 import './phone.css';
 import { mountChat, receiveChat, receiveReplay } from './chat';
-import { mountScreen } from './screens';
+import { ENGINE_ICON, iconSvg, mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
@@ -81,7 +81,7 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
   const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), screen);
-  if (tab === 'more') main.append(h('h2', { className: 'section-title' }, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen'));
+  if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen')));
   app.replaceChildren(header(), main, tabBar(tab));
   unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
   listen(null);
@@ -89,15 +89,19 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
 /** The chat shown, as it was when it was drawn: it is drawn again when that chat starts, stops or restarts. */
 let shownChat: string | null = null;
 
-const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
-/** The state in the words the computer's tiles use (src/state/channel-state.ts); the phone knows three of the seven. */
-const word = { waiting: 'Needs you', running: 'Working', idle: 'Idle' } as const;
+const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : channel.failed ? 'failed' : 'idle';
+/** The state in the words the computer's tiles use (src/state/channel-state.ts); the phone knows four of the seven. */
+const word = { waiting: 'Needs you', running: 'Working', failed: 'Failed', idle: 'Idle' } as const;
+/** The state as a badge in its colour: working in the engine's, as on the computer's tiles. */
+const badge = (channel: RemoteChannel, className = '') => { const now = state(channel); return h('span', { className: `badge ${{ waiting: 'waiting', running: channel.engine, failed: 'danger', idle: 'neutral' }[now]} ${className}` }, word[now]); };
+/** An engine's avatar, as on the computer's tiles. The SVG is fixed markup, not data. */
+function avatar(engine: RemoteChannel['engine']) { const element = h('span', { className: `avatar ${engine}`, aria: { hidden: 'true' } }); element.innerHTML = iconSvg(ENGINE_ICON[engine]); return element; }
 
-/** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
+/** Trace's mark: the keycap (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
 function mark(big = false) {
   const element = h('span', { className: `mark ${big ? 'big' : ''}` });
   // The app icon's keycap (scripts/make-icon.cjs, its 32 px drawing), the same as the desktop top bar's.
-  element.innerHTML = '<svg width="20" height="20" viewBox="34 33 188 188" aria-hidden="true"><path transform="translate(0 16)" fill-rule="evenodd" fill="#b9700f" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 50H180A8 8 0 0 1 188 58V78A8 8 0 0 1 180 86H154A6 6 0 0 0 148 92V150A8 8 0 0 1 140 158H116A8 8 0 0 1 108 150V92A6 6 0 0 0 102 86H76A8 8 0 0 1 68 78V58A8 8 0 0 1 76 50Z"/><path fill-rule="evenodd" fill="#ffb547" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z"/></svg><span>TRACE</span>';
+  element.innerHTML = '<svg width="20" height="20" viewBox="34 33 188 188" aria-hidden="true"><path transform="translate(0 16)" fill-rule="evenodd" class="mark-lip" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 50H180A8 8 0 0 1 188 58V78A8 8 0 0 1 180 86H154A6 6 0 0 0 148 92V150A8 8 0 0 1 140 158H116A8 8 0 0 1 108 150V92A6 6 0 0 0 102 86H76A8 8 0 0 1 68 78V58A8 8 0 0 1 76 50Z"/><path class="mark-face" fill-rule="evenodd" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z"/></svg><span>Trace</span>';
   return element;
 }
 function header(back?: () => void, title?: Node, ...tools: Node[]) {
@@ -119,10 +123,11 @@ function showPair(error = '') {
   const message = h('p', { className: 'error', aria: { role: 'alert' } }, error);
   const form = h('form', { className: 'pair' },
     mark(true),
-    h('h1', {}, 'Pair this phone'),
-    h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
-    h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
-    h('button', { className: 'primary', type: 'submit' }, 'Pair'), message);
+    h('div', { className: 'pair-card' },
+      h('h1', {}, 'Pair this phone'),
+      h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
+      h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
+      h('button', { className: 'primary', type: 'submit' }, 'Pair'), message));
   form.onsubmit = async (event) => {
     event.preventDefault(); message.textContent = '';
     try { await pair(codeInput.value.trim(), nameInput.value.trim()); history.replaceState(null, '', '/'); showList(); }
@@ -131,7 +136,7 @@ function showPair(error = '') {
   app.replaceChildren(form);
 }
 
-const linkText = () => !connected ? 'reconnecting…' : via ? `live · ${via}` : 'live';
+const linkText = () => !connected ? 'Reconnecting…' : via ? `Live · ${via}` : 'Live';
 function listen(sessionId: string | null) {
   stop?.();
   stop = follow(sessionId, onEvent, (value: boolean, target: Target, problem?: string) => {
@@ -153,8 +158,10 @@ function channelControls(channel: RemoteChannel): Node[] {
     const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
     try { await control(channel.sessionId, value); } catch (e) { alertText((e as Error).message); } finally { button.disabled = false; }
   };
+  // Restart and Stop are icons with their names, leaving the channel's name room beside them in the header. Fixed markup, not data.
+  const iconButton = (className: string, value: ChannelControl, label: string, paths: string) => { const button = h('button', { className: `small icon-only ${className}`, type: 'button', title: label, onclick: press(value), aria: { label: `${label} CH${channel.channel}` } }); button.innerHTML = iconSvg(paths); return button; };
   return channel.running
-    ? [h('button', { className: 'quiet', type: 'button', onclick: press('restart'), aria: { label: `Restart CH${channel.channel}` } }, 'Restart'), h('button', { className: 'quiet stop', type: 'button', onclick: press('stop'), aria: { label: `Stop CH${channel.channel}` } }, 'Stop')]
+    ? [iconButton('', 'restart', 'Restart', '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'), iconButton('stop', 'stop', 'Stop', '<rect width="14" height="14" x="5" y="5" rx="2"/>')]
     : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')];
 }
 /** Waits until `find` returns something from the channel list as the computer updates it; null after `ms`. */
@@ -196,12 +203,17 @@ function addMenu() {
   return h('div', { id: 'add-wrap', className: 'add-wrap', hidden: !me?.canRun }, menu, button);
 }
 
+/** No channels: the list keeps its place, with an empty state in it. The SVG is fixed markup, not data. */
+function emptyList() {
+  const element = h('div', { id: 'empty', className: 'empty', hidden: true }); element.innerHTML = iconSvg(ENGINE_ICON.shell);
+  element.append(h('p', {}, 'No channels yet. Open a project in Trace on your computer.')); return element;
+}
 function showList() {
   leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), h('p', { id: 'direct', className: 'banner warning', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, emptyList(), alertsPanel()), h('footer', {}, remove));
   app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
@@ -295,10 +307,12 @@ function renderNeeds() {
   const flagged = phoneTasks.filter((task) => task.status === 'review' || (task.status === 'working' && task.outcome && task.outcome !== 'finished'));
   const why = (task: RemoteTask) => task.status === 'review' ? 'ready for review' : task.outcome === 'failed' ? 'channel failed' : task.outcome === 'stopped' ? 'channel stopped' : task.outcome === 'blocked' ? 'waiting for you' : task.outcome === 'unconfirmed' ? 'not confirmed done' : 'gone quiet';
   box.hidden = !asking.length && !flagged.length;
-  box.replaceChildren(h('h2', {}, `Needs you · ${asking.length + flagged.length}`), h('ul', {},
+  box.replaceChildren(h('h2', {}, 'Needs you ', h('span', { className: 'count waiting' }, String(asking.length + flagged.length))), h('ul', {},
     ...asking.map((channel) => h('li', {}, h('button', { type: 'button', className: 'need waiting', onclick: () => showChannel(channel.sessionId) }, h('strong', {}, `CH${channel.channel} needs approval`), h('span', {}, channel.attention ?? '')))),
     ...flagged.map((task) => h('li', {}, h('button', { type: 'button', className: `need ${task.outcome ?? 'review'}`, onclick: () => showTab('tasks') }, h('strong', {}, task.title), h('span', {}, `${task.channel ? `CH${task.channel} · ` : ''}${why(task)}`))))));
 }
+/** What a channel is, under its name: the engine (unless that is its name), a chat or a Round Table (two agents in one channel), and whose computer. */
+const meta = (channel: RemoteChannel, several: boolean) => [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, channel.table ? 'Round Table' : channel.chat ? 'Chat' : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · ');
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
   renderNeeds(); readTasks();
@@ -307,12 +321,11 @@ function renderList() {
   const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;
   list.replaceChildren(...shown.map((channel) => h('li', {},
     h('button', { className: `channel ${state(channel)}`, dataset: tone(channel), onclick: () => showChannel(channel.sessionId) },
-      h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
-      h('span', { className: 'name' }, channel.title, account(channel), (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
-      // A Round Table is two agents in one channel, not a single chat.
-      h('span', { className: 'tag' }, channel.table ? `Round Table · ${word[state(channel)].toLowerCase()}` : channel.chat ? `Chat · ${word[state(channel)].toLowerCase()}` : word[state(channel)]),
+      avatar(channel.engine),
+      h('span', { className: 'main' }, h('span', { className: 'line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('strong', {}, channel.title)), (meta(channel, several) || channel.account) && h('span', { className: 'line' }, meta(channel, several) && h('small', {}, meta(channel, several)), account(channel))),
+      badge(channel, 'tag'),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
-      channel.attention && h('span', { className: 'ask' }, channel.attention)))));
+      channel.attention ? h('span', { className: 'ask' }, channel.attention) : !channel.running && channel.failed && h('span', { className: 'ask failed' }, channel.failed)))));
   const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
   const add = document.getElementById('add-wrap'); if (add) add.hidden = !me?.canRun;
 }
@@ -402,7 +415,7 @@ function showChannel(sessionId: string) {
     return;
   }
   const title = h('span', { className: 'title', id: 'channel-title' });
-  const waiting = h('p', { id: 'waiting', className: 'ask-banner', hidden: true, aria: { role: 'status' } });
+  const waiting = h('p', { id: 'waiting', className: 'banner waiting', hidden: true, aria: { role: 'status' } });
   const coach = h('div', { id: 'coach', className: 'coach', hidden: true, aria: { role: 'status', label: 'Prompt coaching' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
@@ -608,7 +621,8 @@ function renderCoach(channel: RemoteChannel) {
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
   const title = document.getElementById('channel-title');
-  title?.replaceChildren(h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title} `, account(channel), h('small', { className: `state-${state(channel)}` }, word[state(channel)]));
+  // Two lines, so the name keeps its room beside the channel's buttons: CH2 and the name, then the state and the account.
+  title?.replaceChildren(h('span', { className: 'title-line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('span', { className: 'title-name' }, channel.title)), h('span', { className: 'title-line' }, badge(channel, `state-${state(channel)}`), account(channel)));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   renderCoach(channel);

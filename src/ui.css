@@ -35,7 +35,8 @@ hr { border-color: var(--tr-line); }
 .muted { color: var(--tr-fg-dim); font-size: 13px; }
 .eyebrow { font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
 /* With .ui-hint too: an error under a field is a hint in the danger colour, whichever rule comes later. */
-.error-message, .ui-hint.error-message { color: var(--tr-danger); }
+/* The long selector outranks the dim text of a card paragraph or a row's small line, where an error read as a hint. */
+.error-message, .ui-hint.error-message, :is(.hub-panel, .storage-card, .ui-row) .error-message:not(.hub-feedback) { color: var(--tr-danger); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .tr-spacer { flex: 1; }
@@ -285,6 +286,8 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 /* Beside controls that have a label above them, a check box lines up with the control, not the label. */
 .hub-toolbar > :is(.ui-check, .update-checkbox) { min-height: 32px; }
 .hub-panel h2 { margin: 0 0 8px; }
+/* A card head's title sits on the centre line of its icon, count and actions, so it takes no margin of its own. */
+.hub-panel .ui-card-head h2 { margin: 0; }
 .hub-panel p { max-width: 72ch; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 .hub-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 /* A form after a card (Settings: Display and keyboard, then Google Drive) keeps the cards' gap. */
@@ -293,6 +296,7 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 .hub-feedback, .hub-warning, .persistence-alert, .history-notice { margin: 12px 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
 .hub-feedback { --tone: var(--tr-accent); }
 .hub-feedback.success { --tone: var(--tr-success); }
+.hub-feedback.error-message { --tone: var(--tr-danger); }
 .hub-warning, .persistence-alert, .history-notice { --tone: var(--tr-warning); }
 .hub-list { max-height: 580px; overflow: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-well); }
 .extension-row { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 0; border-bottom: 1px solid var(--tr-line-faint); background: none; color: var(--tr-fg-muted); text-align: left; }

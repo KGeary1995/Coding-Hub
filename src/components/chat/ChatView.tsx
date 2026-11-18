@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
-import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
+import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatImage } from '../../../shared/chat';
 import { MAX_CHANNELS, MAX_MODEL_LENGTH } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
@@ -132,14 +132,14 @@ export function ChatView({ session }: { session: Session }) {
       <strong>Round Table</strong>
       <span className="table-partner" title={partnerSession.error ?? undefined}><b className={`seat-text-${partnerEngine}`}>{AGENT[partnerEngine]}</b> {partnerState}</span>
       <span className="table-status" aria-live="polite">{!running ? `${AGENT[partnerEngine]} starts with this channel` : partnerSession.status === 'running' ? 'Seating again…' : partnerLive ? '' : `Start ${AGENT[partnerEngine]} to talk to both again`}</span>
-      {running && !partnerLive && <button className="quiet-button" onClick={() => void startSession(partnerSession.id)}>Start {AGENT[partnerEngine]}</button>}
-      {partnerThread.items.length > 0 && <button className="quiet-button" aria-pressed={showPartner} onClick={() => setShowPartner(!showPartner)}>{showPartner ? 'Back to the table' : `Show ${AGENT[partnerEngine]}`}</button>}
-      <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[partnerEngine]}`} onClick={closeTable}><X size={13} /></button>
+      {running && !partnerLive && <button className="quiet-button small" onClick={() => void startSession(partnerSession.id)}>Start {AGENT[partnerEngine]}</button>}
+      {partnerThread.items.length > 0 && <button className="quiet-button small" aria-pressed={showPartner} onClick={() => setShowPartner(!showPartner)}>{showPartner ? 'Back to the table' : `Show ${AGENT[partnerEngine]}`}</button>}
+      <button className="quiet-button small" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[partnerEngine]}`} onClick={closeTable}><X size={13} /></button>
     </div>}
     {showPartner && partnerSession && <p className="table-seated" role="note">{AGENT[partnerEngine]}'s own conversation, with what Trace passed to it. Your messages still go to the Round Table.</p>}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
-      {!items.length && <p className="chat-empty">{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p>}
+      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" /><p>{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p></div>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={builderName} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
         : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="planner" role="Planner" answer={answerPlanner} view={setViewing} />
@@ -163,7 +163,7 @@ export function ChatView({ session }: { session: Session }) {
       </div>
     </div>
     <dialog ref={dialog} className="pasted-viewer" onClose={() => setViewing(null)} onClick={(event) => { if (event.target === event.currentTarget) setViewing(null); }}>
-      {viewing && <><header><span>Image</span><button className="quiet-button" aria-label="Close image" onClick={() => setViewing(null)}><X size={14} /></button></header><img src={viewing} alt="" /></>}
+      {viewing && <><header><span>Image</span><button className="icon-button" aria-label="Close image" onClick={() => setViewing(null)}><X size={14} /></button></header><img src={viewing} alt="" /></>}
     </dialog>
   </div>;
 }

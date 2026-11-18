@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, X } from 'lucide-react';
+import { CircleAlert, Monitor, TriangleAlert, X } from 'lucide-react';
 import type { LinkedComputer, RemoteStatus } from '../../shared/remote';
 import type { ScreenShareStatus } from '../../shared/screen';
 import { screen } from '../runtime/screen-channel';
@@ -34,46 +34,46 @@ export function OtherComputersCard() {
   const link = (computer: LinkedComputer) => act(async () => { useLinkedStore.setState({ computers: await workbench<LinkedComputer[]>({ action: 'linked-link', id: computer.id, code: codes[computer.id] ?? '' }) }); setCodes((current) => ({ ...current, [computer.id]: '' })); });
   const unlink = (computer: LinkedComputer) => act(async () => { useLinkedStore.setState({ computers: await workbench<LinkedComputer[]>({ action: 'linked-unlink', id: computer.id }) }); });
   const linkedHere = remote?.devices.filter((device) => device.kind === 'computer') ?? [];
-  const ready = Boolean(remote?.listening && remote.tailscale.serving);
-  return <article className="storage-card other-computers" aria-labelledby="other-computers-title">
-    <header><h2 id="other-computers-title"><Monitor size={16} aria-hidden="true" />Other computers</h2><span className={`storage-status ${computers.some((item) => item.connected) ? 'saved' : ''}`}>{computers.filter((item) => item.connected).length ? `${computers.filter((item) => item.connected).length} connected` : 'None connected'}</span></header>
+  const ready = Boolean(remote?.listening && remote.tailscale.serving); const connected = computers.filter((item) => item.connected).length;
+  return <article className="storage-card ui-card settings-card other-computers" aria-labelledby="other-computers-title">
+    <div className="ui-card-head"><Monitor aria-hidden="true" /><h2 id="other-computers-title">Other computers</h2><span className={`ui-badge dot storage-status ${connected ? 'success saved' : 'neutral'}`}>{connected ? `${connected} connected` : 'None connected'}</span></div>
     <p>Watch, type into, start and stop the channels running on your other computers, each in its own tab, and see all of them on your phone through either computer. Computers find each other on your tailnet and through the Drive sync folder, and connect over Tailscale. Each link's key stays on this computer.</p>
-    <label className="linked-screen-toggle"><input type="checkbox" checked={remote?.autoLink ?? true} disabled={busy || !remote} onChange={(event) => { const enabled = event.target.checked; void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-auto-link', enabled }))); }} /> Link my computers automatically</label>
-    <p className="control-note">Computers signed in to your Tailscale account ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>
-    {!computers.length && <p className="control-note">No other computers yet. On each computer, turn on <strong>Phone access</strong> with Tailscale HTTPS; computers on your Tailscale account appear here within a minute.</p>}
-    {computers.length > 0 && <ul className="hub-list linked-computers" aria-label="Other computers">{computers.map((computer) => <li key={computer.id} className="extension-row">
-      <strong>{computer.name}</strong>
-      <span className="muted">{computer.linked ? (computer.connected ? `Connected · ${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…') : computer.url ? computer.error ?? 'Not linked' :'Phone access with Tailscale HTTPS is not set up there yet'}</span>
+    <label className="ui-check"><input type="checkbox" checked={remote?.autoLink ?? true} disabled={busy || !remote} onChange={(event) => { const enabled = event.target.checked; void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-auto-link', enabled }))); }} />Link my computers automatically</label>
+    <p className="ui-hint">Computers signed in to your Tailscale account ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>
+    {!computers.length && <div className="ui-empty"><Monitor aria-hidden="true" /><h3>No other computers yet</h3><p>On each computer, turn on Phone access with Tailscale HTTPS; computers on your Tailscale account appear here within a minute.</p></div>}
+    {computers.length > 0 && <ul className="ui-list linked-computers" aria-label="Other computers">{computers.map((computer) => <li key={computer.id} className="ui-row">
+      <div className="ui-row-main"><strong>{computer.name}</strong>
+      <small>{computer.linked ? (computer.connected ? `Connected · ${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…') : computer.url ? computer.error ?? 'Not linked' : 'Phone access with Tailscale HTTPS is not set up there yet'}</small></div>
       {computer.linked
-        ? <><button className="quiet-button" disabled={!computer.connected} onClick={() => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' })}>Open</button><button className="quiet-button" aria-label={`Unlink ${computer.name}`} disabled={busy} onClick={() => void unlink(computer)}><X size={14} />Unlink</button></>
+        ? <div className="ui-actions"><button className="button secondary small" disabled={!computer.connected} onClick={() => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' })}>Open</button><button className="button danger small" aria-label={`Unlink ${computer.name}`} disabled={busy} onClick={() => void unlink(computer)}><X size={16} />Unlink</button></div>
         : computer.url && <span className="link-code"><input aria-label={`Link code from ${computer.name}`} placeholder="Code from that computer" value={codes[computer.id] ?? ''} maxLength={20} spellCheck={false} autoCapitalize="characters" onChange={(event) => setCodes((current) => ({ ...current, [computer.id]: event.target.value.toUpperCase() }))} onKeyDown={(event) => { if (event.key === 'Enter' && codes[computer.id]) void link(computer); }} /><button className="button primary" disabled={busy || !codes[computer.id]?.trim()} onClick={() => void link(computer)}>Link</button></span>}
     </li>)}</ul>}
-    <div className="link-this">
+    <section className="link-this">
       <h3>Link this computer from another one</h3>
-      {!ready ? <p className="control-note">Turn on Phone access and set up Tailscale HTTPS above first; the other computer reaches this one the same way your phone does.</p>
+      {!ready ? <p className="ui-hint">Turn on Phone access and set up Tailscale HTTPS above first; the other computer reaches this one the same way your phone does.</p>
         : pairing ? <div className="phone-pairing" role="group" aria-label="Link code">
           <div>
             <p>On the other computer, open Settings → Other computers and enter this code next to this computer’s name:</p>
             <p className="phone-code" aria-label="Link code">{pairing.code.replace(/(.{5})/, '$1 ')}</p>
-            <p className="control-note">Expires in {left(pairing.expiresAt, now)}. Works once. A computer linked with it can start and stop channels here.</p>
+            <p className="ui-hint">Expires in {left(pairing.expiresAt, now)}. Works once. A computer linked with it can start and stop channels here.</p>
             <button className="quiet-button" disabled={busy} onClick={() => void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-cancel-pairing' })))}>Cancel</button>
           </div>
         </div>
         : <button className="button secondary" disabled={busy} onClick={() => void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-pair', kind: 'computer' })))}>Show link code</button>}
-      {linkedHere.length > 0 && <ul className="hub-list" aria-label="Computers linked to this one">{linkedHere.map((device) => <li key={device.id} className="extension-row">
-        <strong>{device.name}</strong><span className="muted">Can control this computer’s channels · linked {new Date(device.createdAt).toLocaleDateString()}{device.lastSeen ? ` · last seen ${new Date(device.lastSeen).toLocaleString()}` : ''}</span>
-        <button className="quiet-button" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-revoke', id: device.id })))}><X size={14} />Remove</button>
+      {linkedHere.length > 0 && <ul className="ui-list" aria-label="Computers linked to this one">{linkedHere.map((device) => <li key={device.id} className="ui-row">
+        <div className="ui-row-main"><strong>{device.name}</strong><small>Can control this computer’s channels · linked {new Date(device.createdAt).toLocaleDateString()}{device.lastSeen ? ` · last seen ${new Date(device.lastSeen).toLocaleString()}` : ''}</small></div>
+        <button className="button danger small" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-revoke', id: device.id })))}><X size={16} />Remove</button>
       </li>)}</ul>}
-    </div>
-    {share?.supported && <div className="link-this">
+    </section>
+    {share?.supported && <section className="link-this">
       <h3>Share this screen</h3>
-      <label className="linked-screen-toggle"><input type="checkbox" checked={share.enabled} disabled={busy || (!ready && !share.enabled)} onChange={(event) => { const enabled = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled }))); }} /> Let linked computers see and control this screen</label>
-      {share.enabled && <label className="linked-screen-toggle"><input type="checkbox" checked={share.elevated} disabled={busy} onChange={(event) => { const elevated = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled: true, elevated }))); }} /> Also control apps running as administrator</label>}
-      <p className="control-note">A linked computer opens it with <strong>Screen</strong> on this computer’s tab, and a paired phone with <strong>Screen</strong> in its app, once <strong>Can start and stop agents</strong> is on for it under Phone access. It works while Trace is closed: a small Trace service starts when you sign in to Windows. A Trace icon by the clock shows while someone is watching, with <strong>Disconnect</strong>. This computer must be on, awake and unlocked.</p>
-      {share.enabled && <p className="control-note">{share.elevated ? 'The service runs as administrator every time you sign in, without asking (a scheduled task starts it). Anyone viewing this screen also controls apps running as administrator. Trace is installed in a folder your account can change, so any program running as you could put its own code there and get administrator rights without Windows asking. Windows prompts and the lock screen still cannot be controlled. Turning this off asks Windows’ permission again to remove the task.' : 'Windows lets only a program running as administrator control apps that run as administrator. Turning this on asks Windows’ permission once (an administrator account is needed). The cost: the service then runs as administrator at every sign-in without asking, from a folder your account can change, so any program running as you could get administrator rights without Windows asking; and anyone viewing this screen controls apps running as administrator.'}</p>}
-      {share.enabled && <p className="control-note">{share.running ? 'Sharing: the service is running.' : 'The service is not running. Turn this off and on again.'}</p>}
-      {!ready && !share.enabled && <p className="control-note">Set up Phone access with Tailscale HTTPS above first.</p>}
-    </div>}
-    {error && <p role="alert" className="error-message">{error}</p>}
+      <label className="ui-check"><input type="checkbox" checked={share.enabled} disabled={busy || (!ready && !share.enabled)} onChange={(event) => { const enabled = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled }))); }} />Let linked computers see and control this screen</label>
+      {share.enabled && <label className="ui-check"><input type="checkbox" checked={share.elevated} disabled={busy} onChange={(event) => { const elevated = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled: true, elevated }))); }} />Also control apps running as administrator</label>}
+      <p className="ui-hint">A linked computer opens it with <strong>Screen</strong> on this computer’s tab, and a paired phone with <strong>Screen</strong> in its app, once <strong>Can start and stop agents</strong> is on for it under Phone access. It works while Trace is closed: a small Trace service starts when you sign in to Windows. A Trace icon by the clock shows while someone is watching, with <strong>Disconnect</strong>. This computer must be on, awake and unlocked.</p>
+      {share.enabled && <p className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>{share.elevated ? 'The service runs as administrator every time you sign in, without asking (a scheduled task starts it). Anyone viewing this screen also controls apps running as administrator. Trace is installed in a folder your account can change, so any program running as you could put its own code there and get administrator rights without Windows asking. Windows prompts and the lock screen still cannot be controlled. Turning this off asks Windows’ permission again to remove the task.' : 'Windows lets only a program running as administrator control apps that run as administrator. Turning this on asks Windows’ permission once (an administrator account is needed). The cost: the service then runs as administrator at every sign-in without asking, from a folder your account can change, so any program running as you could get administrator rights without Windows asking; and anyone viewing this screen controls apps running as administrator.'}</span></p>}
+      {share.enabled && <p className="ui-hint">{share.running ? 'Sharing: the service is running.' : 'The service is not running. Turn this off and on again.'}</p>}
+      {!ready && !share.enabled && <p className="ui-hint">Set up Phone access with Tailscale HTTPS above first.</p>}
+    </section>}
+    {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;
 }

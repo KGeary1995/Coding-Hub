@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Link2, LoaderCircle } from 'lucide-react';
 import type { DirectoryEntry, DirectoryListing, RepositoryContext } from '../../shared/types';
 
@@ -29,7 +29,8 @@ function TreeEntry({ entry, depth, ...props }: TreeProps & { entry: DirectoryEnt
   const folder = entry.kind === 'directory';
   const available = folder || entry.kind === 'file';
   const Icon = folder ? expanded ? FolderOpen : Folder : entry.kind === 'symlink' ? Link2 : File;
-  return <li role="none"><button role="treeitem" className={`file-tree-entry ${props.selected === entry.path ? 'selected' : ''}`} style={{ paddingLeft: 10 + Math.min(depth, 16) * 15 }}
+  // The depth only: the indent per level is in styles/changes.css.
+  return <li role="none"><button role="treeitem" className={`file-tree-entry ${props.selected === entry.path ? 'selected' : ''}`} style={{ '--depth': Math.min(depth, 16) } as CSSProperties}
     aria-label={`${folder ? 'Folder' : 'File'} ${entry.path}`} aria-expanded={folder ? expanded : undefined} aria-selected={!folder ? props.selected === entry.path : undefined}
     disabled={!available} title={available ? entry.path : 'Symbolic links and special files are not opened.'}
     onClick={() => folder ? setExpanded((value) => !value) : props.onSelect(entry.path)}>

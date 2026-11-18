@@ -1,6 +1,6 @@
 import { PlanLimitsCard } from './PlanLimitsCard';
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ChartColumn, ChartPie, RefreshCw, Rows3 } from 'lucide-react';
 import type { UsageRecord } from '../../../shared/hub';
 import { useHubStore, dollars } from '../../state/hub-store';
 import { channelNumber, useWorkspaceStore } from '../../state/workspace-store';
@@ -49,31 +49,33 @@ export function UsageScreen() {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Usage could not be refreshed.'); }
     finally { setBusy(false); }
   }
-  const change = (current: number, previous: number) => { const value = delta(current, previous); return value === null ? `no prior ${windowLabel}` : `${value >= 0 ? '▲' : '▼'} ${Math.abs(value)}% vs prior ${windowLabel}`; };
+  const change = (current: number, previous: number) => changeText(delta(current, previous), windowLabel);
   const kpis = [
-    { label: 'input tokens', value: compact(totals.input), sub: change(totals.input, prior.input) },
-    { label: 'output tokens', value: compact(totals.output), sub: totals.reasoning ? `incl. ${compact(totals.reasoning)} reasoning` : change(totals.output, prior.output) },
-    { label: 'cache reads', value: compact(totals.cached), sub: 'not counted in totals' },
-    { label: 'sessions', value: String(totals.sessions), sub: `${totals.overContext} at 80%+ context, last report` },
-    { label: 'estimated cost', value: dollars(totals.cost), sub: totals.unpriced ? `${totals.unpriced} unpriced · configured rates` : 'configured rates' },
+    { label: 'Input tokens', value: compact(totals.input), sub: change(totals.input, prior.input) },
+    { label: 'Output tokens', value: compact(totals.output), sub: totals.reasoning ? `incl. ${compact(totals.reasoning)} reasoning` : change(totals.output, prior.output) },
+    { label: 'Cache reads', value: compact(totals.cached), sub: 'not counted in totals' },
+    { label: 'Sessions', value: String(totals.sessions), sub: `${totals.overContext} at 80%+ context, last report` },
+    { label: 'Estimated cost', value: dollars(totals.cost), sub: totals.unpriced ? `${totals.unpriced} unpriced · configured rates` : 'configured rates' },
   ];
-  return <section className="tr-usage">
-    <header className="tr-usage-head">
-      <h1>Usage</h1>
-      <div className="tr-seg" role="group" aria-label="Window">{USAGE_WINDOWS.map((item) => <button key={item.id} className={days === item.id ? 'active' : ''} aria-pressed={days === item.id} onClick={() => { setDays(item.id); setHovered(null); }}>{item.label}</button>)}</div>
-      <div className="tr-seg" role="group" aria-label="Engine">{(['all', 'claude', 'codex'] as const).map((item) => <button key={item} className={engine === item ? 'active' : ''} aria-pressed={engine === item} onClick={() => setEngine(item)}>{item !== 'all' && <i className="tr-engine-square" style={{ background: `var(--tr-ch-${item})` }} aria-hidden="true" />}{item === 'all' ? 'All engines' : ENGINE_LABEL[item]}</button>)}</div>
-      <span className="tr-spacer" />
-      <span className="tr-usage-meta">CLI-reported · local · updated {time(updated)}</span>
-      <button className="tr-ghost-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={13} className={busy ? 'spin' : ''} />Refresh</button>
+  return <section className="ui-page wide tr-usage">
+    <header className="ui-page-head">
+      <span className="ui-page-icon" aria-hidden="true"><ChartColumn /></span>
+      <div><h1>Usage</h1><p>What the CLIs report · updated {time(updated)}</p></div>
+      <div className="ui-page-actions">
+        <div className="tr-seg" role="group" aria-label="Window">{USAGE_WINDOWS.map((item) => <button key={item.id} className={days === item.id ? 'active' : ''} aria-pressed={days === item.id} onClick={() => { setDays(item.id); setHovered(null); }}>{item.label}</button>)}</div>
+        <div className="tr-seg" role="group" aria-label="Engine">{(['all', 'claude', 'codex'] as const).map((item) => <button key={item} className={engine === item ? 'active' : ''} aria-pressed={engine === item} onClick={() => setEngine(item)}>{item !== 'all' && <i className={`tr-engine-square ${item}`} aria-hidden="true" />}{item === 'all' ? 'All engines' : ENGINE_LABEL[item]}</button>)}</div>
+        <button className="button secondary" onClick={() => void refresh()} disabled={busy}><RefreshCw className={busy ? 'spin' : ''} />Refresh</button>
+      </div>
     </header>
-    {error && <p role="alert" className="error-message">{error}</p>}
-    <PlanLimitsCard />
-    <div className="tr-kpis" role="list" aria-label={`Totals for ${windowLabel}`}>{kpis.map((kpi) => <div key={kpi.label} role="listitem" className="tr-kpi"><span className="tr-kpi-label">{kpi.label}</span><strong className="tnum">{kpi.value}</strong><span className="tr-kpi-sub">{kpi.sub}</span></div>)}</div>
-    <div className="tr-usage-mid">
-      <article className="tr-chart" aria-label="Daily tokens">
+    <div className="ui-grid">
+      {error && <p role="alert" className="ui-banner danger">{error}</p>}
+      <PlanLimitsCard />
+      <div className="tr-kpis" role="list" aria-label={`Totals for ${windowLabel}`}>{kpis.map((kpi) => <div key={kpi.label} role="listitem" className="ui-card ui-stat"><span>{kpi.label}</span><strong>{kpi.value}</strong><small>{kpi.sub}</small></div>)}</div>
+      <article className="ui-card span-8 tr-chart" aria-label="Daily tokens">
+        <div className="ui-card-head"><ChartColumn aria-hidden="true" /><h2>Daily tokens</h2><span className="ui-card-actions tr-chart-caption">input + output · cache excluded</span></div>
         <div className="tr-chart-readout"><strong>{focus.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong><span className="tnum">{compact(focus.claude + focus.codex)} tok</span>
-          <span className="tnum"><i className="tr-engine-square" style={{ background: 'var(--tr-ch-claude)' }} aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square" style={{ background: 'var(--tr-ch-codex)' }} aria-hidden="true" /> {compact(focus.codex)}</span>
-          <span className="tnum">{dollars(focus.cost)}</span><span className="tr-chart-caption">input + output · cache excluded</span></div>
+          <span className="tnum"><i className="tr-engine-square claude" aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square codex" aria-hidden="true" /> {compact(focus.codex)}</span>
+          <span className="tnum">{dollars(focus.cost)}</span></div>
         <div className="tr-chart-plot">
           <div className="tr-chart-axis" aria-hidden="true">{[1, 0.5, 0].map((step) => <span key={step} style={{ bottom: `${step * 100}%` }}>{compact(top * step)}</span>)}</div>
           <div className="tr-chart-bars" onMouseLeave={() => setHovered(null)}>
@@ -84,35 +86,44 @@ export function UsageScreen() {
           </div>
         </div>
       </article>
-      <aside className="tr-usage-side">
-        <h2>By engine · {windowLabel}</h2>
-        <div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} style={{ flexGrow: item.tokens, background: `var(--tr-ch-${item.name})` }} />)}</div>
-        {byEngine.map((item) => <div key={item.name} className="tr-side-row"><span><i className="tr-engine-square" style={{ background: `var(--tr-ch-${item.name})` }} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}
-        <h2>Context at last report</h2>
-        <div className="tr-side-row"><span>Sessions at 80% or more</span><span className={`tnum ${totals.overContext ? 'hot' : ''}`}>{totals.overContext}</span></div>
+      <aside className="ui-card span-4 tr-usage-side">
+        <div className="ui-card-head"><ChartPie aria-hidden="true" /><h2>By engine · {windowLabel}</h2></div>
+        <div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} className={item.name} style={{ flexGrow: item.tokens }} />)}</div>
+        {byEngine.map((item) => <div key={item.name} className="tr-side-row"><span><i className={`tr-engine-square ${item.name}`} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}
+        <h3>Context at last report</h3>
+        <div className="tr-side-row"><span>Sessions at 80% or more</span><span className={`ui-count ${totals.overContext ? 'limit' : 'neutral'}`}>{totals.overContext}</span></div>
         <div className="tr-side-row"><span>Median</span><span className="tnum">{percent(median(contexts))}</span></div>
-        <p className="tr-side-note">Only Codex reports its context window.</p>
+        <p className="ui-hint">Only Codex reports its context window.</p>
       </aside>
+      <section className="ui-card tr-usage-sessions" aria-labelledby="usage-sessions-title">
+        <div className="ui-card-head"><Rows3 aria-hidden="true" /><h2 id="usage-sessions-title">Sessions</h2><span className="ui-count neutral">{current.length}</span></div>
+        {current.length ? <div className="tr-usage-table-wrap">
+          <table className="usage-table ui-table">
+            <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>
+            <tbody>{[...current].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map((record) => {
+              const session = sessions.find((item) => item.runId === record.runId); const number = session ? channelNumber(sessions, session.id) : 0;
+              const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const context = lastContext(record);
+              return <tr key={record.runId}>
+                <td><span className="tr-cell-channel"><span className={`ui-badge ${record.engine}`}>{number ? `CH${number}` : ENGINE_LABEL[record.engine]}</span>{state && <span className="tr-cell-state" aria-label={state.word.toLowerCase()} title={state.word}>{state.glyph}</span>}</span></td>
+                <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}{record.machine && <span className="tr-cell-machine"> · {record.machine}</span>}</td>
+                <td className="tr-cell-mono">{record.model}{record.incomplete && <span className="dim" title="Trace could not read all of this run's usage log, so its totals may be low."> · incomplete</span>}</td>
+                <td className="tr-cell-date">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                <td className="num">{compact(record.input)}</td><td className="num">{compact(record.output)}</td><td className="num">{compact(record.cached)}</td>
+                <td>{context === null ? <span className="tr-cell-date">—</span> : <span className="tr-peak"><span className={`ui-meter ${context >= LIMIT_THRESHOLD ? 'limit' : 'accent'}`}><i style={{ width: `${Math.min(100, context * 100)}%` }} /></span><span className="tnum">{percent(context)}</span></span>}</td>
+                <td className="num">{dollars(record.cost)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div> : <div className="ui-empty"><ChartColumn aria-hidden="true" /><h3>No reported usage in this window</h3><p>Usage appears after a CLI writes its session log.</p></div>}
+      </section>
+      <p className="control-note">Token totals come from local CLI records, not provider billing. Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are already inside its totals. {logs ? "Totals and the chart count this computer's use from Claude Code's and Codex's own logs, on the day it happened, in Trace or not (the last 60 days), plus other computers' synced sessions. The table lists Trace's sessions." : "Days follow each session's start."}</p>
     </div>
-    <div className="tr-usage-table-wrap">
-      <table className="usage-table tr-table">
-        <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>
-        <tbody>{[...current].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).map((record) => {
-          const session = sessions.find((item) => item.runId === record.runId); const number = session ? channelNumber(sessions, session.id) : 0;
-          const state = session ? CHANNEL_STATES[channelState(session, record)] : null; const context = lastContext(record);
-          return <tr key={record.runId}>
-            <td><span className="tr-cell-channel"><i className="tr-engine-square" style={{ background: `var(--tr-ch-${record.engine})` }} aria-hidden="true" />{number ? `CH${number}` : ENGINE_LABEL[record.engine]}{state && <span aria-label={state.word.toLowerCase()}>{state.glyph}</span>}</span></td>
-            <td className="tr-cell-session" title={record.cwd}>{session?.title ?? folderName(record.cwd)}{record.machine && <span className="tr-cell-machine"> · {record.machine}</span>}</td>
-            <td className="tr-cell-mono">{record.model}{record.incomplete && <span className="dim" title="Trace could not read all of this run's usage log, so its totals may be low."> · incomplete</span>}</td>
-            <td className="tr-cell-mono">{new Date(record.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
-            <td className="num">{compact(record.input)}</td><td className="num">{compact(record.output)}</td><td className="num">{compact(record.cached)}</td>
-            <td>{context === null ? <span className="tr-cell-mono dim">—</span> : <span className="tr-peak"><span className={`tr-peak-bar ${context >= LIMIT_THRESHOLD ? 'hot' : ''}`}><i style={{ width: `${Math.min(100, context * 100)}%` }} /></span><span className="tnum">{percent(context)}</span></span>}</td>
-            <td className="num">{dollars(record.cost)}</td>
-          </tr>;
-        })}</tbody>
-      </table>
-      {!current.length && <p className="tr-empty-note">No reported usage in this window. Usage appears after a CLI writes its session log.</p>}
-    </div>
-    <p className="control-note">Token totals come from local CLI records, not provider billing. Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are already inside its totals. {logs ? "Totals and the chart count this computer's use from Claude Code's and Codex's own logs, on the day it happened, in Trace or not (the last 60 days), plus other computers' synced sessions. The table lists Trace's sessions." : "Days follow each session's start."}</p>
   </section>;
+}
+
+/** The sub-line under a total: its change on the window before. 1000% or more (an earlier window near zero) reads as words, not a five-digit figure. */
+export function changeText(value: number | null, windowLabel: string) {
+  if (value === null) return `no prior ${windowLabel}`;
+  if (value >= 1000) return `more than 10× the prior ${windowLabel}`;
+  return `${value >= 0 ? '▲' : '▼'} ${Math.abs(value)}% vs prior ${windowLabel}`;
 }
