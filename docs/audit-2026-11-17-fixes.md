@@ -1,6 +1,6 @@
 # Fixes after the audit of Trace 1.22.0 (17 and 18 November 2026)
 
-This records what was changed on the branch `fix/audit-2026-11-17` (from `main` at `6b0e9b9`) after the audit in [audit-2026-11-17.md](audit-2026-11-17.md). The findings themselves are in [audit-2026-11-17-findings.md](audit-2026-11-17-findings.md). The version was not changed, no dependency was changed, and `docs/RELEASE_NOTES.md` was not rewritten: those belong to the release.
+This records what was changed on the branch `fix/audit-2026-11-17` (from `main` at `6b0e9b9`) after the audit in [audit-2026-11-17.md](audit-2026-11-17.md). The findings themselves are in [audit-2026-11-17-findings.md](audit-2026-11-17-findings.md). No dependency was changed. The fixes were released as 1.23.0: the version and `docs/RELEASE_NOTES.md` were changed in a separate commit after this record was written, so "Before merging" below describes the state before that.
 
 ## How it was done
 
