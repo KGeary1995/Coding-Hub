@@ -7,13 +7,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const executable = process.argv[2]; if (!executable) throw new Error('Usage: node scripts/packaged-smoke.cjs <packaged app executable>');
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-packaged-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
   const fixture = await fs.readFile(path.join(__dirname, 'fixtures/interactive-cli.cjs'), 'utf8');
   for (const engine of ['claude', 'codex']) await fs.writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), PATH: bin + path.delimiter + process.env.PATH }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), PATH: bin + path.delimiter + process.env.PATH }; delete env.ELECTRON_RUN_AS_NODE;
   const args = ['--user-data-dir=' + path.join(root, 'profile')];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
   let app;

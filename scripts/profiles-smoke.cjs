@@ -6,6 +6,7 @@ const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { waitForPage } = require('./lib/wait.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -18,7 +19,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { claude: 'fixture.cjs' } }));
     await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, 'claude.cmd'), '@echo off\r\n');
   } else await fs.writeFile(path.join(bin, 'claude'), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: legacy, ANTHROPIC_API_KEY: 'fixture-inherited-key', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-inherited-token' };
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: legacy, ANTHROPIC_API_KEY: 'fixture-inherited-key', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-inherited-token' };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];

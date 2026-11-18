@@ -8,6 +8,7 @@ const { _electron } = require('playwright-core');
 const { artifactNames, installBaselineVersion } = require('./release-paths.cjs');
 const { product, LEGACY } = require('./product.cjs');
 const { waitForPage } = require('./lib/wait.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const command = promisify(execFile);
 const version = require('../package.json').version;
 
@@ -41,7 +42,7 @@ async function nativeResult(page, method, request) {
     await fs.mkdir(packageRoot, { recursive: true }); await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { [engine]: 'fixture.cjs' } }));
     await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
   }
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: data, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') };
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: data, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const baselineExecutable = path.join(install, `${LEGACY.name}.exe`); const installedExecutable = path.join(install, `${product().name}.exe`); const args = ['--user-data-dir=' + profile];

@@ -9,6 +9,7 @@ const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 if (process.platform !== 'win32') { console.log('SKIP: paste smoke runs on Windows only (the system clipboard is set through Windows Forms).'); process.exit(0); }
 
 const RECORDER = `const fs = require('node:fs'); const log = (line) => fs.appendFileSync(process.env.PASTE_SMOKE_LOG, line + '\\n'); const args = process.argv.slice(2);
@@ -38,7 +39,7 @@ const hex = (text) => Buffer.from(text).toString('hex');
     await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), RECORDER); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
   }
   const setClipboard = (mode) => execFileSync('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script, mode]);
-  const env = { ...process.env, PASTE_SMOKE_LOG: log, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, PASTE_SMOKE_LOG: log, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const received = async () => (await fs.readFile(log, 'utf8')).split('\n').filter(Boolean);
   const after = async (mark, prefix, wait = 1500) => { await sleep(wait); return (await received()).slice(mark).filter((line) => line.startsWith(prefix)); };

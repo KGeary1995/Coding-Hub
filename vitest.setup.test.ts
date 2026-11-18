@@ -15,4 +15,8 @@ describe('test setup', () => {
   it('creates the backup folder only when a test makes a backup', () => {
     expect(fs.existsSync(path.dirname(backupRoot()))).toBe(false);
   });
+  // Tests once mirrored their notes into the person's real G:\My Drive\Coding Hub.
+  it('leaves a hub without saved preferences with no Drive folder', () => {
+    expect(process.env.CODING_HUB_DEFAULT_DRIVE_DIR).toBe('');
+  });
 });

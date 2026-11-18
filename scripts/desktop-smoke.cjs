@@ -7,6 +7,7 @@ const { _electron } = require('playwright-core');
 const { waitForPage } = require('./lib/wait.cjs');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 
 (async () => {
   // Canonical long form: Windows temp paths can use 8.3 short names (RUNNER~1) that the app resolves.
@@ -38,7 +39,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
       await writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
     } else await writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
   }
-  const env = { ...process.env };
+  const env = { ...process.env, ...NO_DRIVE };
   env.CODING_HUB_STORAGE_DIR = path.join(root, 'storage');
   env.CLAUDE_CONFIG_DIR = path.join(root, 'claude-config');
   env.CODEX_HOME = path.join(root, 'codex-config');
@@ -72,6 +73,8 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await page.getByRole('heading', { name: 'Open a project', exact: true }).waitFor();
     await page.locator('.tr-engine-row').first().waitFor();
     assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
+    // NO_DRIVE: until the Drive folder is chosen below, notes written here must not reach the person's real Drive.
+    assert.equal((await page.evaluate(() => window.codingHub.hub({ action: 'preferences' }))).value.driveDirectory, '');
     await page.evaluate(() => {
       window.testEvents = [];
       window.codingHub.onSessionEvent((event) => window.testEvents.push(event));

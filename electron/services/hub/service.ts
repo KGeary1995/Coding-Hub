@@ -10,7 +10,7 @@ import { memoryEntries, projectConfigRoot, projectMemoryKey, useAutomaticKey } f
 import { HubError } from '../cli/engine-adapter';
 import { repriced, type TelemetryService } from './telemetry';
 import { RulesService } from './rules';
-import { preferencesSchema } from './preferences';
+import { defaultDriveDirectory, preferencesSchema } from './preferences';
 import { DeviceSync } from './device-sync';
 import { timed } from '../storage/host-health';
 const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
@@ -79,8 +79,7 @@ export class HubService {
     } finally { this.ticking = false; }
   }
   preferences(): HubPreferences {
-    // The default Drive folder is a Windows drive letter; elsewhere the person chooses the folder (it differs per account).
-    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: process.platform === 'win32' ? DEFAULT_PREFERENCES.driveDirectory : '', prices: [] };
+    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: defaultDriveDirectory(), prices: [] };
     const result = preferencesSchema.safeParse(cfg.data); if (!result.success) throw new HubError('PREFERENCES_INVALID', 'Saved preferences are invalid. Existing file was preserved.'); return result.data;
   }
   /**

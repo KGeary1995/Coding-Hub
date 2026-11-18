@@ -5,6 +5,7 @@ const path=require('node:path');
 const {_electron}=require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async()=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'hub-models-stability-')));const bin=path.join(root,'bin'),project=path.join(root,'project');await Promise.all([bin,project].map(folder=>fs.mkdir(folder)));
  const fixture=await fs.readFile(path.join(__dirname,'fixtures/interactive-cli.cjs'),'utf8');
@@ -12,7 +13,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
   if(process.platform==='win32'){const folder=path.join(bin,'node_modules',...(engine==='claude'?'@anthropic-ai/claude-code':'@openai/codex').split('/'));await fs.mkdir(folder,{recursive:true});await fs.writeFile(path.join(folder,'package.json'),JSON.stringify({bin:{[engine]:'fixture.cjs'}}));await fs.writeFile(path.join(folder,'fixture.cjs'),fixture);await fs.writeFile(path.join(bin,engine+'.cmd'),'@echo off\r\n');}
   else await fs.writeFile(path.join(bin,engine),'#!/usr/bin/env node\n'+fixture,{mode:0o755});
  }
- const env={...process.env,CODING_HUB_STORAGE_DIR:path.join(root,'storage'),CLAUDE_CONFIG_DIR:path.join(root,'claude'),CODEX_HOME:path.join(root,'codex')};delete env.ELECTRON_RUN_AS_NODE;
+ const env={...process.env,...NO_DRIVE,CODING_HUB_STORAGE_DIR:path.join(root,'storage'),CLAUDE_CONFIG_DIR:path.join(root,'claude'),CODEX_HOME:path.join(root,'codex')};delete env.ELECTRON_RUN_AS_NODE;
  const key=Object.keys(env).find(name=>name.toUpperCase()==='PATH')||'PATH';env[key]=bin+path.delimiter+env[key];
  const args=['--user-data-dir='+path.join(root,'profile'),path.resolve(__dirname,'..'),'--production'];if(process.env.CODING_HUB_TEST_NO_SANDBOX==='1')args.unshift('--no-sandbox','--disable-gpu','--disable-dev-shm-usage');
  let app;const errors=[];let claude;

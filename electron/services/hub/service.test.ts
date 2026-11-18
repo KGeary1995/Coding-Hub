@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { HubService } from './service';
+import { defaultDriveDirectory } from './preferences';
 import { mainStalls } from '../storage/host-health';
 import { DEFAULT_PREFERENCES, type MemoryNote } from '../../../shared/hub';
 
@@ -70,6 +71,22 @@ describe('Drive sync from the hub', () => {
     expect(() => service.execute({ action: 'memory-write-many', notes: [note('shared', 'F4'), { ...note('shared', 'F5'), supersedes: '00000000-0000-4000-8000-000000000000' }] })).toThrow('1 of 2 notes were saved');
     expect(sync.mock.calls.map(([project]) => project)).toEqual(['shared']);
     expect(() => service.execute({ action: 'memory-write-many', notes: [] })).toThrow();
+  });
+});
+
+describe('the Drive folder of a computer with no saved preferences', () => {
+  it('is Google Drive for desktop’s usual folder on Windows and none elsewhere, unless CODING_HUB_DEFAULT_DRIVE_DIR says otherwise', () => {
+    expect(defaultDriveDirectory({}, 'win32')).toBe('G:\\My Drive\\Coding Hub'); expect(defaultDriveDirectory({}, 'darwin')).toBe('');
+    expect(defaultDriveDirectory({ CODING_HUB_DEFAULT_DRIVE_DIR: '' }, 'win32')).toBe(''); expect(defaultDriveDirectory({ CODING_HUB_DEFAULT_DRIVE_DIR: '/tmp/drive' }, 'darwin')).toBe('/tmp/drive');
+  });
+  // Tests and smokes start Trace with no preferences.json; their notes reached the person's real Drive folder.
+  it('keeps tests out of the person’s real Drive, while a saved folder still applies', () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-service-'))); const service = new HubService(path.join(root, 'hub'));
+    cleanup.push(() => { vi.unstubAllEnvs(); service.close(); fs.rmSync(root, { recursive: true, force: true }); });
+    expect(service.preferences().driveDirectory).toBe(''); expect(service.drive.status().problem).toContain('No Google Drive folder is selected');
+    // Off Windows the line above holds without the variable too: a folder named by it shows that the hub reads it.
+    const named = path.join(root, 'named'); vi.stubEnv('CODING_HUB_DEFAULT_DRIVE_DIR', named); expect(service.preferences().driveDirectory).toBe(named);
+    service.execute({ action: 'save-preferences', preferences: { ...DEFAULT_PREFERENCES, driveDirectory: root } }); expect(service.preferences().driveDirectory).toBe(root);
   });
 });
 
