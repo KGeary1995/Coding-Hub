@@ -174,7 +174,7 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
   - React 18 + TypeScript, built by Vite 6 (`base: './'`, dev server on `127.0.0.1:5173`)
   - zustand 5 stores, `react-grid-layout` for the channel grid, `lucide-react` icons
   - xterm 6 with the fit and WebGL addons. WebGL is opt-in through the `terminalWebGL` preference.
-  - **Styling:** plain CSS with `--tr-*` custom properties (`src/tokens.css`, `styles.css`, `shell.css`, `tile.css`, `screens.css`, `views.css`, `workbench.css`). Tailwind's utility classes are effectively unused, but `src/styles.css` starts with `@tailwind base`, which supplies the base reset, so don't remove Tailwind.
+  - **Styling:** plain CSS with `--tr-*` custom properties from `src/tokens.css`, one stylesheet per owner, imported by `src/main.tsx` in this order: `src/ui.css` (element rules and every class more than one area uses), `src/shell.css` (the window frame), `src/tile.css` (channels), then `src/styles/` `chat`, `linked`, `start`, `changes`, `usage`, `tasks`, `setup`, `settings`, `workbench`. Rules of equal specificity are decided by that order, so a few rules sit in a later file than their owner to keep an override working. The phone app imports `src/styles/chat.css` for its chat view. Tailwind's utility classes are effectively unused, but `src/ui.css` starts with `@tailwind base`, which supplies the base reset, so don't remove Tailwind.
   - **Fonts:** IBM Plex Sans Condensed and Plex Mono, bundled. `src/main.tsx` waits for Plex Mono before rendering, because terminals measure their cells when created.
 - **Navigation:** `App.tsx` switches on `useWorkspaceStore().activeView` (`NavigationView` in `src/state/workspace-store.ts`):
   - `workspace` → `SessionGrid` (+ `WorkspaceExplorer`)

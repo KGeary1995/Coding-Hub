@@ -18,13 +18,19 @@ import './tokens.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import '@xterm/xterm/css/xterm.css';
-import './styles.css';
-import './workbench.css';
+// One stylesheet per owner: shared pieces first, then each area's (src/styles/), in this order.
+import './ui.css';
 import './shell.css';
 import './tile.css';
-import './screens.css';
-import './views.css';
-import './flight-deck.css';
+import './styles/chat.css';
+import './styles/linked.css';
+import './styles/start.css';
+import './styles/changes.css';
+import './styles/usage.css';
+import './styles/tasks.css';
+import './styles/setup.css';
+import './styles/settings.css';
+import './styles/workbench.css';
 
 // A stall or lost GPU context in this window is recorded in host-health.json, as the main process's are.
 startWindowHealth();

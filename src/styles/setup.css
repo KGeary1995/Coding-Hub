@@ -1,0 +1,152 @@
+/* Agent setup: accounts, engine health, shared memory, rules, MCP servers, skills and device sync. */
+.engine-health { display: flex; align-items: center; gap: 12px; margin-top: 16px; border: 1px solid var(--tr-line-control); background: var(--tr-surface); border-radius: var(--tr-r-control); padding: 7px 12px; position: relative; }
+.engine-health-title { display: flex; align-items: center; gap: 6px; color: var(--tr-fg); font-size: 11px; letter-spacing: 1px; }
+.engine-health-title .icon-button { width: 22px; height: 22px; }
+.engine-health-items { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
+.engine-health-item { position: relative; min-width: 0; }
+.engine-health-item summary { display: flex; gap: 7px; align-items: center; list-style: none; cursor: pointer; font-size: 12px; color: var(--tr-fg-dim); padding: 4px 8px; border-radius: var(--tr-r-control); }
+.engine-health-item summary::-webkit-details-marker { display: none; }
+.engine-health-item summary:hover, .engine-health-item[open] summary { background: var(--tr-control-on); }
+.engine-health-item strong { color: var(--tr-fg-muted); font-weight: 500; white-space: nowrap; }
+.engine-health-item.available summary > svg { color: var(--tr-fg-dim); }
+.engine-glyph { font-size: 15px; color: var(--tr-fg-dim); line-height: 1; }
+.engine-glyph.claude { color: var(--tr-ch-claude); }
+.engine-glyph.codex { color: var(--tr-ch-codex); }
+.engine-glyph.shell { color: var(--tr-ch-shell); }
+.engine-detection { font-family: var(--tr-font-mono); color: var(--tr-fg); font-size: 12px; white-space: nowrap; }
+.engine-diagnostic { position: absolute; top: 33px; left: 0; z-index: 40; width: 330px; padding: 15px; background: var(--tr-raised); border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg-dim); font-size: 13px; }
+.engine-diagnostic code { display: block; word-break: break-all; color: var(--tr-fg); font-size: 12px; margin-bottom: 8px; }
+.active-process-count { display: flex; align-items: center; gap: 6px; font-family: var(--tr-font-mono); font-size: 12px; color: var(--tr-fg-dim); white-space: nowrap; }
+.active-process-count i { width: 5px; height: 5px; background: var(--tr-fg-off); border-radius: 50%; }
+.active-process-count i.online { background: var(--tr-add); box-shadow: none; }
+.engine-health.detailed { margin: 28px 0; }
+@media (max-width: 1250px) { .engine-health-title > span { display: none; } .engine-detection { display: none; } }
+.hub-project { flex: 1; min-width: 230px; }
+.hub-feedback.success { display: flex; align-items: center; gap: 9px; color: var(--tr-fg-muted); border-color: var(--tr-line-strong); background: var(--tr-raised); }
+.hub-warning .button { margin-left: 10px; }
+.form-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.server-list { display: grid; gap: 14px; }
+.server-card h2 { margin: 0 0 6px; }
+.server-card code { font-size: 13px; overflow-wrap: anywhere; line-height: 1.8; }
+.server-icon { display: grid; place-items: center; background: var(--tr-control-on); width: 42px; height: 42px; border-radius: var(--tr-r-panel); color: var(--tr-fg); }
+.server-icon.enabled { background: var(--tr-control-on); color: var(--tr-fg-muted); }
+.status-chip, .engine-chip { font-size: 12px; letter-spacing: .5px; border: 1px solid var(--tr-line-strong); color: var(--tr-fg-dim); border-radius: var(--tr-r-control); padding: 5px 8px; white-space: nowrap; }
+.source-path { display: block; color: var(--tr-fg); font-size: 12px; margin-top: 13px; overflow-wrap: anywhere; }
+.hub-inspector { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; min-height: 400px; }
+.memory-connection { display: flex; gap: 18px; align-items: center; }
+.memory-connection > div { flex: 1; min-width: 0; }
+.memory-connection strong, .memory-connection code, .memory-connection small { display: block; margin: 7px 0; }
+.memory-connection code { color: var(--tr-fg-muted); overflow-wrap: anywhere; font-size: 14px; }
+.memory-connection small { color: var(--tr-fg-dim); font-size: 13px; line-height: 1.6; }
+.memory-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.memory-history .hub-list { max-height: 320px; margin-bottom: 18px; }
+.usage-table-wrap { margin-top: 24px; overflow: auto; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); }
+@media (max-width: 1180px) { .hub-inspector { grid-template-columns: 250px minmax(0, 1fr); } .memory-columns { grid-template-columns: 1fr; } }
+.pricing-editor .usage-table-wrap { margin: 0 0 12px; }
+.pricing-editor .usage-table td, .pricing-editor .usage-table th { padding: 12px 10px; }
+.pricing-editor input { width: 95px; }
+.pricing-editor td:first-child input { width: 200px; }
+/* Local AI reference and shared project instructions. */
+.rules-state { color: var(--tr-fg-dim); font-size: 14px; margin-right: auto; }
+.rules-columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 20px; }
+.rules-editor-header { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.rules-editor { font-family: var(--tr-font-mono); font-size: 14px; line-height: 1.9; min-height: 350px; resize: vertical; }
+.rules-targets label.rules-target { display: flex; flex-direction: row; align-items: start; gap: 12px; border-top: 1px solid var(--tr-line-control); padding-top: 15px; }
+.rules-target input { margin: 2px 0 0; accent-color: var(--tr-fg-dim); }
+.rules-target > span { min-width: 0; }
+.rules-target code { display: block; overflow-wrap: anywhere; font-size: 13px; }
+.rules-target small { display: block; color: var(--tr-fg-dim); margin-top: 7px; line-height: 1.7; }
+@media (max-width: 1180px) { .rules-columns { grid-template-columns: 1fr; } }
+
+.engine-capabilities { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 13px; }
+.engine-capabilities dd { margin: 0; color: var(--tr-fg-muted); }
+
+.account-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.account-card { min-width: 0; display: flex; flex-direction: column; gap: 8px; margin-bottom: 0; }
+.account-card .hub-toolbar { margin-top: auto; flex-wrap: wrap; }
+.account-state { font-size: 14px; color: var(--tr-st-limit); }
+.account-state.authenticated { color: var(--tr-add); }
+.account-path, .account-command { display: block; overflow-wrap: anywhere; white-space: pre-wrap; padding: 8px; background: var(--tr-panel); border-radius: var(--tr-r-control); font-size: 13px; }
+.account-login { margin-top: 20px; }
+.account-login h2 { display: flex; align-items: center; gap: 8px; }
+.account-terminal { height: 310px; padding: 8px; background: var(--tr-panel); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); }
+.account-terminal .xterm { height: 100%; }
+@media (max-width: 1250px) { .account-cards { grid-template-columns: 1fr; } }
+.engine-health { background: var(--tr-hover); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); }
+.engine-health-item summary { padding: 4px 8px; }
+.engine-health-item.available summary { color: var(--tr-fg-strong); }
+.engine-health-item.available summary > svg:nth-last-child(2) { color: var(--success); }
+.engine-detection { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-strong); }
+.engine-diagnostic { background: var(--tr-hover); border-color: var(--tr-line-strong); box-shadow: var(--tr-shadow-overlay); }
+.account-card { background: var(--tr-surface); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); padding: 22px; }
+.account-card header h2 { font-size: 16px; color: var(--tr-fg-strong); }
+.account-state.authenticated { background: var(--tr-add-bg); border-color: var(--tr-add); color: var(--tr-add); }
+@media (max-width: 1000px) {
+  .account-cards { grid-template-columns: 1fr; }
+}
+
+.account-details { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 6px; }
+.account-details summary { cursor: pointer; color: var(--tr-fg-strong); font-size: 13px; }
+.account-details code { margin-top: 10px; }
+.account-card .hub-toolbar { margin-top: 6px; }
+.account-login.login-idle .account-terminal { height: 110px; }
+.account-login.login-active .account-terminal { height: 310px; }
+@media (max-width: 1180px) { .account-details { grid-column: 1 / -1; } }
+.claude-profile-manager { margin-top: 20px; }
+.profile-create, .profile-connect { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.profile-create label, .profile-connect label { display: flex; flex-direction: column; gap: 8px; min-width: 240px; color: var(--tr-fg-strong); font-size: 13px; }
+.profile-connect .account-state { align-self: center; }
+
+/* 07 Agent setup: a 280 px navigation column with live status, and the area beside it. */
+.app-shell .main-shell:has(> .tr-setup) { padding: 0; overflow: hidden; }
+.tr-setup { height: 100%; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
+.tr-setup-nav { min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 20px 0 12px; border-right: 1px solid var(--tr-line); background: var(--tr-panel); overflow-y: auto; }
+.tr-setup-nav h1 { margin: 0 20px 12px; font: 600 20px/24px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.tr-setup-nav ul { list-style: none; margin: 0; padding: 0; }
+.tr-setup-nav button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 20px; border: 0; background: none; text-align: left; color: var(--tr-fg-muted); box-shadow: inset 2px 0 transparent; }
+.tr-setup-nav button:hover { background: var(--tr-hover); color: var(--tr-fg-strong); }
+.tr-setup-nav button.active { background: var(--tr-hover); color: var(--tr-fg-strong); box-shadow: inset 2px 0 var(--tr-fg-strong); }
+.tr-setup-name { font: 400 16px/20px var(--tr-font-ui); }
+.tr-setup-status { font: 400 11px/14px var(--tr-font-mono); color: var(--tr-fg-faint); }
+.tr-setup-status.ok { color: var(--tr-add); }
+.tr-setup-status.warn { color: var(--tr-st-limit); }
+.tr-setup-nav footer { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding: 12px 20px 0; border-top: 1px solid var(--tr-line); font: 400 11px/14px var(--tr-font-mono); color: var(--tr-fg-faint); }
+.tr-setup-nav footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-setup-content { min-width: 0; min-height: 0; overflow-y: auto; padding: 8px 32px 24px; }
+@container shell (max-width: 1024px) { .tr-setup { grid-template-columns: 220px minmax(0, 1fr); } .tr-setup-content { padding: 8px 20px 24px; } }
+/* Accounts inside Agent setup: rows, not cards (name · status and detail · actions, then the CLI details). */
+.tr-setup .account-cards { grid-template-columns: minmax(0, 1fr); gap: 0; border-top: 1px solid var(--tr-line); }
+.tr-setup .account-card { display: grid; grid-template-columns: 200px minmax(0, 1fr) auto; column-gap: 24px; row-gap: 2px; margin: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--tr-line); border-radius: 0; background: none; }
+.tr-setup .account-card > header { grid-column: 1; grid-row: 1 / span 4; align-self: start; display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
+.tr-setup .account-card > header h2 { margin: 0; font: 600 17px/22px var(--tr-font-ui); }
+.tr-setup .account-card > :not(header):not(.hub-toolbar):not(details) { grid-column: 2; margin: 0; }
+.tr-setup .account-card > .hub-toolbar { grid-column: 3; grid-row: 1 / span 3; align-self: start; margin: 0; flex-wrap: nowrap; }
+.tr-setup .account-card > details { grid-column: 2 / -1; margin-top: 6px; }
+.tr-setup .account-card .account-state { justify-self: start; padding: 0; border: 0; background: none; font: 400 13px/18px var(--tr-font-mono); }
+@container shell (max-width: 1180px) { .tr-setup .account-card { grid-template-columns: minmax(0, 1fr); } .tr-setup .account-card > * { grid-column: 1 !important; grid-row: auto !important; } }
+
+/* Sync between computers (Settings) and synced usage rows. */
+.device-sync header h2 { display: flex; align-items: center; gap: 8px; }
+.device-sync dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 12px 0; }
+.device-sync dt { color: var(--tr-fg-dim); }
+.device-sync-conflict { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--tr-st-limit); border-radius: var(--tr-r-panel); }
+/* Here, not in ui.css: it overrides `.tr-empty h1` (styles/start.css), `.tr-setup-nav h1` (styles/setup.css), so it loads after them. */
+/* Flight Deck Lite across every screen (docs/design/trace/DECISIONS.md, canvas direction 11). Loaded last, so the shared
+   pieces each screen is built from (page headings, cards, buttons, the setup list, empty and idle states) take the
+   direction's form once, here, rather than screen by screen: tracked uppercase titles, mono section labels, square
+   outlined controls, and Codex cyan for what is active. */
+
+/* Page titles: uppercase and tracked, like the top bar. The eyebrow above them is a mono label. */
+.feature-panel-heading h1, .feature-panel > h1, .tr-setup-nav > h1, .tr-setup-nav > h2, .tr-empty h1 {
+  text-transform: uppercase; letter-spacing: .06em; font-weight: 700;
+}
+
+/* Here, not in ui.css: it overrides `.account-card header h2` (styles/setup.css), `.tr-empty-columns h2` (styles/start.css), so it loads after them. */
+/* Card and form section titles: small mono labels, as "PLAN LIMITS" and "// CHANNELS" in the direction. */
+.storage-card > h2, .storage-card > header > h2, .storage-card header h2, .hub-form > h2, .hub-form h2, .more-tools h2, .tr-empty h2, .tr-empty-columns h2, .tr-empty-columns h3 {
+  font: 600 12px/1.4 var(--tr-font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--tr-fg-dim);
+}
+
+/* Agent setup's list: each place an uppercase name over its mono status, the current one marked in cyan. */
+.tr-setup-name { text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
+.tr-setup-nav button.active, .tr-setup-nav button[aria-current="page"] { box-shadow: inset 3px 0 0 var(--tr-ch-codex); }

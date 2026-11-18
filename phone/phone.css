@@ -6,7 +6,7 @@ body { margin: 0; background: var(--tr-bg); color: var(--tr-fg); font: 400 16px/
 button, input { font: inherit; color: inherit; }
 button { min-height: 44px; padding: 0 14px; border: 1px solid var(--tr-line-control, var(--tr-line)); border-radius: var(--tr-r-control, 6px); background: var(--tr-panel); cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
-/* An attached image's remove button stays a small circle (tile.css), with a larger area around it to tap. */
+/* An attached image's remove button stays a small circle (src/styles/chat.css), with a larger area around it to tap. */
 .chat-attachments button { min-height: 0; } .chat-attachments button::after { content: ""; position: absolute; inset: -8px; }
 button.primary { background: var(--tr-fg-strong); color: var(--tr-on-light, #0b1010); border-color: transparent; font-weight: 600; }
 button.quiet { border: 0; background: none; color: var(--tr-fg-dim); }
@@ -137,7 +137,7 @@ h1 { text-transform: uppercase; }
   background: linear-gradient(var(--c), var(--c)) left top / 12px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 12px, linear-gradient(var(--c), var(--c)) right bottom / 12px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 12px; background-repeat: no-repeat; }
 button.primary { background: var(--tr-ch-codex); color: var(--tr-on-light); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
 
-/* A chat channel on the phone: the desktop's thread (src/tile.css), sized for touch. */
+/* A chat channel on the phone: the desktop's thread (src/styles/chat.css), sized for touch. */
 .chat-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .phone-chat { height: calc(100dvh - 53px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 .phone-chat .chat-thread { font-size: 15px; }

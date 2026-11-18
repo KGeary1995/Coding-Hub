@@ -1,4 +1,4 @@
-import '../src/tile.css';
+import '../src/styles/chat.css';
 import { createRoot } from 'react-dom/client';
 import { RemoteChat, type RemoteChatProps } from '../src/components/chat/RemoteChat';
 export { receiveChat, receiveReplay } from '../src/components/chat/RemoteChat';

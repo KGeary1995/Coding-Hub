@@ -1,0 +1,104 @@
+/* Insight tools: coaching, experiments, verification profiles, Workflow center, More tools and Help. Loaded last. */
+.help-search { display: flex; align-items: center; gap: 12px; padding: 6px 16px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); background: var(--tr-hover); margin: 25px 0 18px; }
+.help-search > span { white-space: nowrap; font-size: 12px; color: var(--tr-fg); }
+.help-categories { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+.help-categories button { padding: 8px 13px; color: var(--tr-fg-dim); background: var(--tr-hover); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); font-size: 13px; }
+.help-categories button.selected { color: var(--tr-fg-muted); border-color: var(--tr-line-strong); background: var(--tr-control-on); }
+.help-workbench { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 22px; align-items: start; }
+.help-topics { max-height: 780px; overflow: auto; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); background: var(--tr-hover); }
+.help-topics > button { display: flex; flex-direction: column; text-align: left; width: 100%; background: none; border: 0; border-bottom: 1px solid var(--tr-line-control); padding: 18px; gap: 9px; }
+.help-topics > button:hover, .help-topics > button.selected { background: var(--tr-control-on); box-shadow: inset 3px 0 var(--tr-fg-dim); }
+.help-topics small { color: var(--tr-fg); text-transform: uppercase; letter-spacing: 1px; font-size: 11px; }
+.help-topics strong { font-size: 14px; color: var(--tr-fg); line-height: 1.6; font-weight: 550; }
+.help-topics span { color: var(--tr-fg-dim); font-size: 13px; line-height: 1.7; }
+.help-article header { border-bottom: 1px solid var(--tr-line-strong); padding-bottom: 18px; margin-bottom: 24px; }
+.help-article header h2 { font-size: 23px; margin: 14px 0; line-height: 1.4; color: var(--tr-fg); }
+.help-article h3 { font-size: 15px; color: var(--tr-fg-muted); font-weight: 550; margin: 24px 0 12px; }
+.help-article p, .help-article li { font-size: 14px; line-height: 1.9; color: var(--tr-fg-muted); }
+.help-article li { padding-left: 3px; margin-bottom: 8px; }
+.help-article pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; font-size: 14px; padding: 18px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); background: var(--tr-surface); color: var(--tr-fg-muted); }
+.help-article footer { border-top: 1px solid var(--tr-line-control); margin-top: 30px; padding-top: 24px; }
+.help-article footer > div { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0 22px; }
+.help-article footer > div > button { display: flex; align-items: center; gap: 10px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); color: var(--tr-fg-dim); background: var(--tr-raised); padding: 8px 10px; font-size: 13px; text-align: left; }
+.help-flow { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 22px; color: var(--tr-fg-dim); }
+.help-flow span { padding: 10px 12px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); font-size: 13px; background: var(--tr-control-on); }
+.help-comparison td, .help-comparison th { border-bottom: 1px solid var(--tr-line-strong); padding: 13px 10px; text-align: left; }
+.help-comparison th { color: var(--tr-fg-muted); font-weight: 550; }
+@media (max-width: 1180px) { .help-workbench { grid-template-columns: 230px minmax(0, 1fr); gap: 14px; } .help-article { padding: 22px; } }
+/* Here, not in ui.css: it overrides `.help-article p` (styles/workbench.css), so it loads after it. */
+.hub-panel p, .help-article p, .help-article li { color: var(--tr-fg-strong); line-height: 1.75; }
+/* Here, not in ui.css: it overrides `.help-article pre` (styles/workbench.css), `.account-path` (styles/setup.css), so it loads after them. */
+.account-path, .account-command, .help-article pre, .coaching-packet { background: var(--tr-panel); color: var(--tr-fg-strong); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); }
+.help-topics > button:hover, .help-topics > button.selected { background: var(--tr-raised); box-shadow: inset 2px 0 var(--accent); }
+.help-categories button.selected { background: var(--tr-raised); color: var(--tr-fg-strong); border-color: var(--tr-fg-dim); }
+.help-search { border-color: var(--tr-line-strong); background: var(--tr-raised); }
+.coaching-metrics article { background: var(--tr-panel); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); }
+.coaching-metrics strong { color: var(--tr-fg-strong); font-variant-numeric: tabular-nums; }
+.coaching-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.coaching-metrics article { background: var(--surface); border: 1px solid var(--border); border-radius: var(--tr-r-control); padding: 18px; }
+.coaching-metrics span { display: block; color: var(--muted); font-size: 12px; }
+.coaching-metrics strong { display: block; font-size: 25px; font-weight: 500; margin-top: 10px; }
+.coaching-trend { display: grid; gap: 10px; margin: 18px 0; }
+.coaching-trend > div { display: grid; grid-template-columns: 90px minmax(50px, 1fr) 140px; gap: 15px; align-items: center; font-size: 13px; }
+.coaching-trend > div > div { background: var(--tr-raised); height: 12px; border-radius: var(--tr-r-control); overflow: hidden; }
+.coaching-trend i { display: block; background: var(--tr-fg); height: 100%; }
+.coaching-trend strong { font-size: 12px; font-weight: 400; }
+.coaching-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.coaching-columns li { color: var(--tr-fg-strong); font-size: 14px; line-height: 1.8; margin-bottom: 12px; }
+.coaching-example-form { padding: 0; border: 0; }
+.coaching-examples > article { position: relative; padding: 15px; border-top: 1px solid var(--border); }
+.coaching-examples label { display: flex; align-items: center; gap: 10px; font-size: 13px; text-transform: capitalize; }
+.coaching-examples p { white-space: pre-wrap; }
+.coaching-examples small { color: var(--muted); }
+.coaching-examples .icon-button { position: absolute; top: 12px; right: 8px; }
+.coaching-packet { max-height: 400px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: var(--tr-surface); border: 1px solid var(--border); border-radius: var(--tr-r-control); font-size: 12px; line-height: 1.7; }
+@media (max-width: 1180px) { .coaching-columns { grid-template-columns: 1fr; } }
+
+.coaching-columns ul { list-style: disc; padding-left: 18px; }
+.experiment-summary { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+
+/* Advanced workflows appear only when selected or expanded. */
+.workflow-tabs { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; padding: 4px; margin: 20px 0; border: 1px solid var(--border); background: var(--tr-surface); border-radius: var(--tr-r-control); width: fit-content; }
+.workflow-tabs > button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 13px; background: transparent; border: 0; border-radius: var(--tr-r-control); color: var(--tr-fg-strong); font-size: 13px; text-transform: capitalize; }
+.workflow-tabs > button[aria-selected='true'], .workflow-tabs > button[aria-pressed='true'] { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.workflow-tabs > button:hover { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.workflow-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; }
+.workflow-columns .storage-card { margin-top: 0; min-width: 0; }
+.field-label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--tr-fg-strong); margin: 16px 0; }
+.recovery-advice { padding: 16px; margin: 18px 0; border-left: 2px solid var(--accent); background: var(--tr-surface); }
+.recovery-advice strong { color: var(--tr-fg-strong); font-size: 14px; }
+.search-form { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px; }
+.search-form > details { grid-column: 1/-1; font-size: 13px; color: var(--tr-fg-strong); }
+.search-results { display: grid; gap: 12px; margin-top: 20px; }
+.search-results > article, .template-list > article { border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); padding: 18px; background: var(--tr-raised); min-width: 0; }
+.search-results header, .template-list header { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.search-results header .quiet-button { margin-left: auto; }
+.result-kind { color: var(--tr-fg-strong); background: var(--tr-raised); padding: 3px 6px; border-radius: var(--tr-r-control); font-size: 12px; text-transform: uppercase; }
+.search-results pre { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--tr-fg-strong); font-size: 13px; line-height: 1.7; }
+.template-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-top: 22px; }
+.template-list h3 { margin: 0; font-size: 14px; }
+.template-list header span { margin-left: auto; color: var(--tr-fg-strong); font-size: 12px; }
+.template-list summary { cursor: pointer; color: var(--tr-fg-strong); font-size: 13px; }
+.delivery-panel .workflow-tabs { margin: 14px 0; }
+@media (max-width:1180px) { .workflow-columns, .template-list { grid-template-columns: 1fr; } }
+@media (max-width:1000px) { .workflow-tabs > button { padding: 8px 10px; } .search-form { grid-template-columns: 1fr; } .search-form > .button { justify-self: start; } }
+.search-results header strong, .template-list h3 { min-width: 0; overflow-wrap: anywhere; }
+.search-results header .quiet-button, .template-list header > span { flex-shrink: 0; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label, .hub-toolbar label, .hub-form label, .field-label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
+.more-tools-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 16px; }
+.more-tools-list .storage-card { display: grid; gap: 8px; align-content: start; justify-items: start; }
+.more-tools-back { justify-self: start; margin: 8px 0 0 16px; display: inline-flex; align-items: center; gap: 4px; }
+
+.live-feed { display: grid; gap: 10px; margin-top: 10px; max-height: 520px; overflow-y: auto; }
+.live-feed > article { border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); padding: 10px 12px; }
+.live-feed blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--tr-line-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live-feed pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--tr-font-mono); }
+.live-feed ul, .live-feed p { margin: 6px 0; }
+.live-week { margin: 8px 0; }
+.live-week h3 { margin: 0 0 4px; font-size: 13px; }
+.live-week ul { margin: 4px 0; padding-left: 18px; }
+/* Here, not in ui.css: it overrides `.account-card` (styles/setup.css), `.coaching-example-form` (styles/workbench.css), so it loads after them. */
+.storage-card, .hub-form { background: var(--tr-surface); border-color: var(--tr-line); }
+/* Here, not in ui.css: it overrides `.workflow-tabs > button` (styles/workbench.css), `.tr-detail-button` (styles/chat.css), so it loads after them. */
+/* A tile's hover controls, tab groups and table headings follow the controls and labels everywhere else. */
+.tr-detail-button, [role="tablist"] > button, .workflow-tabs button { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; }

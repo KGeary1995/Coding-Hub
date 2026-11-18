@@ -1,0 +1,25 @@
+/* Settings: backups, updates, phone access, other computers, crash diagnostics, accessibility, diagnostics. */
+.updates-card progress { width: 100%; accent-color: var(--accent); margin: 12px 0; }
+/* Phone access (Settings). */
+.phone-access header h2 { display: flex; align-items: center; gap: 8px; }
+.phone-steps { margin: 12px 0; padding-left: 22px; display: grid; gap: 10px; list-style: decimal; }
+.phone-steps li::marker { color: var(--tr-fg-dim); }
+.phone-steps li.done::marker { color: var(--tr-add); }
+.phone-steps .button { margin-left: 8px; }
+.phone-guide { margin-top: 8px; padding: 12px 14px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); display: grid; gap: 8px; justify-items: start; }
+.phone-guide p { margin: 0; }
+.phone-guide ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; list-style: decimal; }
+.phone-guide .button { margin-left: 0; }
+.phone-guide li .button { margin-left: 8px; }
+.phone-pairing { display: flex; gap: 20px; align-items: flex-start; margin: 12px 0; padding: 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); }
+.phone-qr { width: 200px; height: 200px; flex: none; border-radius: var(--tr-r-control); }
+.phone-code { font: 600 28px/1.2 var(--tr-font-mono); letter-spacing: .12em; color: var(--tr-fg-strong); margin: 8px 0; }
+.phone-devices li { display: flex; align-items: center; gap: 12px; }
+.phone-devices li .muted { flex: 1; }
+@container shell (max-width: 900px) { .phone-pairing { flex-direction: column; } }
+
+/* Other computers: linking in Settings, and a linked computer's channels in its own tab. */
+.linked-computers .link-code { display: inline-flex; gap: 8px; align-items: center; }
+.linked-computers .link-code input { width: 170px; font-family: var(--tr-font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.link-this { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--tr-line); }
+.link-this h3 { margin: 0 0 8px; font-size: 14px; }

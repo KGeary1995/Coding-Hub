@@ -1,0 +1,392 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shared pieces: element rules and every class that components of more than one area use (buttons, cards, forms,
+   feature panels, empty states, tables, the channel tile's parts that a linked computer's tiles reuse). Loaded first after
+   tokens.css and the third-party CSS; each area's file below may build on these. */
+:root { color-scheme: dark; font-family: var(--tr-font-ui); font-synthesis: none; color: var(--tr-fg); background: var(--tr-bg); font-size: 14px; }
+/* Keep the existing size scale until each view adopts the Trace type scale; the condensed face needs 14px to match. */
+body { font: 400 14px/1.45 var(--tr-font-ui); }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 860px; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .35; }
+button, a, input, select { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--tr-fg-dim); outline-offset: 3px; }
+input:focus, select:focus { outline: 1px solid var(--tr-line-strong); }
+button { transition: background .15s, color .15s; }
+.main-shell { flex: 1; min-width: 0; padding: 0 30px; display: flex; flex-direction: column; background: var(--tr-bg); }
+.eyebrow { color: var(--tr-fg); font-size: 12px; letter-spacing: 2px; font-weight: 600; margin-bottom: 11px; }
+h1 { margin: 0; font-size: 27px; font-weight: 550; letter-spacing: -.8px; color: var(--tr-fg-strong); }
+.button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; padding: 9px 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); font-size: 13px; font-weight: 550; white-space: nowrap; }
+.button.secondary { color: var(--tr-fg-muted); background: var(--tr-hover); border-color: var(--tr-line-control); }
+.button.secondary:hover { background: var(--tr-control-on); }
+.button.primary { background: var(--tr-fg); color: var(--tr-on-light); }
+.button.primary:hover { background: var(--tr-fg-strong); }
+h2 { margin: 0; font-size: 14px; font-weight: 550; }
+.icon-button { background: none; border: 0; border-radius: var(--tr-r-control); display: inline-flex; justify-content: center; align-items: center; width: 26px; height: 26px; color: var(--tr-fg-faint); }
+.icon-button:hover, .icon-button.selected { background: var(--tr-control-on); color: var(--tr-fg); }
+.session-tile { container-type: inline-size; height: 100%; display: flex; flex-direction: column; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-panel); overflow: hidden; background: var(--tr-panel); box-shadow: none; }
+.session-tile.claude { border-top-color: var(--tr-ch-claude); }
+.session-tile.codex { border-top-color: var(--tr-ch-codex); }
+.session-tile.shell { border-top-color: var(--tr-ch-shell); }
+.tile-header { height: 46px; flex-shrink: 0; display: flex; align-items: center; gap: 9px; padding: 0 11px; border-bottom: 1px solid var(--tr-line); background: var(--tr-hover); }
+.tile-drag-handle { cursor: grab; display: flex; align-items: center; color: var(--tr-fg-off); padding: 2px 0; }
+.tile-drag-handle:hover { color: var(--tr-fg-muted); }
+.tile-header strong { font-size: 13px; font-weight: 550; white-space: nowrap; }
+.model-name { color: var(--tr-fg-dim); border-left: 1px solid var(--tr-line-control); margin-left: 5px; padding-left: 11px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+.quiet-button { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; color: var(--tr-fg-dim); font-size: 12px; padding: 4px; }
+.quiet-button:hover { color: var(--tr-fg); }
+.terminal-frame { flex: 1; min-height: 0; padding: 18px 13px 8px; }
+.terminal-viewport { width: 100%; height: 100%; }
+.terminal-surface { width: 100%; height: 100%; }
+.terminal-viewport .xterm { height: 100%; }
+/* Here, not in tile.css: `.update-checkbox input` (ui.css) and `[data-contrast="high"] input` (ui.css) override it, so it loads first. */
+.engine-controls input, .engine-controls select, .binding-control input, .binding-control select { width: 100%; border: 1px solid var(--tr-line-strong); background: var(--tr-surface); color: var(--tr-fg-muted); border-radius: var(--tr-r-control); padding: 6px; font-family: var(--tr-font-mono); font-size: 12px; }
+.control-note { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--tr-fg-dim); line-height: 1.5; }
+.error-message { color: var(--tr-st-limit); }
+.feature-panel { padding: 65px 0; max-width: 880px; }
+.feature-panel-heading h1 { display: flex; align-items: center; gap: 12px; }
+.feature-panel-heading p { color: var(--tr-fg-dim); margin-top: 15px; line-height: 1.7; }
+.react-grid-item.react-grid-placeholder { background: var(--tr-fg-dim); opacity: .08; border-radius: var(--tr-r-panel); }
+.react-resizable-handle::after { border-color: var(--tr-fg-off) !important; }
+kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-left: auto; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); padding: 2px 5px; }
+/* Here, not in styles/setup.css: `.hub-panel p` (ui.css) overrides it, so it loads first. */
+.engine-diagnostic p { line-height: 1.6; margin: 0; }
+.session-error { display: flex; align-items: flex-start; gap: 7px; padding: 9px 12px; background: var(--tr-del-bg); color: var(--tr-st-limit); border-bottom: 1px solid var(--tr-st-failed); font-size: 12px; line-height: 1.6; max-height: 96px; overflow-y: auto; flex-shrink: 0; }
+.session-error svg { flex-shrink: 0; margin-top: 2px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.persistence-alert, .history-notice { padding: 12px 16px; margin: 14px 0; border: 1px solid var(--tr-st-limit); border-radius: var(--tr-r-control); background: var(--tr-raised); color: var(--tr-st-limit); font-size: 14px; line-height: 1.6; }
+.storage-status { color: var(--tr-fg-dim); text-transform: capitalize; font-size: 13px; }
+.storage-status.error { color: var(--tr-st-limit); }
+.storage-card { margin-top: 20px; padding: 24px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-surface); }
+.storage-card header { display: flex; align-items: center; justify-content: space-between; }
+.storage-card h2 { margin: 0; }
+.storage-card dl { display: grid; grid-template-columns: 125px 1fr; gap: 14px; margin: 24px 0; font-size: 14px; }
+.storage-card dt { color: var(--tr-fg-dim); }
+.storage-card dd { margin: 0; overflow-wrap: anywhere; }
+.storage-card p { color: var(--tr-fg-dim); line-height: 1.7; font-size: 14px; }
+.history-empty { min-height: 320px; border: 1px dashed var(--tr-line-control); border-radius: var(--tr-r-panel); display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 25px 0; color: var(--tr-fg-dim); }
+.history-empty h2 { color: var(--tr-fg-muted); }
+.history-empty p { font-size: 14px; }
+@container (max-width: 320px) {
+  .tile-header { gap: 4px; padding: 0 5px; }
+  .tile-header strong { font-size: 12px; }
+}
+@media (max-width: 1180px) {
+  .main-shell { padding: 0 20px; }
+  h1 { font-size: 23px; }
+  .tile-header { gap: 5px; padding: 0 8px; }
+}
+/* Native integrations share the workspace's typography, surfaces, and spacing. */
+.hub-panel { max-width: 1500px; }
+.hub-toolbar { display: flex; align-items: end; gap: 14px; margin: 20px 0; flex-wrap: wrap; }
+.hub-toolbar > .muted { flex: 1; align-self: center; }
+.hub-toolbar label, .hub-form label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--tr-fg-muted); }
+.hub-panel input, .hub-panel select, .hub-panel textarea { background: var(--tr-surface); border: 1px solid var(--tr-line-strong); color: var(--tr-fg); border-radius: var(--tr-r-control); padding: 10px 12px; min-width: 0; }
+.hub-panel input:focus, .hub-panel textarea:focus, .hub-panel select:focus { outline: 2px solid var(--tr-fg-dim); outline-offset: 2px; }
+.hub-panel h2 { font-size: 15px; font-weight: 550; margin: 0 0 10px; }
+.hub-panel p { font-size: 14px; line-height: 1.8; color: var(--tr-fg-dim); }
+.hub-panel .muted { color: var(--tr-fg-dim); font-size: 13px; }
+.hub-feedback, .hub-warning { padding: 13px 16px; border: 1px solid var(--tr-line-strong); background: var(--tr-raised); border-radius: var(--tr-r-control); margin: 12px 0; font-size: 14px; line-height: 1.7; }
+.hub-form, .hub-preview, .server-card, .memory-connection { padding: 24px; border: 1px solid var(--tr-line-control); background: var(--tr-surface); border-radius: var(--tr-r-panel); }
+.hub-form { display: flex; flex-direction: column; gap: 17px; margin-bottom: 24px; }
+/* A form after a card (Settings: Display and keyboard, then Google Drive) keeps the cards' 20 px gap. */
+.storage-card + .hub-form { margin-top: 20px; }
+.hub-form > .button { align-self: start; }
+.server-card header, .hub-preview header { display: flex; align-items: center; gap: 14px; margin-bottom: 17px; }
+.server-card header > div, .hub-preview header > div { flex: 1; }
+.hub-list { max-height: 580px; overflow: auto; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-hover); }
+.extension-row { display: flex; width: 100%; flex-wrap: wrap; gap: 8px; align-items: center; padding: 16px; background: none; border: 0; border-bottom: 1px solid var(--tr-line-control); text-align: left; color: var(--tr-fg-muted); }
+.extension-row strong { font-size: 14px; flex: 1; overflow-wrap: anywhere; }
+.extension-row > .muted { width: 100%; }
+.extension-row:hover, .extension-row.selected { background: var(--tr-control-on); }
+.hub-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; color: var(--tr-fg-muted); max-height: 600px; overflow: auto; }
+.hub-empty { min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 9px; padding: 30px; color: var(--tr-fg-dim); }
+.hub-empty h2, .hub-empty p { margin: 0; max-width: 440px; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }
+.usage-table th { color: var(--tr-fg-dim); background: var(--tr-surface); text-align: left; font-weight: 500; }
+.usage-table th, .usage-table td { padding: 17px 20px; border-bottom: 1px solid var(--tr-line-control); }
+.usage-table td small { display: block; margin-top: 6px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: var(--tr-fg); font-size: 12px; }
+.input-with-button { display: flex; gap: 10px; }
+.input-with-button input { flex: 1; }
+/* Here, not in styles/workbench.css: `[data-contrast="high"] input` (ui.css) and `.hub-panel input` (ui.css) override it, so it loads first. */
+.help-search input { border: 0; background: transparent; flex: 1; }
+/* Here, not in styles/workbench.css: `.help-article` (ui.css) overrides it, so it loads first. */
+.help-article { border: 1px solid var(--tr-line-control); background: var(--tr-panel); border-radius: var(--tr-r-panel); padding: 32px; }
+/* Here, not in styles/workbench.css: `.help-comparison` (ui.css) overrides it, so it loads first. */
+.help-comparison { border-collapse: collapse; width: 100%; margin: 22px 0; font-size: 14px; }
+.update-checkbox { display: flex; align-items: center; gap: 10px; }
+.update-checkbox input { width: auto; accent-color: var(--accent); }
+
+.check-output { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font-size: 14px; }
+
+:focus-visible { outline: 2px solid var(--tr-fg-dim); outline-offset: 3px; }
+[data-density="compact"] .hub-panel { padding: 20px; }
+[data-density="compact"] .storage-card, [data-density="compact"] .hub-form { padding: 14px; }
+[data-contrast="high"] .muted, [data-contrast="high"] .control-note, [data-contrast="high"] .eyebrow { color: var(--tr-fg); }
+[data-contrast="high"] .button, [data-contrast="high"] input, [data-contrast="high"] select, [data-contrast="high"] textarea { border-color: var(--tr-fg-dim); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
+/* Desktop design system. Repository diff colors and terminal ANSI remain semantic. */
+:root {
+  --accent: var(--tr-fg-strong);
+  --surface: var(--tr-surface);
+  --surface-raised: var(--tr-raised);
+  --canvas: var(--tr-bg);
+  --border: var(--tr-line);
+  --muted: var(--tr-fg-muted);
+  --text: var(--tr-fg);
+  --success: var(--tr-add);
+  --claude: var(--tr-ch-claude);
+  --codex: var(--tr-ch-codex);
+  color: var(--text);
+  background: var(--canvas);
+  font-family: var(--tr-font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+body { min-width: calc(860px / var(--display-scale, 1)); }
+button, input, select, textarea { font: inherit; }
+button { transition: background .15s ease, border-color .15s ease, color .15s ease; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.main-shell { padding: 0 24px; min-height: 0; overflow-y: auto; background: var(--canvas); }
+kbd { color: var(--tr-fg-strong); border-color: var(--tr-line-strong); background: var(--tr-raised); padding: 2px 4px; border-radius: var(--tr-r-control); font-size: 12px; }
+.eyebrow { color: var(--tr-fg-strong); font-weight: 600; letter-spacing: 1.3px; }
+h1 { font-size: 25px; color: var(--tr-fg-strong); font-weight: 600; letter-spacing: -.65px; line-height: 1.25; }
+.button { border-radius: var(--tr-r-control); font-size: 13px; min-height: 33px; font-weight: 600; padding: 8px 12px; }
+.button.primary { background: var(--tr-fg); color: var(--tr-on-light); border-color: var(--tr-fg); font-weight: 600; }
+.button.primary:hover { background: var(--tr-fg-strong); border-color: var(--tr-fg-strong); }
+.button.secondary { background: var(--tr-hover); border-color: var(--tr-line-strong); color: var(--tr-fg); }
+.button.secondary:hover { background: var(--tr-raised); border-color: var(--tr-line-strong); }
+.quiet-button { color: var(--tr-fg-strong); font-size: 13px; }
+.quiet-button:hover { color: var(--tr-fg-strong); }
+.icon-button { color: var(--tr-fg-strong); border-radius: var(--tr-r-control); width: 28px; height: 28px; }
+.icon-button:hover, .icon-button.selected { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.session-grid .react-grid-item { transition: none; }
+.session-tile { border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); box-shadow: none; background: var(--tr-bg); }
+.session-tile.claude { border-top: 2px solid var(--claude); }
+.session-tile.codex { border-top: 2px solid var(--codex); }
+.session-tile:focus-within { border-color: var(--tr-fg-dim); }
+.tile-header { height: 40px; background: var(--tr-hover); border-color: var(--tr-line-strong); }
+.tile-header strong { font-size: 14px; color: var(--tr-fg); }
+.tile-drag-handle { color: var(--tr-fg); }
+.model-name { color: var(--tr-fg-strong); border-color: var(--tr-line-strong); }
+.account-profile-chip { border-color: var(--tr-line-strong); background: var(--tr-raised); }
+.terminal-frame { container-type: size; padding: 11px 11px 7px; position: relative; min-height: 70px; background: var(--tr-bg); }
+.storage-status { font-size: 12px; }
+.feature-panel-heading { padding-bottom: 6px; }
+.feature-panel-heading p { max-width: 800px; color: var(--tr-fg-strong); font-size: 14px; line-height: 1.8; }
+.storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article { background: var(--surface); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); box-shadow: none; }
+.storage-card { padding: 24px; }
+.storage-card > h2 { color: var(--tr-fg); font-size: 14px; font-weight: 600; }
+.hub-panel .muted { color: var(--tr-fg-strong); }
+.hub-form { gap: 18px; }
+.hub-panel input, .hub-panel select, .hub-panel textarea { background: var(--tr-surface); color: var(--tr-fg); border-color: var(--tr-line-strong); border-radius: var(--tr-r-control); padding: 9px 10px; font-size: 14px; }
+.hub-panel input[type='checkbox'] { accent-color: var(--tr-fg); }
+.hub-panel .hub-toolbar label, .hub-form label { color: var(--tr-fg-strong); font-size: 13px; }
+.hub-form textarea { line-height: 1.7; }
+.hub-toolbar { gap: 12px; }
+.hub-panel .control-note { color: var(--tr-fg-strong); font-size: 12px; }
+.history-output, .file-preview { border-color: var(--tr-line-strong); background: var(--tr-hover); }
+.usage-table, .help-comparison { font-size: 13px; }
+.usage-table th, .help-comparison th { color: var(--tr-fg-dim); background: var(--tr-surface); padding: 12px; font-weight: 500; }
+.usage-table td, .help-comparison td { padding: 12px; border-color: var(--tr-line-strong); color: var(--tr-fg-strong); }
+.usage-table tbody tr:nth-child(even), .help-comparison tbody tr:nth-child(even) { background: var(--tr-panel); }
+.react-grid-item.react-grid-placeholder { background: var(--accent); opacity: .12; border: 1px dashed var(--accent); }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-thumb { background: var(--tr-control-on); border-radius: var(--tr-r-control); }
+::-webkit-scrollbar-thumb:hover { background: var(--tr-control-on); }
+::-webkit-scrollbar-track { background: transparent; }
+@media (max-width: 1250px) {
+  .main-shell { padding-inline: 18px; }
+}
+[data-contrast='high'] { --border: var(--tr-fg-dim); --muted: var(--tr-fg); }
+[data-contrast='high'] .session-tile, [data-contrast='high'] .storage-card, [data-contrast='high'] .hub-form { border-color: var(--border); }
+[data-contrast='high'] .quiet-button, [data-contrast='high'] .session-welcome > small { color: var(--tr-fg-strong); }
+.account-profile-chip { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-control); color: var(--tr-fg-strong); font-size: 12px; flex-shrink: 0; }
+.session-error > span { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.session-error { max-height: 72px; }
+.diagnostic-step { padding: 12px; margin: 8px 0; border: 1px solid var(--border); border-radius: var(--tr-r-control); }
+.diagnostic-step.failed { border-color: var(--tr-st-failed); }
+.diagnostic-step.passed { border-left: 3px solid var(--tr-add); }
+.backup-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); }
+.backup-row > span { margin-right: auto; font-size: 13px; }
+/* A delete question stays where its Delete button was, after the row's text. */
+.backup-row > .confirm-step { margin-right: 0; }
+.workflow-record { margin: 18px 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.workflow-record summary, .session-preferences summary { color: var(--tr-fg-strong); cursor: pointer; font-size: 13px; }
+.workflow-record[open] > summary { margin-bottom: 15px; }
+.workflow-record .hub-form { margin: 16px 0 0; }
+.search-results code, .workflow-record > code { display: block; overflow-wrap: anywhere; font-size: 12px; color: var(--tr-fg-strong); }
+
+.tile-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hub-form .update-checkbox { flex-direction: row; align-items: center; }
+/* A channel waiting for the person (Trace HOLD). Answering happens in the CLI's own prompt. */
+.session-attention { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--tr-st-waiting); border-bottom: 1px solid var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 12%, transparent); color: var(--tr-fg-strong); font-size: 14px; }
+.session-attention > span:first-child { color: var(--tr-st-waiting); font-family: var(--tr-font-mono); }
+.session-attention > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Flight Deck Lite: the main action on a screen is solid Codex cyan, uppercase like the navigation. */
+.button.primary { background: var(--tr-ch-codex); border-color: var(--tr-ch-codex); color: var(--tr-on-light); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-ch-codex) 82%, white); border-color: color-mix(in srgb, var(--tr-ch-codex) 82%, white); }
+/* Here, not in styles/chat.css: the phone app loads that file and never had this rule. */
+/* An approval's Allow is the waiting colour, so it reads as the answer to that card. */
+.chat-permission .button.primary { background: var(--tr-st-waiting); border-color: var(--tr-st-waiting); color: var(--tr-on-waiting); }
+.main-shell { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; background: var(--tr-bg); }
+.app-shell[data-view="workspace"] .main-shell { padding: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.tr-spacer { flex: 1; }
+.tnum { font-variant-numeric: tabular-nums; }
+.tr-engine-square { width: 8px; height: 8px; display: inline-block; }
+/* Needs you: everything waiting for the person, opened from the status bar. */
+/* The list opens above the toasts (z-index 70), which sit over the same corner. The cell stretches to the bar's height. */
+.needs-you { position: relative; flex: 0 0 auto; display: flex; }
+/* Trace channel tile (docs/design/trace/README.md, "08 Channel tile anatomy"): the parts a linked computer's tiles share. The rest is in tile.css. */
+.session-tile.tr-tile { position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-panel); background: var(--tr-term); box-shadow: none; }
+.session-tile.tr-tile.claude, .session-tile.tr-tile.codex { border-top: 1px solid var(--tr-tile-border); }
+.session-tile.tr-tile:focus-within, .session-tile.tr-tile.selected { border-color: var(--tr-line-strong); }
+/* With higher contrast every frame is --tr-line-strong, so the focused one is lighter still; a waiting or failed frame keeps its colour. */
+:where([data-contrast="high"]) .session-tile.tr-tile:focus-within, :where([data-contrast="high"]) .session-tile.tr-tile.selected { border-color: var(--tr-fg-dim); }
+.session-tile.tr-tile:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
+.session-tile.tr-tile.state-waiting { border-color: var(--tr-st-waiting); }
+.session-tile.tr-tile.state-failed { border-color: var(--tr-st-failed); }
+/* Only the frame blinks; the terminal inside stays readable. */
+@keyframes tr-frame-blink3 { 50% { border-color: var(--tr-tile-border); } }
+.session-tile.tr-tile.state-waiting, .session-tile.tr-tile.state-failed { animation: tr-frame-blink3 .4s steps(1) 3; }
+.tr-tile .tr-tile-head { height: var(--tr-tile-head-h); display: flex; align-items: center; gap: 10px; padding: 0 6px 0 8px; border: 0; background: var(--tr-surface); min-width: 0; }
+.tr-tile .tile-drag-handle { flex: none; display: grid; place-items: center; color: var(--tr-fg-off); cursor: grab; }
+.tr-ch-badge { flex: none; padding: 1px 6px; border-radius: var(--tr-r-chip); color: var(--tr-on-light); font: var(--tr-t-micro); }
+.tr-tile .tr-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.tr-tile .tr-tile-model { margin: 0; padding: 0; border: 0; min-width: 0; flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
+.tr-profile-chip.account-profile-chip { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 5px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-muted); font: 400 11px/16px var(--tr-font-mono); }
+/* Each account has its own colour, on its name and down the tile's left edge, so personal and work channels differ at a glance. */
+.tr-tile[data-account="0"], .account-profile-chip[data-account="0"] { --account: var(--tr-account-0); }
+.tr-tile[data-account="1"], .account-profile-chip[data-account="1"] { --account: var(--tr-account-1); }
+.tr-tile[data-account="2"], .account-profile-chip[data-account="2"] { --account: var(--tr-account-2); }
+.tr-tile[data-account="3"], .account-profile-chip[data-account="3"] { --account: var(--tr-account-3); }
+.session-tile.tr-tile[data-account]::before { content: ""; position: absolute; z-index: 20; inset: -1px auto -1px -1px; width: 4px; border-radius: var(--tr-r-panel) 0 0 var(--tr-r-panel); background: var(--account); pointer-events: none; }
+.tr-profile-chip.account-profile-chip[data-account] { max-width: 160px; border-color: transparent; background: var(--account); color: var(--tr-on-light, #0b1010); font-weight: 600; }
+.tr-tile-head .tr-spacer { flex: 1 1 0; min-width: 0; }
+
+/* Contextual action: one per state, before the chip. */
+.tr-action { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-control); font: 600 13px/1 var(--tr-font-ui); color: var(--tr-on-light); white-space: nowrap; }
+.tr-action kbd { margin: 0; padding: 0; border: 0; background: none; font: 400 10px/1 var(--tr-font-mono); color: inherit; opacity: .7; }
+.tr-action.start { background: var(--tr-ch-codex); }
+.claude .tr-action.start { background: var(--tr-ch-claude); }
+.shell .tr-action.start { background: var(--tr-ch-shell); }
+.tr-action.waiting { background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
+.tr-action.retry { background: var(--tr-fg); }
+.tr-action.limit { background: var(--tr-st-limit); }
+.tr-action:hover { filter: brightness(1.08); }
+
+/* State chip: outlined in the state colour, filled for waiting and failed. */
+.tr-state-chip { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--chip); border-radius: var(--tr-r-chip); color: var(--chip); font: 600 11px/1 var(--tr-font-mono); letter-spacing: .06em; }
+.state-waiting .tr-state-chip, .state-failed .tr-state-chip { animation: tr-blink3 .4s steps(1) 3; }
+.state-starting .tr-state-chip { animation: tr-start-pulse 1.2s ease-in-out infinite; }
+/* The question a risky action asks in place (ConfirmStep): closing a running channel, removing a task, deleting an experiment or a saved example. */
+.confirm-step { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.confirm-step-question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-control); color: var(--tr-fg-strong); }
+.tr-tile .terminal-frame { background: var(--tr-term); padding: 12px 14px 8px; }
+
+/* Narrow tiles: drop the model, then the metrics, so the action and chip never clip. */
+/* The account stays: it is what tells a personal channel from a work one. */
+@container (max-width: 520px) { .tr-tile-model, .tr-profile-chip.account-profile-chip:not([data-account]) { display: none; } }
+@container (max-width: 420px) { .tr-action kbd { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .session-tile.tr-tile, .tr-state-chip { animation: none !important; }
+}
+/* Over the terminal rather than instead of it, so the running CLI keeps its size. */
+.transcript-overlay { position: absolute; inset: 0; display: flex; z-index: 2; }
+
+/* Flight Deck Lite: corner brackets mark the focused channel (in its engine's colour) and one that needs you or failed;
+   a soft glow only on a channel waiting for you. The brackets themselves are drawn in tokens.css. */
+.session-tile.tr-tile.claude { --bracket: var(--tr-ch-claude); }
+.session-tile.tr-tile.codex { --bracket: var(--tr-ch-codex); }
+.session-tile.tr-tile.shell { --bracket: var(--tr-ch-shell); }
+.session-tile.tr-tile.state-waiting { --bracket: var(--tr-st-waiting); box-shadow: var(--tr-glow-waiting); }
+.session-tile.tr-tile.state-failed { --bracket: var(--tr-st-failed); }
+.tr-tile .tr-tile-name { text-transform: uppercase; letter-spacing: .04em; font-size: 14px; }
+/* A narrow tile keeps its name and state: the account chip shrinks (its full name is in its tooltip), and ctx / tok
+   give way first (the scope strip and status bar still show them). */
+.tr-tile .tr-tile-name { flex: 0 1 auto; min-width: 48px; }
+.tr-profile-chip.account-profile-chip[data-account] { flex: 0 1 auto; min-width: 44px; }
+/* The narrowest tiles (four channels in columns on a 1280 px window): the topic and a failed channel's Open log go, and
+   the name and account give up their minimum, so the state chip, which goes last, stays in view. */
+@container (max-width: 400px) {
+  .tr-tile .tr-tile-head { gap: 6px; }
+  .tr-tile .tr-tile-name, .tr-profile-chip.account-profile-chip[data-account] { min-width: 0; }
+}
+
+/* Flight Deck Lite tile anatomy (canvas direction 11): the channel number and engine in the engine's colour as text, an
+   outlined account and action, and a footer with the segmented context gauge, tokens and the output trace. */
+.tr-ch-badge { padding: 0; border-radius: 0; background: none; color: var(--ch); font: 700 13px/1 var(--tr-font-mono); letter-spacing: .04em; white-space: nowrap; }
+.tr-tile .tr-tile-name { font-weight: 600; color: var(--tr-fg-strong); }
+.tr-tile .tr-tile-model { text-transform: uppercase; letter-spacing: .04em; color: var(--tr-fg-dim); }
+.tr-profile-chip.account-profile-chip[data-account] { border: 1px solid var(--account); background: color-mix(in srgb, var(--account) 10%, transparent); color: var(--account); font: 500 11px/18px var(--tr-font-mono); text-transform: uppercase; letter-spacing: .04em; }
+.tr-action.start, .claude .tr-action.start { border: 1px solid var(--tr-ch-codex); background: color-mix(in srgb, var(--tr-ch-codex) 12%, transparent); color: var(--tr-ch-codex); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; }
+.claude .tr-action.start { border-color: var(--tr-ch-claude); background: color-mix(in srgb, var(--tr-ch-claude) 12%, transparent); color: var(--tr-ch-claude); }
+.tr-empty-note { margin: 8px 4px; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.tr-ghost-button { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: none; color: var(--tr-fg); font: 400 14px/1 var(--tr-font-ui); }
+.tr-ghost-button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg-strong); }
+.tr-ghost-button:disabled { opacity: .5; }
+/*
+ * Trace type scale and surfaces for the remaining views (docs/design/trace, "Not yet designed": Projects, History,
+ * Tasks, Verification, Coaching, and the Agent setup areas). Loaded last. Every selector is wrapped in :where()
+ * so it adds no specificity: it replaces the old generic element styles, and the screens built in phases 3–5 keep their
+ * own class rules.
+ */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) { font: var(--tr-t-control); color: var(--tr-fg); }
+
+/* Page heading: title and one line of description; the eyebrow label above it goes. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel, .history-panel, .repository-panel:not(.tr-repo)) { max-width: 1200px; padding: 20px 4px 32px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .feature-panel-heading { margin-bottom: 8px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading > div) > .eyebrow { display: none; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) h1 { gap: 10px; font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) h1 svg { width: 20px; height: 20px; color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.feature-panel-heading, .history-heading) p { max-width: 90ch; margin: 4px 0 0; font: 400 14px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+
+/* Text */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h1) { font: 600 24px/28px var(--tr-font-ui); letter-spacing: 0; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h2) { font: 600 16px/22px var(--tr-font-ui); color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(h3) { font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(p, li, dd, dt) { font-size: 14px; line-height: 20px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(small, .control-note, .muted, .hub-feedback) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-dim); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(code, pre, kbd) { font: var(--tr-t-meta); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .eyebrow { font: 600 11px/14px var(--tr-font-mono); letter-spacing: .06em; color: var(--tr-fg-dim); }
+
+/* Controls */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .button { min-height: 30px; padding: 0 12px; border-radius: var(--tr-r-control); font: 600 14px/1 var(--tr-font-ui); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) { min-height: 32px; padding: 5px 9px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-term); color: var(--tr-fg); font: 400 14px/20px var(--tr-font-ui); }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input, select, textarea):focus-visible { outline: var(--tr-focus); outline-offset: 1px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(input, textarea)::placeholder { color: var(--tr-fg-faint); }
+
+/* Surfaces: bordered panels instead of raised cards. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form, .server-card, .memory-connection, .hub-preview) { padding: 16px 18px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); box-shadow: none; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(.storage-card, .hub-form) h2 { margin-bottom: 6px; }
+:where(.app-shell:not([data-view="workspace"]) .main-shell) .hub-toolbar { gap: 10px; margin: 12px 0; }
+.more-tools-page { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.linked-screen-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
+.feature-panel-heading .eyebrow, .eyebrow { font: 500 11px/1.4 var(--tr-font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--tr-ch-codex); }
+.feature-panel-heading h1 svg { color: var(--tr-ch-codex); }
+
+/* Buttons: square, outlined, uppercase and tracked; the main action stays solid cyan (`.button.primary`, above). */
+.button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; }
+.button.secondary, .button:not(.primary):not(.danger) { border-color: var(--tr-line-control); background: transparent; color: var(--tr-fg); }
+.button.secondary:hover:not(:disabled), .button:not(.primary):not(.danger):hover:not(:disabled) { border-color: var(--tr-ch-codex); color: var(--tr-fg-strong); background: color-mix(in srgb, var(--tr-ch-codex) 8%, transparent); }
+
+/* Empty states inside panels: a mono note. */
+.history-empty { font-family: var(--tr-font-mono); font-size: 13px; letter-spacing: .02em; }
+
+/* A Terminal channel's Start is in the shell's colour, like its CH badge. */
+.shell .tr-action.start { border-color: var(--tr-ch-shell); background: color-mix(in srgb, var(--tr-ch-shell) 12%, transparent); color: var(--tr-ch-shell); }
+
+/* The channel being worked in (keyboard focus inside it) gets the corner brackets and crosshair, not only a maximised one. */
+.session-tile.tr-tile:focus-within::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
+  background: linear-gradient(var(--c), var(--c)) left top / 14px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 14px, linear-gradient(var(--c), var(--c)) right top / 14px 2px, linear-gradient(var(--c), var(--c)) right top / 2px 14px,
+    linear-gradient(var(--c), var(--c)) left bottom / 14px 2px, linear-gradient(var(--c), var(--c)) left bottom / 2px 14px, linear-gradient(var(--c), var(--c)) right bottom / 14px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 14px;
+  background-repeat: no-repeat; }
+.tr-table th, .usage-table th, table th { font: 600 11px/1.4 var(--tr-font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--tr-fg-dim); }
