@@ -1,26 +1,62 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, memo, useState, type ReactNode } from 'react';
+import { workbench } from '../../runtime/workbench';
 
 /**
  * Claude's replies, formatted: headings, paragraphs, lists, quotes, tables, fenced code and inline code, bold, italic
  * and links. Everything becomes React elements (never HTML from the reply), so nothing in a reply can run in Trace.
- * Links show their address on hover and do not navigate the window.
+ * Links never navigate the window: clicking one shows its address, to copy, and to open in the browser when it is a
+ * web address. Memoized by text, so a settled message is not parsed again while another one streams.
  */
-export function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return <div className="chat-markdown">{blocks(text)}</div>;
+});
+
+/** The address, when it is one Trace opens in the browser (http or https); anything else (a file path, javascript:) is not. */
+export function webAddress(url: string): string | null {
+  try { const parsed = new URL(url); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null; } catch { return null; }
+}
+/** Opens a web address outside Trace: through the host on the desktop (which checks it again), in a new tab on the phone. */
+export async function openAddress(url: string) {
+  if (window.codingHub) { await workbench({ action: 'flow-open-link', url }); return; }
+  // With noopener, window.open returns null even when the tab opened, so its result says nothing.
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+/** Copies through the host on the desktop (the window may not write the clipboard itself); the phone page is on HTTPS. */
+export async function copyAddress(url: string) {
+  if (window.codingHub) { const result = await window.codingHub.copyText(url); if (!result.ok) throw new Error(result.error.message); return; }
+  await navigator.clipboard.writeText(url);
+}
+function ChatLink({ url, children }: { url: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false); const [note, setNote] = useState('');
+  const web = webAddress(url);
+  const act = (job: () => Promise<unknown>, done: string) => { setNote(''); void job().then(() => setNote(done), (e: Error) => setNote(e.message || 'That did not work.')); };
+  return <span className="chat-link-wrap">
+    <button type="button" className="chat-link" title={url} aria-expanded={open} onClick={() => { setOpen(!open); setNote(''); }}>{children}</button>
+    {open && <span className="chat-link-menu" role="group" aria-label="Link">
+      <code className="chat-link-address">{url}</code>
+      {web && <button type="button" className="quiet-button" onClick={() => act(() => openAddress(web), 'Opened in your browser.')}>Open in browser</button>}
+      <button type="button" className="quiet-button" onClick={() => act(() => copyAddress(url), 'Copied.')}>Copy address</button>
+      {note && <small role="status">{note}</small>}
+    </span>}
+  </span>;
 }
 
-function inline(text: string, key = 'i'): ReactNode[] {
+/** `links`: false inside a link's own text, so a link never holds another. */
+function inline(text: string, key = 'i', links = true): ReactNode[] {
   const out: ReactNode[] = []; let rest = text; let index = 0;
-  const pattern = /(`+)([\s\S]*?)\1|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_|\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/;
+  // Underscores inside a word (snake_case, an address) are not emphasis. Last: a bare web address, with balanced
+  // parentheses but without the punctuation that ends a sentence around it.
+  const pattern = /(`+)([\s\S]*?)\1|\*\*([^*]+)\*\*|(?<!\w)__([^_]+)__|\*([^*\s][^*]*)\*|(?<!\w)_([^_\s][^_]*)_|\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?:\/\/(?:[^\s<>()[\]`]|\([^\s<>()[\]`]*\))*(?:[^\s<>()[\]`.,;:!?'"]|\([^\s<>()[\]`]*\)))/;
   while (rest) {
     const match = pattern.exec(rest);
     if (!match) { out.push(rest); break; }
     if (match.index) out.push(rest.slice(0, match.index));
     const k = `${key}-${index++}`;
     if (match[1]) out.push(<code key={k}>{match[2]}</code>);
-    else if (match[3] ?? match[4]) out.push(<strong key={k}>{inline(match[3] ?? match[4], k)}</strong>);
-    else if (match[5] ?? match[6]) out.push(<em key={k}>{inline(match[5] ?? match[6], k)}</em>);
-    else out.push(<span key={k} className="chat-link" title={match[8]}>{inline(match[7], k)}</span>);
+    else if (match[3] ?? match[4]) out.push(<strong key={k}>{inline(match[3] ?? match[4], k, links)}</strong>);
+    else if (match[5] ?? match[6]) out.push(<em key={k}>{inline(match[5] ?? match[6], k, links)}</em>);
+    else if (match[9]) out.push(links ? <ChatLink key={k} url={match[9]}>{match[9]}</ChatLink> : match[9]);
+    else out.push(links ? <ChatLink key={k} url={match[8]}>{inline(match[7], k, false)}</ChatLink> : <Fragment key={k}>{inline(match[7], k, false)}</Fragment>);
     rest = rest.slice(match.index + match[0].length);
   }
   return out;

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../shared/workbench';
 
-const calls: Record<string, unknown>[] = []; let failStatus = 0; let listed: Task[] = []; let transcript: unknown = null;
-vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { if (request.action === 'task-status' && failStatus > 0) { failStatus--; throw new Error('disk full'); } calls.push(request); return request.action === 'channel-transcript' ? transcript : request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
+const calls: Record<string, unknown>[] = []; let failStatus = 0; let listed: Task[] = []; let transcript: unknown = null; let taskPart: unknown = null;
+vi.mock('../runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { if (request.action === 'task-status' && failStatus > 0) { failStatus--; throw new Error('disk full'); } calls.push(request); if (request.action === 'channel-task-transcript' && taskPart === 'refuse') throw new Error('Invalid request.'); return request.action === 'channel-transcript' ? transcript : request.action === 'channel-task-transcript' ? taskPart : request.action === 'task-list' ? listed : request.action === 'task-send' ? { task: listed[0], prompt: 'Task: Fix it.' } : null; }) }));
 vi.mock('../runtime/terminals', () => ({ writeTerminal: vi.fn(async () => true) }));
 
 const { chainTasks, returnTasks, sendTask, startTaskAutomation, taskTurnDone, useTaskStore } = await import('./task-store');
@@ -87,12 +87,15 @@ describe('task automation never takes silence or a stop for completion', () => {
   beforeEach(() => { calls.length = 0; transcript = null; vi.useFakeTimers(); });
   const run = async (session: Record<string, unknown>, samples: number[], task: Task) => {
     useWorkspaceStore.setState({ sessions: [{ config: { engine: 'codex', chat: false }, attention: null, ...session }] as never });
-    useActivityStore.setState({ samples: { [session.id as string]: samples } } as never); listed = [task]; useTaskStore.setState({ tasks: [task] });
+    useActivityStore.setState({ samples: samples ? { [session.id as string]: samples } : {} } as never); listed = [task]; useTaskStore.setState({ tasks: [task] });
     const stop = startTaskAutomation(); await vi.advanceTimersByTimeAsync(5000); stop(); vi.useRealTimers();
     return statusCalls();
   };
   it('marks a quiet terminal task but leaves it in Working', async () => {
     const task = working('q'); expect(await run({ id: 'q', status: 'running' }, Array(45).fill(0), task)).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'quiet' }]);
+  });
+  it('marks a terminal task quiet after more than two minutes of silence too, when the trace has dropped its samples', async () => {
+    const task = working('long'); expect(await run({ id: 'long', status: 'running' }, undefined as never, task)).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'quiet' }]);
   });
   it('does nothing to a quiet channel that is waiting for an approval', async () => {
     expect(await run({ id: 'w', status: 'running', attention: { message: 'Allow?', at: new Date().toISOString() } }, Array(45).fill(0), working('w'))).toEqual([]);
@@ -108,6 +111,21 @@ describe('task automation never takes silence or a stop for completion', () => {
   it('keeps a task whose channel stopped or failed in Working, marked', async () => {
     const stopped = working('s'); expect(await run({ id: 's', status: 'exited' }, [], stopped)).toEqual([{ action: 'task-status', id: stopped.id, status: 'active', outcome: 'stopped' }]);
     calls.length = 0; vi.useFakeTimers(); const failed = working('f'); expect(await run({ id: 'f', status: 'error' }, [], failed)).toEqual([{ action: 'task-status', id: failed.id, status: 'active', outcome: 'failed' }]);
+  });
+  it('reads a sent task\u2019s own part of the conversation, which the whole transcript may no longer reach', async () => {
+    const task = working('part', { outcome: 'blocked', outcomeNote: 'which file?', sendId: 't-55555555' });
+    transcript = { type: 'history', messages: [{ role: 'user', text: 'Task t-66666666: Later. x', images: 0 }], results: {} };
+    taskPart = { type: 'history', messages: [{ role: 'user', text: 'Task t-55555555: Fix it. x', images: 0 }, { role: 'assistant', messageId: 'a', blocks: [{ type: 'text', text: 'Used a.ts.\nTASK COMPLETE' }] }], results: {} };
+    expect(await run({ id: 'part', status: 'running' }, Array(45).fill(0), task)).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
+    expect(calls).toContainEqual({ action: 'channel-task-transcript', sessionId: 'part', mark: 'Task t-55555555:' }); taskPart = null;
+  });
+  it('reads the whole transcript when the host has no such part, or is older and refuses the action', async () => {
+    for (const part of [null, 'refuse']) {
+      calls.length = 0; vi.useFakeTimers(); taskPart = part; const task = working(`old-${part}`, { outcome: 'blocked', outcomeNote: 'which file?', sendId: 't-77777777' });
+      transcript = { type: 'history', messages: [{ role: 'user', text: 'Task t-77777777: Fix it. x', images: 0 }, { role: 'assistant', messageId: 'a', blocks: [{ type: 'text', text: 'TASK COMPLETE' }] }], results: {} };
+      expect(await run({ id: `old-${part}`, status: 'running' }, Array(45).fill(0), task)).toEqual([{ action: 'task-status', id: task.id, status: 'review', outcome: 'finished' }]);
+    }
+    taskPart = null;
   });
 });
 
@@ -143,6 +161,16 @@ describe('a hierarchy table’s verdict moves the task it worked on', () => {
     chainTasks('hier', chain('Task t-55555555: Fix it. Keep it small.'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(statusCalls()).toEqual([{ action: 'task-status', id: a.id, status: 'review', outcome: 'finished' }]);
+  });
+  it('writes a long or empty needs-you note once, not again on every table event', async () => {
+    const needsYou = (note: string) => ({ ...chain('Task t-12121212: Fix it.'), chain: { ...chain('Task t-12121212: Fix it.').chain, step: 'needs-you' as const, verdict: null, note } }) as never;
+    for (const [note, stored] of [['x'.repeat(600), 'x'.repeat(500)], ['', 'The Round Table needs you.']]) {
+      calls.length = 0; const task = working('hier4', { sendId: 't-12121212' }); useTaskStore.setState({ tasks: [task] }); listed = [task];
+      chainTasks('hier4', needsYou(note)); await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(statusCalls()).toEqual([{ action: 'task-status', id: task.id, status: 'active', outcome: 'blocked', outcomeNote: stored }]);
+      calls.length = 0; useTaskStore.setState({ tasks: [{ ...task, outcome: 'blocked', outcomeNote: stored }] });
+      chainTasks('hier4', needsYou(note)); await new Promise((resolve) => setTimeout(resolve, 0)); expect(statusCalls()).toEqual([]);
+    }
   });
   it('marks nothing when the chain carries none of the working tasks, one of them or several', async () => {
     calls.length = 0;

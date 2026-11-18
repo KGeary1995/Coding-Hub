@@ -10,9 +10,6 @@
 /* Top bar */
 .tr-topbar { height: var(--tr-topbar-h); flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: var(--tr-surface); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); color: var(--tr-fg-muted); }
 .tr-wordmark { display: flex; align-items: center; gap: 8px; margin-right: 10px; color: var(--tr-fg-strong); text-decoration: none; font: 600 16px/1 var(--tr-font-mono); letter-spacing: .02em; }
-.tr-wordmark-bars { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
-.tr-wordmark-bars i { width: 3px; background: var(--tr-ch-claude); }
-.tr-wordmark-bars i:nth-child(n + 3) { background: var(--tr-ch-codex); }
 .tr-tabs { display: flex; gap: 2px; }
 .tr-tabs > button, .tr-menu-button, .tr-icon { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: inherit; white-space: nowrap; }
 .tr-tabs > button:hover, .tr-menu-button:hover, .tr-icon:hover { background: var(--tr-hover); color: var(--tr-fg-strong); }
@@ -60,6 +57,11 @@
 .tr-sb-project, .tr-sb-alert, .tr-statusbar .storage-status { flex: 0 1 auto; min-width: 0; }
 .tr-sb-project, .tr-statusbar .storage-status { flex-shrink: 8; }
 .tr-sb-project { max-width: 240px; }
+/* With many channels their cells give way next, cutting their token counts and then state words but keeping CHn, so
+   Needs you and the alerts stay on screen. */
+.tr-sb-channel { flex: 0 2 auto; min-width: 64px; overflow: hidden; }
+/* The engine square is the only item in a cell that could shrink, so it would vanish first. */
+.tr-sb-channel .tr-engine-square { flex: none; }
 /* Above the legacy `.app-statusbar span { display: flex }`, which would defeat the ellipsis. */
 .tr-statusbar .tr-sb-text { display: block; }
 .tr-statusbar .tr-sb-text, .tr-statusbar .storage-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -93,7 +95,8 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 
 /* Linked computers get tabs after the main views; a dot of colour marks channels there that need the person. */
 .tr-tabs > button.tr-computer-tab { gap: 6px; }
-.tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-off); }
+/* An offline computer's name stays readable (it is still a tab to open); its dimmed screen icon says it is offline. */
+.tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-faint); } .tr-tabs > button.tr-computer-tab.offline svg { color: var(--tr-fg-off); }
 .tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--tr-r-panel); background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }
 
 /* Subscription limits in the status bar: amber nearing a limit, red nearly out. */
@@ -111,9 +114,10 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .app-statusbar.tr-statusbar { text-transform: uppercase; letter-spacing: .06em; }
 .tr-topbar .tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-ch-claude); }
 /* Needs you: everything waiting for the person, opened from the status bar. */
-.needs-you { position: relative; flex: 0 0 auto; }
+/* The list opens above the toasts (z-index 70), which sit over the same corner. The cell stretches to the bar's height. */
+.needs-you { position: relative; flex: 0 0 auto; display: flex; }
 .needs-you-cell { color: var(--tr-st-waiting); }
-.needs-you-list { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 60; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 6px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); color: var(--tr-fg); }
+.needs-you-list { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 80; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 6px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); color: var(--tr-fg); }
 .needs-you-list ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .needs-you-list li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 6px; border-left: 2px solid var(--tr-line); }
 .needs-you-list li p { margin: 2px 0 0; color: var(--tr-fg-muted); overflow-wrap: anywhere; }

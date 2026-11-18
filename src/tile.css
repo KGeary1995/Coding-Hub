@@ -2,6 +2,8 @@
 .session-tile.tr-tile { position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-panel); background: var(--tr-term); box-shadow: none; }
 .session-tile.tr-tile.claude, .session-tile.tr-tile.codex { border-top: 1px solid var(--tr-tile-border); }
 .session-tile.tr-tile:focus-within, .session-tile.tr-tile.selected { border-color: var(--tr-line-strong); }
+/* With higher contrast every frame is --tr-line-strong, so the focused one is lighter still; a waiting or failed frame keeps its colour. */
+:where([data-contrast="high"]) .session-tile.tr-tile:focus-within, :where([data-contrast="high"]) .session-tile.tr-tile.selected { border-color: var(--tr-fg-dim); }
 .session-tile.tr-tile:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
 .session-tile.tr-tile.state-waiting { border-color: var(--tr-st-waiting); }
 .session-tile.tr-tile.state-failed { border-color: var(--tr-st-failed); }
@@ -57,20 +59,22 @@
 .tr-scope-rail { stroke: var(--tr-line-strong); stroke-width: 1; stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
 .tr-scope-trace { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .state-idle .tr-scope-trace { stroke: var(--tr-fg-off) !important; }
-.tr-scope-window { position: absolute; left: 6px; bottom: 5px; padding: 0 3px; background: var(--tr-surface); font: 400 10px/1 var(--tr-font-mono); color: var(--tr-fg-faint); }
 .tr-scope-rate { position: absolute; right: 6px; top: 3px; padding: 1px 4px; background: var(--tr-surface); font: 400 11px/14px var(--tr-font-mono); color: var(--tr-fg-dim); }
-.dense .tr-scope-window { display: none; }
 .dense .tr-scope-rate { top: 2px; }
 .tr-scope-limit { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: none; }
 .tr-scope-limit i { display: block; height: 100%; background: var(--tr-fg-off); transition: width var(--tr-d-slow) var(--tr-ease); }
 .tr-scope-limit.hot i { background: var(--tr-st-limit); }
 .tr-scope-limit::after { content: ""; position: absolute; left: 80%; bottom: 0; width: 1px; height: 6px; background: var(--tr-st-limit); }
 
-/* Detail row: takes the scope strip's place while the header is pointed at or a control has keyboard focus, so the
-   terminal never resizes for it and it never covers a notice. With settings open it sits in the flow instead. */
-.tr-tile-detail { position: absolute; left: 0; right: 0; top: var(--tr-tile-head-h); bottom: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; background: #0f1514; border-bottom: 1px solid var(--tr-line); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--tr-d-base) var(--tr-ease), transform var(--tr-d-base) var(--tr-ease); }
+/* Detail row: laid over the top of the terminal, under the header, while the header is pointed at or a control has
+   keyboard focus, so the terminal never resizes for it. The scope strip moved to the tile's foot, so the row has its
+   own height: it once took the strip's and ended up 1 px high, its buttons drawn over the header. With settings open,
+   or with anything but the terminal under the header (a failed channel's error line, the prepared-request notice, a
+   chat's approval banner), it sits in the flow and stays shown instead: laid over a notice, it kept that notice's
+   buttons out of reach for as long as the header held the focus. */
+.tr-tile-detail { position: absolute; left: 0; right: 0; top: var(--tr-tile-head-h); height: var(--tr-tile-detail-h); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; background: #0f1514; border-bottom: 1px solid var(--tr-line); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--tr-d-base) var(--tr-ease), transform var(--tr-d-base) var(--tr-ease); }
 .tr-tile-head:hover ~ .tr-tile-detail, .tr-tile-detail:hover, .tr-tile-top:focus-within .tr-tile-detail, .config-open .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
-.config-open .tr-tile-detail { position: static; height: var(--tr-tile-detail-h); }
+.config-open .tr-tile-detail, .tr-tile-top:not(:has(+ .terminal-frame)) .tr-tile-detail { position: static; height: var(--tr-tile-detail-h); opacity: 1; transform: none; pointer-events: auto; }
 .tr-detail-facts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/16px var(--tr-font-mono); color: var(--tr-fg-dim); }
 .tr-detail-button { flex: none; height: 22px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: 400 13px/1 var(--tr-font-ui); }
 .tr-detail-button.icon { padding: 0 5px; }
@@ -84,6 +88,11 @@
 }
 .tr-detail-button:hover:not(:disabled), .tr-detail-button.selected { background: var(--tr-hover); color: var(--tr-fg-strong); }
 .tr-detail-button.stop { border-color: var(--tr-st-failed); color: var(--tr-stop-fg); }
+/* Close on a running channel asks in the detail row: the row stays shown and holds only the question. */
+.tr-tile.closing .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
+.tr-tile.closing .tr-tile-detail > .tr-detail-button { display: none; }
+.confirm-step { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.confirm-step-question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-control); color: var(--tr-fg-strong); }
 .tr-detail-button:disabled { opacity: .45; }
 .tr-tile .terminal-frame { background: var(--tr-term); padding: 12px 14px 8px; }
 .tr-tile .session-config { border-top: 1px solid var(--tr-line); }
@@ -144,7 +153,12 @@
 .chat-markdown blockquote { padding-left: 10px; border-left: 3px solid var(--tr-line-strong); color: var(--tr-fg-muted); }
 .chat-code { margin: 0 0 8px; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-panel); font: 400 12.5px/1.5 var(--tr-font-mono); }
 .chat-code code { padding: 0; background: none; }
-.chat-link { text-decoration: underline; text-underline-offset: 2px; color: var(--tr-ch-codex); cursor: help; }
+/* A link is a button: it shows its address, with Copy and (for web addresses) Open in browser, under the text. Its
+   text stays part of a selection, so a copied paragraph keeps its addresses. */
+.chat-link { padding: 0; border: 0; background: none; font: inherit; text-align: inherit; text-decoration: underline; text-underline-offset: 2px; color: var(--tr-ch-codex); cursor: pointer; -webkit-user-select: text; user-select: text; }
+.chat-link-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; padding: 6px 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-surface); }
+.chat-link-menu .chat-link-address { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; background: none; padding: 0; }
+.chat-link-menu small { color: var(--tr-fg-dim); }
 .chat-table { overflow-x: auto; margin-bottom: 8px; } .chat-table table { border-collapse: collapse; font-size: 13px; }
 .chat-table th, .chat-table td { padding: 4px 10px; border: 1px solid var(--tr-line); text-align: left; } .chat-table th { background: var(--tr-surface); }
 .chat-streaming .chat-markdown > :last-child::after { content: '▍'; color: var(--tr-ch-claude); animation: chat-blink 1s steps(2) infinite; }
@@ -243,6 +257,13 @@
 .tr-tile .tr-tile-name { flex: 0 1 auto; min-width: 48px; }
 .tr-profile-chip.account-profile-chip[data-account] { flex: 0 1 auto; min-width: 44px; }
 @container (max-width: 600px) { .tr-tile-metric { display: none; } }
+/* The narrowest tiles (four channels in columns on a 1280 px window): the topic and a failed channel's Open log go, and
+   the name and account give up their minimum, so the state chip, which goes last, stays in view. */
+@container (max-width: 400px) {
+  .tr-tile .tr-tile-head { gap: 6px; }
+  .tr-tile-topic, .tr-action.retry + .tr-action.ghost { display: none; }
+  .tr-tile .tr-tile-name, .tr-profile-chip.account-profile-chip[data-account] { min-width: 0; }
+}
 /* Flight Deck Lite: context as a segmented gauge, 20 cells, filled in the engine's colour (the limit colour past 80%). */
 .tr-scope-limit { height: 5px; background: var(--tr-line); -webkit-mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 2px), transparent calc(5% - 2px) 5%); mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 2px), transparent calc(5% - 2px) 5%); }
 .claude .tr-scope-limit i { background: var(--tr-ch-claude); } .codex .tr-scope-limit i { background: var(--tr-ch-codex); }

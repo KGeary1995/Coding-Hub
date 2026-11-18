@@ -31,6 +31,12 @@ describe('starting a task in its own worktree', () => {
     await expect(startTaskInWorktree(task.id, 'claude')).resolves.toMatchObject({ rulesApplied: true });
     expect(rulesSaved).toEqual([{ action: 'rules-save', content: 'Never guess.', revision: 'r1', targets: [{ directory: '/worktrees/abc', claudeHash: 'c', codexHash: 'x' }] }]);
   });
+  it('applies the rules in the folder the host names, even when its spelling differs by more than letter case', async () => {
+    rules = { ...rules, content: 'Never guess.', targets: [{ ...rules.targets[0], directory: 'D:\\WORKTR~1\\abc' }] };
+    await expect(startTaskInWorktree(task.id, 'claude')).resolves.toMatchObject({ rulesApplied: true });
+    expect(rulesSaved).toMatchObject([{ targets: [{ directory: 'D:\\WORKTR~1\\abc' }] }]);
+    rules = { ...rules, targets: [{ ...rules.targets[0], directory: '/worktrees/abc' }] };
+  });
   it('says where it stopped when the channel does not start, and does not send', async () => {
     startOk = false;
     await expect(startTaskInWorktree(task.id, 'claude')).rejects.toThrow(/coding-hub\/abc and its channel are ready, but the channel did not start: Apply shared rules first/); expect(sent).toEqual([]);

@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { startHierarchyTable, startRoundTable } from '../../runtime/round-table';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { CircleHelp, Columns2, Grid2X2, Monitor, PanelLeft, Rows2, SlidersHorizontal } from 'lucide-react';
@@ -46,7 +47,7 @@ function tableFailed(error: string) {
   useWorkspaceStore.getState().setSessionError(tile.id, error, tile.status !== 'running' && tile.status !== 'starting');
 }
 export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onToggleExplorer: () => void }) {
-  const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore();
+  const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore(useShallow((s) => ({ activeView: s.activeView, setView: s.setView, rootDirectory: s.rootDirectory, sessions: s.sessions, layoutMode: s.layoutMode, arrange: s.arrange, addSession: s.addSession })));
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string }[]): MenuItem[] => views.map(({ view, label }) => ({ label, current: activeView === view, onSelect: () => setView(view) }));

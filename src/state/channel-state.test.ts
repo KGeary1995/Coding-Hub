@@ -60,6 +60,12 @@ describe('terminal activity', () => {
     for (let second = 0; second < ACTIVITY_WINDOW; second++) tickActivity();
     expect(useActivityStore.getState().samples).not.toHaveProperty('t'); expect(activitySamples('t').every((value) => value === 0)).toBe(true);
   });
+  it('moves by the seconds that passed when a timer fires late (a hidden window)', () => {
+    const start = Date.now() + 1000000;
+    recordActivity('t', 4); tickActivity(start); recordActivity('t', 9); tickActivity(start + 60000);
+    expect(activitySamples('t').slice(-61)).toEqual([4, ...Array(59).fill(0), 9]);
+    tickActivity(start + 60000 + 10 * 60000); expect(useActivityStore.getState().samples).not.toHaveProperty('t');
+  });
   it('ignores focus and mouse reports as answers', () => {
     expect(isPersonInput('\x1b[I')).toBe(false); expect(isPersonInput('\x1b[O\x1b[<0;10;5M\x1b[<0;10;5m')).toBe(false);
     expect(isPersonInput('y')).toBe(true); expect(isPersonInput('\r')).toBe(true); expect(isPersonInput('\x1b[I1')).toBe(true);

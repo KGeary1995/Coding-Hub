@@ -5,6 +5,13 @@ import { workbench } from '../runtime/workbench';
 /** Today's usage from the CLIs' own logs (see DayUsage on the host), for the status bar's "Σ today". */
 export const useDayUsage = create<{ usage: DayUsage | null; days: LogUsage | null }>(() => ({ usage: null, days: null }));
 let reading = false; let readingDays = false;
+/**
+ * The next read of a day not caught up yet. One at a time: the status bar also asks every 15 s, and each answer that is
+ * not caught up used to start another chain, so reads came closer and closer together. Each read blocks the host for up
+ * to about 0.1 s, so they are a second apart.
+ */
+let followUp: ReturnType<typeof setTimeout> | null = null;
+export const FOLLOW_UP_MS = 1000;
 /** Every day's usage from the CLIs' logs (the last 60 days), for the Usage screen; read again until caught up. */
 export async function refreshUsageDays() {
   if (readingDays) return; readingDays = true;
@@ -14,8 +21,8 @@ export async function refreshUsageDays() {
 }
 export async function refreshDayUsage() {
   if (reading) return; reading = true;
-  // A long day's logs take more than one read: the next follows at once, until they are caught up.
-  try { const usage = await workbench<DayUsage>({ action: 'usage-today' }); useDayUsage.setState({ usage }); if (!usage.complete) setTimeout(() => void refreshDayUsage(), 500); }
+  // A long day's logs take more than one read: the next follows shortly, until they are caught up.
+  try { const usage = await workbench<DayUsage>({ action: 'usage-today' }); useDayUsage.setState({ usage }); if (!usage.complete) followUp ??= setTimeout(() => { followUp = null; void refreshDayUsage(); }, FOLLOW_UP_MS); }
   catch { /* Kept as it was; the status bar falls back to Trace's own runs. */ }
   finally { reading = false; }
 }

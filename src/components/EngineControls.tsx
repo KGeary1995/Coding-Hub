@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MemoryProject } from '../../shared/hub';
 import { hubCall } from '../state/hub-store';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
-import type { CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import type { ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, withPermissions } from '../runtime/permissions';
 import { CodexModelPicker } from './CodexModelPicker';
 import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue, permissionLevel } from '../../shared/schemas';
@@ -17,6 +17,18 @@ function tokenValue(value: string): number | null {
 }
 /** A limit of 0 would stop the CLI at its first response; treat it as no limit. */
 function limitValue(value: string): number | null { return tokenValue(value) || null; }
+/**
+ * The config with another Claude account ('' for the default sign-in). A saved conversation belongs to the account's
+ * config folder and cannot resume under another, so it is set aside in `kept` (by account) instead of being lost:
+ * choosing that account again while Settings is open brings it back. A restored one leaves `kept` (the config holds it
+ * again), so one the person then drops is not brought back by a later change.
+ */
+export function withProfile(config: ClaudeCLIEngineConfig, profileId: string, kept: Record<string, string>): ClaudeCLIEngineConfig {
+  const { accountProfileId: from, resumeId, ...rest } = config;
+  if (resumeId) kept[from ?? ''] = resumeId;
+  const back = kept[profileId]; delete kept[profileId];
+  return { ...rest, ...(profileId ? { accountProfileId: profileId } : {}), ...(back ? { resumeId: back } : {}) };
+}
 
 /**
  * Which shared memory project the channel reads and writes: the folder's automatic one, or another the person picks (a
@@ -41,6 +53,9 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
   const { profiles, error } = useAccountStore();
   useEffect(() => { void refreshClaudeProfiles(); }, []);
   const permissions = permissionLevel(config);
+  /** Conversations set aside by an account change, by account, while Settings is open. */
+  const kept = useRef<Record<string, string>>({});
+  const setAside = config.engine === 'claude' && !config.resumeId ? Object.entries(kept.current).find(([profile]) => profile !== (config.accountProfileId ?? '')) : undefined;
   return (
     <div className="engine-controls">
       <label className="model-control">Permissions
@@ -56,12 +71,9 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
       </label>}
       {config.engine === 'claude' ? <>
         <label className="model-control">Claude account profile
-          <select aria-label="Claude account profile" value={config.accountProfileId ?? ''} onChange={(event) => {
-            // A saved conversation belongs to the old profile's config directory and cannot resume under another.
-            const { accountProfileId: _old, resumeId: _resume, ...rest } = config;
-            onChange(event.target.value ? { ...rest, accountProfileId: event.target.value } : rest);
-          }}><option value="">Default · existing CLI login</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{config.accountProfileId && !profiles.some((p) => p.id === config.accountProfileId) && <option value={config.accountProfileId}>Saved profile · unavailable</option>}</select>
+          <select aria-label="Claude account profile" value={config.accountProfileId ?? ''} onChange={(event) => onChange(withProfile(config, event.target.value, kept.current))}><option value="">Default · existing CLI login</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{config.accountProfileId && !profiles.some((p) => p.id === config.accountProfileId) && <option value={config.accountProfileId}>Saved profile · unavailable</option>}</select>
           <small>Create and connect named accounts in Accounts & connections. Stop this session before changing its account.</small>
+          {setAside && <small role="status">The saved conversation belongs to {setAside[0] ? profiles.find((p) => p.id === setAside[0])?.name ?? 'another profile' : 'the default sign-in'}, so the next start begins a new conversation. Choose that account again to continue it.</small>}
           {error && <small role="alert">{error}</small>}
         </label>
         <div className="model-control">

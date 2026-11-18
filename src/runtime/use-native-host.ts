@@ -1,13 +1,14 @@
 import { useEffect } from 'react';
 import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
-import type { ChannelEngine } from '../../shared/types';
+import type { ChannelEngine, Session } from '../../shared/types';
 import { HIERARCHY_MODELS, RETIRED_REVIEWER_MODELS } from '../../shared/chat';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
-import { forgetTable, rememberTable, restoreTables } from './round-table';
+import { archiveFindings, forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
 import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, leadOf, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
-import { focusTerminal, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
+import { focusTerminal, onWebGLContextLost, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
+import { reportWindowHealth } from './window-health';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
@@ -57,15 +58,19 @@ export function useNativeHost() {
     if (!host) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'browser' }); return; }
     let cancelled = false;
     let loaded = false;
+    // A terminal's lost WebGL context (once per incident) goes into the health record, which a GPU process death alone would miss.
+    onWebGLContextLost(() => reportWindowHealth('context-lost', undefined, 'terminal WebGL'));
     let unsubscribeSave = () => {};
     const unsubscribeUsage = host.onUsage((usage) => {
       useHubStore.getState().upsert(usage);
-      if (usage.conversationId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.runId === usage.runId && session.config.engine === usage.engine && session.config.resumeId !== usage.conversationId ? { ...session, config: { ...session.config, resumeId: usage.conversationId } } : session) }));
+      // Only when a channel's conversation really changed: every usage update would otherwise redraw the whole window.
+      const resumed = (session: Session) => session.runId === usage.runId && session.config.engine === usage.engine && session.config.resumeId !== usage.conversationId;
+      if (usage.conversationId && useWorkspaceStore.getState().sessions.some(resumed)) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => resumed(session) ? { ...session, config: { ...session.config, resumeId: usage.conversationId } } : session) }));
     });
     void hubCall<UsageRecord[]>({ action: 'usage' }).then((usage) => { if (!cancelled) { const live = useHubStore.getState().usage; useHubStore.getState().setUsage([...live, ...usage.filter((u) => !live.some((l) => l.runId === u.runId))]); } }).catch(() => {});
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
-    const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced(); }, 60000);
+    const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced().catch(() => { /* Tried again next minute. */ }); }, 60000);
     const unsubscribeChat = host.onChatEvent((envelope) => {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
@@ -112,7 +117,11 @@ export function useNativeHost() {
       loaded = true;
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
+      // What the saved workspace is made of: when none of these changed (a status line, a view), nothing is serialized.
+      const parts = (state: ReturnType<typeof useWorkspaceStore.getState>) => [state.sessions, state.tiles, state.layoutMode, state.rootDirectory, state.focusedSessionId] as const;
+      let seen = parts(useWorkspaceStore.getState());
       unsubscribeSave = useWorkspaceStore.subscribe((state) => {
+        const now = parts(state); if (now.every((part, index) => part === seen[index])) return; seen = now;
         const workspace = savedWorkspace(state);
         const next = JSON.stringify(workspace);
         if (next === previous) return;
@@ -130,7 +139,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -184,14 +193,33 @@ export async function stopSession(id: string): Promise<boolean> {
   const stopped = await Promise.all([stopRun(id), ...seats.map((seat) => stopRun(seat.id))]);
   return stopped.every(Boolean);
 }
-/** Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped. */
+/**
+ * Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped, or when the table's
+ * findings could not be saved to shared memory (the channel stays then, with the reason on it).
+ */
 export async function closeChannel(id: string): Promise<boolean> {
-  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
-  if (!(await stopSession(id))) return false;
+  const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id); const ids = [id, ...seats.map((seat) => seat.id)];
+  if (!(await stopSession(id))) {
+    // A run still starting cannot be stopped yet; without this the Close button seems to do nothing.
+    if (useWorkspaceStore.getState().sessions.some((session) => ids.includes(session.id) && session.status === 'starting')) useWorkspaceStore.getState().setSessionError(id, 'This channel is still starting. Close it again once it runs.');
+    return false;
+  }
   // The exit events can arrive just after the stop requests return; a session still running is never removed.
-  await settled([id, ...seats.map((seat) => seat.id)]);
+  await settled(ids);
+  const unsaved = await keepTableFindings(id); if (unsaved) { useWorkspaceStore.getState().setSessionError(id, unsaved); return false; }
   useWorkspaceStore.getState().removeSession(id);
   return !useWorkspaceStore.getState().sessions.some((session) => session.id === id);
+}
+/**
+ * A Round Table's findings go to shared memory before its channel closes, as closing the table itself does
+ * (ChatView's closeTable). Its runs have stopped by now, so no later table event brings them back. The reason, or null.
+ */
+async function keepTableFindings(id: string): Promise<string | null> {
+  // removeSession keeps a live channel, so archiving now would save the findings with the table still open.
+  const status = useWorkspaceStore.getState().sessions.find((session) => session.id === id)?.status;
+  if (status === 'starting') return 'This channel is still starting. Close it again once it runs.';
+  if (status === 'running') return 'This channel is still running. Close it again once it stops.';
+  const unsaved = await archiveFindings(id); return unsaved ? `${unsaved} The channel stays open; try Close again.` : null;
 }
 async function stopRun(id: string): Promise<boolean> {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
@@ -220,8 +248,9 @@ export function remoteResume(request: RemoteResumeRequest): string | undefined {
     ? { engine: 'claude', resumeId: request.id, ...(request.profileId ? { accountProfileId: request.profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
     : { engine: 'codex', resumeId: request.id, model: '', reasoningEffort: null };
   session.title = request.title || (request.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed');
+  // In the layout the desktop already uses: the person is elsewhere.
   const sessions = [...state.sessions, session];
-  useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid' });
+  useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, state.layoutMode) });
   return undefined;
 }
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
@@ -249,6 +278,7 @@ export async function remoteControl(id: string, control: ChannelControl): Promis
   if (control === 'close') {
     // The same rule as the X on its tile: a computer keeps at least one channel.
     if (channelsOf(useWorkspaceStore.getState().sessions).length <= 1) return 'This is the only channel on this computer, so it was stopped but not closed.';
+    const unsaved = await keepTableFindings(id); if (unsaved) return unsaved;
     useWorkspaceStore.getState().removeSession(id);
     return current() ? 'The channel could not be closed.' : undefined;
   }

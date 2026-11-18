@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { startWindowHealth } from './runtime/window-health';
 // Fonts ship with the app so it renders the same offline.
 import '@fontsource/chakra-petch/400.css';
 import '@fontsource/chakra-petch/500.css';
@@ -24,8 +26,10 @@ import './screens.css';
 import './views.css';
 import './flight-deck.css';
 
+// A stall or lost GPU context in this window is recorded in host-health.json, as the main process's are.
+startWindowHealth();
 // Terminals measure their cell size when created, so load the terminal font first. The files are local.
 const terminalFont = ['400 13px "IBM Plex Mono"', '600 13px "IBM Plex Mono"'].map((font) => document.fonts.load(font));
 void Promise.allSettled(terminalFont).then(() => ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><App /></React.StrictMode>,
+  <React.StrictMode><ErrorBoundary label="Trace's window"><App /></ErrorBoundary></React.StrictMode>,
 ));

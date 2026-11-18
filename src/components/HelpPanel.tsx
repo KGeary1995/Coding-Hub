@@ -12,7 +12,7 @@ export function HelpPanel() {
   const topics = searchHelp(query, category);
   const topic = topics.find((t) => t.id === selected) ?? topics[0];
   const categories = ['All topics', ...new Set(HELP_TOPICS.map((t) => t.category))];
-  const openTopic = (id: string) => { setQuery(''); setCategory('All topics'); setSelected(id); document.querySelector('.help-article')?.scrollTo({ top: 0 }); };
+  const openTopic = (id: string) => { setQuery(''); setCategory('All topics'); setSelected(id); document.getElementById('main-content')?.scrollTo({ top: 0 }); /* The page scrolls in main.main-shell, not the article. */ };
 
   return <section className="feature-panel hub-panel help-panel">
     <div className="feature-panel-heading"><span className="eyebrow">UNDERSTAND YOUR AI WORKSPACE</span><h1><BookOpen size={28} />Help & AI guide</h1><p>Learn the concepts, choose the right tools, and get unstuck. Available locally, even offline.</p></div>

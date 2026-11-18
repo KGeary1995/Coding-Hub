@@ -15,9 +15,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--tr-fg-dim); out
 input:focus, select:focus { outline: 1px solid var(--tr-line-strong); }
 button { transition: background .15s, color .15s; }
 .app-shell { display: flex; min-height: 100vh; }
-.navigation { width: 224px; flex-shrink: 0; background: var(--tr-surface); border-right: 1px solid var(--tr-line); padding: 29px 14px 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
 .main-shell { flex: 1; min-width: 0; padding: 0 30px; display: flex; flex-direction: column; background: var(--tr-bg); }
-.version { font-size: 12px; color: var(--tr-fg-faint); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); padding: 4px 6px; letter-spacing: 1px; }
 .eyebrow { color: var(--tr-fg); font-size: 12px; letter-spacing: 2px; font-weight: 600; margin-bottom: 11px; }
 h1 { margin: 0; font-size: 27px; font-weight: 550; letter-spacing: -.8px; color: var(--tr-fg-strong); }
 .button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; padding: 9px 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); font-size: 13px; font-weight: 550; white-space: nowrap; }
@@ -89,13 +87,12 @@ kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-lef
 .engine-health.detailed { margin: 28px 0; }
 .session-error { display: flex; align-items: flex-start; gap: 7px; padding: 9px 12px; background: var(--tr-del-bg); color: var(--tr-st-limit); border-bottom: 1px solid var(--tr-st-failed); font-size: 12px; line-height: 1.6; max-height: 96px; overflow-y: auto; flex-shrink: 0; }
 .session-error svg { flex-shrink: 0; margin-top: 2px; }
-.command-backdrop { position: fixed; inset: 0; background: color-mix(in srgb, var(--tr-bg) 71%, transparent); backdrop-filter: blur(5px); z-index: 100; display: flex; justify-content: center; align-items: flex-start; padding-top: 17vh; }
+.command-backdrop { position: fixed; inset: 0; background: color-mix(in srgb, var(--tr-bg) 71%, transparent); z-index: 100; display: flex; justify-content: center; align-items: flex-start; padding-top: 17vh; }
 .command-menu { width: 540px; max-height: 70vh; overflow: hidden; border: 1px solid var(--tr-fg-off); background: var(--tr-hover); box-shadow: var(--tr-shadow-overlay); border-radius: var(--tr-r-panel); }
-.command-search { padding: 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--tr-line-control); color: var(--tr-fg-dim); }
-.command-search input { border: 0; outline: none; background: transparent; color: var(--tr-fg); flex: 1; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .persistence-alert, .history-notice { padding: 12px 16px; margin: 14px 0; border: 1px solid var(--tr-st-limit); border-radius: var(--tr-r-control); background: var(--tr-raised); color: var(--tr-st-limit); font-size: 14px; line-height: 1.6; }
+.persistence-alert { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; } .persistence-alert .quiet-button { flex: none; }
 .storage-status { color: var(--tr-fg-dim); text-transform: capitalize; font-size: 13px; }
 .storage-status.error { color: var(--tr-st-limit); }
 .storage-card { margin-top: 20px; padding: 24px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-surface); }
@@ -213,7 +210,6 @@ kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-lef
   .engine-controls { grid-template-columns: 1fr; }
 }
 @media (max-width: 1180px) {
-  .navigation { width: 190px; }
   .main-shell { padding: 0 20px; }
   h1 { font-size: 23px; }
   .tile-header { gap: 5px; padding: 0 8px; }
@@ -282,7 +278,6 @@ kbd { font-family: inherit; font-size: 11px; color: var(--tr-fg-dim); margin-lef
 .pricing-editor input { width: 95px; }
 .pricing-editor td:first-child input { width: 200px; }
 /* Local AI reference and shared project instructions. */
-.navigation nav[aria-label="Main navigation"] { overflow-y: auto; flex-shrink: 1; min-height: 140px; }
 .rules-state { color: var(--tr-fg-dim); font-size: 14px; margin-right: auto; }
 .rules-columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 20px; }
 .rules-editor-header { display: flex; gap: 12px; align-items: center; justify-content: space-between; }

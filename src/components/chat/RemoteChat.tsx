@@ -3,7 +3,7 @@ import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
-import { AGENT, ChainBar, EMPTY, Item, readImage, TableBar } from './ChatParts';
+import { AGENT, ChainBar, EMPTY, Item, readImage, TableBar, useSteady } from './ChatParts';
 
 /**
  * A chat channel that runs on another device's computer: on the phone, and in another computer's tab on the desktop. The
@@ -76,6 +76,8 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     if (!target.runId) return;
     if (await act({ action: 'answer', sessionId: target.sessionId, runId: target.runId, requestId, allow, ...(allowEdits ? { allowEdits } : {}) })) chatAnswered(keyOf(target.sessionId), requestId, allow);
   };
+  // Steady across renders, so a message that did not change is not drawn again (sameItem).
+  const answerLead = useSteady((requestId: string) => answer('lead')(requestId)); const answerPlanner = useSteady((requestId: string) => answer('planner')(requestId)); const answerPartner = useSteady((requestId: string) => answer('partner')(requestId));
   const stop = () => { if (!runId) return; void act(table ? { action: 'table-stop', sessionId, runId } : { action: 'interrupt', sessionId, runId }); };
   const attach = async (files: Blob[]) => { try { const read = await Promise.all(files.filter((item) => item.type.startsWith('image/')).map(readImage)); setImages((current) => [...current, ...read].slice(0, 10)); } catch (e) { setError((e as Error).message); } };
   const agent = AGENT[engine];
@@ -87,9 +89,9 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
       {!items.length && <p className="chat-empty">{live ? `Ask ${agent} anything. The conversation is the same one as on the computer.` : 'This chat is not running. Start it to write to it.'}</p>}
       {items.map(({ item, from }) => from === 'lead'
-        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answer('lead')} view={setViewing} />
-        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={planner.results} agent="Claude" author="claude" role="Planner" answer={answer('planner')} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partner.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={hierarchy ? 'Reviewer' : table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answer('partner')} view={setViewing} />)}
+        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
+        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={planner.results} agent="Claude" author="claude" role="Planner" answer={answerPlanner} view={setViewing} />
+        : <Item key={`partner-${item.id}`} item={item} results={partner.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={hierarchy ? 'Reviewer' : table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answerPartner} view={setViewing} />)}
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
     </div>
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>

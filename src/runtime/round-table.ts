@@ -74,13 +74,25 @@ export async function keepFindings(lead: Session): Promise<number> {
   if (!findings.length || !isAgentConfig(lead.config)) return 0;
   if (!lead.config.memoryKey && !directory) throw new Error('This channel has no folder to find its memory project from.');
   const project = lead.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
-  await hubCall({ action: 'memory-write', project, title: `Round Table review record: ${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}, ${findings.length - open.length} verified`, content: ['Saved by Trace when the Round Table closed.', ...findings.map((finding) => `- ${findingLine(finding)}`)].join('\n'), author: 'human' });
-  for (const finding of open) {
-    const content = [`Round Table finding ${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}.`, 'Saved by Trace when the Round Table closed, because it was not verified.'].filter(Boolean).join('\n');
-    await hubCall({ action: 'memory-write', project, title: itemTitle(`Round Table ${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}`), content, author: 'human' });
+  const notes = [{ title: `Round Table review record: ${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}, ${findings.length - open.length} verified`, content: ['Saved by Trace when the Round Table closed.', ...findings.map((finding) => `- ${findingLine(finding)}`)].join('\n') },
+    ...open.map((finding) => ({ title: itemTitle(`Round Table ${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}`), content: [`Round Table finding ${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}.`, 'Saved by Trace when the Round Table closed, because it was not verified.'].filter(Boolean).join('\n') }))]
+    .map((note) => ({ ...note, project, author: 'human' as const, key: `${project}\n${note.title}\n${note.content}` }));
+  const missing = notes.filter((note) => !written.has(note.key));
+  // One call, so the project's Drive copy syncs once rather than once a note.
+  if (missing.length) try { await hubCall({ action: 'memory-write-many', notes: missing.map(({ key: _key, ...note }) => note) }); }
+  catch (error) {
+    const { code, message } = error as Error & { code?: string };
+    // Notes are saved in order: the first N of them are, and a retry must not write them again.
+    if (code === 'MEMORY_PARTIAL') { const saved = Number(/^(\d+) of /.exec(message)?.[1]); if (Number.isInteger(saved)) for (const note of missing.slice(0, saved)) written.add(note.key); throw error; }
+    // A host that refuses the request (an older one has no memory-write-many): one note at a time, as before.
+    if (code !== 'INVALID_HUB_REQUEST') throw error;
+    for (const { key, ...note } of missing) { await hubCall({ action: 'memory-write', ...note }); written.add(key); }
   }
+  for (const note of notes) written.delete(note.key);
   return findings.length;
 }
+/** Notes written by a save that failed part way. Memory notes cannot be changed or removed, so a retry writes only the rest. */
+const written = new Set<string>();
 
 /**
  * Saves a table's findings to shared memory and takes them off its saved record, so they are saved once. The error
@@ -127,13 +139,23 @@ export async function tableRequest(leadId: string, request: TableRequest): Promi
   return result?.ok ? null : result?.error.message ?? 'Trace could not reach the Round Table.';
 }
 
+type TableRecord = NonNullable<Session['roundTable']>;
+/** Whether two saved tables are the same; waiting images (up to 6 MB of base64) are compared as they are, not serialized. */
+type Images = readonly { mediaType: string; data: string }[];
+const sameImages = (left: Images = [], right: Images = []) => left.length === right.length && left.every((image, index) => image.mediaType === right[index].mediaType && image.data === right[index].data);
+/** Images (a waiting message's, and a hierarchy task's once the host keeps them) are compared field by field, not serialized twice on every table event. */
+function sameRecord(a: TableRecord, b: TableRecord) {
+  const { waitingImages: left, chain: chainA, ...restA } = a; const { waitingImages: right, chain: chainB, ...restB } = b;
+  const { images: imagesA, ...stepsA } = (chainA ?? {}) as { images?: Images }; const { images: imagesB, ...stepsB } = (chainB ?? {}) as { images?: Images };
+  return sameImages(left, right) && sameImages(imagesA, imagesB) && !chainA === !chainB && JSON.stringify(stepsA) === JSON.stringify(stepsB) && JSON.stringify(restA) === JSON.stringify(restB);
+}
 /** The leading channel remembers its table (partner, driver, rounds) whenever the table changes. */
 export function rememberTable(leadId: string, table: RoundTableState) {
   // The review record and a waiting message are kept with it, so a restart loses neither.
   const saved = { partner: table.partner.sessionId, driver: table.driver, rounds: table.rounds, ...(table.kind === 'hierarchy' ? { kind: 'hierarchy' as const, ...(table.planner ? { planner: table.planner.sessionId } : {}), ...(table.chain ? { chain: table.chain } : {}) } : {}), ...(table.findings?.length ? { findings: table.findings } : {}), ...(table.waiting !== undefined ? { waiting: table.waiting } : {}), ...(table.waitingImages?.length ? { waitingImages: table.waitingImages } : {}) };
   useWorkspaceStore.setState((state) => {
     const lead = state.sessions.find((session) => session.id === leadId);
-    if (!lead || (lead.roundTable && JSON.stringify(lead.roundTable) === JSON.stringify(saved))) return {};
+    if (!lead || (lead.roundTable && sameRecord(lead.roundTable, saved))) return state;
     const sessions = state.sessions.map((session) => session.id === leadId ? { ...session, roundTable: saved } : session);
     // A seat added as a channel (a table opened from a phone) is hidden now: its tile goes.
     return { sessions, tiles: fitTiles(sessions, state.tiles, state.layoutMode) };

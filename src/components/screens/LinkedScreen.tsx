@@ -5,6 +5,7 @@ import type { LinkedComputer, LinkedScreenState } from '../../../shared/remote';
 import { fitPaste, type ScreenKind } from '../../../shared/screen';
 import { savedCredentials, screen, ScreenChannel, unlockKeys, WAKE_KEYS, type KeyStroke } from '../../runtime/screen-channel';
 import { workbench } from '../../runtime/workbench';
+import { MAC } from '../platform';
 
 const XK_SUPER_L = 0xffeb; const XK_CONTROL_L = 0xffe3; const XK_V = 0x0076;
 type Status = 'connecting' | 'reconnecting' | 'signin' | 'connected' | 'ended';
@@ -19,14 +20,13 @@ const RETRY_RESET_MS = 30000;
 /** How often an open screen asks whether that computer is locked, so the note comes and goes with it. */
 const LOCK_CHECK_MS = 5000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const mac = navigator.userAgent.includes('Mac');
 /**
  * The modifier each side copies and pastes with differs, so one local key stands in for the other's: on Windows (whose
  * Windows key cannot be sent) viewing a Mac, Ctrl sends ⌘; on a Mac viewing Windows, ⌘ sends Ctrl (noVNC would send Alt).
  */
 function swapFor(kind: ScreenKind | null) {
-  if (kind === 'system' && !mac) return { codes: ['ControlLeft', 'ControlRight'], keysym: XK_SUPER_L, code: 'MetaLeft', label: 'Ctrl as ⌘', title: 'Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on the Mac', paste: (event: KeyboardEvent) => event.ctrlKey && !event.metaKey };
-  if (kind === 'trace' && mac) return { codes: ['MetaLeft', 'MetaRight'], keysym: XK_CONTROL_L, code: 'ControlLeft', label: '⌘ as Ctrl', title: '⌘ is sent as Ctrl, so ⌘C and ⌘V copy and paste on Windows', paste: (event: KeyboardEvent) => event.metaKey && !event.ctrlKey };
+  if (kind === 'system' && !MAC) return { codes: ['ControlLeft', 'ControlRight'], keysym: XK_SUPER_L, code: 'MetaLeft', label: 'Ctrl as ⌘', title: 'Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on the Mac', paste: (event: KeyboardEvent) => event.ctrlKey && !event.metaKey };
+  if (kind === 'trace' && MAC) return { codes: ['MetaLeft', 'MetaRight'], keysym: XK_CONTROL_L, code: 'ControlLeft', label: '⌘ as Ctrl', title: '⌘ is sent as Ctrl, so ⌘C and ⌘V copy and paste on Windows', paste: (event: KeyboardEvent) => event.metaKey && !event.ctrlKey };
   return null;
 }
 

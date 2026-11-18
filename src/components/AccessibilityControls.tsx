@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { focusTerminal } from '../runtime/terminals';
 import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
+import { CHANNEL_KEYS, channelKey } from './channel-key';
 interface DisplaySettings { scale: number; density: 'comfortable' | 'compact'; contrast: boolean }
 const defaults: DisplaySettings = { scale: 100, density: 'comfortable', contrast: false };
 function load(): DisplaySettings { try { const value = JSON.parse(localStorage.getItem('coding-hub-display') ?? 'null'); return value && [80, 90, 100, 110, 125].includes(value.scale) && ['comfortable', 'compact'].includes(value.density) && typeof value.contrast === 'boolean' ? value : defaults; } catch { return defaults; } }
@@ -9,9 +10,9 @@ export function useAccessibility() {
   useEffect(() => {
     apply(load());
     const handler = (event: KeyboardEvent) => {
-      // Top-row digits only: Alt+numpad digits are Windows character entry (Alt+0169).
-      if (event.altKey && !event.ctrlKey && !event.metaKey && /^Digit[1-8]$/.test(event.code)) {
-        const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[Number(event.code.slice(5)) - 1];
+      const channel = channelKey(event);
+      if (channel !== null) {
+        const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[channel];
         if (session) {
           event.preventDefault(); event.stopPropagation(); state.setView('workspace');
           // Only the isolated tile's terminal is mounted; isolate the requested one instead.
@@ -28,5 +29,5 @@ export function useAccessibility() {
 export function AccessibilityControls() {
   const [value, setValue] = useState(load); const [error, setError] = useState('');
   function update(next: DisplaySettings) { setValue(next); apply(next); try { localStorage.setItem('coding-hub-display', JSON.stringify(next)); setError(''); } catch { setError('Display settings apply now but could not be saved.'); } }
-  return <article className="storage-card"><h2>Display and keyboard</h2><div className="hub-toolbar"><label>Interface scale<select aria-label="Interface scale" value={value.scale} onChange={(e) => update({ ...value, scale: Number(e.target.value) })}>{[80, 90, 100, 110, 125].map((scale) => <option key={scale} value={scale}>{scale}%</option>)}</select></label><label>Information density<select aria-label="Information density" value={value.density} onChange={(e) => update({ ...value, density: e.target.value as DisplaySettings['density'] })}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label className="update-checkbox"><input type="checkbox" checked={value.contrast} onChange={(e) => update({ ...value, contrast: e.target.checked })} />Higher contrast</label></div><p><kbd>Alt+1–8</kbd> focuses a channel. <kbd>F1</kbd> opens help. <kbd>Ctrl/Cmd+Shift+F</kbd> searches local context. <kbd>Ctrl/Cmd+Shift+P</kbd> opens commands. <kbd>Tab</kbd> follows keyboard focus; inside a terminal it passes to the CLI.</p><p className="control-note">Display settings stay in this Electron profile. Terminal font size is configured separately below. On small windows, lower scale or use compact density.</p>{error && <p role="alert" className="error-message">{error}</p>}</article>;
+  return <article className="storage-card"><h2>Display and keyboard</h2><div className="hub-toolbar"><label>Interface scale<select aria-label="Interface scale" value={value.scale} onChange={(e) => update({ ...value, scale: Number(e.target.value) })}>{[80, 90, 100, 110, 125].map((scale) => <option key={scale} value={scale}>{scale}%</option>)}</select></label><label>Information density<select aria-label="Information density" value={value.density} onChange={(e) => update({ ...value, density: e.target.value as DisplaySettings['density'] })}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label className="update-checkbox"><input type="checkbox" checked={value.contrast} onChange={(e) => update({ ...value, contrast: e.target.checked })} />Higher contrast</label></div><p><kbd>{CHANNEL_KEYS}</kbd> focuses a channel. <kbd>F1</kbd> opens help. <kbd>Ctrl/Cmd+Shift+F</kbd> searches local context. <kbd>Ctrl/Cmd+Shift+P</kbd> opens commands. <kbd>Tab</kbd> follows keyboard focus; inside a terminal it passes to the CLI.</p><p className="control-note">Display settings stay in this Electron profile. Terminal font size is configured separately below. On small windows, lower scale or use compact density.</p>{error && <p role="alert" className="error-message">{error}</p>}</article>;
 }

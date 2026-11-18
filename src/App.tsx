@@ -1,5 +1,7 @@
+import { useShallow } from 'zustand/react/shallow';
 import { LinkedComputerView } from './components/screens/LinkedComputerView';
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import { useAccessibility } from './components/AccessibilityControls';
 import { EmptyWorkspace, useProjectSetup } from './components/workspace/EmptyWorkspace';
 import { SessionGrid } from './components/SessionGrid';
@@ -13,6 +15,7 @@ import { WorkspaceExplorer } from './components/WorkspaceExplorer';
 import { Topbar } from './components/shell/Topbar';
 import { StatusBar } from './components/shell/StatusBar';
 import { Toasts } from './components/shell/Toasts';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 /** Channels, or the empty screen until a project is chosen. Mounted per visit, so setup state is re-read each time. */
 function WorkspaceView({ explorer, onCloseExplorer }: { explorer: boolean; onCloseExplorer: () => void }) {
@@ -31,7 +34,7 @@ export function App() {
   useNativeHost();
   useViewShortcuts();
   const [explorer, setExplorer] = useState(false);
-  const { activeView, persistenceReady, persistenceError, logError } = useWorkspaceStore();
+  const { activeView, persistenceReady, persistenceError, logError } = useWorkspaceStore(useShallow((s) => ({ activeView: s.activeView, persistenceReady: s.persistenceReady, persistenceError: s.persistenceError, logError: s.logError })));
   // Once the workspace is up, fetch the other screens in the background so they open instantly.
   useEffect(() => { if (!persistenceReady) return; const timer = setTimeout(preloadScreens, 1500); return () => clearTimeout(timer); }, [persistenceReady]);
   return (
@@ -39,13 +42,16 @@ export function App() {
       <a className="skip-link" href="#main-content">Skip to workspace content</a>
       <Topbar explorer={explorer} onToggleExplorer={() => setExplorer(!explorer)} />
       <main id="main-content" tabIndex={-1} className="main-shell">
-        {(persistenceError || logError) && <div className="persistence-alert" role="alert">{persistenceError || logError}</div>}
+        {/* A saving problem stays until a save works; a recording problem can be dismissed, as nothing else clears it. */}
+        {(persistenceError || logError) && <div className="persistence-alert" role="alert"><span>{persistenceError || logError}</span>{!persistenceError && <button className="quiet-button" aria-label="Dismiss this notice" onClick={() => useWorkspaceStore.setState({ logError: null })}><X size={14} /></button>}</div>}
+        <ErrorBoundary label="This view" resetKey={activeView}>
         {!persistenceReady ? <div className="history-empty">Restoring local workspace…</div>
           : activeView === 'workspace' ? <WorkspaceView explorer={explorer} onCloseExplorer={() => setExplorer(false)} />
           : activeView === 'computer' ? <LinkedComputerView />
           : activeView === 'history' ? <SessionHistory />
             : activeView === 'files' || activeView === 'diff' ? <RepositoryPanel mode={activeView} />
               : <FeaturePanel />}
+        </ErrorBoundary>
       </main>
       <StatusBar />
       <Toasts />

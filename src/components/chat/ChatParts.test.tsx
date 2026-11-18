@@ -1,0 +1,82 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { ChatBlock } from '../../../shared/chat';
+import type { ChatItem, ToolResult } from '../../state/chat-store';
+import { Item, type ItemProps, sameItem, TableBar } from './ChatParts';
+
+const said = (id: string, text: string, streaming = ''): ChatItem => ({ kind: 'assistant', id, blocks: [{ type: 'text', text }], streaming });
+const answer = () => () => {}; const view = () => {};
+const props = (item: ChatItem, results: Record<string, ToolResult> = {}): ItemProps => ({ item, results, agent: 'Claude', answer, view });
+
+/**
+ * There is no DOM here, so this draws the thread as React would decide to: an item is drawn again only when sameItem
+ * says its props changed (Item is React.memo with sameItem). Counted per item across a streamed piece.
+ */
+function redrawn(before: ItemProps[], after: ItemProps[]) { return after.filter((next, index) => !before[index] || !sameItem(before[index], next)).map((next) => next.item.id); }
+
+describe('a chat thread draws again only what changed', () => {
+  it('Item is memoized with sameItem', () => {
+    expect((Item as unknown as { compare: unknown }).compare).toBe(sameItem);
+  });
+  it('a streamed piece redraws only the message being streamed, not the settled ones', () => {
+    const settled = Array.from({ length: 200 }, (_, index) => said(`m${index}`, `Message **${index}**`));
+    const streaming = said('live', '', 'Hel');
+    const results = {};
+    const before = [...settled, streaming].map((item) => props(item, results));
+    // A delta: the store copies the items array and replaces only the streaming item; settled items keep their object.
+    const after = [...settled, { ...streaming, streaming: 'Hello' }].map((item) => props(item, results));
+    expect(redrawn(before, after)).toEqual(['live']);
+  });
+  it('a new answer handler on every render would redraw everything, so callers keep it steady', () => {
+    const item = said('a', 'Done.');
+    expect(sameItem(props(item), { ...props(item), answer: () => () => {} })).toBe(false);
+  });
+  it('a tool result redraws only the message holding that tool call', () => {
+    const tool: ChatBlock = { type: 'tool', id: 't1', name: 'Bash', input: { command: 'ls' } };
+    const withTool: ChatItem = { kind: 'assistant', id: 'b', blocks: [tool], streaming: '' };
+    const other = said('c', 'Other.');
+    const before = { t0: { text: 'old', isError: false, image: false } };
+    const after = { ...before, t1: { text: 'files', isError: false, image: false } };
+    expect(sameItem(props(other, before), props(other, after))).toBe(true);
+    expect(sameItem(props(withTool, before), props(withTool, after))).toBe(false);
+  });
+});
+
+describe('a message that does not match this version still draws', () => {
+  it('a tool call without its input, and a block of an unknown kind, do not stop the thread', () => {
+    const odd = { kind: 'assistant', id: 'x', streaming: '', blocks: [{ type: 'tool', id: 't', name: 'Mystery' }, { type: 'diagram', text: 'new' }, { type: 'text', text: 'Still here.' }] } as unknown as ChatItem;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const html = renderToStaticMarkup(<Item {...props(odd)} />);
+    error.mockRestore();
+    expect(html).toContain('Mystery'); expect(html).toContain('Still here.'); expect(html).not.toContain('diagram');
+  });
+  it('an approval whose input is null', () => {
+    const asks = { kind: 'permission', id: 'p', toolName: 'Bash', description: 'Run it', input: null, canAllowEdits: false, answer: null } as unknown as ChatItem;
+    const html = renderToStaticMarkup(<Item {...props(asks)} />);
+    expect(html).toContain('wants to use Bash'); expect(html).toContain('Allow');
+  });
+});
+
+describe('answering an approval', () => {
+  it('asks for the handler when the person answers, not when the card is drawn', () => {
+    const sent: string[] = []; let run = 'first';
+    const answerFor = vi.fn((id: string) => (allow: boolean) => { sent.push(`${run}:${id}:${allow}`); });
+    const asks: ChatItem = { kind: 'permission', id: 'p', toolName: 'Bash', description: '', input: {}, canAllowEdits: false, answer: null };
+    const draw = (Item as unknown as { type: (props: ItemProps) => ReactElement<{ answer: (allow: boolean) => void }> }).type;
+    const card = draw({ ...props(asks), answer: answerFor });
+    expect(answerFor).not.toHaveBeenCalled();
+    run = 'second'; card.props.answer(true);
+    expect(sent).toEqual(['second:p:true']);
+  });
+});
+
+describe('a Round Table message waiting to go', () => {
+  it('says how many images it carries, also on a phone or linked computer, which gets only the count', () => {
+    const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'discussing' as const, agreed: false, waiting: 'Also the docs.' };
+    const bar = (extra: object) => renderToStaticMarkup(<TableBar leadEngine="claude" table={{ ...table, ...extra }} busy={false} onRequest={() => {}} />);
+    expect(bar({ waitingImageCount: 2 })).toContain(' + 2 images');
+    expect(bar({ waitingImages: [{ mediaType: 'image/png', data: 'AA==' }] })).toContain(' + 1 image');
+    expect(bar({})).not.toContain('image');
+  });
+});

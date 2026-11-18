@@ -101,10 +101,16 @@
   --tr-focus: 2px solid var(--tr-fg-strong);
 }
 
+/* Higher contrast (Settings > Display): tokens, not single rules, since later stylesheets draw the borders from them.
+   Control outlines go from 2.0:1 to 9:1, tile frames to 3:1, and the dimmest marks (idle trace, drag handle, offline
+   computer) to readable text. */
+:root[data-contrast="high"] { --tr-line-control: var(--tr-fg-dim); --tr-tile-border: var(--tr-line-strong); --tr-fg-off: var(--tr-fg-faint); }
+[data-contrast="high"] ::-webkit-scrollbar-thumb, [data-contrast="high"] ::-webkit-scrollbar-thumb:hover { background: var(--tr-line-strong); }
+
 /* The faint grid behind everything; panels and tiles are solid over it, so text never sits on the lines. */
 body { background-color: var(--tr-bg); background-image: linear-gradient(var(--tr-grid) 1px, transparent 1px), linear-gradient(90deg, var(--tr-grid) 1px, transparent 1px); background-size: 32px 32px; color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
-/* Corner brackets: drawn on the element's ::after by `.tr-brackets`, in --bracket (defaults to the line colour). */
-.tr-brackets::after, .session-tile.tr-tile.selected::after, .session-tile.tr-tile.state-waiting::after, .session-tile.tr-tile.state-failed::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
+/* Corner brackets: drawn on a tile's ::after, in --bracket (defaults to the line colour). */
+.session-tile.tr-tile.selected::after, .session-tile.tr-tile.state-waiting::after, .session-tile.tr-tile.state-failed::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
   background: linear-gradient(var(--c), var(--c)) left top / 14px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 14px, linear-gradient(var(--c), var(--c)) right top / 14px 2px, linear-gradient(var(--c), var(--c)) right top / 2px 14px,
     linear-gradient(var(--c), var(--c)) left bottom / 14px 2px, linear-gradient(var(--c), var(--c)) left bottom / 2px 14px, linear-gradient(var(--c), var(--c)) right bottom / 14px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 14px;
   background-repeat: no-repeat; }

@@ -1,6 +1,7 @@
+import { memo, useCallback, useRef, useState } from 'react';
 import { ArrowLeftRight, ChevronRight, Square, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
-import { HIERARCHY_MODELS, late, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
+import { HIERARCHY_MODELS, late, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
@@ -38,7 +39,9 @@ export function readImage(file: Blob): Promise<ChatImage> {
 }
 
 /** One line saying what a tool call does: the command, the file, the search, the address. */
-function toolSummary(name: string, input: Record<string, unknown>) {
+/** `input` may be missing or not an object in an event from a linked computer on another version: read as none. */
+function toolSummary(name: string, given: unknown) {
+  const input: Record<string, unknown> = given && typeof given === 'object' ? given as Record<string, unknown> : {};
   const value = (key: string) => typeof input[key] === 'string' ? input[key] as string : '';
   const short = (path: string) => path.split(/[\\/]/).slice(-3).join('/');
   if (name === 'Bash') return value('command');
@@ -53,12 +56,14 @@ function toolSummary(name: string, input: Record<string, unknown>) {
 }
 
 export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' }>; result?: ToolResult }) {
-  const summary = toolSummary(block.name, block.input);
-  const edit = block.name === 'Edit' && typeof block.input.old_string === 'string' ? block.input : null;
+  // A block from a linked computer on another version may come without its input: shown as none rather than failing.
+  const input = block.input && typeof block.input === 'object' ? block.input : {};
+  const summary = toolSummary(block.name, input);
+  const edit = block.name === 'Edit' && typeof input.old_string === 'string' ? input : null;
   return <details className={`chat-tool ${result?.isError ? 'error' : ''} ${result ? 'done' : 'running'}`}>
     <summary><ChevronRight size={13} className="chat-chevron" aria-hidden="true" /><strong>{block.name}</strong><span className="chat-tool-summary" title={summary}>{summary}</span><span className="chat-tool-state">{!result ? 'running…' : result.isError ? 'failed' : 'done'}</span></summary>
     {edit && <div className="chat-diff"><pre className="removed">{String(edit.old_string)}</pre><pre className="added">{String(edit.new_string ?? '')}</pre></div>}
-    {!edit && block.name !== 'Bash' && <pre className="chat-tool-input">{JSON.stringify(block.input, null, 2).slice(0, 4000)}</pre>}
+    {!edit && block.name !== 'Bash' && <pre className="chat-tool-input">{JSON.stringify(input, null, 2).slice(0, 4000)}</pre>}
     {result && (result.text || result.image) && <pre className="chat-tool-output">{result.text || '(an image)'}</pre>}
   </details>;
 }
@@ -82,9 +87,29 @@ export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { 
 export const AGENT = { claude: 'Claude', codex: 'Codex' } as const;
 const PHASE: Record<RoundTableState['phase'], string> = { joining: 'Catching the other agent up', answering: 'Both answering', discussing: 'Discussing', idle: 'Your turn' };
 
+export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
+/**
+ * Whether a message would draw the same: the store keeps a settled item's object while another streams, and the tool
+ * results that matter are its own tool calls'. So a streamed piece, a keystroke in the message box or another channel's
+ * change draws again only the message it touches, not every message's Markdown.
+ */
+export function sameItem(before: ItemProps, after: ItemProps) {
+  if (before.item !== after.item || before.agent !== after.agent || before.author !== after.author || before.role !== after.role || before.answer !== after.answer || before.view !== after.view) return false;
+  const item = after.item;
+  return before.results === after.results || item.kind !== 'assistant' || item.blocks.every((block) => block.type !== 'tool' || before.results[block.id] === after.results[block.id]);
+}
+/**
+ * A function whose identity never changes and which calls the latest `fn`: answer handlers built in render stay the
+ * same for sameItem, and still use the run that is current when the person answers.
+ */
+export function useSteady<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const latest = useRef(fn); latest.current = fn;
+  return useCallback((...args: A) => latest.current(...args), []);
+}
+
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
 /** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say YOU. */
-export function Item({ item, results, agent, author, answer, view, role }: { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }) {
+export const Item = memo(function Item({ item, results, agent, author, answer, view, role }: ItemProps) {
   if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
     {author && <p className="chat-author"><i className="seat-hex seat-you" aria-hidden="true" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
@@ -94,12 +119,14 @@ export function Item({ item, results, agent, author, answer, view, role }: { ite
     {author && <p className="chat-author"><i className={`seat-hex seat-${author}`} aria-hidden="true" />{agent}{role ? ` · ${role === 'driver' ? 'Driver' : role === 'reviewer' ? 'Review' : role}` : ''}</p>}
     {item.blocks.map((block, index) => block.type === 'text' ? <Markdown key={index} text={block.text} />
       : block.type === 'thinking' ? <details key={index} className="chat-thinking"><summary>Thinking</summary><p>{block.text}</p></details>
-        : <ToolCard key={block.id} block={block} result={results[block.id]} />)}
+        // Only tool calls are drawn as cards: a kind of block this version does not know (a newer linked computer's) is left out.
+        : block.type === 'tool' ? <ToolCard key={block.id ?? index} block={block} result={results[block.id]} /> : null)}
     {item.streaming && <div className="chat-streaming"><Markdown text={item.streaming} /></div>}
   </div>;
-  if (item.kind === 'permission') return <Permission item={item} agent={agent} answer={answer(item.id)} />;
+  // Resolved at the click, so the handler (steady, see useSteady) uses the run current then, not at this draw.
+  if (item.kind === 'permission') return <Permission item={item} agent={agent} answer={(allow, allowEdits) => answer(item.id)(allow, allowEdits)} />;
   return <p className={`chat-notice ${item.error ? 'error' : ''}`}>{author ? `${agent}: ` : ''}{item.text}</p>;
-}
+}, sameItem);
 
 /** How a Round Table's hidden partner is doing, in a few words for the table bar (it has no tile of its own). */
 export function seatState(partner: Pick<Session, 'status' | 'error'> & { attention?: Session['attention'] }, busy: boolean) {
@@ -117,7 +144,7 @@ const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` :
  */
 export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerState, showing = false, onShow }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; tokens?: { lead: number; partner: number }; partnerState?: string; showing?: boolean; onShow?: () => void }) {
   const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
-  const run = onRequest;
+  const run = onRequest; const images = waitingImageCount(table);
   const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
   return <div className="table-bar" role="group" aria-label="Round Table">
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
@@ -131,7 +158,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerSt
     {busy && <button className="quiet-button" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
     {onShow && <button className="quiet-button" aria-pressed={showing} title={showing ? 'Back to the Round Table thread' : `${AGENT[table.partner.engine]}'s own conversation, with what Trace passed to it`} onClick={onShow}>{showing ? 'Back to the table' : `Show ${AGENT[table.partner.engine]}`}</button>}
     <button className="quiet-button" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[table.partner.engine]}`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
-    {(table.waiting !== undefined) && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Waiting to go: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingImages?.length ? ` + ${table.waitingImages.length} ${table.waitingImages.length === 1 ? 'image' : 'images'}` : ''}{table.waitingImagesDropped ? ` (its ${table.waitingImagesDropped} ${table.waitingImagesDropped === 1 ? 'image is' : 'images are'} too large to keep through a restart)` : ''}{table.waitingKept && <><button className="quiet-button" onClick={() => run({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => run({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
+    {(table.waiting !== undefined) && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Waiting to go: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{images ? ` + ${images} ${images === 1 ? 'image' : 'images'}` : ''}{table.waitingImagesDropped ? ` (its ${table.waitingImagesDropped} ${table.waitingImagesDropped === 1 ? 'image is' : 'images are'} too large to keep through a restart)` : ''}{table.waitingKept && <><button className="quiet-button" onClick={() => run({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => run({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;
 }
@@ -182,7 +209,25 @@ export function waitingLabel(table: RoundTableState): string {
   if (step === 'reviewing' || step === 'fixing') return 'Goes with the next step, or to the planner if the final review is next: ';
   return 'Goes with the next step: ';
 }
-export function ChainBar({ table, busy, plannerName, builderName, lead, planner, reviewer, onRequest, onModel, detached, seats }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; /** Each seat: who, its role, what it is doing now, and its tokens today. */ seats?: ChainSeat[]; lead?: Session; planner?: Session | null; /** The Codex reviewer (hidden), for its model. */ reviewer?: Session | null; onRequest: (request: ChainAction) => void; onModel?: (session: Session, model: string) => void; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
+/** A seat's Models field: what was last refused in it stays beside it until that field is left again, whatever the other fields do. */
+type SeatField = 'planner' | 'builder' | 'reviewer';
+/**
+ * Each seat's model, used when that seat starts. onModel saves it, or returns why it did not (the caller checks it, so
+ * this file, which the phone also loads, needs no schemas).
+ */
+function ChainModels({ lead, planner, reviewer, locked, onModel, maxLength }: { lead: Session; planner?: Session | null; reviewer?: Session | null; locked: boolean; onModel: (session: Session, model: string) => string | void; maxLength?: number }) {
+  const model = (session: Session | null | undefined, fallback: string) => session && isAgentConfig(session.config) ? session.config.model || fallback : fallback;
+  const [refused, setRefused] = useState<Partial<Record<SeatField, string>>>({});
+  const setModel = (field: SeatField, session: Session | null | undefined, value: string) => { const reason = session && isAgentConfig(session.config) ? onModel(session, value.trim()) || '' : ''; setRefused((current) => ({ ...current, [field]: reason })); };
+  const field = (key: SeatField, label: string, aria: string, session: Session | null | undefined, fallback: string) => <><label>{label}<input aria-label={aria} aria-invalid={refused[key] ? true : undefined} disabled={locked} maxLength={maxLength} defaultValue={model(session, fallback)} onBlur={(e) => setModel(key, session, e.target.value)} spellCheck={false} /></label>{refused[key] && <small role="alert">{refused[key]}</small>}</>;
+  return <details className="chain-models"><summary>Models</summary>
+      {field('planner', 'Planner and final review', 'Planner model', planner, HIERARCHY_MODELS.planner)}
+      {field('builder', 'Builder', 'Builder model', lead, HIERARCHY_MODELS.builder)}
+      {reviewer && field('reviewer', 'Reviewer (Codex)', 'Reviewer model', reviewer, HIERARCHY_MODELS.reviewer)}
+      <small>{locked ? 'A running seat keeps its model: stop this channel (which stops all three), change them here, then start it again.' : 'Used when the channel starts again.'}</small>
+  </details>;
+}
+export function ChainBar({ table, busy, plannerName, builderName, lead, planner, reviewer, onRequest, onModel, modelMaxLength, detached, seats }: { table: RoundTableState; busy: boolean; plannerName: string; builderName: string; /** Each seat: who, its role, what it is doing now, and its tokens today. */ seats?: ChainSeat[]; lead?: Session; planner?: Session | null; /** The Codex reviewer (hidden), for its model. */ reviewer?: Session | null; onRequest: (request: ChainAction) => void; /** Saves a seat's model as typed (trimmed), or returns why it did not. */ onModel?: (session: Session, model: string) => string | void; /** The longest model the Models fields take. */ modelMaxLength?: number; /** The builder runs but the table is not open: why, and Reopen when its seats can be started again. */ detached?: { note: string; onReopen?: () => void } }) {
   const chain = table.chain; const step = chain?.step ?? 'idle'; const at = step === 'stopped' ? chain?.stoppedAt : step;
   const steps = CHAIN_STEPS;
   const current = steps.findIndex((item) => at && item.of.includes(at));
@@ -190,8 +235,6 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
   const status = step === 'challenging' ? 'Codex challenging the plan…' : step === 'plan-responding' ? `${plannerName} answering Codex's challenges…` : step === 'plan-review' && chain?.challenged && !chain.challenges?.length && !chain.note ? `${plannerName}'s plan is ready (Codex raised no challenges): approve it, or write what to change` : step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change${chain?.note ? ` (${chain.note})` : ''}` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${steps[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner, reviewer].some((session) => session?.status === 'running' || session?.status === 'starting');
-  const model = (session: Session | null | undefined, fallback: string) => session && isAgentConfig(session.config) ? session.config.model || fallback : fallback;
-  const setModel = (session: Session | null | undefined, value: string) => { if (session && isAgentConfig(session.config)) onModel?.(session, value.trim()); };
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">
     <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className="seat-planner" /><i className="seat-claude" /><i className="seat-codex" /></span>
     <strong>Round Table · hierarchy</strong>
@@ -202,12 +245,7 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     {!detached && step === 'stopped' && chain?.stoppedAt && !table.stopping && <button className="quiet-button" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
     {!detached && challengeStopped && !table.stopping && <button className="quiet-button" title="Show the plan to you without Codex's challenge" onClick={() => onRequest({ action: 'table-continue', skipChallenge: true })}>Continue without the challenge</button>}
     {busy && <button className="quiet-button" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} />Stop</button>}
-    {onModel && lead && <details className="chain-models"><summary>Models</summary>
-      <label>Planner and final review<input aria-label="Planner model" disabled={locked} defaultValue={model(planner, HIERARCHY_MODELS.planner)} onBlur={(e) => setModel(planner, e.target.value)} spellCheck={false} /></label>
-      <label>Builder<input aria-label="Builder model" disabled={locked} defaultValue={model(lead, HIERARCHY_MODELS.builder)} onBlur={(e) => setModel(lead, e.target.value)} spellCheck={false} /></label>
-      {reviewer && <label>Reviewer (Codex)<input aria-label="Reviewer model" disabled={locked} defaultValue={model(reviewer, HIERARCHY_MODELS.reviewer)} onBlur={(e) => setModel(reviewer, e.target.value)} spellCheck={false} /></label>}
-      <small>{locked ? 'A running seat keeps its model: stop this channel (which stops all three), change them here, then start it again.' : 'Used when the channel starts again.'}</small>
-    </details>}
+    {onModel && lead && <ChainModels lead={lead} planner={planner} reviewer={reviewer} locked={locked} onModel={onModel} maxLength={modelMaxLength} />}
     <button className="quiet-button" aria-label="Close the Round Table" title="Close the Round Table and stop its planner and reviewer" onClick={() => onRequest({ action: 'table-close' })}><X size={13} /></button>
     {chain?.challenges && chain.challenges.length > 0 && <ChallengeList challenges={chain.challenges} plannerName={plannerName} open={step === 'plan-review'} />}
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : waitingLabel(table)}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}{chain?.held && <> ({chain.held})</>}{!table.waitingKept && step === 'needs-you' && <button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button>}{!table.waitingKept && (step === 'needs-you' || (step === 'stopped' && !table.stopping)) && <button className="quiet-button" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button>}</span>}

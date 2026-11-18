@@ -6,7 +6,8 @@ import { promptMark, replyToTask, taskSignal } from '../../shared/task-signal';
 import { workbench } from '../runtime/workbench';
 import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
-import { useActivityStore } from './activity-store';
+import { activitySamples } from './activity-store';
+import { sendMark } from './task-evidence';
 import { chatFailed, chatSent, useChatStore } from './chat-store';
 import { hierarchyDetached } from './hierarchy-state';
 import { isAgentConfig } from '../../shared/types';
@@ -73,10 +74,17 @@ type Said = { role: 'user' | 'assistant'; text: string };
 const textOf = (blocks: ChatBlock[]) => blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n');
 /** A channel's conversation as the CLI recorded it (for terminals, whose screen Trace cannot read); null when unreadable. */
 async function transcriptOf(sessionId: string): Promise<Said[] | null> {
-  try {
-    const transcript = await workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId });
-    return (transcript?.messages ?? []).map((message) => message.role === 'user' ? { role: 'user' as const, text: message.text } : { role: 'assistant' as const, text: textOf(message.blocks) });
-  } catch { return null; }
+  try { return saidOf(await workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId })); } catch { return null; }
+}
+const saidOf = (transcript: ChannelTranscript | null) => (transcript?.messages ?? []).map((message): Said => message.role === 'user' ? { role: 'user', text: message.text } : { role: 'assistant', text: textOf(message.blocks) });
+/**
+ * One sent task's part of the conversation (from its prompt), however long the channel's history: the whole transcript
+ * is only its newest part, so an older task's prompt can fall out of it. The whole transcript when the host has no such
+ * part (null), or refuses the action (an older host).
+ */
+async function taskTranscriptOf(sessionId: string, task: Task): Promise<Said[] | null> {
+  if (task.sendId) { const part = await workbench<ChannelTranscript>({ action: 'channel-task-transcript', sessionId, mark: sendMark(task) }).catch(() => null); if (part) return saidOf(part); }
+  return transcriptOf(sessionId);
 }
 /** What a chat channel drew (at a Round Table, the seat's own conversation, which has the task as Trace passed it). */
 function chatOf(sessionId: string): Said[] {
@@ -84,7 +92,7 @@ function chatOf(sessionId: string): Said[] {
   return items.flatMap((item): Said[] => item.kind === 'user' ? [{ role: 'user', text: item.text }] : item.kind === 'assistant' ? [{ role: 'assistant', text: textOf(item.blocks) }] : []);
 }
 /** The newest reply to a task in a channel's conversation as the CLI recorded it. */
-async function lastReply(sessionId: string, task: Task): Promise<string | null> { const said = await transcriptOf(sessionId); return said ? replyToTask(said, task) : null; }
+async function lastReply(sessionId: string, task: Task): Promise<string | null> { const said = await taskTranscriptOf(sessionId, task); return said ? replyToTask(said, task) : null; }
 /** The newest reply to a task that a chat channel drew. */
 export function chatReply(sessionId: string, task: Task): string | null { return replyToTask(chatOf(sessionId), task); }
 
@@ -121,6 +129,8 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
   const waiting = useChatStore.getState().threads[sessionId]?.table?.waiting?.trim() ?? '';
   const delivered = (text: string) => !waiting || !text.trim() || !waiting.includes(text.trim());
   const active = activeOn(sessionId).filter((task) => !waiting.includes(promptMark(task))); if (!active.length) return;
+  // A terminal turn ending within seconds of every send (see below) is not read at all: the transcript can be 8 MB.
+  if (!from && active.every((task) => Date.now() - Date.parse(task.sentAt!) <= 5000)) return;
   const given = from && 'text' in from ? from.text : null;
   const said = from && 'text' in from ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
   const task = taskOfTurn(active, said); if (!task) return;
@@ -143,11 +153,6 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
 /** When each quiet terminal task's reply was last read, and what it said: read again only when it may have changed. */
 const rechecked = new Map<string, { at: number; reply: string }>();
 /**
- * What names one send of a task in its prompt: `Task <sendId>:`, which a later title edit does not change (the colon ends
- * it, so one id never matches as the start of another). A task sent before send ids existed: its whole mark, title included.
- */
-const sendMark = (task: Task) => task.sendId ? `Task ${task.sendId}:` : promptMark(task);
-/**
  * A hierarchy Round Table's verdict moves the task given to its channel: APPROVED by the planner sends it to Ready for
  * review; a table that needs the person, or was stopped, marks it so. The builder's own turn ends say nothing here.
  */
@@ -160,7 +165,8 @@ export function chainTasks(leadId: string, table: RoundTableState) {
   const task = active.find((item) => chainTask.includes(sendMark(item))); if (!task) return;
   const { step, verdict, note } = table.chain;
   if (step === 'done' && verdict === 'approved') void setTaskStatus(task.id, 'review', 'finished').catch(() => {});
-  else if (step === 'needs-you' && (task.outcome !== 'blocked' || task.outcomeNote !== note)) void setTaskStatus(task.id, 'active', 'blocked', note.slice(0, 500) || 'The Round Table needs you.').catch(() => {});
+  // Compared as it is stored (cut to 500 characters, or a default), so a long or empty note is not written again on every table event.
+  else if (step === 'needs-you') { const stored = note.slice(0, 500) || 'The Round Table needs you.'; if (task.outcome !== 'blocked' || task.outcomeNote !== stored) void setTaskStatus(task.id, 'active', 'blocked', stored).catch(() => {}); }
   else if (step === 'plan-review' && task.outcome !== 'blocked') void setTaskStatus(task.id, 'active', 'blocked', 'The plan is waiting for your approval.').catch(() => {});
   else if (step === 'stopped' && task.outcome !== 'stopped') void setTaskStatus(task.id, 'active', 'stopped').catch(() => {});
   else if (!['done', 'needs-you', 'plan-review', 'stopped', 'idle'].includes(step) && task.outcome && task.outcome !== 'finished') void setTaskStatus(task.id, 'active').catch(() => {});
@@ -205,13 +211,14 @@ function flushReturns(): Promise<void> {
 export function startTaskAutomation() {
   let ticks = 0;
   const tick = () => {
-    const sessions = useWorkspaceStore.getState().sessions; const samples = useActivityStore.getState().samples;
+    const sessions = useWorkspaceStore.getState().sessions;
     for (const task of useTaskStore.getState().tasks) {
       if (task.status !== 'active' || !task.sentAt || !task.sessionId) continue;
       const session = sessions.find((item) => item.id === task.sessionId); const since = Date.now() - Date.parse(task.sentAt);
       if (!session || session.status === 'exited' || session.status === 'error' || session.status === 'idle') { const outcome = session?.status === 'error' ? 'failed' : 'stopped'; if (since > 5000 && task.outcome !== outcome) void setTaskStatus(task.id, 'active', outcome).catch(() => {}); continue; }
       if (session.attention) continue;
-      const recent = samples[session.id]?.slice(-45) ?? [];
+      // A channel silent for the whole trace has no samples of its own; it reads as silence, not as unknown.
+      const recent = activitySamples(session.id).slice(-45);
       // A quiet terminal (Codex, which reports no turn end here): its transcript may say TASK COMPLETE or BLOCKED. A task
       // already marked (blocked, not confirmed, quiet) is read again whenever its reply changed, at most every 30 s, so a
       // later TASK COMPLETE after the person answered is not missed.
