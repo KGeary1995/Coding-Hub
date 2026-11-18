@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict');
-const { realpath, mkdtemp, mkdir, readFile, writeFile, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, mkdir, readFile, writeFile } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { waitForPage } = require('./lib/wait.cjs');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 
 (async () => {
   // Canonical long form: Windows temp paths can use 8.3 short names (RUNNER~1) that the app resolves.
@@ -48,8 +49,9 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   env[pathKey] = bin + path.delimiter + (env[pathKey] ?? '');
   // The app's home folder too: Skills & plugins also lists ~/.agents, and a developer's own skills there come before
-  // the rows this test checks (on a clean CI runner there are none). Windows only: os.homedir() reads USERPROFILE.
-  if (process.platform === 'win32') { env.USERPROFILE = path.join(root, 'home'); await mkdir(env.USERPROFILE); }
+  // the rows this test checks (on a clean CI runner there are none). os.homedir() reads USERPROFILE on Windows and HOME
+  // elsewhere.
+  env.USERPROFILE = env.HOME = path.join(root, 'home'); await mkdir(env.HOME);
   if (process.platform === 'linux') {
     env.XDG_CONFIG_HOME = path.join(root, 'xdg-config');
     env.XDG_CACHE_HOME = path.join(root, 'xdg-cache');
@@ -126,6 +128,24 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
     await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line');
+    // Trace's own menu has no Reload, Force Reload or Close Window, so Ctrl+R and Ctrl+W (Cmd on a Mac) cannot stop every
+    // channel. Checked on the menu itself: Playwright's synthetic keys may never reach Electron's menu accelerators.
+    const menuItems = await app.evaluate(({ Menu }) => {
+      const all = []; const walk = (menu) => { for (const item of menu?.items ?? []) { all.push({ role: String(item.role ?? '').toLowerCase(), accelerator: String(item.accelerator ?? '') }); walk(item.submenu); } };
+      walk(Menu.getApplicationMenu()); return all;
+    });
+    assert.ok(menuItems.length > 0, 'Trace sets its own application menu');
+    for (const role of ['reload', 'forcereload', 'close']) assert.equal(menuItems.some((item) => item.role === role), false, `menu has no ${role} item`);
+    assert.equal(menuItems.some((item) => /^(CmdOrCtrl|CommandOrControl|Ctrl|Control|Cmd|Command)\+(Shift\+)?[RW]$/i.test(item.accelerator)), false);
+    // The keys as well, with focus outside the terminals: the window stays open and both channels keep running. A reload
+    // would also drop window.testEvents.
+    await page.evaluate(() => document.activeElement?.blur());
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    for (const key of ['KeyR', 'KeyW']) await page.keyboard.press(`${modifier}+${key}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(page.isClosed(), false);
+    assert.equal(await page.evaluate(() => window.testEvents.some((event) => event.type === 'exit')), false);
+    assert.equal(await page.locator('.session-tile').count(), 2);
     const starts = await page.evaluate(() => window.testEvents.filter((event) => event.type === 'started'));
     assert.deepEqual(starts.map((event) => event.cwd).sort(), projects.sort());
     await (await tileControl(page, 'Engine settings for session 1')).click();
@@ -276,7 +296,8 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     await openView(page, 'Skills & plugins');
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.extension-row').length >= 2);
-    await page.locator('.extension-row').first().click();
+    // By name: rows from the CLIs' own folders (and a developer's ~/.agents skills) come before the project's.
+    await page.locator('.extension-row').filter({ has: page.locator('strong', { hasText: /^CLAUDE\.md$/ }) }).filter({ hasText: 'memory · project' }).first().click();
     await page.waitForFunction(() => document.querySelector('.hub-preview pre')?.textContent.includes('coding-hub-memory'));
     assert.deepEqual(await readFile(path.join(projects[0], '.git/index')), indexBeforeReview);
     await openView(page, 'Help & AI guide');
@@ -435,7 +456,7 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     assert.equal(await restored.evaluate(() => document.documentElement.dataset.density), 'compact');
     assert.equal(await restored.evaluate(() => document.documentElement.dataset.contrast), 'high');
     await restored.getByLabel('Interface scale', { exact: true }).selectOption('100');
-    await restored.keyboard.press('Alt+1');
+    await restored.keyboard.press(process.platform === 'darwin' ? 'Meta+1' : 'Alt+1');
     await restored.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     const tree = await restored.evaluate((directory) => window.codingHub.projectTools({ action: 'worktree-create', directory }), projects[0]);
     assert.equal(tree.ok, true); assert.ok(tree.value.branch.startsWith('coding-hub/'));
@@ -530,6 +551,6 @@ const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
     throw error;
   } finally {
     await app?.close().catch(() => {});
-    await rm(root, { recursive: true, force: true });
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

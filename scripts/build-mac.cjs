@@ -50,12 +50,29 @@ function checkMacFeed(feed, version, prefix) {
   }
 }
 
+/**
+ * The folder the build empties first. TRACE_MAC_OUTPUT is resolved against the repository; a folder outside release/
+ * must be new, empty or an earlier build (electron-builder leaves builder-effective-config.yaml in it), so a value such
+ * as "." or ".." never deletes the working tree or its parent.
+ */
+function macOutput(value, base = root) {
+  const output = path.resolve(base, value || 'release/mac');
+  /** True when child is parent or inside it (a path on another drive is neither). */
+  const holds = (parent, child) => { const relative = path.relative(parent, child); return !relative.startsWith('..') && !path.isAbsolute(relative); };
+  const refuse = () => new Error(`TRACE_MAC_OUTPUT names ${output}, which is outside release/ and is not an earlier Mac build, so the build will not empty it. Name a new or empty folder.`);
+  if (holds(output, base)) throw refuse();
+  const release = path.join(base, 'release'); if (output !== release && holds(release, output)) return output;
+  let entries; try { entries = fs.readdirSync(output); } catch (error) { if (error.code === 'ENOENT') return output; throw error; }
+  if (entries.length === 0 || entries.includes('builder-effective-config.yaml')) return output;
+  throw refuse();
+}
+
 if (require.main === module) {
   try {
     if (process.platform !== 'darwin') throw new Error('Build the Mac disk images on a Mac (the release workflow uses a macOS runner).');
     const version = releaseVersion(require('../package.json').version);
     // TRACE_MAC_OUTPUT builds elsewhere (relative to the repository), leaving an app that is running from release/mac alone.
-    const output = path.resolve(root, process.env.TRACE_MAC_OUTPUT || 'release/mac');
+    const output = macOutput(process.env.TRACE_MAC_OUTPUT);
     fs.rmSync(output, { recursive: true, force: true });
     const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');
     run(process.execPath, [builder, '--config', 'electron-builder.cjs', '--mac', '--publish', 'never', `--config.directories.output=${output}`, `--config.extraMetadata.version=${version}`]);
@@ -74,4 +91,4 @@ if (require.main === module) {
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = { verifyApp, checkMacFeed };
+module.exports = { verifyApp, checkMacFeed, macOutput };

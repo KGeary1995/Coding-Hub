@@ -9,6 +9,7 @@ concurrency:
 jobs:
   signed-windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
       CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}

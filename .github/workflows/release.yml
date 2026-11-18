@@ -1,8 +1,9 @@
 name: Release
 # Pushing a tag v<version> (matching package.json) builds the Windows installer and the Mac disk images, checks that
-# the Mac app starts a CLI (windows-release.yml, run by hand on main before tagging, tests the Windows installer), and publishes them on
-# the public downloads repository KGeary1995/trace-releases, which installed copies check for updates. A manual run
-# builds and tests; on main with "publish" ticked it also publishes, as v<package.json version>.
+# the Mac app starts a CLI, and publishes them on the public downloads repository KGeary1995/trace-releases, which
+# installed copies check for updates. windows-release.yml, run by hand on main before tagging, installs and starts the
+# Windows build; publish refuses a commit it has not passed on. A manual run builds and tests; on main with "publish"
+# ticked it also publishes, as v<package.json version>.
 on:
   push:
     tags: ['v*']
@@ -20,6 +21,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -32,6 +34,12 @@ jobs:
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME" || { echo "::error::Tag $GITHUB_REF_NAME does not match package.json"; exit 1; }
       - run: npm ci
       - run: npm test
+      - name: Check for the Windows signing certificate
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then echo "::warning::No WINDOWS_CERTIFICATE secret: the Windows installer and app are not code-signed, so installed copies accept an update on the feed's checksum alone (docs/windows-releases.md)."; fi
       - run: npm run dist:win
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -50,6 +58,8 @@ jobs:
             release/latest.yml
   mac:
     runs-on: macos-latest
+    # Notarizing two disk images waits on Apple, so this one gets longer.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -96,7 +106,21 @@ jobs:
     needs: [windows, mac]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # The published Setup.exe is never started here: windows-release.yml installs and starts a build of the same commit.
+      # A rerun of this job (gh run rerun <id> --failed) after the candidate passes publishes without building again.
+      - name: Check the Windows release candidate passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          passed=$(gh run list --workflow windows-release.yml --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq 'length')
+          if [ "$passed" != 1 ]; then echo "::error::No successful Windows release candidate run on $GITHUB_SHA. Start it (gh workflow run windows-release.yml --ref main), wait for it to pass on this commit, then rerun this job."; exit 1; fi
+          echo "The Windows release candidate passed on $GITHUB_SHA."
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Not "assets": that folder in the checkout holds the app icons and entitlements, which would be published too.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

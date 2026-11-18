@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 /** Not Trace's own port (47821), so the test also runs while an installed Trace is open. */
 const PORT = 47831;
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
@@ -274,6 +275,6 @@ else if (args.startsWith('serve --bg --https=443')) {
     console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

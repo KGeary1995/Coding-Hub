@@ -1,10 +1,11 @@
 // Validate the production layout in an isolated profile without starting agent CLIs.
 const assert = require('node:assert/strict');
-const { realpath, mkdtemp, rm } = require('node:fs/promises');
+const { realpath, mkdtemp } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'hub-design-')));
   const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') };
@@ -69,7 +70,7 @@ const { openView, addChannel } = require('./lib/navigate.cjs');
     await page.locator('.session-tile').first().waitFor();
     console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
   } finally {
-    if (app) await app.close();
-    await rm(root, { recursive: true, force: true });
+    await app?.close().catch(() => {});
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

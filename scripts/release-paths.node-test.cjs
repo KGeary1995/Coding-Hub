@@ -69,6 +69,36 @@ test('every Mac build makes the update zips; only a Developer ID build marks the
   const { validateConfiguration } = require('app-builder-lib/out/util/config/config'); const { DebugLogger } = require('builder-util');
   for (const config of [signed, adhoc]) await validateConfiguration(config, new DebugLogger(false));
 });
+test('publish refuses a commit the Windows release candidate has not passed on', () => {
+  const { load } = require('js-yaml');
+  const publish = load(fs.readFileSync(path.resolve(__dirname, '../.github/workflows/release.yml'), 'utf8')).jobs.publish;
+  assert.equal(publish.permissions?.actions, 'read'); assert.equal(publish.permissions?.contents, 'read');
+  const gate = publish.steps.findIndex((step) => /gh run list --workflow windows-release\.yml --commit "\$GITHUB_SHA" --status success/.test(step.run ?? ''));
+  const release = publish.steps.findIndex((step) => /gh release create/.test(step.run ?? ''));
+  assert.ok(gate >= 0 && gate < release, 'the candidate check runs before anything is published');
+  assert.match(publish.steps[gate].run, /exit 1/); assert.equal(publish.steps[gate].env.GH_TOKEN, '${{ github.token }}');
+});
+test('every workflow job has a time limit and every action is pinned to a commit', () => {
+  const { load } = require('js-yaml'); const folder = path.resolve(__dirname, '../.github/workflows');
+  for (const name of fs.readdirSync(folder).filter((file) => file.endsWith('.yml'))) {
+    for (const [id, job] of Object.entries(load(fs.readFileSync(path.join(folder, name), 'utf8')).jobs)) {
+      assert.ok(Number.isInteger(job['timeout-minutes']), `${name} ${id} has no timeout-minutes`);
+      for (const step of job.steps ?? []) if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}$/, `${name} ${id}: ${step.uses} is not pinned to a commit`);
+    }
+  }
+});
+test('dist:mac empties only a folder under release/, a new or empty one, or an earlier build', () => {
+  const { macOutput } = require('./build-mac.cjs');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-mac-output-')); roots.push(base); fs.writeFileSync(path.join(base, 'package.json'), '{}');
+  assert.equal(macOutput(undefined, base), path.join(base, 'release', 'mac'));
+  assert.equal(macOutput('release/mac-test', base), path.join(base, 'release', 'mac-test'));
+  // The working tree, its parent, and release/ itself (which holds the Windows builds) are never emptied.
+  for (const value of ['.', '..', base, path.dirname(base), 'release']) { fs.mkdirSync(path.join(base, 'release', 'win'), { recursive: true }); assert.throws(() => macOutput(value, base), /outside release\//); }
+  const other = path.join(base, 'elsewhere'); assert.equal(macOutput(other, base), other);
+  fs.mkdirSync(other); assert.equal(macOutput(other, base), other);
+  fs.writeFileSync(path.join(other, 'notes.txt'), 'keep'); assert.throws(() => macOutput(other, base), /not an earlier Mac build/);
+  fs.writeFileSync(path.join(other, 'builder-effective-config.yaml'), 'directories: {}'); assert.equal(macOutput(other, base), other);
+});
 test('a Mac build is refused unless latest-mac.yml lists both update zips and both disk images with their checksums', () => {
   const { checkMacFeed } = require('./build-mac.cjs');
   const sum = (letter) => letter.repeat(86) + '==';

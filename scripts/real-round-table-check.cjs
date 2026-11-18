@@ -6,6 +6,7 @@
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
+const { removeFolder } = require('./lib/cleanup.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-table'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-real-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project });
@@ -69,5 +70,6 @@ const taskColumn = async (page) => page.evaluate(() => { for (const section of d
     for (const key of fs.existsSync(memory) ? fs.readdirSync(memory) : []) for (const file of fs.readdirSync(path.join(memory, key)).filter((name) => name.endsWith('.json'))) titles.push(JSON.parse(fs.readFileSync(path.join(memory, key, file), 'utf8')).title);
     note('closed', { saved: titles.filter((title) => /Round Table/.test(title)) }); await shot(page, '07-closed');
   } catch (error) { note('error', { error: String(error).slice(0, 500) }); await shot(page, '99-error'); }
-  finally { fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2)); await app.close().catch(() => {}); }
+  // The scratch project and Trace data (storage, logs, memory) go; what the check saw is kept in <outDir>.
+  finally { fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2)); await app.close().catch(() => {}); await removeFolder(root); }
 })();

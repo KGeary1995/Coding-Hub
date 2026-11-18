@@ -34,7 +34,7 @@ Trace has no model API client and never touches credentials: the CLIs own sign-i
 ```sh
 npm ci                 # Node >= 22.13 (node:sqlite); postinstall checks node-pty
 npm run dev            # app with reload
-npm run typecheck      # renderer + host
+npm run typecheck      # renderer + host + host tests
 npm test               # vitest (unit)
 npm run test:release   # release/packaging invariants
 npm run test:memory    # memory MCP server over stdio
@@ -43,7 +43,7 @@ npm run test:desktop   # end-to-end smoke (needs a display; xvfb + CODING_HUB_TE
 npm run build          # typecheck + renderer + phone + host
 ```
 
-Before you call a change done, run `typecheck`, `test` and the smoke test nearest your change. On Windows without Developer Mode, about four symbolic-link tests fail with `EPERM`; that's expected. Report results honestly, including flaky or skipped checks.
+Before you call a change done, run `typecheck`, `test` and the smoke test nearest your change. On Windows without Developer Mode, the symbolic-link tests are skipped (`canSymlink`), so an `EPERM` failure is a real one. Report results honestly, including flaky or skipped checks.
 
 ## Map
 
@@ -79,7 +79,7 @@ Before you call a change done, run `typecheck`, `test` and the smoke test neares
 ## Releasing (summary)
 
 1. `npm version <x.y.z> --no-git-tag-version`, and rewrite `docs/RELEASE_NOTES.md`. It becomes the public release description.
-2. Merge to `main` through a PR, wait for **CI**, then start **Windows release candidate** by hand (`gh workflow run windows-release.yml --ref main`; it otherwise runs only nightly, or on PRs labeled `windows`) and wait for it to pass on the merge commit. Release doesn't check this. Windows runners sometimes time out in heavy tests: rerun the failed job once (`gh run rerun <id> --failed`), and investigate if it fails again.
+2. Merge to `main` through a PR, wait for **CI**, then start **Windows release candidate** by hand (`gh workflow run windows-release.yml --ref main`; it otherwise runs only nightly, or on PRs labeled `windows`) and wait for it to pass on the merge commit. Release's publish job refuses a commit it has not passed on. Windows runners sometimes time out in heavy tests: rerun the failed job once (`gh run rerun <id> --failed`), and investigate if it fails again.
 3. Push the tag on the exact commit that passed: `git tag v<x.y.z> <sha> && git push origin v<x.y.z>`. That starts **Release**, which builds Windows and both Mac disk images and publishes them all to `trace-releases` as `Trace-<x.y.z>-…`. A manual run (`gh workflow run release.yml --ref main -f publish=true`) also works, but it builds whatever `main` holds when it starts, so don't merge anything else in between. A published version is never replaced.
 
 Windows installs update themselves from that feed. So do Macs on a version built with the Developer ID secrets (`latest-mac.yml`; see [docs/windows-releases.md](docs/windows-releases.md)); a Mac on an ad-hoc build installs the first signed version from the downloads page once.

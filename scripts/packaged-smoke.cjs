@@ -6,6 +6,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const executable = process.argv[2]; if (!executable) throw new Error('Usage: node scripts/packaged-smoke.cjs <packaged app executable>');
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-packaged-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
@@ -29,6 +30,6 @@ const { _electron } = require('playwright-core');
     console.log(`PASS: packaged app (${path.basename(executable)}) starts a CLI in a real terminal.`);
   } finally {
     await app?.close().catch(() => {});
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

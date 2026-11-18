@@ -4,6 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const readline = require('node:readline');
 const { spawn } = require('node:child_process');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'coding-hub-memory-')));
   const children = new Set();
@@ -52,5 +53,5 @@ const { spawn } = require('node:child_process');
     assert.deepEqual(JSON.parse((await started.call('tools/call', { name: 'list_decisions', arguments: {} })).result.content[0].text), []);
     const badCommits = await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Bad', content: 'x', commits: ['not a hash'] } }); assert.equal(badCommits.result.isError, true); assert.match(badCommits.result.content[0].text, /commit hashes/); await started.close();
     console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search, default author, open items, pinned decisions, and named commits.');
-  } finally { for (const child of children) child.kill(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { for (const child of children) child.kill(); await removeFolder(root); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

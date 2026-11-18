@@ -51,7 +51,7 @@ If a channel says a CLI was not found, install it (or fix your PATH), then resta
 
 Getting around:
 - **Ctrl+Shift+P** (Cmd+Shift+P on Mac) opens the command menu.
-- **Alt+1–8** jumps to a channel.
+- **Alt+1–8** (Cmd+1–8 on Mac) jumps to a channel.
 - **G** then a letter opens a view (U Usage, C Changes, S Settings…).
 
 ### Where things are

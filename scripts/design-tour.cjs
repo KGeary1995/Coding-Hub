@@ -1,10 +1,11 @@
 // Screenshots every desktop view in an isolated profile, for checking the design page by page (no agent CLIs start).
 // Usage: npm run build && node scripts/design-tour.cjs <outDir>
-const { realpath, mkdtemp, mkdir, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, mkdir } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 
 const VIEWS = ['Changes', 'Projects', 'Usage', 'Session history', 'Files', 'More tools', 'AI coaching', 'Tasks', 'Verification profiles',
   'Accounts & connections', 'Shared memory', 'Shared rules', 'MCP servers', 'Skills & plugins', 'Settings', 'Workflow center', 'Help & AI guide'];
@@ -41,6 +42,6 @@ const VIEWS = ['Changes', 'Projects', 'Usage', 'Session history', 'Files', 'More
     }
   } finally {
     await app?.close().catch(() => {});
-    await rm(root, { recursive: true, force: true });
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

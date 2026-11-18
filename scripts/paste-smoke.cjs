@@ -8,6 +8,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { tileControl } = require('./lib/navigate.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 if (process.platform !== 'win32') { console.log('SKIP: paste smoke runs on Windows only (the system clipboard is set through Windows Forms).'); process.exit(0); }
 
 const RECORDER = `const fs = require('node:fs'); const log = (line) => fs.appendFileSync(process.env.PASTE_SMOKE_LOG, line + '\\n'); const args = process.argv.slice(2);
@@ -88,5 +89,5 @@ const hex = (text) => Buffer.from(text).toString('hex');
     assert.ok(sent, 'The chat message reached the CLI');
     assert.deepEqual(sent.message.content.map((part) => part.type), ['image', 'text']); assert.equal(sent.message.content[0].source.media_type, 'image/png');
     console.log('PASS: Windows paste: Ctrl+C with a selection copies and without one sends ^C, Ctrl+V image sends Alt+V and shows Attached, Alt+V unchanged, Ctrl+V text pastes text, chat sends the pasted image.');
-  } finally { await app?.close().catch(() => {}); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => {}); }
+  } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exit(1); });

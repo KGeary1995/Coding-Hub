@@ -1,8 +1,9 @@
 const assert = require('node:assert/strict');
-const { realpath, mkdtemp, mkdir, rm } = require('node:fs/promises');
+const { realpath, mkdtemp, mkdir } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { PtyManager } = require('../dist-electron/electron/services/cli/pty-manager');
+const { removeFolder } = require('./lib/cleanup.cjs');
 
 (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'coding-hub-pty-')));
@@ -51,5 +52,5 @@ const { PtyManager } = require('../dist-electron/electron/services/cli/pty-manag
     for (const pid of children) assert.throws(() => process.kill(pid, 0));
     for (const run of runs) assert.throws(() => process.kill(run.pid, 0));
     console.log('PASS: Electron native PTYs, two isolated working directories, ANSI streams, keyboard input, resize propagation, output isolation, and CLI/child-process shutdown.');
-  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }); }
+  } finally { await manager.dispose(); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

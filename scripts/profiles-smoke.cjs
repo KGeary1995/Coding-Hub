@@ -5,6 +5,7 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { waitForPage } = require('./lib/wait.cjs');
+const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -101,5 +102,5 @@ const { waitForPage } = require('./lib/wait.cjs');
     assert.equal((await native(page, 'accounts', { action: 'profile-list' })).length, 2);
     if (process.env.CODING_HUB_PROFILES_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_PROFILES_SCREENSHOT });
     console.log('PASS: independent Claude logins, preserved default account, simultaneous profile sessions, per-profile usage, reconnect guard, private login output, and restored profile assignments. Fixture CLIs; real OAuth requires desktop provider login.');
-  } finally { if (app) await app.close(); await fs.rm(root, { recursive: true, force: true }); }
+  } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

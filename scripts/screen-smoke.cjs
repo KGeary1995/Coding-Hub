@@ -5,6 +5,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
+const { removeFolder } = require('./lib/cleanup.cjs');
 // A linked computer's screen end to end: the Screen button on its tab connects noVNC, through the host, to a stand-in
 // screen-sharing server on loopback (CODING_HUB_TEST_SCREEN_PORT). It checks sign-in with a saved password, the
 // picture, the note and unlock when that Mac is locked (or when Trace there cannot say), Ctrl sent as ⌘, Ctrl+V handing this computer's text over first,
@@ -175,6 +176,6 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
     console.log('screen smoke passed');
   } finally {
     await app?.close().catch(() => {}); vnc.server.close(); other.server.close();
-    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+    await removeFolder(root);
   }
 })().catch((error) => { console.error(error); process.exit(1); });
