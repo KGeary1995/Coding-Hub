@@ -4,10 +4,10 @@
 /* shared-candidate: a bare label outside the workspace takes the control type. Zero specificity, so any label rule wins;
    kept from before because other pages' plain labels may rely on it. */
 :where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
-/* shared-candidate: ui.css's `.hub-panel p` and `.storage-card p` outrank `.error-message`, so an error read as dim text;
-   here it keeps the danger colour, and one above the cards keeps their distance. ui.css could exclude it from those two rules. */
-.workbench-page .error-message { color: var(--tr-danger); }
-.workbench-page > .error-message { margin: 0 0 16px; }
+/* An error above the cards keeps their distance. */
+.workbench-page > .ui-banner { margin-bottom: 16px; }
+/* A notice in a card stands off the field or list after it. */
+.workbench-page .storage-card > .ui-banner { margin-bottom: 12px; }
 /* A quiet button beside 32 px buttons is as tall as they are, so its words sit on their line (the toolbar aligns to the bottom). */
 .workbench-page .hub-toolbar > .quiet-button { min-height: 32px; }
 /* A form inside a card is part of that card, not a second card in it. */
@@ -21,6 +21,9 @@
 /* A check box, or the line a button reports, directly in a card stands off what is above it. */
 .workbench-page .storage-card > .update-checkbox { margin-top: 12px; }
 .workbench-page .storage-card > .button + p { margin-top: 8px; }
+/* shared-candidate: a hint written as a paragraph stays a hint; ui.css's `.hub-panel p` would make it 13 px dim body text. */
+.workbench-page p.ui-hint { font: var(--tr-t-small); color: var(--tr-fg-faint); }
+[data-contrast="high"] .workbench-page p.ui-hint { color: var(--tr-fg); }
 
 /* Workflow center */
 .workflow-tabs { margin-bottom: 16px; }
@@ -31,7 +34,7 @@
 .recovery-advice strong { color: var(--tr-fg-strong); }
 .workbench-page .recovery-advice p { margin: 0; color: var(--tr-fg); }
 .search-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
-.search-form > details { grid-column: 1 / -1; }
+.search-form > :is(details, .ui-hint) { grid-column: 1 / -1; }
 .search-form > details > :not(summary) { margin-top: 12px; }
 .workbench-page .storage-card > .search-form + p { margin: 12px 0 0; }
 /* A failed run, opened: its folder, output, note and action, 8 px apart. */
@@ -63,6 +66,8 @@
 .coaching-examples .icon-button { position: absolute; top: 8px; right: 8px; }
 .coaching-examples > article > .confirm-step { align-self: end; }
 .coaching-packet { max-height: 400px; margin: 12px 0; }
+.coaching-how { margin-top: 8px; }
+.coaching-how > p { margin: 8px 0 0; }
 @container shell (max-width: 1180px) { .coaching-columns { grid-template-columns: minmax(0, 1fr); } .coaching-columns > .storage-card + .storage-card { margin-top: 0; } }
 /* Live coaching */
 .live-coaching .update-checkbox { margin: 12px 0; }

@@ -3,7 +3,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { memo, useEffect, useState, type KeyboardEvent } from 'react';
-import { Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, Asterisk, TerminalSquare, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, SquareChevronRight, ClipboardList } from 'lucide-react';
+import { Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -25,6 +25,7 @@ import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
+import { ENGINE_ICONS } from './tile/engine-icons';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
 import { newTaskFor } from '../state/task-store';
@@ -78,7 +79,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
   const engineName = seatId ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : 'Codex CLI';
   // The engine's mark, in its avatar: a shape as well as a colour.
-  const EngineIcon = claude ? Asterisk : shell ? SquareChevronRight : TerminalSquare;
+  const EngineIcon = ENGINE_ICONS[engine];
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
   const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
@@ -116,7 +117,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     event.preventDefault();
     if (state === 'idle') start(); else focusTerminal(session.id);
   };
-  const action = state === 'idle' ? <button className="tr-action start" aria-label="Start session" title="Start session (Enter on the tile)" onClick={start}><Play size={12} aria-hidden="true" />Start<kbd aria-hidden="true">⏎</kbd></button>
+  const action = state === 'idle' ? <button className="tr-action start" aria-label="Start channel" title="Start channel (Enter on the tile)" onClick={start}><Play size={12} aria-hidden="true" />Start<kbd aria-hidden="true">⏎</kbd></button>
     : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
     : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
     : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out" onClick={() => setView('memory')}>Write handoff</button>
@@ -130,7 +131,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   ].filter(Boolean);
   return (
     <article className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
-      data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} session ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
+      data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
@@ -148,18 +149,18 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         <div className="tr-tile-detail">
           {/* One span a fact, each after the first with its separator: a fact with no room leaves whole (tile.css). */}
           <span className="tr-detail-facts" title={cwd ?? undefined}>{facts.map((fact, index) => <span key={index}>{index ? ' · ' : ''}{fact}</span>)}</span>
-          {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt session ${channel}`} onClick={interrupt} disabled={stopping}><OctagonPause size={13} /></button>}
+          {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt channel ${channel}`} onClick={interrupt} disabled={stopping}><OctagonPause size={13} /></button>}
           {session.status === 'running'
             ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
-          {!shell && !chat && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of session ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
-          <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for session ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
+          {!shell && !chat && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of channel ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
+          <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for channel ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
           {agent && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
-          <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate session ${channel}`} disabled={sessionCount >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
-          <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate session ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
+          <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate channel ${channel}`} disabled={sessionCount >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
+          <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate channel ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
           {confirmClose
             ? <ConfirmStep question={`Stop ${engineName} and close channel ${channel}?`} action="Stop and close" busy={stopping} onConfirm={() => { setConfirmClose(false); void close(); }} onCancel={() => setConfirmClose(false)} />
-            : <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close session ${channel}`} disabled={channelCount <= 1 || session.status === 'starting' || stopping} onClick={() => { if (closeAsks(session.status)) setConfirmClose(true); else void close(); }}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>}
+            : <button className="tr-detail-button" title="Stop and close (keep at least one channel)" aria-label={`Close channel ${channel}`} disabled={channelCount <= 1 || session.status === 'starting' || stopping} onClick={() => { if (closeAsks(session.status)) setConfirmClose(true); else void close(); }}><X size={13} className="tr-detail-icon" /><span className="tr-detail-label">Close</span></button>}
         </div>
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
@@ -168,7 +169,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         {session.binding.mode === 'independent' && <label className="binding-control ui-field">Repository path<input aria-label="Repository path" value={session.binding.cwd} placeholder="Absolute directory path" onChange={(event) => updateBinding(session.id, { mode: 'independent', cwd: event.target.value })} spellCheck={false} /><button className="button secondary" type="button" onClick={() => void window.codingHub?.pickDirectory().then((directory) => { if (directory) updateBinding(session.id, { mode: 'independent', cwd: directory }); }).catch(() => useWorkspaceStore.getState().setSessionError(session.id, 'Folder picker unavailable. Use Projects to enter a path.'))}><FolderOpen size={13} />Browse repository folder</button></label>}
         <SessionPreferences session={session} />
         <WorktreeControls session={session} />
-        {busy && <p className="control-note">Stop the session to change its next launch settings.</p>}
+        {busy && <p className="control-note">Stop the channel to change its next launch settings.</p>}
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {chat && attention}
@@ -181,13 +182,13 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
         {/* The folder opens the channel's settings, where its folder is chosen; with no project yet, it opens Projects. */}
         <div className="welcome-actions">
-          {cwd ? <button className="button secondary welcome-directory" aria-label={`Configure idle session ${channel}`} title={`Session settings · ${cwd}`} onClick={() => setControlsOpen(true)}><Folder size={14} /><span>{folderName(cwd)}</span></button>
-            : <button className="button secondary welcome-directory" aria-label={`Choose project for session ${channel}`} onClick={() => setView('projects')}><Folder size={14} /><span>Choose project</span></button>}
+          {cwd ? <button className="button secondary welcome-directory" aria-label={`${folderName(cwd)} · channel ${channel} settings`} title={`Channel settings · ${cwd}`} onClick={() => setControlsOpen(true)}><Folder size={14} /><span>{folderName(cwd)}</span></button>
+            : <button className="button secondary welcome-directory" aria-label={`Choose project for channel ${channel}`} onClick={() => setView('projects')}><Folder size={14} /><span>Choose project</span></button>}
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
       <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} tokens={today.tokens} contextUsed={contextUsed}
-        tokensTitle={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Session budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+        tokensTitle={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
       {agent && <TaskStrip sessionId={session.id} />}
       {agent && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}

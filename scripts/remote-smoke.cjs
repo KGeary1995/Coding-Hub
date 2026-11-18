@@ -77,7 +77,7 @@ ${terminalFixture}
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.
     const tile = page.locator('.session-tile').nth(1);
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
-    await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+    await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'Working' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
@@ -230,7 +230,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.locator('.phone-card').filter({ hasText: 'Plan limits' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-usage.png') });
     await phone.locator('.tabbar').getByRole('button', { name: 'Tasks' }).click();
-    await phone.getByText('No tasks. Give a channel a task on the computer', { exact: false }).waitFor();
+    await phone.locator('.empty').filter({ has: phone.getByText('No tasks', { exact: true }) }).getByText('Give a channel a task on the computer', { exact: false }).waitFor();
     await phone.locator('.tabbar').getByRole('button', { name: 'History' }).click();
     await phone.locator('.screen-host').filter({ hasNotText: 'Loading' }).waitFor();
     assert.equal(await phone.locator('.screen-host .error').count(), 0, 'history loads without an error');

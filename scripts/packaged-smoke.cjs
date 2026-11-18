@@ -25,7 +25,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click(); await page.waitForSelector('.session-tile');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
-    await page.locator('.session-tile').first().getByRole('button', { name: 'Start session', exact: true }).click();
+    await page.locator('.session-tile').first().getByRole('button', { name: 'Start channel', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('READY')));
     assert.equal(await page.evaluate(() => window.events.some((event) => event.type === 'exit')), false, 'the CLI exited instead of running');
     console.log(`PASS: packaged app (${path.basename(executable)}) starts a CLI in a real terminal.`);

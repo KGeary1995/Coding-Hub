@@ -19,7 +19,7 @@ How to build, run and test Trace from source. [architecture.md](architecture.md)
 npm ci           # postinstall downloads Electron and test-loads node-pty (scripts/check-native.cjs)
 npm run dev      # host + phone build, Vite on 127.0.0.1:5173, Electron with reload
 npm start        # full production build, then electron . --production
-npm run dev:web  # renderer only in a browser: no host, no sessions
+npm run dev:web  # renderer only in a browser: no host, no live channels
 ```
 
 If node-pty fails to load (a channel shows Failed with `The terminal process could not start`), run `npm run rebuild:native`.

@@ -7,7 +7,7 @@ import { compact } from '../shell/StatusBar';
 const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
 
 /**
- * The channel's footer: context, or the session budget, as a meter with its share and the channel's tokens today, then
+ * The channel's footer: context, or the channel's budget, as a meter with its share and the channel's tokens today, then
  * terminal output over the last two minutes as a small trace with its rate. The trace is real output only; the state
  * shows in its colour (set in tile.css from the tile's state), never in invented data.
  */

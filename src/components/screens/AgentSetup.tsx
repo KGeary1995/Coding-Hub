@@ -4,7 +4,7 @@ import { useWorkspaceStore, type NavigationView } from '../../state/workspace-st
 import { useHubStore } from '../../state/hub-store';
 import { SETUP_VIEWS } from '../shell/Topbar';
 
-/** One status line per setup area: live where the app already knows it, otherwise what the area holds. */
+/** A status badge for the areas whose state the app already knows; the others show only their name (docs/design/midnight, section 6). */
 function useSetupStatus() {
   const [accounts, setAccounts] = useState<AccountConnection[] | null>(null);
   const [version, setVersion] = useState<string | null>(null);
@@ -18,15 +18,10 @@ function useSetupStatus() {
   }, [onAccounts]);
   useEffect(() => { void window.codingHub?.updates({ action: 'status' }).then((result) => { if (result.ok) setVersion(result.value.version); }).catch(() => {}); }, []);
   const connected = accounts?.filter((item) => item.state === 'authenticated').length ?? 0;
-  const status: Partial<Record<NavigationView, { text: string; tone?: 'ok' | 'warn' }>> = {
+  const status: Partial<Record<NavigationView, { text: string; tone: 'success' | 'warning' | 'neutral' }>> = {
     // GitHub is optional (project cloning only): it alone not being signed in is no warning.
-    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'ok' : 'warn' } : { text: 'Checking local CLIs…' },
-    memory: { text: automaticMemory ? 'On for every project' : 'Automatic memory off', tone: automaticMemory ? 'ok' : undefined },
-    rules: { text: 'CLAUDE.md, AGENTS.md' },
-    connectors: { text: 'Claude Code and Codex' },
-    skills: { text: 'Installed and configured' },
-    settings: { text: 'Backups, updates, storage' },
-    workflow: { text: 'Search, recovery, templates' },
+    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking…', tone: 'neutral' },
+    memory: automaticMemory ? { text: 'On for every project', tone: 'success' } : { text: 'Off', tone: 'neutral' },
   };
   return { status, version };
 }
@@ -42,7 +37,7 @@ export function AgentSetup({ children }: { children: ReactNode }) {
       <ul className="ui-list">{SETUP_VIEWS.map(({ view, label, icon: Icon }) => { const line = status[view]; return <li key={view}>
         <button className={`ui-row ${activeView === view ? 'active' : ''}`} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>
           <Icon className="tr-setup-icon" size={16} aria-hidden="true" />
-          <span className="ui-row-main"><strong className="tr-setup-name">{label}</strong>{line && <small className={`tr-setup-status ${line.tone ?? ''}`}>{line.tone && <i aria-hidden="true" />}{line.text}</small>}</span>
+          <span className="ui-row-main"><strong className="tr-setup-name">{label}</strong>{line && <span className={`ui-badge dot tr-setup-status ${line.tone}`}>{line.text}</span>}</span>
         </button>
       </li>; })}</ul>
       <footer>{version && <span>Trace {version} · Electron {navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1] ?? '—'}</span>}{dataPath && <code title={dataPath}>{dataPath}</code>}</footer>

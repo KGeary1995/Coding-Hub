@@ -97,7 +97,7 @@ export function CommandMenu() {
       { id: 'settings', label: 'Open workspace settings', run: go('settings') },
       { id: 'tools', label: 'Open more tools (coaching, verification)', run: go('tools') },
       { id: 'search', label: 'Search local workspace', run: () => { useWorkspaceStore.setState({ workflowTab: 'search' }); setView('workflow'); } },
-      { id: 'recovery', label: 'Recover a failed session', run: () => { useWorkspaceStore.setState({ workflowTab: 'recovery' }); setView('workflow'); } },
+      { id: 'recovery', label: 'Recover a failed channel', run: () => { useWorkspaceStore.setState({ workflowTab: 'recovery' }); setView('workflow'); } },
       { id: 'templates', label: 'Apply a project template', run: () => { useWorkspaceStore.setState({ workflowTab: 'templates' }); setView('workflow'); } },
       { id: 'support', label: 'Export a diagnostic report', run: () => { useWorkspaceStore.setState({ workflowTab: 'support' }); setView('workflow'); } },
       { id: 'grid', label: 'Arrange channels in grid', run: () => { setView('workspace'); arrange('grid'); } },

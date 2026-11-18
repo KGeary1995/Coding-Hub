@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Link2, LoaderCircle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, File, Folder, FolderOpen, Link2, LoaderCircle } from 'lucide-react';
 import type { DirectoryEntry, DirectoryListing, RepositoryContext } from '../../shared/types';
 
 interface TreeProps { repository: RepositoryContext; selected: string | null; onSelect: (path: string) => void; revision: number }
@@ -19,7 +19,7 @@ function DirectoryContents({ relative, depth, ...props }: TreeProps & { relative
     }).catch(() => { if (!cancelled) setError('This directory could not be loaded.'); });
     return () => { cancelled = true; };
   }, [props.repository.id, props.revision, relative]);
-  if (error) return <p className="tree-message error-message" role="alert">{error}</p>;
+  if (error) return <p className="tree-message error-message" role="alert"><AlertTriangle size={12} />{error}</p>;
   if (!listing) return <div className="tree-message"><LoaderCircle size={12} className="spin" />Loading directory…</div>;
   return <ul role={depth === 0 ? 'tree' : 'group'} aria-label={depth === 0 ? 'Project files' : undefined} className="file-tree">{listing.entries.map((entry) => <TreeEntry key={entry.path} {...props} entry={entry} depth={depth} />)}{!listing.entries.length && <li className="tree-message">Empty directory</li>}{listing.limited && <li className="tree-message">Showing the first 500 entries in this directory.</li>}</ul>;
 }

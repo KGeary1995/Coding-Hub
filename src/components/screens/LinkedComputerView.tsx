@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
-import { AlertCircle, Asterisk, Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, SquareChevronRight, TerminalSquare, X } from 'lucide-react';
+import { AlertCircle, Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
 import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import type { ChatRequest } from '../../../shared/chat';
 import { TranscriptView } from '../chat/TranscriptView';
@@ -13,6 +13,7 @@ import { useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES } from '../../state/channel-state';
 import { LinkedScreen } from './LinkedScreen';
 import { LinkedTipStrip } from '../tile/LiveTipStrip';
+import { ENGINE_ICONS } from '../tile/engine-icons';
 
 /**
  * Restart and install on another computer, after asking: Trace there saves its workspace, installs the latest version
@@ -34,8 +35,6 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
 }
 
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
-/** The engine's mark, as on this computer's tiles (SessionTile). */
-const ENGINE_ICON = { claude: Asterisk, codex: TerminalSquare, shell: SquareChevronRight } as const;
 
 /**
  * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read
@@ -83,7 +82,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
   const interrupt = () => { if (channel.runId) void workbench({ action: 'linked-input', id: computer.id, sessionId: channel.sessionId, runId: channel.runId, data: '\x03' }).catch((e: Error) => setError(e.message)); };
   const state = !channel.running ? 'idle' : channel.attention ? 'waiting' : 'working';
   // Whose account it runs on there, coloured as on desktop tiles here (that computer numbers its own accounts).
-  const tone = channel.account ? String(channel.account.tone % 4) : undefined; const EngineIcon = ENGINE_ICON[channel.engine];
+  const tone = channel.account ? String(channel.account.tone % 4) : undefined; const EngineIcon = ENGINE_ICONS[channel.engine];
   return <article className={`session-tile tr-tile linked-tile ${channel.engine} state-${state}`} data-account={tone} aria-label={`${computer.name} channel ${channel.channel}: ${channel.title}${channel.account ? `, ${channel.account.name} account` : ''}`}>
     <header className="tile-header tr-tile-head">
       <span className="tile-drag-handle" title="Drag to move (only here)"><GripVertical size={14} /></span>
@@ -91,7 +90,6 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       {/* The engine's name stays in the badge for screen readers; the avatar shows it. */}
       <span className="tr-ch-badge" title={ENGINE_NAME[channel.engine]}>CH{channel.channel}<span className="tr-ch-engine">{ENGINE_NAME[channel.engine]}</span></span>
       <strong className="tr-tile-name" title={channel.title}>{channel.title}</strong>
-      <span className="tr-tile-model model-name">{computer.name}</span>
       {channel.account && <span className="tr-profile-chip account-profile-chip ui-badge" data-account={tone} title={`Claude account on ${computer.name}: ${channel.account.name}`}>{channel.account.name}</span>}
       <span className="tr-spacer" />
       {channel.running
@@ -139,7 +137,11 @@ export function LinkedComputerView() {
     {addError && <div className="ui-banner danger" role="alert"><AlertCircle aria-hidden="true" /><span>{addError}</span><button className="icon-button small" aria-label="Dismiss this notice" onClick={() => useLinkedStore.setState({ addError: '' })}><X /></button></div>}
     {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
       {computer.connected && !computer.channels.length && <div className="ui-empty linked-empty"><Monitor aria-hidden="true" /><h3>No channels on {computer.name}</h3><p>Add one with + Channel.</p></div>}
-      {!computer.connected && <div className="ui-empty linked-empty"><MonitorOff aria-hidden="true" /><h3>{computer.name} is not reachable right now</h3><p>Trace keeps trying; check that it is on, Trace is open there, and Tailscale is connected. If Trace has closed there, Screen still reaches it.</p></div>}
+      {/* Not connected and no reason yet: still connecting, which is not a failure. */}
+      {!computer.connected && !computer.error && computer.linked && <div className="ui-empty linked-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h3>Connecting to {computer.name}…</h3></div>}
+      {/* Its screen-sharing server answers even while Trace there is closed, so the screen is the one action offered. */}
+      {!computer.connected && (computer.error || !computer.linked) && <div className="ui-empty linked-empty off"><MonitorOff aria-hidden="true" /><h3>{computer.name} is not reachable; Trace keeps trying</h3><p>Check that it is on, with Trace open and Tailscale connected.</p>
+        <button className="button secondary" title={`If Trace has closed on ${computer.name}, its screen still answers`} onClick={() => setScreenOf(computer.id)}><MonitorPlay aria-hidden="true" />Show its screen</button></div>}
       {computer.channels.length > 0 && <LinkedGrid computer={computer} />}</>}
   </section>;
 }
@@ -162,7 +164,7 @@ function LinkedGrid({ computer }: { computer: LinkedComputer }) {
     setSaved(places); savePlaces(computer.id, places);
   };
   return <div ref={container} className="linked-grid">
-    {width > 0 && <GridLayout className="session-grid" width={width} cols={12} rowHeight={ROW_HEIGHT} margin={[10, 10]} containerPadding={[0, 0]} layout={layout}
+    {width > 0 && <GridLayout className="session-grid" width={width} cols={12} rowHeight={ROW_HEIGHT} margin={[8, 8]} containerPadding={[0, 0]} layout={layout}
       draggableHandle=".tile-drag-handle" draggableCancel="button,input,select,.terminal-viewport" compactType="vertical" resizeHandles={['se']} onLayoutChange={change}>
       {computer.channels.map((channel) => <div key={channel.sessionId}><LinkedTile computer={computer} channel={channel} /></div>)}
     </GridLayout>}

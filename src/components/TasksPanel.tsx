@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent } from 'react';
-import { ClipboardList, Plus, Send } from 'lucide-react';
+import { ClipboardList, Inbox, Plus, Send, TriangleAlert } from 'lucide-react';
 import type { Task, TaskDetail, TaskOutcome, VerificationData, VerificationFreshness } from '../../shared/workbench';
 import { useChatStore } from '../state/chat-store';
 import { startTaskInWorktree } from '../runtime/task-worktree';
@@ -61,7 +61,9 @@ export function TasksPanel() {
   const agents = channelsOf(sessions).filter((session) => isAgentConfig(session.config));
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
-  useEffect(() => { void loadTasks().then(() => refreshTaskWatch()); void workbench<VerificationData>({ action: 'verification-list' }).then(setChecks).catch(() => {}); }, []);
+  /** Until the first list arrives, the board says it is loading rather than that there are no tasks. */
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { void loadTasks().then(() => { setLoaded(true); return refreshTaskWatch(); }); void workbench<VerificationData>({ action: 'verification-list' }).then(setChecks).catch(() => {}); }, []);
   // Whether each task's check still describes its files, read again with the tasks' changes.
   useEffect(() => { if (tasks.some((task) => task.verificationId)) void workbench<VerificationFreshness>({ action: 'verification-fresh' }).then(setFresh).catch(() => {}); }, [watch, tasks]);
   const checkText = (task: Task) => { const result = checks.results.find((r) => r.id === task.verificationId); if (!result) return ''; const state = fresh[result.id]; return `Check: ${result.profileName} passed` + (state === 'current' ? ' on these files.' : state === 'changed' ? (result.tested?.changedDuring ? ', but files changed while it ran. Run it again.' : ', but files changed since. Run it again.') : '. Trace cannot tell which files it tested.'); };
@@ -82,19 +84,19 @@ export function TasksPanel() {
 
   return <section className="ui-page wide task-panel">
     <header className="ui-page-head"><span className="ui-page-icon" aria-hidden="true"><ClipboardList /></span><div><h1>Tasks</h1>
-      <p>Give each agent a job, and if you like the files it may change. Trace types the task into the channel, moves it along as the agent works, and warns you when an agent changes files outside its task or the same files as another task.</p></div>
+      <p>Give each channel a job and, if you like, the files it may change.</p></div>
       {!open && <div className="ui-page-actions"><button className="button primary" onClick={() => { setForm({ ...EMPTY_FORM, directory: rootDirectory ?? '' }); setOpen(true); }}><Plus />New task</button></div>}</header>
-    {error && <p className="ui-banner danger" role="alert">{error}</p>}{note && <p className="ui-banner success" role="status">{note}</p>}
-    {!tasks.length && !open && <ol className="ui-card task-howto"><li><strong>Write a task</strong> and pick the channel to do it, or press <strong>Task</strong> on a channel.</li><li><strong>Send it.</strong> Trace types it into that agent, with its files and a request to say what it changed.</li><li><strong>Check the result.</strong> When the agent finishes, the task moves to Ready for review with the files it changed. Look them over and mark it done.</li></ol>}
+    {error && <p className="ui-banner danger" role="alert"><TriangleAlert aria-hidden="true" /><span>{error}</span></p>}{note && <p className="ui-banner success" role="status">{note}</p>}
+    <details className="task-howto"><summary>How this works</summary><ol><li><strong>Write a task</strong> and pick the channel to do it, or press <strong>Task</strong> on a channel.</li><li><strong>Send it.</strong> Trace types it into that agent, with its files and a request to say what it changed, and moves it along as the agent works.</li><li><strong>Check the result.</strong> When the agent finishes, the task moves to Ready for review with the files it changed. Look them over and mark it done.</li></ol><p>Trace warns you when an agent changes files outside its task or the same files as another task.</p></details>
     {open && <form className="ui-card task-form" onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       <div className="ui-card-head"><ClipboardList aria-hidden="true" /><h2>{form.id ? 'Edit task' : 'New task'}</h2></div>
       <label className="ui-field">What should the agent do?<input aria-label="Task title" required maxLength={150} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="For example: Add a dark mode switch to Settings" /></label>
       <label className="ui-field">More details (optional)<textarea aria-label="Task details" rows={3} maxLength={2000} value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} placeholder="What it should look like, what to avoid, how to check it" /></label>
       <div className="task-form-pair">
-        <label className="ui-field">Channel<select aria-label="Task agent session" value={form.sessionId} onChange={(e) => setForm({ ...form, sessionId: e.target.value, directory: e.target.value ? folderOf(e.target.value) : form.directory })}><option value="">Choose later</option>{agents.map((session) => <option key={session.id} value={session.id}>{channelLabel(session.id)}{session.status === 'running' ? '' : ' (not running)'}</option>)}</select></label>
-        <label className="ui-field">Project folder<div className="input-with-button"><input aria-label="Task directory" required value={form.directory || folderOf(form.sessionId)} onChange={(e) => setForm({ ...form, directory: e.target.value })} /><button type="button" className="button secondary" onClick={() => void window.codingHub?.pickDirectory().then((value) => { if (value) setForm({ ...form, directory: value }); })}>Browse</button></div></label>
+        <label className="ui-field">Channel<select aria-label="Task agent channel" value={form.sessionId} onChange={(e) => setForm({ ...form, sessionId: e.target.value, directory: e.target.value ? folderOf(e.target.value) : form.directory })}><option value="">Choose later</option>{agents.map((session) => <option key={session.id} value={session.id}>{channelLabel(session.id)}{session.status === 'running' ? '' : ' (not running)'}</option>)}</select></label>
+        <label className="ui-field">Project folder<div className="input-with-button"><input aria-label="Task directory" required value={form.directory || folderOf(form.sessionId)} onChange={(e) => setForm({ ...form, directory: e.target.value })} /><button type="button" className="button secondary" onClick={() => void window.codingHub?.pickDirectory().then((value) => { if (value) setForm({ ...form, directory: value }); })}>Choose folder</button></div></label>
       </div>
-      <label className="ui-field">Only these files or folders (optional, one per line; empty means the whole project)<textarea aria-label="Task file scope" rows={2} value={form.files} onChange={(e) => setForm({ ...form, files: e.target.value })} placeholder={'src/settings/**\nREADME.md'} /></label>
+      <label className="ui-field">Only these files or folders (optional)<textarea aria-label="Task file scope" rows={2} value={form.files} onChange={(e) => setForm({ ...form, files: e.target.value })} placeholder={'src/settings/**\nREADME.md'} /><small className="ui-hint">One per line. Empty means the whole project.</small></label>
       <details><summary>Review notes and checks</summary>
         <label className="ui-field">Notes (optional)<textarea aria-label="Task review notes" rows={2} maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
         <label className="ui-field">Passing check (from Verification profiles)<select aria-label="Task verification evidence" value={form.verificationId} onChange={(e) => setForm({ ...form, verificationId: e.target.value })}><option value="">None</option>{checks.results.filter((r) => r.passed && r.directory === (form.directory || folderOf(form.sessionId))).map((r) => <option key={r.id} value={r.id}>{r.profileName} · {new Date(r.endedAt).toLocaleString()}</option>)}</select></label>
@@ -104,7 +106,7 @@ export function TasksPanel() {
     <div className="task-board">{TASK_COLUMNS.map((column) => { const inColumn = tasks.filter((task) => task.status === column.status); return <section key={column.status} className="ui-card task-column" onDragOver={(e) => e.preventDefault()} onDrop={drop(column.status)} aria-label={column.label}>
       <div className="ui-card-head"><h2>{column.label}</h2><span className={`ui-count ${inColumn.length ? 'accent' : 'neutral'}`}>{inColumn.length}</span></div>
       <p className="task-column-hint">{column.hint}</p>
-      {!inColumn.length && <p className="task-column-empty">No tasks here.</p>}
+      {!inColumn.length && (column.status === 'queued' && !tasks.length ? <div className="ui-empty task-column-empty"><ClipboardList aria-hidden="true" /><h3>{!loaded ? 'Loading tasks…' : error ? 'No tasks to show' : 'No tasks yet'}</h3>{!(loaded && error) && <p>{loaded ? 'Press New task, or Task on a channel.' : 'Reading your saved tasks.'}</p>}</div> : <div className="ui-empty task-column-empty"><Inbox aria-hidden="true" /><h3>No tasks here</h3></div>)}
       {inColumn.map((task) => {
         const changed = watch.changed[task.id] ?? []; const warnings = warningsFor(task.id); const files = limitedTo(task);
         const outcome = task.outcome && OUTCOME_BADGE[task.outcome];

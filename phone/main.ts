@@ -80,7 +80,7 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
   leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
-  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), screen);
+  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), directNotice(), screen);
   if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen')));
   app.replaceChildren(header(), main, tabBar(tab));
   unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
@@ -125,7 +125,7 @@ function showPair(error = '') {
     mark(true),
     h('div', { className: 'pair-card' },
       h('h1', {}, 'Pair this phone'),
-      h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
+      h('p', { className: 'dim' }, 'Enter the code from Settings → Phone access in Trace on your computer.'),
       h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
       h('button', { className: 'primary', type: 'submit' }, 'Pair'), message));
   form.onsubmit = async (event) => {
@@ -144,7 +144,8 @@ function listen(sessionId: string | null) {
     for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = linkText(); }
     // While nothing is connected, the list says which computer this app is asking for and why it does not answer.
     const text = !value && problem ? problem : via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : '';
-    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !text; notice.textContent = text; }
+    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !text; notice.querySelector('.banner-text')!.textContent = text; }
+    showEmpty();
     // On its own computer, the phone picks up keys to the others, so it can still reach them when this one is off.
     if (value && !target.id) void collectKeys().catch(() => {});
   }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
@@ -206,14 +207,20 @@ function addMenu() {
 /** No channels: the list keeps its place, with an empty state in it. The SVG is fixed markup, not data. */
 function emptyList() {
   const element = h('div', { id: 'empty', className: 'empty', hidden: true }); element.innerHTML = iconSvg(ENGINE_ICON.shell);
-  element.append(h('p', {}, 'No channels yet. Open a project in Trace on your computer.')); return element;
+  element.append(h('strong', {}, 'No channels'), h('p', {}, 'Open a project in Trace on your computer.')); return element;
+}
+/** Why this app's computer does not answer, or that the phone went to another one, as api.ts and listen() word it. The SVG is fixed markup. */
+function directNotice() {
+  const element = h('p', { id: 'direct', className: 'banner warning', hidden: !via, aria: { role: 'status' } });
+  element.innerHTML = iconSvg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>');
+  element.append(h('span', { className: 'banner-text' })); return element;
 }
 function showList() {
   leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), h('p', { id: 'direct', className: 'banner warning', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, emptyList(), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), directNotice(), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, emptyList(), alertsPanel()), h('footer', {}, remove));
   app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
@@ -270,7 +277,7 @@ function alertsPanel() {
       onclick: async () => { render(null, ''); try { if (on) await disableAlerts(); else await enableAlerts(); render(await alertsOn()); } catch (e) { render(on, (e as Error).message); } } }, on ? 'Turn off alerts' : 'Turn on alerts');
     panel.replaceChildren(h('h2', { id: 'alerts-title' }, 'Alerts'),
       h('p', { className: 'dim' }, on ? 'This phone is told when a channel needs you or stops with an error.' : 'Get a notification when a channel needs you or stops with an error, even with Trace closed.'),
-      !alertsSupported() ? h('p', { className: 'dim' }, ios ? 'On iPhone and iPad, add Trace to your Home Screen first (Share → Add to Home Screen), then open it from there.' : 'This browser cannot receive alerts.') : button,
+      !alertsSupported() ? h('p', { className: 'dim' }, ios ? 'On iPhone and iPad, alerts need Trace on the Home Screen (Share → Add to Home Screen).' : 'This browser cannot receive alerts.') : button,
       h('p', { className: 'error', aria: { role: 'alert' } }, note));
   };
   render(null); if (alertsSupported()) void alertsOn().then((on) => render(on)).catch(() => render(false)); else render(false);
@@ -313,6 +320,8 @@ function renderNeeds() {
 }
 /** What a channel is, under its name: the engine (unless that is its name), a chat or a Round Table (two agents in one channel), and whose computer. */
 const meta = (channel: RemoteChannel, several: boolean) => [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, channel.table ? 'Round Table' : channel.chat ? 'Chat' : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · ');
+/** "No channels" only while the computer answers: while it does not, the notice above the list says why nothing is listed. */
+function showEmpty() { const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0 || !connected; }
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
   renderNeeds(); readTasks();
@@ -326,7 +335,7 @@ function renderList() {
       badge(channel, 'tag'),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention ? h('span', { className: 'ask' }, channel.attention) : !channel.running && channel.failed && h('span', { className: 'ask failed' }, channel.failed)))));
-  const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
+  showEmpty();
   const add = document.getElementById('add-wrap'); if (add) add.hidden = !me?.canRun;
 }
 

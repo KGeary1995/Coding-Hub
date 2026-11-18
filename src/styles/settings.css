@@ -41,12 +41,14 @@
 .phone-qr { width: 200px; height: 200px; flex: none; border-radius: var(--tr-r-control); }
 .phone-devices .ui-row, .linked-computers .ui-row { flex-wrap: wrap; }
 .phone-devices .ui-row-main, .linked-computers .ui-row-main { flex: 1 1 240px; }
-.phone-devices :is(.ui-check, .ui-hint) { flex-basis: 100%; }
+.phone-devices .ui-check { flex-basis: 100%; }
 @container shell (max-width: 900px) { .phone-pairing { flex-direction: column; } }
 
 /* Other computers: the link code beside a computer, and the two sections under the list. */
 .linked-computers .link-code { display: inline-flex; gap: 8px; align-items: center; }
-.linked-computers .link-code input { width: 176px; font-family: var(--tr-font-mono); }
+.linked-computers .link-code input { width: 200px; font-family: var(--tr-font-mono); }
+/* The code is typed in mono; its placeholder is words, which in mono did not fit the field. */
+.linked-computers .link-code input::placeholder { font-family: var(--tr-font-ui); }
 .link-this { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tr-line-faint); }
 .link-this > * { margin: 0; }
 .link-this > :is(.button, .ui-check) { justify-self: start; }
@@ -61,6 +63,24 @@
 /* Higher contrast: the wells this sheet draws take the stronger line that shared rows take. */
 [data-contrast="high"] .settings-card :is(.settings-facts, .phone-guide, .phone-pairing) { border-color: var(--tr-line-strong); }
 
-/* shared-candidate: a plain heading over a group of cards on a long form page (Settings), for the page's owner to use. */
-.ui-section-title { margin: 32px 0 0; font: var(--tr-t-section); color: var(--tr-fg-strong); }
-.ui-section-title + .storage-card, .ui-section-title + .ui-card { margin-top: 12px; }
+/* shared-candidate: a plain heading over a group of cards on a long form page. It takes focus when "On this page" jumps
+   to it (tabindex -1), so it keeps a little room above it and shows the ring only to the keyboard. */
+.ui-section-title { margin: 0; font: var(--tr-t-section); color: var(--tr-fg-strong); scroll-margin-top: 24px; }
+.ui-section-title:focus:not(:focus-visible) { outline: none; }
+
+/* The page: "On this page", then sections of cards, 16 px between cards and 32 px between sections. The cards' own
+   margins (.storage-card, .engine-health, .hub-form) give way to the gap. */
+.settings-toc { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.settings-toc > span { margin-right: 4px; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.settings-section { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; }
+.settings-toc + .settings-section { margin-top: 24px; }
+.hub-panel .settings-section > * { margin: 0; }
+
+/* A hint that ends in the shared help button, and a sub-heading with one. */
+.settings-hint-help { display: flex; align-items: center; gap: 8px; }
+.link-this-head { display: flex; align-items: center; gap: 8px; }
+.link-this-head h3 { margin: 0; }
+
+/* Save preferences with its notice or error beside it; a number needs no field as wide as a path. */
+.settings-save .hub-feedback { flex: 1 1 240px; max-width: 72ch; margin: 0; }
+.settings-form .hub-form > label > input[type="number"] { max-width: 200px; }

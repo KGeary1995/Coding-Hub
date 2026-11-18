@@ -19,7 +19,7 @@ export const CHANNEL_STATES: Record<ChannelState, { glyph: string; word: string;
   limit: { glyph: '▲', word: 'Near limit', color: 'var(--tr-st-limit)' },
 };
 
-/** Share of the context window or session budget in use (0–1+). Claude does not report its window size. */
+/** Share of the context window or the channel's budget in use (0–1+). Claude does not report its window size. */
 export function limitRatio(session: Session, usage: UsageRecord | undefined) {
   if (!usage) return 0;
   const context = usage.context && usage.context.limit > 0 ? usage.context.used / usage.context.limit : 0;

@@ -36,8 +36,8 @@ function Meter({ ratio, tone, label }: { ratio: number; tone: string; label: str
 }
 
 function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) { return <section className="phone-card"><h2>{title}{count !== undefined && <span className="count neutral">{count}</span>}</h2>{children}</section>; }
-/** No data yet: the card keeps its place, with one line saying why. */
-function Empty({ children }: { children: ReactNode }) { return <div className="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg><p>{children}</p></div>; }
+/** No data yet: the card keeps its place, with a title and one line saying why. */
+function Empty({ title, children }: { title: string; children: ReactNode }) { return <div className="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg><strong>{title}</strong><p>{children}</p></div>; }
 
 function UsageScreen() {
   const [usage, error, reload] = useRoute<RemoteUsage>('/api/usage');
@@ -52,7 +52,7 @@ function UsageScreen() {
       {budgetShare !== null && <div className="budget"><p className="measure"><span>Daily budget{usage.budget?.dollars ? ` of $${usage.budget.dollars}` : usage.budget?.tokens ? ` of ${compact(usage.budget.tokens)} tok` : ''}</span><b>{Math.round(budgetShare * 100)}%</b></p><Meter ratio={budgetShare} tone="accent" label={`Daily budget ${Math.round(budgetShare * 100)}% used`} /></div>}
     </Section>
     <Section title="Plan limits">
-      {!usage.limits.length && <Empty>No limits reported yet.</Empty>}
+      {!usage.limits.length && <Empty title="No plan limits yet">Shown once an agent reports them.</Empty>}
       {usage.limits.map((limit) => <div key={`${limit.engine}-${limit.account}`} className="limit">
         <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
         {limit.error && <p className="dim">{limit.error}</p>}
@@ -71,7 +71,7 @@ function TasksScreen({ canRun }: { canRun: boolean }) {
   if (!tasks) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="error" role="alert">{note}</p>}
-    {!tasks.length && <Empty>No tasks. Give a channel a task on the computer (Task on its tile).</Empty>}
+    {!tasks.length && <Empty title="No tasks">Give a channel a task on the computer (Task on its tile).</Empty>}
     {COLUMNS.map((column) => { const list = tasks.filter((task) => task.status === column.status); return list.length ? <Section key={column.status} title={column.label} count={list.length}>
       <div className="rows">{list.map((task) => <article key={task.id} className="task"><div>
         <strong>{task.title}</strong>
@@ -89,13 +89,13 @@ function HistoryScreen({ canRun }: { canRun: boolean }) {
   if (!items) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="dim" role="status">{note}</p>}
-    {!items.length && <Empty>No conversations yet.</Empty>}
+    {!items.length && <Empty title="No conversations yet">Claude Code and Codex conversations on this computer show here.</Empty>}
     {items.length > 0 && <ul className="history rows">{items.map((item) => <li key={item.key} className={`history-item engine-${item.engine}`}>
       <EngineMark engine={item.engine} />
       <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{item.engine === 'claude' ? 'Claude Code' : 'Codex'} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
       {canRun && <button type="button" className="small" onClick={() => void resume(item)}>Resume</button>}
     </li>)}</ul>}
-    {!canRun && items.length > 0 && <p className="dim">To resume a conversation from this phone, turn on Can start and stop agents for it on the computer (Settings → Phone access).</p>}
+    {!canRun && items.length > 0 && <p className="dim">Resuming needs Can start and stop agents (Settings → Phone access on the computer).</p>}
   </>;
 }
 
@@ -104,7 +104,7 @@ function MemoryScreen() {
   useEffect(() => { if (projects?.length && !projects.some((item) => item.project === project)) setProject(projects[0].project); }, [projects]);
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!projects) return <p className="dim">Loading…</p>;
-  if (!projects.length) return <Empty>No projects with channels on this computer yet.</Empty>;
+  if (!projects.length) return <Empty title="No projects yet">Projects with channels on this computer show here.</Empty>;
   const shown = projects.find((item) => item.project === project) ?? projects[0];
   const save = async () => { setNote(''); try { await post('/api/memory', { project: shown.project, title: title.trim(), content: content.trim() }); setTitle(''); setContent(''); setNote('Handoff saved. Both agents see it in their next session.'); reload(); } catch (e) { setNote((e as Error).message); } };
   return <>

@@ -20,9 +20,10 @@ export function CrashDiagnostics({ storagePath }: { storagePath?: string }) {
   return <details className="workflow-record settings-details" onToggle={(event) => { if (event.currentTarget.open && !report && !busy) void refresh(); }}>
     <summary>Application stability & crash diagnostics</summary>
     <p className="ui-hint">Lifecycle records help distinguish an application crash from a normal CLI exit. They exclude prompts, terminal output, account details and raw exception messages.</p>
+    {busy && !report && <p className="ui-hint">Reading the lifecycle records…</p>}
     {report && <><p className="ui-hint">Previous application shutdown: <strong>{report.previousShutdown}</strong>{report.previousShutdown === 'unclean' && ' · This can mean a crash, force quit or power loss; it does not identify the cause.'}</p><pre className="check-output" aria-label="Application lifecycle report">{JSON.stringify({ previousShutdown: report.previousShutdown, events: report.events }, null, 2)}</pre><StallList stalls={report.stalls} /></>}
     <div className="ui-actions"><button type="button" className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh crash diagnostics</button></div>
-    <p className="ui-hint">Reports begin with this release. Native crash dumps stay under {storagePath ? <code>{storagePath}/crash-dumps</code> : 'the local data folder'} and are never uploaded automatically. Dumps may contain process memory; they are excluded from shared memory, support exports and backups.</p>
+    <p className="ui-hint">Native crash dumps stay under {storagePath ? <code>{storagePath}/crash-dumps</code> : 'the local data folder'} and are never uploaded automatically. Dumps may contain process memory; they are excluded from shared memory, support exports and backups.</p>
     {error && <p className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </details>;
 }

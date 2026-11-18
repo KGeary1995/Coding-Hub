@@ -23,14 +23,14 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
  try{
   let page=await launch();await page.evaluate(()=>{window.events=[];window.codingHub.onSessionEvent(event=>window.events.push(event));});
   await app.evaluate(({dialog},project)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[project]});},project);await page.getByRole('button',{name:'Open project',exact:true}).click();
-  const tile=page.locator('.session-tile').nth(1);await (await tileControl(page, 'Engine settings for session 2')).click();
+  const tile=page.locator('.session-tile').nth(1);await (await tileControl(page, 'Engine settings for channel 2')).click();
   await page.waitForFunction(()=>[...document.querySelectorAll('datalist option')].some(option=>option.value==='fixture-hidden-model'));
   const options=await tile.locator('datalist option').evaluateAll(nodes=>nodes.map(node=>node.value));assert.deepEqual(options,['fixture-current-model','fixture-extra-model','fixture-hidden-model']);assert.ok(!options.some(value=>value.startsWith('picker-')));
   await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('none');await tile.getByLabel('codex model',{exact:true}).fill('fixture-hidden-model');assert.equal(await tile.getByLabel('Reasoning effort',{exact:true}).inputValue(),'');assert.ok((await tile.textContent()).includes('reasoning has been reset') || (await tile.textContent()).includes('Reasoning has been reset'));await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('ultra');
-  await (await tileControl(page, 'Engine settings for session 2')).click();await tile.getByRole('button',{name:'Start session',exact:true}).click();
+  await (await tileControl(page, 'Engine settings for channel 2')).click();await tile.getByRole('button',{name:'Start channel',exact:true}).click();
   await page.waitForFunction(()=>window.events.some(event=>event.data?.includes('MODEL_OVERRIDE:fixture-hidden-model')));await (await tileControl(tile, 'Stop')).click();
   await openView(page, 'Settings');await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);
-  await page.getByRole('button',{name:'Workspace',exact:true}).click();const first=page.locator('.session-tile').first();await first.getByRole('button',{name:'Start session',exact:true}).click();await page.waitForFunction(()=>window.events.some(event=>event.type==='started'&&event.engine==='claude'));
+  await page.getByRole('button',{name:'Workspace',exact:true}).click();const first=page.locator('.session-tile').first();await first.getByRole('button',{name:'Start channel',exact:true}).click();await page.waitForFunction(()=>window.events.some(event=>event.type==='started'&&event.engine==='claude'));
   claude=await page.evaluate(()=>window.events.find(event=>event.type==='started'&&event.engine==='claude'));
   // Exercise physical Enter through Xterm, the serialized renderer input queue,
   // IPC and the native PTY; bypassing input with writeSession would miss this path.

@@ -84,7 +84,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
   };
   /** A scene that only takes pictures runs when one of its shots is wanted; scenes that set up later ones always run. */
   const view = (names, run) => [names].flat().some(wantedAny) ? scene([names].flat()[0], run) : Promise.resolve();
-  const tile = (channel) => page.getByRole('article', { name: new RegExp(` session ${channel}(,|$)`) });
+  const tile = (channel) => page.getByRole('article', { name: new RegExp(` channel ${channel}(,|$)`) });
   const typeIn = async (channel, ...lines) => { await tile(channel).getByRole('textbox', { name: 'Terminal input' }).focus(); for (const line of lines) { await page.keyboard.type(line); await page.keyboard.press('Enter'); await page.waitForTimeout(250); } };
   // xterm's own row layer (not a Trace class): terminal text has no accessible role.
   const terminalShows = (channel, text) => tile(channel).locator('.xterm-rows').filter({ hasText: text }).waitFor();
@@ -143,13 +143,13 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
     await scene('01-workspace-idle', async () => { await page.getByRole('button', { name: 'Open project', exact: true }).click(); await tile(2).waitFor(); await shot('01-workspace-idle'); });
 
     await scene('channels', async () => {
-      for (const channel of [1, 2]) await tile(channel).getByRole('button', { name: 'Start session', exact: true }).click();
+      for (const channel of [1, 2]) await tile(channel).getByRole('button', { name: 'Start channel', exact: true }).click();
       await addChannel(page, 'Terminal');
       for (const channel of [1, 2]) await terminalShows(channel, 'READY');
       await typeIn(1, 'Add a check for an empty name to greet()', 'Then run the tests');
       await typeIn(2, 'Review src/greet.ts');
       // The shell prints its prompt after its profile loads; give it a moment before typing.
-      await tile(3).getByRole('button', { name: 'Start session', exact: true }).click(); await tile(3).getByRole('textbox', { name: 'Terminal input' }).waitFor({ timeout: 15_000 }); await page.waitForTimeout(2500);
+      await tile(3).getByRole('button', { name: 'Start channel', exact: true }).click(); await tile(3).getByRole('textbox', { name: 'Terminal input' }).waitFor({ timeout: 15_000 }); await page.waitForTimeout(2500);
       await typeIn(3, 'git log --oneline'); await terminalShows(3, 'Greeting library');
       await typeIn(3, 'git status --short'); await terminalShows(3, 'farewell.ts');
       await page.getByRole('button', { name: 'Arrange in grid', exact: true }).click(); await page.mouse.move(1, 1);
@@ -167,15 +167,15 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       await box.fill('write the answer to notes.txt'); await page.keyboard.press('Enter');
       await chat.getByRole('button', { name: 'Allow', exact: true }).first().waitFor({ timeout: 20_000 });
       // Maximised, so the conversation is readable rather than a quarter of the grid.
-      await (await tileControl(tile(4), 'Isolate session 4')).click(); await page.mouse.move(1, 1);
+      await (await tileControl(tile(4), 'Isolate channel 4')).click(); await page.mouse.move(1, 1);
       await shot('03-chat');
       await chat.getByRole('button', { name: 'Allow', exact: true }).first().click();
       await (await tileControl(tile(4), 'Restore grid')).click(); await page.mouse.move(1, 1);
     });
 
-    await scene('04-tile-detail', async () => { await (await tileControl(tile(1), 'Isolate session 1')).waitFor(); await shot('04-tile-detail'); await page.mouse.move(1, 1); });
+    await scene('04-tile-detail', async () => { await (await tileControl(tile(1), 'Isolate channel 1')).waitFor(); await shot('04-tile-detail'); await page.mouse.move(1, 1); });
     await scene('layouts', async () => {
-      await (await tileControl(tile(1), 'Isolate session 1')).click(); await page.mouse.move(1, 1); await shot('05-layout-single');
+      await (await tileControl(tile(1), 'Isolate channel 1')).click(); await page.mouse.move(1, 1); await shot('05-layout-single');
       await (await tileControl(tile(1), 'Restore grid')).click(); await page.mouse.move(1, 1);
       for (const [name, label] of [['06-layout-columns', 'Split vertically: columns'], ['07-layout-rows', 'Split horizontally: rows'], ['08-layout-grid', 'Arrange in grid']]) { await page.getByRole('button', { name: label, exact: true }).click(); await page.mouse.move(1, 1); await shot(name); }
     });
@@ -196,7 +196,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       await typeIn(1, 'Run the tests again');
     });
     await scene('12-close-question', async () => {
-      await (await tileControl(tile(3), 'Close session 3')).click();
+      await (await tileControl(tile(3), 'Close channel 3')).click();
       await tile(3).getByRole('group', { name: /^Stop .* and close channel 3\?$/ }).waitFor();
       await shot('12-close-question');
       await tile(3).getByRole('button', { name: 'Keep', exact: true }).click(); await page.mouse.move(1, 1);

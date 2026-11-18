@@ -94,7 +94,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await openView(page, 'Session history');
     await page.getByRole('button', { name: 'View native CLI conversations', exact: true }).click();
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
-    await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
+    await page.getByRole('button', { name: 'Resume in new channel', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Tasks', 'Verification profiles', 'AI coaching', 'Settings']) {
       await openView(page, name); await page.waitForTimeout(150);

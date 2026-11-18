@@ -4,6 +4,7 @@ import type { AccountConnection } from '../../../shared/accounts';
 import type { SessionHistoryRun } from '../../../shared/types';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { openProjectFolder } from '../shell/Topbar';
+import { TraceMark } from '../shell/TraceMark';
 
 const SETUP_KEY = 'coding-hub-setup-complete';
 const absolute = (directory: string) => /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(directory);
@@ -42,13 +43,17 @@ const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; to
 /** Workspace with no project: a centred welcome with the ways in, then recent folders and what is installed. */
 export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
   const { setRootDirectory, setView } = useWorkspaceStore();
-  const [recent, setRecent] = useState<{ directory: string; at: string }[]>([]);
+  /** null while loading; the browser preview has no history, so it starts empty. */
+  const [recent, setRecent] = useState<{ directory: string; at: string }[] | null>(() => window.codingHub ? null : []);
   const [engines, setEngines] = useState<AccountConnection[] | null>(null);
+  /** A failed read is shown as one, not left looking like "still checking" or "nothing here". */
+  const [recentError, setRecentError] = useState(''); const [enginesError, setEnginesError] = useState('');
   const [error, setError] = useState('');
   useEffect(() => {
     let live = true;
-    void window.codingHub?.listHistory().then((result) => { if (live && result.ok) setRecent(recentProjects(result.value)); }).catch(() => {});
-    void window.codingHub?.accounts({ action: 'status' }).then((result) => { if (live && result.ok) setEngines(result.value as AccountConnection[]); }).catch(() => {});
+    const failed = (set: (message: string) => void) => (cause: unknown) => { if (live) set(cause instanceof Error ? cause.message : 'Trace could not read it.'); };
+    void window.codingHub?.listHistory().then((result) => { if (!live) return; if (result.ok) setRecent(recentProjects(result.value)); else setRecentError(result.error.message); }).catch(failed(setRecentError));
+    void window.codingHub?.accounts({ action: 'status' }).then((result) => { if (!live) return; if (result.ok) setEngines(result.value as AccountConnection[]); else setEnginesError(result.error.message); }).catch(failed(setEnginesError));
     return () => { live = false; };
   }, []);
   const open = () => { setError(''); openProjectFolder().catch(() => setError('The folder picker could not open. Try again, or enter a path in Projects.')); };
@@ -66,7 +71,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
   const githubReady = github?.state === 'authenticated';
   return <section className="tr-empty" aria-labelledby="tr-empty-title">
     <div className="tr-start-welcome">
-      <span className="tr-start-mark" aria-hidden="true"><FolderOpen /></span>
+      <span className="tr-start-mark" aria-hidden="true"><TraceMark size={48} /></span>
       <h1 id="tr-empty-title">Open a project</h1>
       <p className="tr-start-lead">Every channel runs inside a local folder.</p>
       <div className="ui-actions tr-start-actions">
@@ -74,13 +79,15 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
         <button className="button large" onClick={() => setView('projects')}><Github size={16} aria-hidden="true" />Clone from GitHub{github && !githubReady && <span className="ui-badge warning">Sign-in needed</span>}</button>
         <button className="button large" onClick={() => setView('projects')}><FolderPlus size={16} aria-hidden="true" />New project</button>
       </div>
-      <p className="tr-start-keys"><span><kbd>Ctrl O</kbd> Open a folder</span><span><kbd>Ctrl ⇧ N</kbd> New project</span></p>
-      {error && <p role="alert" className="ui-banner danger"><AlertTriangle aria-hidden="true" /><span>{error}</span></p>}
+      <p className="tr-start-keys"><span><kbd>Ctrl O</kbd> Open folder</span><span><kbd>Ctrl ⇧ N</kbd> New project</span></p>
+      {error && <div role="alert" className="ui-banner danger"><AlertTriangle aria-hidden="true" /><span>{error}</span></div>}
     </div>
     <div className="ui-grid">
       <section className="ui-card span-6" aria-labelledby="tr-recent-title">
-        <div className="ui-card-head"><History aria-hidden="true" /><h2 id="tr-recent-title">Recent projects</h2>{recent.length > 0 && <span className="ui-count neutral">{recent.length}</span>}</div>
-        {recent.length ? <ul className="ui-list">{recent.map(({ directory, at }) => <li key={directory}><button className="ui-row" onClick={() => setRootDirectory(directory)} title={`Open ${directory}`}><span className="ui-avatar neutral" aria-hidden="true"><Folder /></span><span className="ui-row-main"><strong>{folderName(directory)}</strong><small className="tr-row-path">{directory}</small></span><small className="tr-row-meta">{ago(at)}</small></button></li>)}</ul>
+        <div className="ui-card-head"><History aria-hidden="true" /><h2 id="tr-recent-title">Recent projects</h2>{!!recent?.length && <span className="ui-count neutral">{recent.length}</span>}</div>
+        {recentError ? <div className="ui-empty danger" role="alert"><AlertTriangle aria-hidden="true" /><h3>Recent projects unavailable</h3><p>{recentError}</p></div>
+          : !recent ? <div className="ui-empty" role="status"><History aria-hidden="true" /><h3>Loading recent projects</h3><p>Looking for folders you ran channels in.</p></div>
+          : recent.length ? <ul className="ui-list">{recent.map(({ directory, at }) => <li key={directory}><button className="ui-row" onClick={() => setRootDirectory(directory)} title={`Open ${directory}`}><span className="ui-avatar neutral" aria-hidden="true"><Folder /></span><span className="ui-row-main"><strong>{folderName(directory)}</strong><small className="tr-row-path">{directory}</small></span><small className="tr-row-meta">{ago(at)}</small></button></li>)}</ul>
           : <div className="ui-empty"><History aria-hidden="true" /><h3>No recent projects</h3><p>Folders you run channels in appear here.</p></div>}
       </section>
       <section className="ui-card span-6" aria-labelledby="tr-engines-title">
@@ -89,7 +96,10 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
           <span className={`ui-avatar ${tone}`} aria-hidden="true"><Mark /></span>
           <span className="ui-row-main"><strong>{ENGINE_NAMES[item.provider]}</strong><small>{item.installed ? item.version ?? 'Installed' : 'Not installed'}</small></span>
           {item.state === 'authenticated' ? <span className="ui-badge success dot">Signed in</span> : <button className="button small" onClick={() => setView('accounts')} aria-label={`Sign in to ${ENGINE_NAMES[item.provider]}`}>{item.installed ? 'Sign in' : 'Set up'}</button>}
-        </li>; })}</ul> : <div className="ui-empty"><Cpu aria-hidden="true" /><p>{window.codingHub ? 'Checking local CLIs…' : 'The desktop app checks local CLIs.'}</p></div>}
+        </li>; })}</ul>
+          : enginesError ? <div className="ui-empty danger" role="alert"><AlertTriangle aria-hidden="true" /><h3>Engines not checked</h3><p>{enginesError}</p><button className="button secondary" onClick={() => setView('accounts')}>Open Accounts & connections</button></div>
+          : window.codingHub ? <div className="ui-empty" role="status"><Cpu aria-hidden="true" /><h3>Checking engines</h3><p>Looking for Claude Code, Codex and GitHub CLI.</p></div>
+          : <div className="ui-empty"><Cpu aria-hidden="true" /><h3>Engines not checked</h3><p>The desktop app checks local CLIs.</p></div>}
       </section>
     </div>
     <button className="quiet-button tr-empty-skip" onClick={onSkip}>Use channels without a project</button>

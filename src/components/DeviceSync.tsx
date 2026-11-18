@@ -32,12 +32,14 @@ export function DeviceSyncCard() {
     const load = () => void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then(setStatus).catch((e) => setError(e.message));
     load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
   }, []);
-  if (!status) return error ? <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p> : null;
+  const head = (state: string, tone: string) => <div className="ui-card-head"><MonitorSmartphone aria-hidden="true" /><h2 id="device-sync-title">Sync between computers</h2>
+    <span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
+  // Before the first answer the card is already there, so the Sync section is never a heading over nothing.
+  if (!status) return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">{error ? <>{head('Unavailable', 'danger')}<p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p></> : <>{head('Checking', 'neutral')}<p className="ui-hint">Checking sync…</p></>}</article>;
   const outside = outsideSyncFolder(linked, status);
   return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">
-    <div className="ui-card-head"><MonitorSmartphone aria-hidden="true" /><h2 id="device-sync-title">Sync between computers</h2>
-      <span className={`ui-badge dot storage-status ${status.enabled && status.connected ? 'saved success' : status.enabled ? 'warning' : 'neutral'}`}>{!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable'}</span></div>
-    <p>Settings, shared rules, project templates and usage history follow you through the Drive folder above. Running sessions, recorded output and the project list stay on each computer.</p>
+    {head(!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable', status.enabled && status.connected ? 'saved success' : status.enabled ? 'warning' : 'neutral')}
+    <p>Settings, shared rules, project templates and usage history follow you through the Drive folder above. Running channels, recorded output and the project list stay on each computer.</p>
     {status.enabled && <>
       <dl className="settings-facts">
         <dt>This computer</dt><dd>{status.machine.name}</dd>

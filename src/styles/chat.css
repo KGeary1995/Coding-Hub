@@ -28,9 +28,13 @@
 .chat-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tr-term); }
 .chat-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 16px; color: var(--tr-fg); font: 400 14px/22px var(--tr-font-ui); }
 /* Before the first message: an empty state in the middle of the thread. */
-.chat-empty { margin: auto; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); }
+.chat-empty { margin: auto; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); }
 .chat-empty > svg { flex: none; width: 44px; height: 44px; padding: 12px; border-radius: 50%; background: var(--tr-accent-soft); color: var(--tr-accent); }
 .chat-empty p { margin: 0; }
+/* A title over the one line, as the shared empty state (the phone has no ui.css, so it is drawn here). */
+.chat-empty > strong { color: var(--tr-fg-strong); font: 600 15px/20px var(--tr-font-ui); }
+/* A conversation that could not be read: the danger tone, so it does not read as an empty one. */
+.chat-empty.error > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
 .chat-message.user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .chat-user-text { margin: 0; padding: 8px 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-raised); color: var(--tr-fg-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-images { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
@@ -98,6 +102,8 @@
 
 /* ---------- The composer: the shared field and buttons, 40 px tall ---------- */
 .chat-composer { flex-shrink: 0; padding: 12px; border-top: 1px solid var(--tr-line); background: var(--tr-surface); display: flex; flex-direction: column; gap: 8px; }
+/* A message or answer that did not go through: a danger banner above the box, not a faint centred line. */
+.chat-composer > .chat-notice.error { padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tr-danger) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); text-align: left; }
 .chat-attachments { display: flex; gap: 8px; margin: 0; padding: 8px 0 0; list-style: none; overflow-x: auto; }
 .chat-attachments li { position: relative; flex-shrink: 0; }
 .chat-attachments img { display: block; height: 56px; max-width: 110px; object-fit: cover; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); }
@@ -107,7 +113,9 @@
 .chat-permissions { flex-shrink: 0; height: 40px; max-width: 132px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background-color: var(--tr-well); color: var(--tr-fg-muted); font: 500 13px/16px var(--tr-font-ui); }
 .chat-permissions.edits { color: var(--tr-fg); }
 .chat-permissions.full { color: var(--tr-st-limit); border-color: var(--tr-st-limit); }
-@container (max-width: 420px) { .chat-permissions { max-width: 88px; } }
+/* In a tile of 420 px or less (columns) the message box and Send take a row of their own under the other buttons
+   (48 px is Send and its gap). Beside them the level was cut to "Allow e" and, under 300 px, the hint to four letters. */
+@container (max-width: 420px) { .chat-input-row:has(> .chat-permissions) { flex-wrap: wrap; } .chat-input-row:has(> .chat-permissions) textarea { flex-basis: calc(100% - 48px); } }
 .chat-input-row textarea { flex: 1; min-height: 40px; resize: none; padding: 8px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); color: var(--tr-fg-strong); font: 400 14px/22px var(--tr-font-ui); }
 .chat-input-row textarea::placeholder { color: var(--tr-fg-faint); opacity: 1; }
 /* A long hint stays on one line in a narrow tile: wrapped, it made the empty box grow and show a scroll bar. */
@@ -135,6 +143,11 @@
 /* With its lists open (challenges, findings) the bar scrolls in itself past 60% of the chat, so the thread keeps its room in a small tile. */
 .table-bar { max-height: 60%; overflow-y: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
 .table-bar strong { color: var(--tr-fg-strong); font-weight: 600; }
+/* A Round Table bar wraps by whole groups (TableBar); a group wraps inside only when it is wider than the bar. Where
+   the table is, and its buttons, keep to the right. */
+.table-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.table-end { margin-left: auto; }
+.table-end > .table-status { margin-left: 0; }
 /* Who sits at the table: overlapping round marks, each ringed in the bar's colour. */
 .table-seats { display: inline-flex; padding-left: 4px; }
 .table-seats i { width: 14px; height: 14px; margin-left: -4px; border: 2px solid var(--tr-surface); border-radius: 50%; background: var(--tone); }

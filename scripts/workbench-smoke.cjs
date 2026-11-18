@@ -26,10 +26,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     await page.getByRole('button', { name: 'Use channels without a project', exact: true }).click(); assert.equal(await page.locator('.tr-empty').count(), 0);
-    await (await tileControl(page, 'Engine settings for session 1')).click();
+    await (await tileControl(page, 'Engine settings for channel 1')).click();
     await page.locator('.session-tile').first().getByLabel('Working directory', { exact: true }).selectOption('independent');
     await page.locator('.session-tile').first().getByLabel('Repository path', { exact: true }).fill(project);
-    await (await tileControl(page, 'Engine settings for session 1')).click();
+    await (await tileControl(page, 'Engine settings for channel 1')).click();
     assert.equal(await page.locator('.tr-empty').count(), 0);
     await page.evaluate(() => localStorage.removeItem('coding-hub-setup-complete'));
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
@@ -49,7 +49,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Prepare Codex coaching', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Preparing a report must not launch a provider CLI');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
-    const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+    const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     // READY can be in scrollback in a short software-rendered tile. Verify the
     // received startup event and the latest rendered size line independently.
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('READY')));
@@ -86,7 +86,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
     // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
-    await (await tileControl(page, 'Isolate session 1')).click();
+    await (await tileControl(page, 'Isolate channel 1')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
     await page.locator('.tr-sb-alert').click();
     await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();

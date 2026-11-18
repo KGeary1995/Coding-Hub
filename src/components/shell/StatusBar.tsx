@@ -8,6 +8,7 @@ import { CHANNEL_STATES, channelAlerts, channelState, channelTokensToday, todayT
 import { focusTerminal } from '../../runtime/terminals';
 import { useLinkedStore } from '../../state/linked-store';
 import type { LinkedComputer } from '../../../shared/remote';
+import type { LimitWindow, PlanLimits } from '../../../shared/plan-limits';
 import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
 import { NeedsYouCell } from './NeedsYou';
 
@@ -26,6 +27,19 @@ export function jumpToChannel(id: string) {
 
 const SHORT: Record<string, string> = { Session: '5h', Week: 'wk' };
 /**
+ * The limits an engine's plan cell shows, from all its accounts' readings: the default login's 5-hour and weekly limits,
+ * or with neither its fullest other limit, under its own name. An empty list when that login's reading holds only an
+ * error (or only another account has limits): the cell says "no data" and its tooltip says why. Null when no account
+ * has a limit or an error: a check that returned nothing has nothing to say, so the cell leaves whole.
+ */
+export function planReading(all: PlanLimits[]): LimitWindow[] | null {
+  if (!all.some((item) => item.windows.length > 0 || item.error)) return null;
+  const main = all.find((item) => item.account === 'Default') ?? all[0];
+  const known = main.windows.filter((window) => window.label in SHORT);
+  if (known.length || !main.windows.length) return known;
+  return [main.windows.reduce((fullest, window) => window.usedPercent > fullest.usedPercent ? window : fullest)];
+}
+/**
  * Each agent's subscription limits, always in view: the 5-hour session and the week, as used percentages that turn
  * amber and then red as they fill. Hover for every limit, account and reset; click for Usage.
  */
@@ -40,16 +54,15 @@ function PlanLimitCells() {
     return () => { clearInterval(timer); window.removeEventListener('focus', focus); };
   }, []);
   return <>{(['claude', 'codex'] as const).map((engine) => {
-    const all = limits.filter((item) => item.engine === engine); const main = all.find((item) => item.account === 'Default') ?? all[0];
-    if (!main) return null;
-    const shown = main.windows.filter((window) => window.label in SHORT);
+    const all = limits.filter((item) => item.engine === engine); const shown = planReading(all);
+    if (!shown) return null;
     const worst = Math.max(0, ...shown.map((window) => window.usedPercent));
     // The one window that stays when the bar is short (shell.css): the fullest, and of equals the first.
     const kept = shown.findIndex((window) => window.usedPercent === worst);
     const title = all.map((item) => `${engine === 'claude' ? 'Claude' : 'Codex'}${all.length > 1 || item.account !== 'Default' ? ` · ${item.account}` : ''}${item.plan ? ` (${item.plan})` : ''}\n${item.error ?? item.windows.map((window) => `  ${window.label}: ${window.usedPercent}% used${resetText(window) ? `, resets ${resetText(window)}` : ''}`).join('\n')}`).join('\n\n');
     return <button key={engine} className="tr-sb-cell tr-sb-plan" title={title} onClick={() => useWorkspaceStore.getState().setView('usage')}>
       <i className={`tr-sb-dot ${engine}`} aria-hidden="true" /><span className="tr-sb-plan-name">{engine === 'claude' ? 'Claude' : 'Codex'}</span>
-      {shown.length ? shown.map((window, index) => <span key={window.label} className={`tr-sb-window ${limitLevel(window.usedPercent)} ${index === kept ? 'worst' : ''}`}><small>{SHORT[window.label]}</small> {Math.round(window.usedPercent)}%</span>) : '—'}
+      {shown.length ? shown.map((window, index) => <span key={window.label} className={`tr-sb-window ${limitLevel(window.usedPercent)} ${index === kept ? 'worst' : ''}`}><small>{SHORT[window.label] ?? window.label}</small> {Math.round(window.usedPercent)}%</span>) : <span className="tr-sb-window worst">no data</span>}
     </button>;
   })}</>;
 }

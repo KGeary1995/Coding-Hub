@@ -43,8 +43,6 @@
 .tr-ch-badge { flex: none; color: var(--ch); font: 600 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The engine's name is read out, not shown: the avatar beside the number shows it. */
 .tr-ch-engine { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* A linked computer's tile fills this mark with the engine's colour itself, so there its number is dark on that colour. */
-.linked-tile .tr-ch-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--tr-r-small); color: var(--tr-on-light); }
 /* The name takes the spare width and is the last to shorten: the topic gives way first, then the model, then the account.
    The shrink factors are a million apart, so one gives way completely before the next loses a fraction of a pixel (which
    would already draw its ellipsis). */
@@ -53,9 +51,6 @@
 .tr-tile-topic { flex: 0 1e18 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
 .tr-tile-head .tr-spacer { flex: 1 1 0; min-width: 0; }
 .tr-tile .tr-tile-model { flex: 0 1e12 auto; min-width: 0; margin: 0; padding: 0; border: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
-/* The state and the account are shared badges. A linked computer's tile does not give them the class yet, so there
-   they are drawn the same way here. */
-:is(.tr-state-chip, .account-profile-chip):not(.ui-badge) { --tone: var(--tr-fg-dim); flex: none; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-chip); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); font: var(--tr-t-micro); white-space: nowrap; }
 /* A long account name shortens (its tooltip has it in full), so it is a block, which an ellipsis needs. */
 .tr-profile-chip.account-profile-chip { flex: 0 1e6 auto; display: block; min-width: 44px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; line-height: 18px; }
 .tr-profile-chip.account-profile-chip[data-account] { --tone: var(--account); }
@@ -99,13 +94,17 @@
 .tr-detail-facts { flex: 1; min-width: 0; height: 16px; display: flex; flex-wrap: wrap; overflow: hidden; white-space: pre; font: var(--tr-t-small); font-variant-numeric: tabular-nums; color: var(--tr-fg-dim); }
 .tr-detail-facts > span { flex: none; }
 .tr-detail-facts > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* While a conversation is open the row stays shown and the conversation starts under it (see .transcript-overlay).
+   Laid over the conversation, the row covered its bar (the title and Refresh) for as long as the pointer or the focus
+   stayed in the header, which the focus does right after Conversation is pressed. */
+.tr-tile:has(> .terminal-frame > .transcript-overlay) .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
 /* Close on a running channel asks in the detail row: the row stays shown and holds only the question. */
 .tr-tile.closing .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
 .tr-tile.closing .tr-tile-detail > .tr-detail-button { display: none; }
 /* The row's buttons, and a linked tile's in its header, are the small quiet form (24 px) with their icon; Stop is the
    danger form. `.tr-detail-button` is drawn in styles/chat.css, which the phone loads too: these rules bring it to the
-   shared small button inside a tile, and undo the capitals styles/workbench.css still gives it. */
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button { height: 24px; gap: 4px; padding: 0 6px; border-color: transparent; border-radius: var(--tr-r-small); color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); letter-spacing: normal; text-transform: none; }
+   shared small button inside a tile. */
+:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button { height: 24px; gap: 4px; padding: 0 6px; border-color: transparent; border-radius: var(--tr-r-small); color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); }
 :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
 :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button svg { flex: none; width: 14px; height: 14px; }
 :is(.tr-tile-detail, .tr-tile-head) .tr-detail-icon { display: block; }
@@ -154,6 +153,14 @@
 .terminal-viewport .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { left: 4px !important; width: 6px !important; border-radius: var(--tr-r-chip); }
 /* Over the terminal rather than instead of it, so the running CLI keeps its size. */
 .transcript-overlay { position: absolute; inset: 0; display: flex; z-index: 2; }
+/* Under the detail row where that row floats over the well (it stays shown while a conversation is open), so the
+   conversation's own bar is never under it. Where the row sits in the flow, the well already starts below it. */
+.tr-tile-top + .terminal-frame > .transcript-overlay { top: var(--tr-tile-detail-h); }
+/* A channel that needs the person while its conversation is open: what it asks stays in view, as a second row of the
+   detail row's height under it (the row would cover it for as long as the conversation is open), and the conversation
+   starts under both. */
+.tr-tile-top + .terminal-frame:has(> .transcript-overlay) > .session-attention.over-terminal { top: var(--tr-tile-detail-h); height: var(--tr-tile-detail-h); }
+.tr-tile-top + .terminal-frame:has(> .session-attention.over-terminal) > .transcript-overlay { top: calc(var(--tr-tile-detail-h) * 2); }
 
 /* ---------- Before a channel starts: the engine, its name, one line, the folder and Start ---------- */
 /* The top padding keeps the content clear of the detail row, which lies over the top of the well while the header is
@@ -179,7 +186,7 @@
 }
 
 /* ---------- Footer: one 24 px row under the terminal, in 12 px with tabular numbers ---------- */
-/* The context meter (the session budget when the CLI reports no window), its share, the channel's tokens today, then the
+/* The context meter (the channel's budget when the CLI reports no window), its share, the channel's tokens today, then the
    output trace and its rate. --trace is the state's colour; an idle trace is a mark, not a signal. */
 .tr-tile-foot { --trace: var(--tr-fg-off); flex: none; height: 24px; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 12px; border-top: 1px solid var(--tr-tile-border); background: var(--tr-surface-2); color: var(--tr-fg-dim); font: var(--tr-t-small); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
 .tr-tile-foot.state-starting { --trace: var(--tr-st-starting); }

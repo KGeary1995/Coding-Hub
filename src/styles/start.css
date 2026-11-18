@@ -2,11 +2,11 @@
    only the layout of these screens is here. */
 
 /* The start screen: a centred welcome, then two cards (recent projects, engines). */
-.tr-empty { width: min(960px, 100%); margin: 0 auto; padding: 64px 0 32px; display: flex; flex-direction: column; gap: 32px; }
+.tr-empty { width: min(960px, 100%); min-height: 100%; margin: 0 auto; padding: 48px 0 32px; display: flex; flex-direction: column; justify-content: center; gap: 32px; }
 .app-shell[data-view="workspace"] .main-shell:has(> .tr-empty) { overflow-y: auto; padding: 0 24px; }
 .tr-start-welcome { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
-.tr-start-mark { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 16px; border: 1px solid var(--tr-accent-line); border-radius: var(--tr-r-overlay); background: var(--tr-accent-soft); color: var(--tr-accent); box-shadow: var(--tr-glow-accent); }
-.tr-start-mark svg { width: 28px; height: 28px; }
+/* Trace's own keycap (TraceMark), as in the top bar and the app icon. */
+.tr-start-mark { display: flex; margin-bottom: 16px; }
 .tr-start-welcome h1 { font: var(--tr-t-display); letter-spacing: -.01em; }
 .tr-start-lead { margin: 0; font: 400 15px/20px var(--tr-font-ui); color: var(--tr-fg-muted); }
 .tr-start-actions { justify-content: center; margin-top: 16px; }
@@ -29,6 +29,11 @@
 .tr-projects .hub-toolbar { margin: 0; }
 .tr-projects .hub-toolbar > .ui-field { flex: 1 1 200px; max-width: 400px; }
 .github-repository .button { flex: none; }
+/* Where a clone goes: the parent folder from the card above, in mono because it is a path. */
+.tr-clone-dest { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tr-clone-dest > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-control); color: var(--tr-fg-dim); }
+.tr-clone-dest code { font: var(--tr-t-meta); color: var(--tr-fg); }
+.tr-clone-dest-missing { color: var(--tr-fg); }
 @container shell (max-width: 900px) { .tr-projects .ui-grid > .span-6 { grid-column: span 12; } }
 
 /* Project checks (Shared rules): what the inspection found. */

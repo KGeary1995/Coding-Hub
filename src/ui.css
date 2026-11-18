@@ -92,6 +92,9 @@ input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"
 /* Focus: an accent border and a 3 px soft ring. The ring is the outline, so a screen that sets `outline: none` loses both. */
 input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"])):focus, select:focus, textarea:where(:not(.xterm-helper-textarea)):focus { border-color: var(--tr-accent); outline: 3px solid var(--tr-accent-soft); outline-offset: 0; }
 input::placeholder, textarea::placeholder { color: var(--tr-fg-faint); opacity: 1; }
+/* A number field has no native stepper, which the browser drew over the value's end on hover and focus. It is still
+   typed in, and the arrow keys still step it. */
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--tr-danger); }
 textarea:where(:not(.xterm-helper-textarea)) { min-height: 64px; padding: 8px 12px; line-height: 20px; resize: vertical; }
 /* The browser's grip goes; dragging the corner still resizes. */
@@ -167,13 +170,6 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .ui-page-icon svg { width: 18px; height: 18px; }
 .ui-page-head p { margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 .ui-page-actions { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
-/* The heading markup the pages had before (.eyebrow, h1 with its icon inside, p) takes the same form: the icon becomes
-   the tile at the left and the label above the title goes. */
-.feature-panel-heading, .history-heading > div { position: relative; min-width: 0; min-height: 36px; margin-bottom: 20px; }
-:is(.feature-panel-heading, .history-heading > div):has(h1 > svg) { padding-left: 48px; }
-:is(.feature-panel-heading, .history-heading > div) > .eyebrow { display: none; }
-:is(.feature-panel-heading, .history-heading > div) h1 > svg { position: absolute; left: 0; top: 6px; width: 36px; height: 36px; padding: 8px; border-radius: var(--tr-r-tile); background: var(--tr-accent-soft); color: var(--tr-accent); }
-:is(.feature-panel-heading, .history-heading > div) p { max-width: 90ch; margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 /* Cards in a page: a 12-column grid 16 px apart (a child spans all 12 unless it says .span-N), or a plain stack. */
 .ui-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
 .ui-grid > * { grid-column: span 12; min-width: 0; }
@@ -199,8 +195,11 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .storage-card dl { display: grid; grid-template-columns: 125px 1fr; gap: 8px 16px; margin: 16px 0; font-size: 13px; }
 .storage-card dt { color: var(--tr-fg-dim); }
 .storage-card dd { margin: 0; overflow-wrap: anywhere; }
-.storage-card p { color: var(--tr-fg-dim); }
-.storage-status { color: var(--tr-fg-dim); text-transform: capitalize; font-size: 12px; }
+/* A card's paragraph is dim. A hint, a control note, a banner or a notice in a card is not this paragraph: left out
+   here (inside :where(), so the rule weighs what it did), each keeps its own form. A warning written as a paragraph
+   read dim otherwise. */
+.storage-card p:where(:not(.ui-hint, .control-note, .ui-banner, .hub-feedback)) { color: var(--tr-fg-dim); }
+.storage-status { color: var(--tr-fg-dim); font-size: 12px; }
 .storage-status.error { color: var(--tr-danger); }
 .help-article { padding: 24px; }
 /* Here, not in styles/workbench.css: `.help-comparison` below builds on it, so it loads first. */
@@ -288,7 +287,9 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 .hub-panel h2 { margin: 0 0 8px; }
 /* A card head's title sits on the centre line of its icon, count and actions, so it takes no margin of its own. */
 .hub-panel .ui-card-head h2 { margin: 0; }
-.hub-panel p { max-width: 72ch; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* Every paragraph keeps the 72 characters; hints, control notes, banners and notices keep their own type and colour, as in a card. */
+.hub-panel p { max-width: 72ch; }
+.hub-panel p:where(:not(.ui-hint, .control-note, .ui-banner, .hub-feedback)) { font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 .hub-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 /* A form after a card (Settings: Display and keyboard, then Google Drive) keeps the cards' gap. */
 .storage-card + .hub-form { margin-top: 16px; }

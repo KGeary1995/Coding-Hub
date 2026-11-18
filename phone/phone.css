@@ -5,7 +5,11 @@
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--tr-line) transparent; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--tr-window); color: var(--tr-fg); font: var(--tr-t-body); -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
-#app { display: flex; flex-direction: column; min-width: 0; min-height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+/* No top inset here: the top bar takes it, so the strip under an iPhone's status bar is the bar's colour (and the page's
+   theme-color, index.html), not the window's, with no seam between them. */
+#app { display: flex; flex-direction: column; min-width: 0; min-height: 100dvh; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+/* A channel and a computer's screen fit the window: a terminal still at the desktop's size scrolls in its well, not the page. */
+#app:has(> .channel-view, > main.screen) { height: 100dvh; }
 h1 { margin: 8px 0 16px; font: var(--tr-t-title); letter-spacing: -.01em; color: var(--tr-fg-strong); }
 h2 { margin: 0 0 12px; font: var(--tr-t-heading); color: var(--tr-fg-strong); }
 p { margin: 0; }
@@ -75,15 +79,20 @@ details[open] > summary:where(:not(:has(> svg:first-child), .note > summary))::b
 .banner[hidden] { display: none; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-card); color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); text-align: center; }
 .empty[hidden] { display: none; }
+.list > .empty, .screen-host > .empty { margin: 0 0 16px; }
 .phone-card .empty { padding: 16px 0 8px; border: 0; background: none; box-shadow: none; }
 .empty > svg { box-sizing: content-box; width: 20px; height: 20px; padding: 12px; border-radius: 50%; background: var(--tr-accent-soft); color: var(--tr-accent); }
+.empty > strong { margin-bottom: -8px; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+/* A banner with its own icon (a warning) shows that instead of the dot; the icon sits on the first 20 px line. */
+.banner > svg { flex: none; width: 16px; height: 20px; color: var(--tone); }
+.banner:has(> svg)::before { display: none; }
 /* Tones, as the desktop's: states, engines and the person. */
 .neutral { --tone: var(--tr-fg-dim); } .accent, .info { --tone: var(--tr-accent); } .success { --tone: var(--tr-success); } .warning { --tone: var(--tr-warning); }
 .danger { --tone: var(--tr-danger); } .waiting { --tone: var(--tr-st-waiting); } .near { --tone: var(--tr-st-limit); }
 .claude { --tone: var(--tr-ch-claude); } .codex { --tone: var(--tr-ch-codex); } .shell { --tone: var(--tr-ch-shell); }
 
 /* ---------- Top bar: the keycap and "Trace", or Back and the channel; the link to the computer at the right ---------- */
-.bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--tr-line); background: var(--tr-panel); }
+.bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--tr-line); background: var(--tr-panel); }
 .bar .icon { flex: none; width: 44px; min-width: 44px; padding: 0; border-color: transparent; background: none; color: var(--tr-fg); font: 400 28px/1 var(--tr-font-ui); }
 .bar .title { flex: 1; display: grid; gap: 4px; min-width: 72px; overflow: hidden; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 .bar .title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -101,7 +110,7 @@ details[open] > summary:where(:not(:has(> svg:first-child), .note > summary))::b
 .mark.big { gap: 12px; margin-bottom: 24px; font-size: 18px; } .mark.big svg { width: 32px; height: 32px; }
 
 /* ---------- Pairing ---------- */
-.pair { display: flex; flex-direction: column; width: 100%; max-width: 440px; margin: 0 auto; padding: 40px 16px; }
+.pair { display: flex; flex-direction: column; width: 100%; max-width: 440px; margin: 0 auto; padding: calc(40px + env(safe-area-inset-top)) 16px 40px; }
 .pair-card { display: flex; flex-direction: column; gap: 12px; margin: 0; }
 .pair-card h1 { margin: 0; }
 .pair-card > p { font: 400 14px/20px var(--tr-font-ui); }
@@ -235,6 +244,7 @@ main.screen { flex: 1; min-width: 0; min-height: 0; display: flex; flex-directio
 .chat-host > .phone-chat { flex: none; height: calc(100dvh - 56px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 .phone-chat .chat-thread { padding: 16px; font-size: 15px; }
 .phone-chat .chat-composer { padding: 8px 16px 16px; }
+/* 16 px, off the size list on purpose: below 16 px, iPhone Safari zooms the page into a field when it is tapped. */
 .phone-chat .chat-input-row textarea { font-size: 16px; }
 .phone-chat .chat-icon { min-width: 44px; min-height: 44px; }
 .phone-chat .table-bar { gap: 8px 12px; padding: 8px 16px; }

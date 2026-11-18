@@ -38,8 +38,8 @@ const taskColumn = async (page) => page.evaluate(() => { for (const section of d
     await page.getByRole('button', { name: 'Tasks', exact: true }).first().click(); await page.getByRole('button', { name: 'New task', exact: true }).click();
     await page.getByLabel('Task title').fill('Create hello.txt containing the word hello');
     await page.getByLabel('Task details').fill('Codex, as reviewer: read hello.txt after the change and report anything wrong as a FINDING line (at least one, even a small one).');
-    const options = await page.getByLabel('Task agent session').locator('option').allTextContents(); note('channels', { options });
-    const lead = options.findIndex((text) => /^CH\d/.test(text) && !/not running/.test(text)); await page.getByLabel('Task agent session').selectOption({ index: lead });
+    const options = await page.getByLabel('Task agent channel').locator('option').allTextContents(); note('channels', { options });
+    const lead = options.findIndex((text) => /^CH\d/.test(text) && !/not running/.test(text)); await page.getByLabel('Task agent channel').selectOption({ index: lead });
     await page.getByRole('button', { name: 'Save and send', exact: true }).click(); note('task-sent', { channel: options[lead] });
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     const until = Date.now() + 9 * 60000; let allowed = 0; let state = null;

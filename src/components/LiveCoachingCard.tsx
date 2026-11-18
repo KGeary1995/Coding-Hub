@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LoaderCircle, Plus, Radio, Sparkles } from 'lucide-react';
+import { LoaderCircle, Plus, Radio, Sparkles, TriangleAlert } from 'lucide-react';
 import type { PromptExample } from '../../shared/coaching';
 import { askAboutTip, clearLiveCoaching, loadLiveCoaching, setLiveCoaching, useLiveCoaching } from '../state/coaching-store';
 import type { CoachingWeek, TipKind } from '../../shared/coaching';
@@ -25,8 +25,9 @@ export function LiveCoachingCard({ save }: { save: (text: string, outcome: Promp
   const sessions = useWorkspaceStore((state) => state.sessions);
   const [saved, setSaved] = useState<string[]>([]); const [error, setError] = useState(''); const [clearing, setClearing] = useState(false);
   return <article className="storage-card live-coaching"><div className="ui-card-head"><Radio aria-hidden="true" /><h2>Live coaching</h2><span className={`ui-badge dot ${enabled ? 'success' : 'neutral'}`}>{enabled ? 'On' : 'Off'}</span></div>
-    <p>Trace checks each prompt you send in a Claude Code or Codex channel and shows tips under that channel. The checks run on this computer. Ask AI sends that prompt, and the end of the reply before it, to Claude Haiku through your Claude account (or to Codex when Claude Code is not installed), which uses a little of that plan and counts in your usage. Another computer's channels are coached there, and shown on its tab here and on your phone.</p>
     <label className="update-checkbox"><input type="checkbox" aria-label="Live coaching" checked={enabled} onChange={(event) => void setLiveCoaching(event.target.checked).catch((e) => setError(e.message))} />Coach my prompts as I send them</label>
+    <p className="ui-hint">Tips appear under each channel; the checks run on this computer.</p>
+    <div className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>Ask AI sends that prompt, and the end of the reply before it, to Claude Haiku through your Claude account (or to Codex without Claude Code). It uses a little of that plan and counts in your usage.</span></div>
     {error && <p role="alert" className="error-message">{error}</p>}
     {/* With nothing coached this week and nothing in the feed, the empty state below says so once. */}
     {week && !(enabled && !tips.length && !week.prompts) && <WeekSummary week={week} />}

@@ -60,10 +60,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     for (const [tileIndex, profileIndex] of [[0, 0], [2, 1]]) {
       const tile = page.locator('.session-tile').nth(tileIndex);
-      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
+      await (await tileControl(tile, `Engine settings for channel ${tileIndex + 1}`)).click();
       await tile.getByLabel('Claude account profile', { exact: true }).selectOption(profiles[profileIndex].id);
-      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
-      await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+      await (await tileControl(tile, `Engine settings for channel ${tileIndex + 1}`)).click();
+      await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     }
     await page.waitForFunction(() => document.querySelectorAll('.session-tile[data-status="running"]').length === 2);
     // READY can scroll out of a short tile in the four-tile grid; check the startup output each run received.

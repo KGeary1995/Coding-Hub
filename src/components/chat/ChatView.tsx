@@ -12,7 +12,7 @@ import { startSession } from '../../runtime/use-native-host';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
 import type { PermissionLevel } from '../../../shared/types';
 import { permissionLevel } from '../../../shared/schemas';
-import { AGENT, ChainBar, type ChainSeat, EMPTY, Item, modelName, readImage, seatState, TableBar, useSteady } from './ChatParts';
+import { AGENT, ChainBar, type ChainSeat, EMPTY, Item, modelName, readImage, seatState, TableBar, useHint, useSteady } from './ChatParts';
 import { isAgentConfig } from '../../../shared/types';
 import { applySeatModel } from './seat-model';
 
@@ -120,7 +120,12 @@ export function ChatView({ session }: { session: Session }) {
     { role: 'Reviewer', name: AGENT.codex, colour: 'codex', state: partnerSession ? seatState(partnerSession, partnerThread.busy) : 'not seated', tokens: partnerTokens },
   ] : undefined;
   const workers = table ? [chat.busy ? builderName : null, partnerThread.busy ? AGENT[table.partner.engine] : null, plannerThread.busy ? plannerName : null].filter(Boolean) : [agent];
-  const placeholder = !running ? 'Start the channel to chat' : seatedAt ? 'This chat is at a Round Table: write in the Round Table channel' : table && hierarchy ? (table.chain?.step === 'plan-review' ? 'Say what to change in the plan, or press Approve plan' : (table.chain?.step === 'stopped' || table.chain?.step === 'needs-you') && table.chain.task ? 'Reply to go on with this task (a new task starts once it is done)' : 'Give the Round Table a task (Enter to send)') : table ? `Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)` : chat.busy ? `${agent} is working. You can write your next message.` : `Message ${agent} (Enter to send, Shift+Enter for a new line)`;
+  /**
+   * The message box's hint, then shorter forms for a narrow tile (useHint). The last of each fits the box of the
+   * smallest four-tile grid: about 110 px beside the Round Table button, 158 px at a table.
+   */
+  const hints = !running ? ['Start the channel to chat', 'Start to chat'] : seatedAt ? ['This chat is at a Round Table: write in the Round Table channel', 'Write in the Round Table channel', 'At a Round Table'] : table && hierarchy ? (table.chain?.step === 'plan-review' ? ['Say what to change in the plan, or press Approve plan', 'What to change in the plan', 'Plan changes'] : (table.chain?.step === 'stopped' || table.chain?.step === 'needs-you') && table.chain.task ? ['Reply to go on with this task (a new task starts once it is done)', 'Reply to go on with this task', 'Reply to go on'] : ['Give the Round Table a task (Enter to send)', 'Give the Round Table a task', 'Give it a task']) : table ? [`Message ${agent} and ${AGENT[table.partner.engine]} (Enter to send)`, `Message ${agent} and ${AGENT[table.partner.engine]}`, 'Message both'] : chat.busy ? [`${agent} is working. You can write your next message.`, 'Write your next message', 'Next message'] : [`Message ${agent} (Enter to send, Shift+Enter for a new line)`, `Message ${agent} (Enter to send)`, `Message ${agent}`, 'Message'];
+  const placeholder = useHint(input, hints);
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
     {table && hierarchy && <ChainBar table={table} busy={busy} seats={seats} plannerName={plannerName} builderName={builderName} lead={session} planner={plannerSession} reviewer={partnerSession} onModel={setSeatModel} modelMaxLength={MAX_MODEL_LENGTH} onRequest={(request) => { if (request.action === 'table-close') { closeTable(); return; } void tableRequest(session.id, request).then((failure) => { if (failure) setError(failure); }); }} />}
@@ -139,7 +144,7 @@ export function ChatView({ session }: { session: Session }) {
     {showPartner && partnerSession && <p className="table-seated" role="note">{AGENT[partnerEngine]}'s own conversation, with what Trace passed to it. Your messages still go to the Round Table.</p>}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
     <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
-      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" /><p>{running ? `Ask ${agent} anything about this project. Paste or drop screenshots to include them.` : `Start the channel to chat with ${agent} in this folder.`}</p></div>}
+      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{running ? <><strong>No messages yet</strong><p>Ask {agent} about this project. Paste or drop screenshots to include them.</p></> : <><strong>{agent} is not running</strong><p>Start the channel to chat with {agent} in this folder.</p></>}</div>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={builderName} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
         : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={plannerThread.results} agent={plannerName} author="planner" role="Planner" answer={answerPlanner} view={setViewing} />

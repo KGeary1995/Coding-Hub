@@ -139,8 +139,7 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-sb-alert.waiting { color: var(--tr-st-waiting); }
 .tr-sb-alert.failed { color: var(--tr-st-failed); }
 .tr-sb-alert.limit { color: var(--tr-st-limit); }
-/* The shared .storage-status capitalises raw status words; here it is a sentence. */
-.tr-statusbar .storage-status { font: inherit; text-transform: none; }
+.tr-statusbar .storage-status { font: inherit; }
 .tr-statusbar .storage-status.error { color: var(--tr-danger); }
 
 /* What gives way when the bar is short, in this order: the host, the saved state, each channel's tokens today, the
@@ -212,6 +211,12 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-toasts { position: fixed; right: 12px; bottom: calc(var(--tr-statusbar-h) + 12px); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: min(400px, calc(100% - 24px)); }
 /* They step aside while the Needs you list is open: it holds the same things, over the same corner. */
 .tr-statusbar:has(.needs-you-list) ~ .tr-toasts { visibility: hidden; }
+/* While the person types in a tile that corner covers, they stand at the top instead (Toasts sets this), so a notice
+   never lies over the message box or the prompt in use. They start 12 px under the first row of tiles' header and
+   detail row (8 px is the workspace's padding), so those rows' buttons stay in reach: Restore, Stop, Answer. Where
+   that place is over the conversation being typed in (columns, or one maximised), they start 12 px under its bars
+   instead: --tr-toasts-under is the top of its thread, a share of the window's height that Toasts measures. */
+.tr-toasts.raised { top: max(calc(var(--tr-topbar-h) + 8px + var(--tr-tile-head-h) + var(--tr-tile-detail-h) + 12px), calc(var(--tr-toasts-under, 0%) + 12px)); bottom: auto; }
 .tr-toast { --tone: var(--tr-accent); position: relative; padding: 12px 12px 12px 16px; overflow: hidden; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-toast); animation: tr-toast-in var(--tr-d-base) var(--tr-ease); }
 .tr-toast::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone); }
 .tr-toast.waiting { --tone: var(--tr-st-waiting); }

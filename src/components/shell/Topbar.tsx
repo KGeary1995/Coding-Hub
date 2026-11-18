@@ -1,10 +1,12 @@
 import { useShallow } from 'zustand/react/shallow';
 import { startHierarchyTable, startRoundTable } from '../../runtime/round-table';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
-import { Asterisk, BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, SquareChevronRight, TerminalSquare, UsersRound, Workflow, type LucideIcon } from 'lucide-react';
+import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, UsersRound, Workflow, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
+import { TraceMark } from './TraceMark';
+import { ENGINE_ICONS } from '../tile/engine-icons';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
@@ -24,7 +26,7 @@ export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIco
 ];
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
 const CHANNEL_KINDS = {
-  shell: { label: 'Terminal', icon: SquareChevronRight, tone: 'shell' }, claude: { label: 'Claude Code', icon: Asterisk, tone: 'claude' }, codex: { label: 'Codex', icon: TerminalSquare, tone: 'codex' },
+  shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' },
   table: { label: 'Round Table', icon: UsersRound, tone: 'you' }, hierarchy: { label: 'Round Table (hierarchy)', icon: Network, tone: 'planner' },
 } as const;
 const channelItem = (kind: keyof typeof CHANNEL_KINDS, onSelect: () => void): MenuItem => { const { label, icon: Icon, tone } = CHANNEL_KINDS[kind]; return { label, icon: <span className={`ui-avatar small ${tone}`} aria-hidden="true"><Icon /></span>, onSelect }; };
@@ -40,8 +42,7 @@ export async function openProjectFolder() {
 /** The keycap and the name; it leads back to the workspace. */
 function Wordmark() {
   return <a className="tr-wordmark" href="#workspace" aria-label="Trace home" onClick={(event) => { event.preventDefault(); useWorkspaceStore.getState().setView('workspace'); }}>
-    {/* The app icon's keycap (scripts/make-icon.cjs, its 32 px drawing): amber face on a darker lip, the T cut through both. shell.css colours the two. */}
-    <svg className="tr-keycap" width="20" height="20" viewBox="34 33 188 188" aria-hidden="true"><path className="tr-keycap-lip" transform="translate(0 16)" fillRule="evenodd" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 50H180A8 8 0 0 1 188 58V78A8 8 0 0 1 180 86H154A6 6 0 0 0 148 92V150A8 8 0 0 1 140 158H116A8 8 0 0 1 108 150V92A6 6 0 0 0 102 86H76A8 8 0 0 1 68 78V58A8 8 0 0 1 76 50Z" /><path className="tr-keycap-face" fillRule="evenodd" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z" /></svg><span className="tr-wordmark-text">Trace</span>
+    <TraceMark size={20} /><span className="tr-wordmark-text">Trace</span>
   </a>;
 }
 

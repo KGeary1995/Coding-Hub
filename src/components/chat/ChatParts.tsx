@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { ArrowLeftRight, Asterisk, ChevronRight, Square, TerminalSquare, User, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
 import { HIERARCHY_MODELS, late, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
@@ -107,6 +107,31 @@ export function useSteady<A extends unknown[], R>(fn: (...args: A) => R): (...ar
   return useCallback((...args: A) => latest.current(...args), []);
 }
 
+/**
+ * The message box's hint, longest first: the first that fits the box's width, else the last. A text area's hint is cut
+ * mid-letter with no ellipsis, so a narrow tile or the phone gets a shorter wording instead. Without ResizeObserver
+ * (tests) the first stays.
+ */
+export function useHint(field: RefObject<HTMLTextAreaElement>, hints: string[]) {
+  const key = hints.join('\n'); const [shown, setShown] = useState(0);
+  useLayoutEffect(() => {
+    const area = field.current; setShown(0); if (!area || hints.length < 2 || typeof ResizeObserver === 'undefined') return;
+    const context = document.createElement('canvas').getContext('2d'); if (!context) return; let live = true;
+    const measure = () => {
+      if (!live) return; const style = getComputedStyle(area); const room = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      // Hidden (a tab not shown): nothing to measure yet.
+      if (room <= 0) return;
+      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const fits = hints.findIndex((hint) => context.measureText(hint).width <= room); setShown(fits < 0 ? hints.length - 1 : fits);
+    };
+    measure(); const observer = new ResizeObserver(measure); observer.observe(area);
+    // The interface font may arrive after the first measure.
+    void document.fonts?.ready.then(measure);
+    return () => { live = false; observer.disconnect(); };
+  }, [key]);
+  return hints[Math.min(shown, hints.length - 1)];
+}
+
 /** A seat's avatar glyph: the person, or the engine's mark as on its tile (a planner is a Claude model). */
 const SEAT_ICON = { you: User, claude: Asterisk, planner: Asterisk, codex: TerminalSquare } as const;
 function SeatAvatar({ seat }: { seat: keyof typeof SEAT_ICON }) { const Icon = SEAT_ICON[seat]; return <i className={`seat-hex seat-${seat}`} aria-hidden="true"><Icon /></i>; }
@@ -150,18 +175,23 @@ export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerSt
   const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
   const run = onRequest; const images = waitingImageCount(table);
   const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
+  // Grouped, so a narrow tile wraps whole groups (who sits there; how the partner is doing; Swap and Rounds; where it is and its buttons), never one control alone.
   return <div className="table-bar" role="group" aria-label="Round Table">
-    <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
-    <strong>Round Table</strong>
-    <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span>
-    {partnerState && <span className={`table-partner ${partnerState === 'needs approval' ? 'waiting' : ''}`} title={`${AGENT[table.partner.engine]} runs in the background in this channel`}><b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]}</b> {partnerState}</span>}
-    {tokens && <span className="table-tokens tnum" title="New tokens today in each agent's channel"><b className={`seat-text-${leadEngine}`}>{AGENT[leadEngine]} {short(tokens.lead)}</b> · <b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]} {short(tokens.partner)}</b></span>}
-    <button className="quiet-button small" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
-    <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-    <span className="table-status" aria-live="polite">{status}</span>
-    {busy && <button className="button danger small" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
-    {onShow && <button className="quiet-button small" aria-pressed={showing} title={showing ? 'Back to the Round Table thread' : `${AGENT[table.partner.engine]}'s own conversation, with what Trace passed to it`} onClick={onShow}>{showing ? 'Back to the table' : `Show ${AGENT[table.partner.engine]}`}</button>}
-    <button className="quiet-button small" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[table.partner.engine]}`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button>
+    <span className="table-group">
+      <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
+      <strong>Round Table</strong>
+      <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span></span>
+    {(partnerState || tokens) && <span className="table-group">
+      {partnerState && <span className={`table-partner ${partnerState === 'needs approval' ? 'waiting' : ''}`} title={`${AGENT[table.partner.engine]} runs in the background in this channel`}><b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]}</b> {partnerState}</span>}
+      {tokens && <span className="table-tokens tnum" title="New tokens today in each agent's channel"><b className={`seat-text-${leadEngine}`}>{AGENT[leadEngine]} {short(tokens.lead)}</b> · <b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]} {short(tokens.partner)}</b></span>}</span>}
+    <span className="table-group">
+      <button className="quiet-button small" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
+      <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label></span>
+    <span className="table-group table-end">
+      <span className="table-status" aria-live="polite">{status}</span>
+      {busy && <button className="button danger small" onClick={() => run({ action: 'table-stop' })}><Square size={12} />Stop both</button>}
+      {onShow && <button className="quiet-button small" aria-pressed={showing} title={showing ? 'Back to the Round Table thread' : `${AGENT[table.partner.engine]}'s own conversation, with what Trace passed to it`} onClick={onShow}>{showing ? 'Back to the table' : `Show ${AGENT[table.partner.engine]}`}</button>}
+      <button className="quiet-button small" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[table.partner.engine]}`} onClick={() => run({ action: 'table-close' })}><X size={13} /></button></span>
     {(table.waiting !== undefined) && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : 'Waiting to go: '}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{images ? ` + ${images} ${images === 1 ? 'image' : 'images'}` : ''}{table.waitingImagesDropped ? ` (its ${table.waitingImagesDropped} ${table.waitingImagesDropped === 1 ? 'image is' : 'images are'} too large to keep through a restart)` : ''}{table.waitingKept && <><button className="quiet-button small" onClick={() => run({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button small" onClick={() => run({ action: 'table-waiting', send: false })}>Drop it</button></>}</span>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;
@@ -236,7 +266,8 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
   const steps = CHAIN_STEPS;
   const current = steps.findIndex((item) => at && item.of.includes(at));
   const challengeStopped = step === 'stopped' && chain?.stoppedAt === 'challenging';
-  const status = step === 'challenging' ? 'Codex challenging the plan…' : step === 'plan-responding' ? `${plannerName} answering Codex's challenges…` : step === 'plan-review' && chain?.challenged && !chain.challenges?.length && !chain.note ? `${plannerName}'s plan is ready (Codex raised no challenges): approve it, or write what to change` : step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready: approve it, or write what to change${chain?.note ? ` (${chain.note})` : ''}` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${steps[current]?.label ?? ''}…`;
+  // A label, not instructions: at plan review, Approve plan sits beside it and the message box says to write what to change.
+  const status = step === 'challenging' ? 'Codex challenging the plan…' : step === 'plan-responding' ? `${plannerName} answering Codex's challenges…` : step === 'plan-review' && chain?.challenged && !chain.challenges?.length && !chain.note ? `${plannerName}'s plan is ready (Codex raised no challenges)` : step === 'idle' ? 'Give it a task' : step === 'plan-review' ? `${plannerName}'s plan is ready${chain?.note ? ` (${chain.note})` : ''}` : step === 'done' ? `Approved by ${plannerName}` : step === 'needs-you' ? (chain?.note || 'Needs you') : step === 'stopped' ? (table.stopping ? 'Stopping…' : `Stopped${chain?.note ? `: ${chain.note}` : ''}`) : step === 'reviewing' ? `Codex reviewing (round ${chain?.reviewRound} of ${table.rounds})` : step === 'fixing' && chain?.verdict === 'changes' ? `${builderName} fixing what the final review found` : step === 'final-fixing' ? `${builderName} making the final review's changes` : step === 'planning' ? `${plannerName} writing the plan…` : step === 'implementing' ? `${builderName} building…` : step === 'fixing' ? `${builderName} fixing the review's findings…` : step === 'final' ? `${plannerName} giving the final review…` : `${steps[current]?.label ?? ''}…`;
   /** A running seat's launch settings are locked (as anywhere in Trace), so models change only while the channel is stopped. */
   const locked = [lead, planner, reviewer].some((session) => session?.status === 'running' || session?.status === 'starting');
   return <div className="table-bar chain-bar" role="group" aria-label="Round Table">

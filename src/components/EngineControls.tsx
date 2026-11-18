@@ -72,7 +72,7 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
       {config.engine === 'claude' ? <>
         <label className="model-control ui-field">Claude account profile
           <select aria-label="Claude account profile" value={config.accountProfileId ?? ''} onChange={(event) => onChange(withProfile(config, event.target.value, kept.current))}><option value="">Default · existing CLI login</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{config.accountProfileId && !profiles.some((p) => p.id === config.accountProfileId) && <option value={config.accountProfileId}>Saved profile · unavailable</option>}</select>
-          <small className="ui-hint">Create and connect named accounts in Accounts & connections. Stop this session before changing its account.</small>
+          <small className="ui-hint">Create and connect named accounts in Accounts & connections. Stop this channel before changing its account.</small>
           {setAside && <small className="ui-hint" role="status">The saved conversation belongs to {setAside[0] ? profiles.find((p) => p.id === setAside[0])?.name ?? 'another profile' : 'the default sign-in'}, so the next start begins a new conversation. Choose that account again to continue it.</small>}
           {error && <small className="ui-hint error-message" role="alert">{error}</small>}
         </label>

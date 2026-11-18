@@ -13,10 +13,8 @@
 .tr-setup-nav .ui-row[aria-current="page"] { border-color: var(--tr-line); background: var(--tr-raised); }
 .tr-setup-icon { flex: none; color: var(--tr-fg-dim); }
 .tr-setup-nav .ui-row[aria-current="page"] .tr-setup-icon { color: var(--tr-accent); }
-.tr-setup-status { font: var(--tr-t-small); }
-.tr-setup-status i { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; vertical-align: 1px; }
-.tr-setup-status.ok i { background: var(--tr-success); }
-.tr-setup-status.warn i { background: var(--tr-warning); }
+.tr-setup-nav .ui-row-main { gap: 4px; }
+.tr-setup-nav .ui-row-main > .tr-setup-status { align-self: flex-start; }
 .tr-setup-nav footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 0; border-top: 1px solid var(--tr-line-faint); font: var(--tr-t-small); color: var(--tr-fg-faint); }
 .tr-setup-nav footer > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-setup-nav footer code { font: var(--tr-t-meta); }
@@ -34,6 +32,18 @@
 .hub-panel .hub-form > .ui-card-head { margin-bottom: 0; }
 /* shared-candidate: `.hub-panel p` (ui.css) stops paragraphs at 72ch, which also wrapped the page heading's one line. */
 .hub-panel .ui-page-head p { max-width: none; }
+/* shared-candidate: a hint written as a paragraph; `.hub-panel p` (ui.css) outranks .ui-hint's size and colour. */
+.hub-panel p.ui-hint { max-width: 72ch; margin: 0; font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.hub-panel p.ui-hint + p.ui-hint { margin-top: 4px; }
+[data-contrast="high"] .hub-panel p.ui-hint { color: var(--tr-fg); }
+/* shared-candidate: an empty state that reports a failure reads as one. */
+.ui-empty.danger > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.ui-empty.danger p { color: var(--tr-fg); }
+/* shared-candidate: "How this works", closed until asked for; it holds what would otherwise be a paragraph in a card. */
+.ui-how { margin-top: 12px; }
+.ui-how > summary { width: fit-content; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.ui-how > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding-left: 24px; }
+.hub-panel .ui-how p { margin: 0; }
 
 /* Accounts: one row per CLI (avatar, name and detail, state, actions), its details and install line under the words. */
 .accounts-panel > .ui-card + .ui-card, .accounts-panel > .ui-banner { margin-top: 16px; }
@@ -43,7 +53,7 @@
 .account-details summary { font: var(--tr-t-small); color: var(--tr-fg-dim); }
 .account-install p { margin: 0; font: var(--tr-t-small); }
 .account-path, .account-command { display: block; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); color: var(--tr-fg-muted); font: var(--tr-t-meta); overflow-wrap: anywhere; white-space: pre-wrap; }
-.account-hint { margin-top: 12px; }
+.hub-panel p.account-hint { margin-top: 12px; }
 /* The note under the cards is as wide as a line of reading, like the banners inside them. */
 .account-note { width: fit-content; }
 .account-note > span { max-width: 72ch; }
@@ -83,7 +93,9 @@
 .server-card .ui-banner > span { flex: 1; }
 .source-path { display: block; margin-top: 12px; color: var(--tr-fg-dim); font: var(--tr-t-meta); overflow-wrap: anywhere; }
 .hub-preview .source-path { margin: 0 0 8px; }
-.config-panel > .control-note { margin-top: 12px; }
+/* The note on what saving does sits under the project field as its hint. */
+.config-panel > .hub-toolbar { margin-bottom: 4px; }
+.hub-panel p.config-note { margin-bottom: 16px; }
 /* An extension: its engine's avatar, the name and its state on one line, the kind and scope under the name. */
 .config-panel .extension-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 4px 8px; }
 .config-panel .extension-row > .muted { grid-column: 2 / -1; font-size: 12px; }
@@ -95,18 +107,42 @@
 .memory-connection > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .memory-connection code { color: var(--tr-fg-muted); font: var(--tr-t-meta); overflow-wrap: anywhere; }
 .memory-connection small { color: var(--tr-fg-dim); }
-.memory-items, .memory-conflict { margin-top: 16px; }
-.memory-items .ui-list { margin-top: 12px; }
+/* Project and sync: the folder and key, what they mean, any problem with the project's own memory entries, Drive, install. */
+.memory-project { display: flex; flex-direction: column; gap: 12px; }
+.memory-project > .ui-card-head { margin-bottom: 0; }
+.memory-project > .memory-fields { margin: 0; }
+.memory-fields .project-key { width: 280px; }
+.memory-key-notes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.memory-key-notes > .button { margin-top: 4px; }
+.memory-entry-banner { align-items: center; }
+.memory-entry-banner > span { flex: 1; }
+/* The Drive folder is a well inside the card, not a card of its own. */
+.memory-project .memory-connection { padding: 12px; border-color: var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); box-shadow: none; }
+.memory-install { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.hub-panel .memory-review { margin: 16px 0 0; }
+.memory-items-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.memory-items { min-width: 0; }
+.memory-items .ui-empty { padding: 12px 16px; }
 .memory-items > .hub-toolbar, .memory-items > .hub-feedback { margin-bottom: 0; }
-.memory-items form label, .memory-search { flex: 1; max-width: 480px; }
-.memory-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.memory-items form label { flex: 1; }
+.memory-conflict { margin-top: 16px; }
+.memory-panel > .memory-columns { margin-top: 16px; }
+.memory-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 16px; }
 .memory-columns .hub-form { margin-bottom: 0; }
-.memory-history .hub-list { max-height: 320px; margin-bottom: 16px; }
+/* Handoffs: the search, then the notes as rows (they keep .extension-row, which the smoke test selects, over ui-row). */
+.memory-history { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.memory-search { margin-bottom: 12px; }
+.memory-notes { max-height: 360px; overflow-y: auto; }
+.memory-notes .extension-row { padding: 8px 12px; border: 1px solid var(--tr-line-faint); background: var(--tr-well); }
+.memory-notes .extension-row:hover { background: var(--tr-hover); }
+.memory-notes .extension-row.selected { border-color: var(--tr-line); background: var(--tr-raised); }
+[data-contrast="high"] .memory-notes .extension-row { border-color: var(--tr-line-strong); }
 /* A handoff opened under the list: its title, who and when, the note, then each action and what a revision does on its own line. */
 .memory-history .hub-preview { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .memory-history .hub-preview h2 { margin: 0; }
 .memory-history .hub-preview pre { align-self: stretch; }
 @container shell (max-width: 1180px) { .memory-columns { grid-template-columns: 1fr; } }
+@container shell (max-width: 900px) { .memory-items-grid { grid-template-columns: 1fr; } }
 
 /* Model pricing (Settings). */
 .pricing-editor .usage-table-wrap { margin: 0 0 12px; overflow: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); }
@@ -114,9 +150,7 @@
 .pricing-editor td:first-child input { width: 200px; }
 
 /* Shared rules: the editor beside the projects it applies to. */
-.rules-toolbar { align-items: center; }
-.rules-toolbar .rules-state { margin-right: auto; }
-.rules-confirm { align-items: center; margin: 12px 0; }
+.rules-confirm, .rules-synced { align-items: center; margin-bottom: 16px; }
 .rules-confirm > span { flex: 1; }
 .rules-columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; }
 .rules-columns > div { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -135,4 +169,4 @@
 .device-sync-conflict p { margin: 0; color: var(--tr-fg); }
 
 /* Higher contrast: the wells these pages draw themselves take the stronger line that shared rows take. */
-[data-contrast="high"] :is(.account-path, .account-command, .account-terminal, .server-command) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.account-path, .account-command, .account-terminal, .server-command, .memory-project .memory-connection) { border-color: var(--tr-line-strong); }

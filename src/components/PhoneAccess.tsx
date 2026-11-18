@@ -9,6 +9,7 @@ function QrCode({ text, label }: { text: string; label: string }) {
   const cells = useMemo(() => { const code = qrcode(0, 'M'); code.addData(text); code.make(); const size = code.getModuleCount(); const dark: string[] = [];
     for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) if (code.isDark(row, col)) dark.push(`M${col + 4} ${row + 4}h1v1h-1z`);
     return { size: size + 8, path: dark.join('') }; }, [text]);
+  // Literal black on white, not tokens: a QR code needs full contrast to scan, and one that does not scan breaks pairing.
   return <svg className="phone-qr" role="img" aria-label={label} viewBox={`0 0 ${cells.size} ${cells.size}`} shapeRendering="crispEdges"><rect width={cells.size} height={cells.size} fill="#fff" /><path d={cells.path} fill="#000" /></svg>;
 }
 
@@ -16,7 +17,7 @@ function QrCode({ text, label }: { text: string; label: string }) {
 function ServeGuide({ problem, busy, open, retry }: { problem: ServeProblem; busy: boolean; open: () => void; retry: () => void }) {
   const openButton = (label: string) => <button className="button secondary small" disabled={busy} onClick={open}>{label}</button>;
   return <div className="phone-guide" role="group" aria-label="Finish Tailscale HTTPS">
-    <p role="alert">{problem.message}</p>
+    <p role="alert" className="error-message">{problem.message}</p>
     {problem.kind === 'certificates' ? <ol>
       <li>Open the DNS page of the Tailscale admin console. {problem.link && openButton('Open Tailscale DNS settings')}</li>
       <li>If MagicDNS is off, click <strong>Enable MagicDNS</strong>.</li>
@@ -61,14 +62,16 @@ export function PhoneAccessCard() {
     window.addEventListener('focus', retry);
     return () => window.removeEventListener('focus', retry);
   }, [fixable]);
-  if (!status) return error ? <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p> : null;
+  const head = (state: string, tone: string) => <div className="ui-card-head"><Smartphone aria-hidden="true" /><h2 id="phone-access-title">Phone access</h2><span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
+  if (!status) return <article className="storage-card ui-card settings-card phone-access" aria-labelledby="phone-access-title">{error ? <>{head('Unavailable', 'danger')}<p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p></> : <>{head('Checking', 'neutral')}<p className="ui-hint">Checking phone access…</p></>}</article>;
   const { tailscale } = status; const ready = status.listening && tailscale.serving && !tailscale.funnel;
   // Computers linked to this one, and codes for linking one, belong to the Other computers card.
   const phones = status.devices.filter((device) => device.kind === 'phone'); const pairing = status.pairing?.kind === 'phone' ? status.pairing : null;
   const tone = !status.enabled ? 'neutral' : ready ? 'success saved' : 'warning';
   return <article className="storage-card ui-card settings-card phone-access" aria-labelledby="phone-access-title">
-    <div className="ui-card-head"><Smartphone aria-hidden="true" /><h2 id="phone-access-title">Phone access</h2><span className={`ui-badge dot storage-status ${tone}`}>{!status.enabled ? 'Off' : ready ? 'Ready' : status.listening ? 'Needs Tailscale' : 'Not running'}</span></div>
-    <p>Read and type into running channels from your phone, including answering approval prompts, and get an alert when one needs you. Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
+    {head(!status.enabled ? 'Off' : ready ? 'Ready' : status.listening ? 'Needs Tailscale' : 'Not running', tone)}
+    <p>Read and type into your channels from your phone, answer approvals, and get alerts.</p>
+    <p className="ui-hint">Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
     <label className="ui-check"><input type="checkbox" checked={status.enabled} disabled={busy} onChange={(event) => { const enabled = event.target.checked; setStatus({ ...status, enabled }); void run({ action: 'remote-enable', enabled }); }} />Allow paired phones to read and type into channels</label>
     {status.error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{status.error}</span></p>}
     {status.enabled && <>
@@ -80,7 +83,8 @@ export function PhoneAccessCard() {
             ? <ServeGuide problem={status.serveProblem} busy={busy} open={() => void run({ action: 'remote-open-tailscale' })} retry={() => void run({ action: 'remote-serve' })} />
             : <>Trace asks Tailscale to pass HTTPS on your tailnet to this computer’s phone page. <button className="button secondary small" disabled={busy || !tailscale.running} onClick={() => void run({ action: 'remote-serve' })}>Set up Tailscale HTTPS</button></>}</li>
         <li className={phones.length ? 'done' : ''}><strong>Pair your phone.</strong>{' '}
-          {pairing ? null : <button className="button primary small" disabled={busy || !status.listening} onClick={() => void run({ action: 'remote-pair' })}>Pair a phone</button>}</li>
+          {/* Primary once HTTPS is set up: until then the step above holds the card's one primary action (Try again). */}
+          {pairing ? null : <button className={`button ${tailscale.serving ? 'primary' : 'secondary'} small`} disabled={busy || !status.listening} onClick={() => void run({ action: 'remote-pair' })}>Pair a phone</button>}</li>
       </ol>
       {tailscale.funnel && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>Tailscale Funnel is on for this address, which would put it on the public internet. Trace refuses Funnel requests; turn Funnel off with “tailscale funnel reset”.</span></p>}
       {pairing && <div className="phone-pairing" role="group" aria-label="Pairing code">
@@ -97,8 +101,9 @@ export function PhoneAccessCard() {
         <div className="ui-row-main"><strong>{device.name}</strong><small>Paired {new Date(device.createdAt).toLocaleDateString()} · {device.lastSeen ? `last used ${new Date(device.lastSeen).toLocaleString()}` : 'not used yet'} · {device.notifications ? 'alerts on' : 'alerts off'}</small></div>
         <div className="ui-actions">{device.notifications && <button className="button secondary small" disabled={busy} onClick={() => void run({ action: 'remote-test-alert', id: device.id })}>Send test alert</button>}<button className="button danger small" aria-label={`Remove ${device.name}`} disabled={busy} onClick={() => void run({ action: 'remote-revoke', id: device.id })}><X size={16} />Remove</button></div>
         <label className="ui-check"><input type="checkbox" checked={device.canRun} disabled={busy} onChange={(event) => void run({ action: 'remote-can-run', id: device.id, canRun: event.target.checked })} />Can start and stop agents</label>
-        <span className="ui-hint">Lets this phone start, stop, restart and add channels, and, on Windows with Share this screen on, see and control this screen (turning it off closes that at once). Either way, a paired phone can type into running channels, answer approvals, write handoff notes to shared memory and ask for a coaching review. Removing the phone still locks it out at once.</span>
       </li>)}</ul>}
+      {/* Said once under the list, not in every phone's row: it is the same for each. */}
+      {phones.length > 0 && <p className="ui-hint">Can start and stop agents lets a phone start, stop, restart and add channels, and, on Windows with Share this screen on, see and control this screen (turning it off closes that at once). Either way, a paired phone can type into running channels, answer approvals, write handoff notes to shared memory and ask for a coaching review. Removing a phone still locks it out at once.</p>}
     </>}
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;
