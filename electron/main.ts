@@ -1,7 +1,7 @@
 import { redactDiagnostic } from '../shared/productivity';
 import { Workflows } from './services/workbench/workflows';
 import { Delivery } from './services/workbench/delivery';
-import { execFile } from 'node:child_process';
+import { ChildProcess, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import { Diagnostics } from './services/workbench/diagnostics';
@@ -20,7 +20,7 @@ import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteRe
 import type { NativeResume } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent } from 'electron';
+import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, Menu, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -29,25 +29,25 @@ import { UpdateService, updatesEnabled } from './services/updates/update-service
 import { pathToFileURL } from 'node:url';
 import os, { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { chatHistory, chatText } from './services/chat/transcript';
+import { chatHistory, chatText, taskHistory } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
-import { COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine, findExecutable, hostEnvironment } from './services/cli/discovery';
+import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
+import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment } from './services/cli/discovery';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
 import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './services/cli/attention';
 import { ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
-import { gpuCrashWindows, HostHealth } from './services/storage/host-health';
-import { chatRequestSchema, finishWorkspaceFlushSchema, resizeSessionSchema } from '../shared/schemas';
+import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
+import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
 import { HubService } from './services/hub/service';
 import { RemoteServer } from './services/remote/remote-server';
 import { serveFailure, serveRemote, stopServing, tailscalePeers, tailscaleRunner, tailscaleState, type TailscaleError } from './services/remote/tailscale';
-import { LinkedComputers, linkableAddress } from './services/remote/linked-computers';
+import { INPUT_TIMEOUT, LinkedComputers, linkableAddress, tailnetOf } from './services/remote/linked-computers';
 import { openTraceScreen, ScreenSharing, screenHost } from './services/remote/screen-sharing';
 import { localScreenToken, shareEnabled } from './services/remote/screen-service-server';
 import { ScreenShare } from './services/remote/screen-share';
@@ -78,6 +78,8 @@ app.on('child-process-gone', (_event, details) => {
   hostHealth?.record('child-process-gone', `${details.type}: ${details.reason}`, details.exitCode);
   // With a GPU crash, each window's state, to tell a black window from one that was hidden, minimized or behind another.
   if (details.type === 'GPU') hostHealth?.record('gpu-crash-windows', gpuCrashWindows(BrowserWindow.getAllWindows()));
+  // Also in the stall list, which channel starts cannot push out: a GPU restart can look like a short freeze.
+  if (details.type === 'GPU') hostHealth?.stall('gpu', 'gpu-gone', null, details.reason);
 });
 let workflows: Workflows | null = null;
 let delivery: Delivery | null = null;
@@ -88,6 +90,10 @@ const production = process.argv.includes('--production') || app.isPackaged;
 let window: BrowserWindow | null = null;
 let quitting = false;
 let updateRestart = false;
+/** A linked computer started the Mac install script here: it quits Trace once its download checks out. */
+let scriptUpdate = false;
+/** Jobs the install script would cut off do not start while it downloads; everything else keeps working. */
+function refuseDuringScriptUpdate() { if (scriptUpdate) throw new HubError('UPDATE_RUNNING', 'Trace is installing an update another computer started. It restarts in a minute or two; try again then.'); }
 let lastFlushSucceeded = false;
 let updates: UpdateService | null = null;
 let projectChecks: ProjectChecks | null = null;
@@ -100,6 +106,10 @@ let screenShare: ScreenShare | null = null;
 /** Start/stop requests from linked computers, waiting for the desktop window to carry them out. */
 const pendingControls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 let autoMemory: AutoMemory | null = null;
+/** The window that owns each run, so a token limit stops the run even when that window is not the current one. */
+const runOwners = new Map<string, number>();
+/** Whether anything an update or backup would cut off is running: channels, sign-ins and the other long jobs (set once they exist). */
+let busyJobs = () => manager.hasSessions;
 let storageFailure = 'Local storage is unavailable. Check access to ~/.coding-hub.';
 let workspaceLoaded = false;
 let pendingFlush: { requestId: string; owner: number; resolve: () => void; promise: Promise<void> } | null = null;
@@ -116,7 +126,7 @@ const channelAccount = (config: { engine: string; accountProfileId?: string }): 
 };
 /** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
 /** Today's usage from the CLIs' own logs: the default homes and every Claude profile's. */
-const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? []);
+const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? [], undefined, path.join(storageRoot, 'day-usage.json'));
 const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id), undefined, undefined, () => claudeProfiles.labels().default?.name ?? null);
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 // Live coaching's reviews run in its coaching folder; their sessions are kept so their usage counts, but are not history.
@@ -127,14 +137,15 @@ const repositoryGit = new RepositoryGit(repositoryFiles);
 // Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
 // SessionStart says which conversation a run is in: telemetry follows it there, then tells the window (see onConversation).
 const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished), (runId, conversationId) => hub?.telemetry?.follow(runId, conversationId), (runId, size) => hub?.telemetry?.setContextWindow(runId, size));
-const manager = new PtyManager((owner, event) => {
+// Each session event is labelled for the stall record (host-health.ts): saving output and ending runs happen here.
+const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, () => {
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
   try {
     if (event.type === 'data') storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
-  if (event.type === 'exit') attention.unregister(event.runId);
+  if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); }
   if (event.type === 'exit') {
     // Telemetry's last read of the run can be what finds a short run's transcript, so the summary waits for it.
     const transcript = hub?.telemetry?.transcript(event.runId) ?? null;
@@ -149,13 +160,15 @@ const manager = new PtyManager((owner, event) => {
     if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   } catch { hostHealth?.record('desktop-alert-failed'); }
-}, { onChat: (owner, envelope) => {
+}), { onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
-}, chatHistory: (config) => { if (!config.resumeId) return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id), prepareLaunch: (run, config, info, launch) => {
+}, chatHistory: (config) => { if (!config.resumeId) return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
+  // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
+  beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
@@ -171,7 +184,8 @@ const manager = new PtyManager((owner, event) => {
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
-}, abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
+}), abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
+  runOwners.set(run.runId, owner);
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
@@ -298,9 +312,18 @@ async function remoteUpdate(): Promise<string> {
   const release = await latestMacRelease(); if (!release) throw new HubError('UPDATE_FAILED', 'Trace there could not read the latest version. Check its connection.');
   const { version } = release;
   if (!isNewerVersion(version, app.getVersion())) return `Trace ${app.getVersion()} there is already the latest version (the downloads page has ${version}).`;
-  if (manager.hasSessions) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels running there first, then try again.');
-  if (workspaceLoaded) await flushWorkspace();
-  startMacUpdate(storageRoot, version, REMOTE_PORT, release.sha512);
+  // The script quits Trace without asking again, so nothing may be running, and nothing may start while it downloads.
+  if (updateRestart || scriptUpdate) throw new HubError('UPDATE_RUNNING', 'Trace there is already installing an update.');
+  if (busyJobs()) throw new HubError('ACTIVE_SESSIONS', 'Stop the channels, sign-ins and other jobs running there first, then try again.');
+  if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'Trace there could not save its workspace. Resolve the storage issue there before updating.'); }
+  if (updateRestart || scriptUpdate || busyJobs()) throw new HubError('ACTIVE_SESSIONS', 'Something started there while Trace was saving its workspace. Stop it, then try again.');
+  // Only new jobs are refused while the script downloads: Settings, usage and the status bar keep working.
+  scriptUpdate = true; let script: unknown;
+  try { script = startMacUpdate(storageRoot, version, REMOTE_PORT, release.sha512); } catch (error) { scriptUpdate = false; throw error; }
+  // A script that gives up (download or checksum failed) leaves Trace running: jobs can start again once it exits, or
+  // after 15 minutes when Trace cannot see it exit.
+  let ended = false; const end = () => { if (!ended) { ended = true; scriptUpdate = false; } };
+  if (script instanceof ChildProcess) script.once('exit', end); setTimeout(end, 15 * 60000).unref();
   return `Installing Trace ${version} there. It quits, restarts and is back in about a minute; if the new version does not start, the old one is put back.`;
 }
 async function linkedRequest(payload: unknown) {
@@ -308,7 +331,7 @@ async function linkedRequest(payload: unknown) {
   const request = linkedSchema.parse(payload);
   if (request.action === 'linked-link') return linked.link(request.id, request.code);
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
-  if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data); return null; }
+  if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data, AbortSignal.timeout(INPUT_TIMEOUT)); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
   if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && (request.engine === 'claude' || request.engine === 'codex')); return null; }
   if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
@@ -327,11 +350,15 @@ async function linkedRequest(payload: unknown) {
  * A channel's whole conversation, read from its CLI's own transcript: every restart resumes the same conversation, so
  * this covers them all, while the terminal shows only the current run. Null for terminals and channels never run.
  */
-function channelTranscript(sessionId: string): ChannelTranscript {
+function channelTranscript(sessionId: string): ChannelTranscript { const source = transcriptSource(sessionId); return source ? chatHistory(source.engine, source.file) : null; }
+/** One task's part of a channel's conversation (its prompt to the next task's prompt); null when it cannot be found there. */
+async function taskTranscript(sessionId: string, mark: string): Promise<ChannelTranscript> { const source = transcriptSource(sessionId); return source ? taskHistory(source.engine, source.file, mark) : null; }
+/** The CLI's own transcript file for a channel; null for terminals and channels never run. */
+function transcriptSource(sessionId: string) {
   const config = storage?.load()?.sessions.find((session) => session.id === sessionId)?.config;
   if (!config || !isAgentConfig(config) || !config.resumeId) return null;
   const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined);
-  return file ? chatHistory(config.engine, file) : null;
+  return file ? { engine: config.engine, file } : null;
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
@@ -393,13 +420,18 @@ function assertSender(event: IpcMainInvokeEvent) {
   }
 }
 
+/** A request's name for the stall record: its channel and action, never what it carries. */
+function jobLabel(channel: string, payload: unknown) {
+  const action = payload && typeof payload === 'object' && 'action' in payload && typeof payload.action === 'string' && /^[\w-]{1,40}$/.test(payload.action) ? ` ${payload.action}` : '';
+  return channel.replace(/^coding-hub:/, '') + action;
+}
 function handle<T>(channel: string, operation: (owner: number, payload: unknown) => T | Promise<T>) {
   ipcMain.handle(channel, async (event, payload): Promise<HostResult<T>> => {
     try {
       assertSender(event);
       if (backups?.busy && [IPC_CHANNELS.startSession, IPC_CHANNELS.accounts, IPC_CHANNELS.projects, IPC_CHANNELS.projectChecks, IPC_CHANNELS.projectTools].includes(channel as never)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before starting or changing local jobs.');
       if ((delivery?.running || workflows?.running) && [IPC_CHANNELS.startSession, IPC_CHANNELS.projectChecks, IPC_CHANNELS.projectTools].some((item) => item === channel)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting or changing local jobs.');
-      return { ok: true, value: await operation(event.sender.id, payload) };
+      return { ok: true, value: await timed(jobLabel(channel, payload), () => operation(event.sender.id, payload)) };
     } catch (error) {
       return { ok: false, error: error instanceof z.ZodError ? { code: 'INVALID_REQUEST', message: error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' ').slice(0, 1500) } : error instanceof HubError ? { code: error.code, message: error.message } : { code: 'HOST_ERROR', message: 'The native operation failed. Check file permissions and refresh before retrying.' } };
     }
@@ -420,6 +452,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Terminals keep reading and acknowledging output, and tasks keep moving, while Trace is minimized or covered.
+      backgroundThrottling: false,
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -454,12 +488,13 @@ function createWindow() {
       if (!quitting && !current.isDestroyed()) dialog.showErrorBox('Workspace recovery could not finish', `A coding or login process could not be confirmed stopped. Check your system process manager before restarting Trace.${manager.ownedProcessIds(owner).length ? '\nOwned coding process IDs: ' + manager.ownedProcessIds(owner).join(', ') : ''}\nLocal lifecycle diagnostics were preserved.`);
     });
   });
-  current.webContents.on('render-process-gone', () => { repositoryFiles.closeOwner(owner); screens?.closeAll(owner); });
+  // A crashed or reloaded window never says it stopped watching other computers' active channels.
+  current.webContents.on('render-process-gone', () => { repositoryFiles.closeOwner(owner); screens?.closeAll(owner); linked?.unwatchAll(); });
   // did-start-navigation fires before will-navigate can cancel, so clean up only once the old page is really replaced.
   let firstDocument = true;
   current.webContents.on('did-navigate', () => {
     if (firstDocument) { firstDocument = false; return; }
-    void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner); screens?.closeAll(owner);
+    void accounts.stopOwner(owner).catch(() => {}); void manager.stopOwner(owner); repositoryFiles.closeOwner(owner); screens?.closeAll(owner); linked?.unwatchAll();
   });
   let closing = false;
   current.on('close', (event) => {
@@ -480,19 +515,45 @@ function createWindow() {
       repositoryFiles.closeOwner(owner); if (!current.isDestroyed()) current.destroy();
     });
   });
-  window.on('closed', () => { window = null; });
+  window.on('closed', () => { window = null; linked?.unwatchAll(); });
+  // Chromium says so only after several seconds; shorter stalls come from the window itself (window-health.ts).
+  current.on('unresponsive', () => hostHealth?.stall('window', 'unresponsive'));
+  current.on('responsive', () => hostHealth?.stall('window', 'responsive'));
+}
+/**
+ * Electron's default menu reloads (Ctrl+R, Ctrl+Shift+R) and closes (Ctrl+W) the window, which stops every channel
+ * without asking, and opens DevTools in the installed app. Trace's menu keeps only editing, zoom, full screen and
+ * quitting (DevTools in source runs); it stays hidden on Windows and Linux, as before, until Alt is pressed.
+ */
+function applicationMenu(): MenuItemConstructorOptions[] {
+  const view: MenuItemConstructorOptions = { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const])] };
+  if (process.platform !== 'darwin') return [{ role: 'editMenu' }, view];
+  // No Close Window (Cmd+W); the window's own close button and Quit (Cmd+Q) stay.
+  return [{ role: 'appMenu' }, { role: 'editMenu' }, view, { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] }];
 }
 
 // Opened from Finder or the Dock, the Mac app lacks the shell's PATH, where the CLIs and Node.js usually are.
 if (process.platform === 'darwin' && app.isPackaged) adoptLoginShellPath();
+/** Trace was opened again while this one was quitting: it starts again once this one has finished. */
+let reopenAfterQuit = false;
+/** app.relaunch() was already called (Restart); a second call would start two copies. */
+let relaunching = false;
 // Opening Trace again (Start menu, shortcut, Dock) while it runs shows the window it already has, instead of nothing.
-app.on('second-instance', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
+// While it is quitting (saving memory summaries can take seconds after the window is gone), it opens again afterwards.
+app.on('second-instance', () => {
+  if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; }
+  if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus();
+});
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void offerToRemoveOldApp().catch(() => {});
   void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   hostHealth = new HostHealth(storageRoot);
-  try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); }
+  // About once a second: a main process blocked 250 ms or more is recorded with the job that ran (see timed()).
+  mainStalls.start((ms, job) => hostHealth?.stall('main', 'main-stall', ms, job));
+  powerMonitor.on('suspend', () => mainStalls.skip()); powerMonitor.on('resume', () => mainStalls.skip());
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
+  try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); void pruneCrashDumps(dumps).catch(() => {}); }
   catch { hostHealth.record('crash-dump-setup-unavailable'); }
   try { storage = new WorkspaceStorage(storageRoot, reportStorageError); }
   catch (error) { if (error instanceof HubError) storageFailure = error.message; }
@@ -500,7 +561,12 @@ else app.whenReady().then(() => {
     hub = new HubService(storageRoot);
     hub.telemetry = new TelemetryService(path.join(path.dirname(hub.preferencesPath), 'telemetry'), () => hub!.preferences().prices, (usage) => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
-    }, (run) => { if (window) void manager.stop(window.webContents.id, { sessionId: run.sessionId, runId: run.runId }).catch(() => reportStorageError('The reported token limit was reached, but the process could not be stopped.')); });
+    }, (run) => {
+      // Called once per run, so it must act: through the window that started the run, whichever window is current.
+      const owner = runOwners.get(run.runId) ?? (window && !window.isDestroyed() ? window.webContents.id : undefined);
+      if (owner === undefined) { hostHealth?.record('token-limit-stop-failed', 'no owner'); return; }
+      void manager.stop(owner, { sessionId: run.sessionId, runId: run.runId }).catch(() => { hostHealth?.record('token-limit-stop-failed'); reportStorageError('The reported token limit was reached, but the process could not be stopped.'); });
+    });
     hub.telemetry.onError = (_run, message) => { hostHealth?.record('telemetry-read-failed'); reportStorageError(message); };
     hub.telemetry.onConversation = (run, conversationId) => manager.notifyConversation(run.runId, conversationId);
     // Once, two minutes after starting (it reads Claude Code's older transcripts): each older reply's day.
@@ -516,6 +582,8 @@ else app.whenReady().then(() => {
       scratch: path.join(storageRoot, 'auto-memory'),
       onWrite: (key) => memoryHub.trackProject(key),
       refresh: (key) => memoryHub.trackProject(key),
+      sync: (key) => memoryHub.syncProject(key),
+      // Shown in the window's banner, which the person can dismiss (only a saving failure stays until a save works).
       onNotice: (message) => { hostHealth?.record('auto-memory-notice'); reportStorageError(message); },
     });
     // Once startup settles: repair stale memory entries in the folders this computer has run agents in (issue #19).
@@ -542,7 +610,7 @@ else app.whenReady().then(() => {
     }));
   };
   const liveCoach = new LiveCoach(path.join(storageRoot, 'coaching'), (tip) => { sendToRenderer(IPC_CHANNELS.coachingEvent, tip); remote?.channelsChanged(); }, async (engine, profileId) => {
-    const env = hostEnvironment(); const executable = await findExecutable(engine, env).catch(() => null);
+    const env = await freshHostEnvironment(); const executable = await findExecutable(engine, env).catch(() => null);
     return executable ? { executable, env: engine === 'claude' && profileId ? claudeProfiles.environment(env, profileId) : env } : null;
   });
   if (hub?.telemetry) hub.telemetry.onLine = (run, config, raw) => liveCoach.observe(run, config, raw);
@@ -556,10 +624,12 @@ else app.whenReady().then(() => {
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Trace-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Trace backup', extensions: ['gz'] }] })).filePath ?? null,
     importFile: async () => { const selected = await dialog.showOpenDialog(window!, { title: 'Import local backup', properties: ['openFile'], filters: [{ name: 'Trace backup', extensions: ['gz'] }] }); return selected.canceled ? null : selected.filePaths[0] ?? null; },
-    confirmRestore: async (record) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Activate restored copy on restart', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Review verified restore', message: `${record.files} files · ${record.bytes} bytes · version ${record.appVersion}`, detail: 'The backup was checked and copied into a new local restore directory. Current data and project files remain intact. Credentials are excluded, so named profiles may need login again. Restart to activate the restored copy.' })).response === 0 && !updateRestart,
+    confirmRestore: async (record) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Activate restored copy on restart', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Review verified restore', message: `${record.files} files · ${record.bytes} bytes · version ${record.appVersion}`, detail: 'The backup was checked and copied into a new local restore directory. Current data and project files remain intact. Credentials are excluded, so named profiles may need login again. This computer’s identity, paired phones and linked computers are kept as they are now. After the restart, sync between computers compares rules and settings with your other computers and asks you to choose where both sides changed. Restart to activate the restored copy.' })).response === 0 && !updateRestart,
+    // The host asks, never the window: deleting a backup cannot be undone.
+    confirmDelete: async (record) => (await dialog.showMessageBox(window!, { type: 'warning', buttons: ['Delete backup', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Delete local backup', message: `${new Date(record.createdAt).toLocaleString()} · ${record.files} files`, detail: 'The backup file is removed from this computer. Exported copies are not affected.' })).response === 0,
   });
   const confirmWorkflow = async (title: string, detail: string) => (await dialog.showMessageBox(window!, { type: 'question', title, message: title, detail, buttons: ['Confirm reviewed action', 'Cancel'], defaultId: 1, cancelId: 1 })).response === 0 && !updateRestart && !backups?.busy;
-  const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop coding sessions and verification before changing repositories or applying templates.'); };
+  const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || scriptUpdate || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop coding sessions and verification before changing repositories or applying templates.'); };
   delivery = new Delivery(confirmWorkflow, workflowReady);
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
@@ -600,17 +670,18 @@ else app.whenReady().then(() => {
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
     // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
     // asks for a fresh read in the background, at most every five minutes like Usage (PlanLimitsService.refresh).
-    usage: () => {
+    // A phone asks once per load, so it waits (at most 2 s) for the logs' latest growth instead of getting the last read.
+    usage: async () => {
       void planLimits.refresh().catch(() => {});
       let budget: { dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number } | null = null; try { budget = hub?.preferences() ?? null; } catch { /* Unreadable preferences: no budget shown. */ }
-      return { today: dayUsage.totals(), limits: planLimits.current(), budget };
+      await dayUsage.settled(); return { today: dayUsage.totals(), limits: planLimits.current(), budget };
     },
     tasks: () => tasks.list(),
     taskStatus: async (id, status) => { await tasks.execute({ action: 'task-status', id, status }); },
     history: async () => { const labels = workflows?.labels() ?? []; return (await nativeSessions.list()).map((item) => { const label = labels.find((entry) => entry.key === item.key)?.name; return label ? { ...item, label } : item; }); },
     resume: (key) => resumeConversation(key),
     memoryProjects: () => channelProjects(),
-    memoryNotes: (project) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); return hub.memory.list(project); },
+    memoryNotes: (project) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); return hub.memory.listLater(project); },
     writeMemory: (project, title, content) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); hub.execute({ action: 'memory-write', project, title, content, author: 'human' }); },
   // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
   }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
@@ -621,6 +692,15 @@ else app.whenReady().then(() => {
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
+    // Auto-link needs no code, so the person is always told, even with Trace in front; clicking opens that computer's tab.
+    // The window's banner shows it too, and host health records it, so it is not lost when desktop alerts are off.
+    phone.onAutoLinked = (name, machineId) => {
+      const body = `${name.slice(0, 80)} linked itself through your Tailscale login. If it isn't yours, remove it under Settings → Other computers.`;
+      hostHealth?.record('computer-auto-linked'); reportStorageError(`A computer linked to Trace here: ${body}`);
+      desktopAlert({ title: 'A computer linked to Trace here', body, target: { computerId: machineId } }, true);
+    };
+    /** This computer's own tailnet (`tail1234.ts.net`), from its Tailscale name; null until that is known. */
+    const ownTailnet = () => phone.tailscale.host ? tailnetOf('https://' + phone.tailscale.host) : null;
     devices.advertise = () => phone.enabled && phone.tailscale.serving ? phone.status().url : null;
     // Another computer's channel that needs the person is told here while this window is not in front; clicking opens its tab.
     const linkedAlerts = new LinkedAlerts((alert) => desktopAlert({ title: alert.title, body: alert.body, target: { computerId: alert.id } }));
@@ -630,7 +710,9 @@ else app.whenReady().then(() => {
     // A smoke test (an unpackaged run on its own remote port) must never find or link the owner's real computers on
     // the tailnet: it would leave links to a throwaway copy on them. CODING_HUB_TEST_TAILNET=1 opts a test back in.
     const isolatedTest = !app.isPackaged && Boolean(process.env.CODING_HUB_TEST_REMOTE_PORT) && process.env.CODING_HUB_TEST_TAILNET !== '1';
-    phone.setRelay(linked); linked.peers = () => isolatedTest ? Promise.resolve([]) : tailscalePeers(runTailscale); linked.start();
+    phone.setRelay(linked); linked.peers = () => isolatedTest ? Promise.resolve([]) : tailscalePeers(runTailscale); linked.tailnet = ownTailnet;
+    // An unreadable linked-computers.json must not keep the window from opening.
+    try { linked.start(); } catch { hostHealth?.record('linked-computers-unreadable'); }
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;
@@ -641,21 +723,26 @@ else app.whenReady().then(() => {
     }, (owner, event) => sendToRenderer(IPC_CHANNELS.screenEvent, event, owner),
     { available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text).toString('base64'), decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')) });
     // The phone app the other computer served may call this one directly while that one is off.
-    phone.allowedOrigins = () => devices.advertised().flatMap((computer) => { const url = linkableAddress(computer.url); return url ? [url.replace(/\/$/, '').toLowerCase()] : []; });
+    // Only addresses on this computer's own tailnet: a Drive writer could list another tailnet's (Funnel) name.
+    // Linked computers count too: one linked over the tailnet may not share this computer's Drive folder.
+    const linkedAddresses = () => { try { return linked?.status().filter((computer) => computer.linked).map((computer) => computer.url) ?? []; } catch { return []; } };
+    phone.allowedOrigins = () => { const own = ownTailnet(); return [...new Set([...devices.advertised().map((computer) => computer.url), ...linkedAddresses()].flatMap((address) => { const url = linkableAddress(address); const net = url ? tailnetOf(url) : null; return url && (!own || !net || net === own) ? [url.replace(/\/$/, '').toLowerCase()] : []; }))]; };
   }
   // Phones are accepted only on this computer's tailnet name: one failed `tailscale status` (a timeout, say) must not
   // forget it, or every phone request gets "Unknown host" until the next check.
-  let checkedTailscale = 0;
-  const refreshTailscale = async () => {
-    if (!phone.enabled) return; checkedTailscale = Date.now(); const next = await tailscaleState(runTailscale, phone.port);
+  let checkedTailscale = 0; let autoLinked = 0; let checkingTailscale: Promise<void> | null = null;
+  // One check at a time: Settings asking again while one runs waits for it instead of starting more tailscale processes.
+  const refreshTailscale = (): Promise<void> => checkingTailscale ??= (async () => {
+    if (!phone.enabled) return; const started = checkedTailscale = Date.now(); const next = await tailscaleState(runTailscale, phone.port);
     phone.tailscale = !next.host && next.error && phone.tailscale.host ? { ...next, host: phone.tailscale.host } : next;
     if (phone.tailscale.serving) { phone.serveProblem = null; phone.serveLink = null; }
-    // The person's other computers on the tailnet are found and linked with each check (a minute apart).
-    if (phone.autoLink && phone.tailscale.running && !(!app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT && process.env.CODING_HUB_TEST_TAILNET !== '1')) void linked?.autoLink().catch(() => {});
-  };
+    // The person's other computers on the tailnet are found and linked at most once a minute, however often Settings asks.
+    // Timed from the check's start, as the timer is, so a quicker check a minute later is not skipped by a few milliseconds.
+    if (phone.autoLink && phone.tailscale.running && started - autoLinked >= 60000 && !(!app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT && process.env.CODING_HUB_TEST_TAILNET !== '1')) { autoLinked = started; void linked?.autoLink().catch(() => {}); }
+  })().finally(() => { checkingTailscale = null; });
   void phone.start().then(refreshTailscale).catch(() => hostHealth?.record('remote-start-failed'));
   // Every minute, and every ten seconds while the tailnet name is not known yet.
-  setInterval(() => { if (Date.now() - checkedTailscale >= 60000 || (phone.enabled && !phone.tailscale.host)) void refreshTailscale().catch(() => {}); }, 10000).unref();
+  setInterval(() => { if (Date.now() - checkedTailscale >= 60000 || (phone.enabled && !phone.tailscale.host)) void timed('tailscale-check', refreshTailscale).catch(() => {}); }, 10000).unref();
   const remoteControl = async (payload: unknown) => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('remote-status') }).strict(), z.object({ action: z.literal('remote-enable'), enabled: z.boolean() }).strict(),
@@ -666,8 +753,8 @@ else app.whenReady().then(() => {
       z.object({ action: z.literal('remote-auto-link'), enabled: z.boolean() }).strict(),
       z.object({ action: z.literal('remote-can-run'), id: z.uuid(), canRun: z.boolean() }).strict(),
     ]).parse(payload);
-    if (request.action === 'remote-auto-link') phone.setAutoLink(request.enabled);
-    if (request.action === 'remote-enable') { await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
+    if (request.action === 'remote-auto-link') { phone.setAutoLink(request.enabled); autoLinked = 0; }
+    if (request.action === 'remote-enable') { autoLinked = 0; await phone.setEnabled(request.enabled); if (!request.enabled) { serveConsent = false; await stopServing(runTailscale, phone.port).catch(() => hostHealth?.record('tailscale-serve-off-failed')); } }
     if (request.action === 'remote-cancel-pairing') return phone.cancelPairing();
     if (request.action === 'remote-revoke') return phone.revoke(request.id);
     if (request.action === 'remote-can-run') return phone.setCanRun(request.id, request.canRun);
@@ -677,10 +764,11 @@ else app.whenReady().then(() => {
       // Once agreed, a retry runs the same command: after fixing Tailscale's settings the person is not asked again.
       // An automatic retry never asks and never opens a page, so returning to Trace cannot bounce back to the browser.
       const confirmed = serveConsent || !request.automatic && (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Set up Tailscale HTTPS', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Reach Trace from your phone',
-        message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;
+        message: 'Let devices on your tailnet reach Trace?', detail: `This runs "tailscale serve --bg --https=443 http://127.0.0.1:${phone.port}". Devices signed in to your Tailscale network can then open Trace's phone page; each phone still has to be paired here before it can see or type into channels. With Link my computers automatically on, your other computers signed in to the same Tailscale account link without a code; Trace tells you when one does. It is not exposed to the internet. It stays set until you remove it with "tailscale serve reset".` })).response === 0;
       if (confirmed) {
         serveConsent = true;
-        try { await serveRemote(runTailscale, phone.port); phone.serveProblem = null; phone.serveLink = null; }
+        // An older Trace's "phone access off" removed /api/screen from Tailscale's settings; the screen service puts it back.
+        try { await serveRemote(runTailscale, phone.port); phone.serveProblem = null; phone.serveLink = null; void screenShare?.ensure().catch(() => hostHealth?.record('screen-service-start-failed')); }
         catch (error) {
           const { url, ...problem } = serveFailure(error as TailscaleError);
           phone.serveProblem = problem; phone.serveLink = url;
@@ -688,21 +776,33 @@ else app.whenReady().then(() => {
         }
       }
     }
-    await refreshTailscale().catch(() => {});
+    // A check already running may have read Tailscale before this change: the answer comes from one started after it.
+    if (request.action === 'remote-serve' || request.action === 'remote-enable' || request.action === 'remote-auto-link') await checkingTailscale?.catch(() => {});
+    // Settings polls remote-status every few seconds while a code shows: it gets the last check unless that is 10 s old.
+    if (request.action !== 'remote-status' || Date.now() - checkedTailscale >= 10000) await refreshTailscale().catch(() => {});
     return request.action === 'remote-pair' ? phone.pair(request.kind) : phone.status();
   };
   handle(IPC_CHANNELS.workbench, async (_owner, payload) => {
     const action = z.object({ action: z.string().max(60) }).passthrough().parse(payload).action;
     if (action === 'runtime') { z.object({ action: z.literal('runtime') }).strict().parse(payload); return { version: app.getVersion(), rendererVersion: app.getVersion(), edition: !app.isPackaged ? 'source' : process.env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'installed', executable: process.execPath, applicationPath: app.getAppPath(), storagePath: storageRoot, platform: process.platform, restartRequired: backups!.restartRequired }; }
-    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); app.relaunch(); app.quit(); return null; }
+    if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); relaunching = true; app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
     if (action === 'codex-models') return modelCatalog.execute(payload);
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if (action.startsWith('remote-')) return remoteControl(payload);
     if (action.startsWith('linked-')) return linkedRequest(payload);
     if (action === 'channel-transcript') return channelTranscript(z.object({ action: z.literal('channel-transcript'), sessionId: z.string().min(1).max(100) }).strict().parse(payload).sessionId);
-    if (action === 'usage-today') { z.object({ action: z.literal('usage-today') }).strict().parse(payload); return dayUsage.totals(); }
-    if (action === 'usage-days') { z.object({ action: z.literal('usage-days') }).strict().parse(payload); return dayUsage.days(); }
+    if (action === 'channel-task-transcript') { const request = z.object({ action: z.literal('channel-task-transcript'), sessionId: z.string().min(1).max(100), mark: z.string().regex(/^Task t-[0-9a-f]{8}:$/) }).strict().parse(payload); return taskTranscript(request.sessionId, request.mark); }
+    // Waiting (at most 2 s) for the logs' latest growth answers with current numbers in one ask.
+    if (action === 'usage-today') { z.object({ action: z.literal('usage-today') }).strict().parse(payload); await dayUsage.settled(); return dayUsage.totals(); }
+    if (action === 'usage-days') { z.object({ action: z.literal('usage-days') }).strict().parse(payload); await dayUsage.settled(); return dayUsage.days(); }
+    // A link in a chat reply: before the busy checks below, since opening a page changes nothing here. The window is
+    // untrusted, so the host itself allows only web addresses.
+    if (action === 'flow-open-link') {
+      const link = webLink(openLinkSchema.parse(payload).url);
+      if ('refused' in link) throw link.refused === 'scheme' ? new HubError('LINK_SCHEME', 'Only web links (http or https) open in the browser. Use Copy address for others.') : new HubError('LINK_INVALID', 'That link is not a web address Trace can open.');
+      await shell.openExternal(link.href); return null;
+    }
     if (action === 'plan-limits') { const request = z.object({ action: z.literal('plan-limits'), force: z.boolean().optional() }).strict().parse(payload); return planLimits.refresh(request.force); }
     if ((delivery?.running || workflows?.running) && ['verification-run', 'flow-template-apply', 'restart'].includes(action)) throw new HubError('DELIVERY_BUSY', 'Finish Git delivery before starting another job.');
     if (action.startsWith('flow-')) {
@@ -721,7 +821,7 @@ else app.whenReady().then(() => {
         const result = await dialog.showSaveDialog(window!, { title: 'Export diagnostic report (no session output or credentials)', defaultPath: `Coding-Hub-${app.getVersion()}-diagnostics.json`, filters: [{ name: 'JSON report', extensions: ['json'] }] });
         if (!result.filePath) return { exported: false };
         if (fs.existsSync(result.filePath) && fs.lstatSync(result.filePath).isSymbolicLink()) throw new HubError('REPORT_PATH', 'Choose a regular output file.');
-        fs.writeFileSync(result.filePath, JSON.stringify({ appVersion: app.getVersion(), platform: process.platform, packaged: app.isPackaged, report: sanitized, excludes: ['Session output','Prompt text','Environment values','Credentials','Configuration contents'] }, null, 2), { mode: 0o600 }); return { exported: true };
+        fs.writeFileSync(result.filePath, JSON.stringify({ appVersion: app.getVersion(), platform: process.platform, packaged: app.isPackaged, report: sanitized, hostHealth: hostHealth?.report() ?? null, excludes: ['Session output','Prompt text','Environment values','Credentials','Configuration contents'] }, null, 2), { mode: 0o600 }); return { exported: true };
       }
       if (!workflows) throw new HubError('WORKFLOW_STORAGE', 'Writable local workflow storage is unavailable.');
       if (action === 'flow-template-apply') workflowReady();
@@ -729,7 +829,7 @@ else app.whenReady().then(() => {
     }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
-    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);
@@ -737,12 +837,13 @@ else app.whenReady().then(() => {
     throw new HubError('INVALID_REQUEST', 'Unknown workbench operation.');
   });
   const projectSetup = new ProjectSetup();
-  handle(IPC_CHANNELS.projects, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return projectSetup.execute(payload); });
-  handle(IPC_CHANNELS.accounts, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing an update.'); return accounts.execute(owner, payload); });
+  handle(IPC_CHANNELS.projects, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate(); return projectSetup.execute(payload); });
+  handle(IPC_CHANNELS.accounts, (owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing an update.'); refuseDuringScriptUpdate(); return accounts.execute(owner, payload); });
   projectChecks = new ProjectChecks((directory) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Shared rules storage is unavailable.'); hub.rules.verifyLaunch(directory); });
-  handle(IPC_CHANNELS.projectChecks, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return projectChecks!.execute(payload, async () => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run project code', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run project check', message: 'Run this project’s npm script?', detail: 'Tests, typecheck, or lint scripts and their npm pre/post hooks execute project code with your local permissions. Only run checks in projects you trust. Output is capped and the check stops after 60 seconds.' })).response === 0 && !updateRestart); });
+  handle(IPC_CHANNELS.projectChecks, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate(); return projectChecks!.execute(payload, async () => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run project code', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run project check', message: 'Run this project’s npm script?', detail: 'Tests, typecheck, or lint scripts and their npm pre/post hooks execute project code with your local permissions. Only run checks in projects you trust. Output is capped and the check stops after 60 seconds.' })).response === 0 && !updateRestart); });
   worktrees = new WorktreeService(storageRoot, directoryInUse);
-  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); return worktrees!.execute(payload); });
+  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate(); return worktrees!.execute(payload); });
+  busyJobs = () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR), macUpdates()),
@@ -751,19 +852,21 @@ else app.whenReady().then(() => {
     storageDirectory: storageRoot,
     updater: autoUpdater,
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
-    hasSessions: () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active),
+    hasSessions: () => busyJobs(),
     installationFailed: () => { updateRestart = false; },
     prepareRestart: async (remote) => {
       const answer = remote ? { response: 0 } : await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {
-        if (manager.hasSessions || accounts.active || projectSetup.active || projectChecks?.running || verification?.running || backups?.busy || delivery?.running || workflows?.running || worktrees?.active) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
+        if (busyJobs()) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
         if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'The workspace could not be saved. Resolve the storage issue before updating.'); }
         else throw new HubError('UPDATE_SAVE_FAILED', 'Load the local workspace successfully before updating.');
         // The installer closes Trace about two seconds after it starts and then ends it by force, so nothing slow may be
         // left for quitting: memory summaries of sessions that just ended are saved now, while Trace is still running.
         await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
+        // Then those summaries (and other notes still on their way) reach Drive for the other computers.
+        await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
         return true;
       } catch (error) { updateRestart = false; throw error; }
     },
@@ -790,10 +893,15 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.listHistory, () => localStorage().history());
   handle(IPC_CHANNELS.readRunLog, (_owner, payload) => localStorage().readLog(payload));
   handle(IPC_CHANNELS.finishWorkspaceFlush, (owner, payload) => {
-    const parsed = finishWorkspaceFlushSchema.safeParse(payload);
-    if (!parsed.success || !pendingFlush || pendingFlush.owner !== owner || parsed.data.requestId !== pendingFlush.requestId) throw new HubError('INVALID_FLUSH', 'Invalid workspace flush request.');
-    try { if (parsed.data.workspace && workspaceLoaded) { localStorage().save(parsed.data.workspace); lastFlushSucceeded = true; } }
-    finally { pendingFlush.resolve(); }
+    const request = z.object({ requestId: z.string().uuid() }).passthrough().safeParse(payload);
+    if (!request.success || !pendingFlush || pendingFlush.owner !== owner || request.data.requestId !== pendingFlush.requestId) throw new HubError('INVALID_FLUSH', 'Invalid workspace flush request.');
+    const flush = pendingFlush;
+    // A workspace that fails the schema still ends the wait now (not after 2 s), and the window is told what is wrong.
+    try {
+      const parsed = finishWorkspaceFlushSchema.safeParse(payload);
+      if (!parsed.success) { hostHealth?.record('workspace-flush-invalid'); throw new HubError('INVALID_WORKSPACE', `The workspace could not be saved: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join(' ').slice(0, 1000)}`); }
+      if (parsed.data.workspace && workspaceLoaded) { localStorage().save(parsed.data.workspace); lastFlushSucceeded = true; }
+    } finally { flush.resolve(); }
     return null;
   });
   handle(IPC_CHANNELS.finishRemoteControl, (_owner, payload) => {
@@ -813,17 +921,26 @@ else app.whenReady().then(() => {
     const items = await clipboard.read();
     const type = items.flatMap((item) => item.types.map((name) => ({ item, name }))).sort((a, b) => Number(b.name === 'image/png') - Number(a.name === 'image/png')).find(({ name }) => name.startsWith('image/'));
     if (!type) return null;
-    const image = nativeImage.createFromBuffer(Buffer.from(await (await type.item.getType(type.name) as Blob).arrayBuffer())); if (image.isEmpty()) return null;
+    const bytes = Buffer.from(await (await type.item.getType(type.name) as Blob).arrayBuffer());
+    const image = nativeImage.createFromBuffer(bytes); if (image.isEmpty()) return null;
     const { width, height } = image.getSize();
-    const full = Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image;
-    return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full: full.toDataURL(), width, height, hasText: (await clipboard.readText()).length > 0 };
+    // Encoding a large image as PNG blocks the main process (0.1-0.5 s for a screenshot), so a PNG or JPEG is shown as
+    // it was copied; only the small thumbnail is encoded here, and a huge or unusual image is scaled down first.
+    const original = clipboardPreviewType(type.name, bytes.length);
+    const full = original ? `data:${original};base64,${bytes.toString('base64')}` : (Math.max(width, height) > 2000 ? image.resize(width >= height ? { width: 2000 } : { height: 2000 }) : image).toDataURL();
+    return { thumbnail: image.resize({ height: Math.min(height, 160) }).toDataURL(), full, width, height, hasText: (await clipboard.readText()).length > 0 };
   });
   // Electron 44's clipboard is asynchronous: wait for the write, so a failure reaches the window instead of vanishing.
   handle(IPC_CHANNELS.screen, screenRequest);
   handle(IPC_CHANNELS.copyText, async (_owner, text) => { await clipboard.writeText(z.string().max(COPY_LIMIT).parse(text)); return null; });
+  // The window's own trouble (a lost WebGL context, a stall), so a freeze leaves a record; limited, as the window is untrusted.
+  handle(IPC_CHANNELS.windowHealth, (_owner, payload) => {
+    const report = windowHealthSchema.parse(payload);
+    hostHealth?.recordFromWindow(report.kind, report.ms ?? null, report.detail ?? null); return null;
+  });
   handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
-    if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.');
+    if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.'); refuseDuringScriptUpdate();
     // The manager validates the complete request. This guard also covers pending
     // login discovery, preventing a session from racing a credential replacement.
     if (payload && typeof payload === 'object' && 'config' in payload) {
@@ -854,15 +971,21 @@ else app.whenReady().then(() => {
   // bar read them every 5 minutes): checked every minute. What was said is kept for the day, so a restart does not repeat it.
   const warnedFile = path.join(storageRoot, 'usage-alerts.json'); let warned = new Set<string>();
   try { warned = new Set(z.array(z.string().max(300)).max(500).parse(JSON.parse(fs.readFileSync(warnedFile, 'utf8')))); } catch { /* None yet. */ }
-  setInterval(() => {
+  // After the logs' latest growth is read (at most 2 s), so an alert is not a minute late.
+  setInterval(() => { if (!hub) return; void dayUsage.settled().then(() => timed('usage-alerts', () => {
     if (!hub) return;
     try {
       const before = warned.size; const alerts = usageAlerts(dayUsage.totals(), planLimits.current(), hub.preferences(), warned);
       for (const alert of alerts) desktopAlert(alert, true);
       if (warned.size !== before) fs.writeFileSync(warnedFile, JSON.stringify([...warned].slice(-300)), { mode: 0o600 });
     } catch { hostHealth?.record('usage-alerts-failed'); }
-  }, 60000);
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  })); }, 60000);
+  // On a Mac, opening Trace from the Dock or Finder while it quits raises this, not second-instance: it opens afterwards.
+  app.on('activate', () => { if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+}).catch(() => {
+  // Without this, a failure while starting left Trace running with no window, and opening it again showed nothing.
+  hostHealth?.record('host-start-failed');
+  if (!window) { dialog.showErrorBox('Trace could not start', 'Something stopped Trace from opening its window. Open Trace again; if this keeps happening, the lifecycle record in ~/.coding-hub/host-health.json can help find out why.'); app.quit(); }
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -871,6 +994,8 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
   quitting = true;
+  // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).
+  const savingUsage = dayUsage.save();
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed'))
     .then(async () => {
       // Quitting would leave these running with nothing to control them; let the person decide.
@@ -880,13 +1005,19 @@ app.on('before-quit', (event) => {
       const choice = await leftRunningChoice(window && !window.isDestroyed() ? window : null, left, 'Quit anyway', 'Keep Trace open');
       if (choice === 'quit') return true;
       quitting = false; manager.reopen(); accounts.reopen();
-      if (choice === 'retry') app.quit();
+      // Trying again keeps a request to reopen, so the relaunch after that quit still happens.
+      if (choice === 'retry') { app.quit(); return false; }
+      // Kept open after being opened again while this was asking: show a window rather than start another copy later.
+      if (reopenAfterQuit && (!window || window.isDestroyed())) createWindow(); reopenAfterQuit = false;
       return false;
     })
     .then(async (quit) => {
     if (!quit) return;
     // Stopping sessions starts their memory summaries; let them save before storage closes.
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
-    try { screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); } finally { app.quit(); }
+    // Then those summaries reach Drive, or another computer starts without them.
+    await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed')); await savingUsage;
+    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
+    finally { if (reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate) app.relaunch(); app.quit(); }
   });
 });

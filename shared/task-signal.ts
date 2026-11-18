@@ -17,6 +17,8 @@ export const promptMark = (task: { title: string; sendId?: string }) => { const 
 export const isSendId = (value: unknown): value is string => typeof value === 'string' && /^t-[0-9a-f]{8}$/.test(value);
 /** A message carrying the start of another send's prompt ("Task t-…:" with a different send, or a different title). */
 const anotherSend = (text: string, mark: string) => [...text.matchAll(/Task t-[0-9a-f]{8}: /g)].some((found) => !text.startsWith(mark, found.index));
+/** A user message after the prompt marked `mark` that is the next task's prompt: its instruction, or another send's id. */
+export const nextTaskPrompt = (text: string, mark: string) => text.includes(SIGNAL_INSTRUCTION) || anotherSend(text, mark);
 /**
  * The newest reply to this task: only what the agent said after the task's own prompt was sent (its latest copy, if it
  * was sent again). An earlier task's TASK COMPLETE never counts for this one; with no prompt found, there is no reply.
@@ -28,17 +30,23 @@ export function replyToTask(messages: { role: 'user' | 'assistant'; text: string
   messages.forEach((message, index) => { if (message.role === 'user' && message.text.includes(mark)) start = index; });
   if (start < 0) return null;
   // The next task's prompt: its instruction, or its own send id (a transcript can keep only the start of a long prompt).
-  const next = messages.findIndex((message, index) => index > start && message.role === 'user' && (message.text.includes(SIGNAL_INSTRUCTION) || anotherSend(message.text, mark)));
+  const next = messages.findIndex((message, index) => index > start && message.role === 'user' && nextTaskPrompt(message.text, mark));
   const after = messages.slice(start + 1, next < 0 ? undefined : next).filter((message) => message.role === 'assistant' && message.text.trim());
   return after.length ? after[after.length - 1].text : null;
 }
 
-/** The signal on the last non-empty line of a reply (markdown emphasis and code ticks allowed around it), or null: anything after it, such as a question, means it is not the signal. */
+/** Tick marks an agent may put beside the signal (with an optional emoji variation selector). */
+const TICK = '[\u2705\u2714\u2611]\uFE0F?';
+/**
+ * The signal on the last non-empty line of a reply, or null: anything after it, such as a question, means it is not the
+ * signal. Marks around it are allowed (emphasis, code ticks, a heading, a full stop after the bold, a tick mark), but no
+ * words, no question mark after TASK COMPLETE, and no mark that says otherwise (an unticked "[ ]", "~~", a cross).
+ */
 export function taskSignal(reply: string): TaskSignal {
   const lines = reply.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean).slice(-1);
   for (const line of lines) {
-    if (/^TASK COMPLETE\.?$/i.test(line)) return { kind: 'complete' };
-    const blocked = /^TASK BLOCKED:\s*(.*)$/i.exec(line); if (blocked) return { kind: 'blocked', reason: blocked[1].trim().slice(0, 500) || 'The agent needs you.' };
+    if (new RegExp(String.raw`^(?:[#>*_\x60\s]|${TICK})*TASK COMPLETE(?:[*_\x60.!…\s]|${TICK})*$`, 'iu').test(line)) return { kind: 'complete' };
+    const blocked = new RegExp(String.raw`^(?:[#>*_\x60\s]|${TICK})*TASK BLOCKED:\s*(.*)$`, 'iu').exec(line); if (blocked) return { kind: 'blocked', reason: blocked[1].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim().slice(0, 500) || 'The agent needs you.' };
   }
   return null;
 }

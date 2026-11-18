@@ -14,14 +14,23 @@ export function channelName(channel: { engine: ChannelEngine; title: string; cwd
 }
 
 /**
+ * A terminal title without control characters or the spinner and status marks CLIs animate in front of it (braille
+ * dots, ✳ ✢ ✶ ✻ ✽ · * • ●) and spaces. Anything else stays, so ".env handling", "/review" and "`npm test` fails" keep
+ * their first character.
+ */
+export function terminalTitle(raw: string): string {
+  return raw.replace(/[\x00-\x1f\x7f]/g, '').replace(/^[\s⠀-⣿✳✢✶✻✽·*•●○◐◑◒◓]+/u, '').trim();
+}
+
+/**
  * What the session is about, from the title the CLI gives its terminal (OSC 0/2). Claude Code sets it to a summary of
  * the current task; idle, or for Codex, it is just the program or folder name, which says nothing new. Spinner and
  * status symbols in front are dropped. Shell titles (user@host:path) are not topics.
  */
 export function sessionTopic(raw: string, engine: ChannelEngine, name: string): string | null {
   if (engine === 'shell') return null;
-  // Spinners (braille, ✳ ✢ · *), other symbols and spaces in front; letters, digits and common punctuation stay.
-  const text = raw.replace(/[\x00-\x1f\x7f]/g, '').replace(/^[^\p{L}\p{N}"'(\[]+/u, '').trim().slice(0, 80);
+  // Cut by characters, not UTF-16 units, so an emoji at the cut is not left half there.
+  const text = Array.from(terminalTitle(raw)).slice(0, 80).join('').trim();
   if (!text) return null;
   const plain = text.toLowerCase();
   if ([DEFAULT_TITLES[engine], 'claude', 'codex', name].some((item) => item.toLowerCase() === plain)) return null;

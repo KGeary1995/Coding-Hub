@@ -3,7 +3,8 @@ export interface DiagnosticStep { name: string; state: 'passed' | 'failed' | 'un
 export interface DiagnosticReport { engine: 'claude' | 'codex'; checkedAt: string; steps: DiagnosticStep[] }
 export interface CodexModel { model: string; displayName: string; description: string; hidden: boolean; isDefault: boolean; reasoningEfforts: string[] }
 export interface CodexModelCatalog { models: CodexModel[]; checkedAt: string; source: 'codex-app-server'; directory: string }
-export interface HostHealthReport { previousShutdown: 'clean' | 'unclean' | 'unknown'; events: { time: string; event: string; reason: string | null; exitCode: number | null }[] }
+/** `stalls` (StallRecord in host-health.ts) is optional so an older host's report still matches. */
+export interface HostHealthReport { previousShutdown: 'clean' | 'unclean' | 'unknown'; events: { time: string; event: string; reason: string | null; exitCode: number | null }[]; stalls?: { time: string; side: 'main' | 'window' | 'gpu'; kind: string; ms: number | null; job: string | null }[] }
 export interface NativeConversation { key: string; id: string; engine: 'claude' | 'codex'; profileId?: string; directory: string | null; title: string; modifiedAt: string }
 export interface NativeResume { conversation: NativeConversation; directory: string }
 export interface Experiment { id: string; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string; createdAt: string }
@@ -32,6 +33,8 @@ export interface VerificationData { profiles: VerificationProfile[]; results: Ve
 export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remote').LinkedComputerRequest | { action: 'plan-limits'; force?: boolean } | { action: 'usage-today' } | { action: 'usage-days' }
   /** A channel's whole conversation across restarts (ChannelTranscript). */
   | { action: 'channel-transcript'; sessionId: string }
+  /** One task's part of a channel's conversation, from the prompt carrying `mark` (its send mark) to the end, however long (ChannelTranscript). */
+  | { action: 'channel-task-transcript'; sessionId: string; mark: string }
  | import('./productivity').WorkflowRequest
  | { action: 'runtime' } | { action: 'restart' }
  | { action: 'codex-models'; directory: string | null }
@@ -40,7 +43,9 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | { action: 'native-list' } | { action: 'native-resume'; key: string; directory?: string }
  | { action: 'experiment-list' } | { action: 'experiment-save'; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string }
  | { action: 'trial-add'; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: Trial['outcome']; evidence: string }
- | { action: 'backup-list' } | { action: 'backup-create'; includeLogs: boolean } | { action: 'backup-export'; id: string } | { action: 'backup-restore'; id: string } | { action: 'backup-import' }
+ /** Both answer with what experiment-list answers; deleting an experiment deletes its trials. */
+ | { action: 'experiment-delete'; id: string } | { action: 'trial-delete'; id: string }
+ | { action: 'backup-list' } | { action: 'backup-create'; includeLogs: boolean } | { action: 'backup-export'; id: string } | { action: 'backup-restore'; id: string } | { action: 'backup-import' } | { action: 'backup-delete'; id: string }
  | { action: 'task-list' } | { action: 'task-save'; id?: string; title: string; details?: string; directory: string; sessionId: string | null; scope: string[]; status: Task['status']; notes: string; verificationId: string | null } | { action: 'task-audit' } | { action: 'task-watch' } | { action: 'task-send'; id: string } | { action: 'task-remove'; id: string } | { action: 'task-status'; id: string; status: Task['status']; outcome?: TaskOutcome; outcomeNote?: string } | { action: 'task-detail'; id: string } | { action: 'task-pr'; id: string; url: string }
  | { action: 'verification-list' } | { action: 'verification-save'; id?: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number } | { action: 'verification-run'; id: string } | { action: 'verification-cancel' } | { action: 'verification-fresh' };
 export type WorkbenchResponse = import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | TaskDetail | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null;

@@ -1,8 +1,10 @@
 /**
  * Replies a terminal sends on its own when the CLI asks it something: cursor position and device attributes
- * (`ESC[6n`, `ESC[c`), mode and window reports, and OSC colour or DCS settings answers. A key press never looks like these.
+ * (`ESC[6n`, `ESC[c`), mode and window reports, and OSC colour or DCS settings answers. One key press does look like a
+ * cursor report: F3 with Shift, Alt or Ctrl is `ESC[1;2R` to `ESC[1;8R`, so those are taken as typing (a real report of
+ * row 1, columns 2 to 8, then counts as typing too, which only clears a waiting mark early).
  */
-const TERMINAL_REPLIES = /\x1b\[\??[\d;]*R|\x1b\[[?>=][\d;]*c|\x1b\[\??[\d;]*\$y|\x1b\[\d+(;\d+)*t|\x1b\[[\d;]*n|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+const TERMINAL_REPLIES = /\x1b\[(?!1;[2-8]R)\??[\d;]*R|\x1b\[[?>=][\d;]*c|\x1b\[\??[\d;]*\$y|\x1b\[\d+(;\d+)*t|\x1b\[[\d;]*n|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 /** The data without terminal replies: what a person actually typed. */
 export const withoutTerminalReplies = (data: string) => data.replace(TERMINAL_REPLIES, '');
 

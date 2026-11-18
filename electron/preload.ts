@@ -55,6 +55,7 @@ const host: CodingHubHost = {
     ipcRenderer.on('coding-hub:storage-error', receive);
     return () => ipcRenderer.removeListener('coding-hub:storage-error', receive);
   },
+  reportWindowHealth: (report) => ipcRenderer.invoke('coding-hub:window-health', report),
   pickDirectory: () => ipcRenderer.invoke('coding-hub:pick-directory'),
   discoverEngines: () => ipcRenderer.invoke('coding-hub:discover-engines'),
   startSession: (request) => ipcRenderer.invoke('coding-hub:start-session', request),
