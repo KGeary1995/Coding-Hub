@@ -30,11 +30,13 @@ export function vapidKeys(): VapidKeys {
   return { publicKey: b64(raw), privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') };
 }
 
+/** Who sends the alerts, for the push service's operator (RFC 8292 `sub`): the public downloads page, not the source. */
+export const VAPID_CONTACT = 'https://github.com/KGeary1995/trace-releases';
 /** The VAPID `Authorization` header for one push service (its origin is the token's audience), valid for twelve hours. */
 export function vapidHeader(endpoint: string, keys: VapidKeys, now = Date.now()) {
   const key: KeyObject = createPrivateKey({ key: Buffer.from(keys.privateKey, 'base64url'), format: 'der', type: 'pkcs8' });
   const part = (value: unknown) => b64(Buffer.from(JSON.stringify(value)));
-  const unsigned = `${part({ typ: 'JWT', alg: 'ES256' })}.${part({ aud: new URL(endpoint).origin, exp: Math.floor(now / 1000) + 12 * 3600, sub: 'https://github.com/KGeary1995/Coding-Hub' })}`;
+  const unsigned = `${part({ typ: 'JWT', alg: 'ES256' })}.${part({ aud: new URL(endpoint).origin, exp: Math.floor(now / 1000) + 12 * 3600, sub: VAPID_CONTACT })}`;
   const signature = sign('sha256', Buffer.from(unsigned), { key, dsaEncoding: 'ieee-p1363' });
   return `vapid t=${unsigned}.${b64(signature)}, k=${keys.publicKey}`;
 }

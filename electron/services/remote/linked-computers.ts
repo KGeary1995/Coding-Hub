@@ -1,8 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedChatEvent, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
 import type { ChatEnvelope, ChatEvent, ChatRequest } from '../../../shared/chat';
 import { ChatReplayBuffer, CHAT_REPLAY_EVENTS } from './chat-replay';
 import type { ChannelEngine } from '../../../shared/types';
+import { dimensions } from '../../../shared/schemas';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import type { RemoteRelay } from './remote-server';
@@ -18,8 +21,17 @@ const FILE = 'linked-computers.json';
 const DECLINED = 'linked-computers-declined.json';
 const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), url: z.string().max(500), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), linkedAt: z.iso.datetime() }).strict();
 type Link = z.infer<typeof linkSchema>;
-const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: z.number().int().nullable(), rows: z.number().int().nullable(), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), table: z.enum(['claude', 'codex']).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
+/** The most computers one Trace links. */
+export const LINK_LIMIT = 20;
+const limitReached = () => new HubError('LINK_LIMIT', `Trace links at most ${LINK_LIMIT} computers. Unlink one in Settings → Other computers, then link again.`);
+const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: dimensions.cols.nullable().catch(null), rows: dimensions.rows.nullable().catch(null), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), table: z.enum(['claude', 'codex']).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
 const RETRY_MAX = 30000;
+/** The most one stream event may take (a channel's screen with its scrollback is a few MB): more, and the connection is dropped rather than buffered without end. */
+export const STREAM_EVENT_LIMIT = 32 * 1024 * 1024;
+/** Typing that has not reached the computer in this long fails, so keys typed after it are not held for minutes and then all delivered at once. */
+export const INPUT_TIMEOUT = 8000;
+/** A terminal size within what a channel's terminal can have (as its PTY is sized): anything else from another computer is ignored, never allocated. */
+const sized = (size: { cols?: unknown; rows?: unknown }): size is { cols: number; rows: number } => dimensions.cols.safeParse(size.cols).success && dimensions.rows.safeParse(size.rows).success;
 /** A chat event from a linked computer: its shape is that computer's (it may be newer), only the envelope is checked. */
 const chatEventSchema = z.object({ type: z.string().min(1).max(40) }).passthrough();
 const chatEnvelopeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), event: chatEventSchema }).strict();
@@ -34,6 +46,10 @@ export function linkableAddress(value: string | null): string | null {
   const url = new URL(value); const host = url.hostname.toLowerCase();
   const ok = url.protocol === 'https:' && host.endsWith('.ts.net') || url.protocol === 'http:' && (host === '127.0.0.1' || host === 'localhost');
   return ok && !url.username && !url.password ? `${url.protocol}//${url.host}/` : null;
+}
+/** The tailnet a Tailscale HTTPS name belongs to (`tail1234.ts.net` for `desk.tail1234.ts.net`); null for any other address. */
+export function tailnetOf(url: string): string | null {
+  const host = new URL(url).hostname.toLowerCase(); return host.endsWith('.ts.net') ? host.slice(host.indexOf('.') + 1) : null;
 }
 
 interface Connection {
@@ -61,8 +77,12 @@ export class LinkedComputers implements RemoteRelay {
   /** Computers that removed this computer's key, kept listed (with a code box) until linked again. */
   private removed = new Map<string, { name: string; url: string }>();
   private discovering: Promise<void> | null = null;
+  /** This computer's tailnet, as its peers' names give it (`tail1234.ts.net`); empty until they have been read. */
+  private tailnets = new Set<string>();
   /** The HTTPS addresses of the person's online computers on the tailnet (`tailscalePeers`); none until set. */
   peers: () => Promise<string[]> = async () => [];
+  /** This computer's own tailnet, from its Tailscale name: known with no other computer online and with auto-link off. */
+  tailnet: () => string | null = () => null;
   /** Linked computers' chat events, for their tabs in the desktop window (only while a tab is open). */
   chatEvents: (event: LinkedChatEvent) => void = () => {};
   constructor(
@@ -76,7 +96,28 @@ export class LinkedComputers implements RemoteRelay {
     private idleSeconds?: () => number,
   ) {}
 
-  private links(): Link[] { return load(this.root, FILE, z.array(linkSchema).max(20), []); }
+  /**
+   * The saved links that are still valid, newest LINK_LIMIT. One bad entry, or a file that cannot be read, never stops
+   * Trace from starting or the others from working; the bad ones are dropped the next time a link is saved.
+   */
+  private links(): Link[] { return this.read().links; }
+  private read(): { links: Link[]; unreadable: boolean } {
+    let saved: unknown[]; try { saved = load(this.root, FILE, z.array(z.unknown()), []); } catch { return { links: [], unreadable: true }; }
+    return { links: saved.flatMap((item) => { const link = linkSchema.safeParse(item); return link.success ? [link.data] : []; }).slice(-LINK_LIMIT), unreadable: false };
+  }
+  /**
+   * The links a change starts from. A file that could not be read (damaged, or busy at that moment) is first copied to
+   * `linked-computers.json.unreadable`, so saving over it loses no other computer's key; if even that fails, nothing is saved.
+   */
+  private current(): Link[] {
+    const { links, unreadable } = this.read(); if (!unreadable) return links;
+    const file = path.join(this.root, FILE);
+    try { if (!fs.lstatSync(file).isSymbolicLink()) fs.copyFileSync(file, file + '.unreadable'); }
+    catch { throw new HubError('LOCAL_DATA', `${FILE} could not be read or set aside. Existing data was preserved; try again.`); }
+    return links;
+  }
+  /** No room for `id` (a computer linked already is only updated, so it always has room). */
+  private full(id: string, links = this.links()) { return links.filter((item) => item.id !== id).length >= LINK_LIMIT; }
   start() { for (const link of this.links()) this.connect(link); }
   stop() { this.stopActive(); for (const connection of this.connections.values()) this.disconnect(connection); this.connections.clear(); }
 
@@ -86,16 +127,30 @@ export class LinkedComputers implements RemoteRelay {
     return [...new Set([...found.keys(), ...links.keys(), ...this.removed.keys()])].map((id): LinkedComputer => {
       const link = links.get(id); const advertised = found.get(id); const connection = this.connections.get(id); const removed = link ? undefined : this.removed.get(id);
       const name = advertised?.name ?? link?.name ?? removed!.name;
-      return { id, name, url: linkableAddress(advertised?.url ?? null) ?? link?.url ?? removed?.url ?? null, linked: Boolean(link), connected: Boolean(connection?.connected), error: connection?.error ?? (removed ? `Removed on ${name}. Enter a code from ${name} to link again.` : null), channels: connection?.connected ? this.tagged(connection) : [] };
+      // A linked computer is reached only at the address saved with its key; Drive's address is only offered for linking.
+      return { id, name, url: link?.url ?? this.trusted(advertised?.url ?? null) ?? removed?.url ?? null, linked: Boolean(link), connected: Boolean(connection?.connected), error: connection?.error ?? (removed ? `Removed on ${name}. Enter a code from ${name} to link again.` : null), channels: connection?.connected ? this.tagged(connection) : [] };
     }).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  /**
+   * An address from Drive or the tailnet, used only on this computer's own tailnet once that is known: anyone who can
+   * write the Drive folder could otherwise name another tailnet's public Funnel address to receive a code.
+   */
+  private trusted(value: string | null) {
+    const url = linkableAddress(value); if (!url) return null;
+    const own = this.tailnet(); const tailnets = own ? new Set([own]) : this.tailnets;
+    const tailnet = tailnetOf(url); return !tailnet || !tailnets.size || tailnets.has(tailnet) ? url : null;
   }
 
   /** Links to a computer found in Drive with the code it shows under Settings → Other computers. */
   async link(id: string, code: string): Promise<LinkedComputer[]> {
     const computer = this.status().find((item) => item.id === id);
     if (!computer) throw new HubError('LINK_UNKNOWN', 'That computer is not in the sync folder. Turn on sync between computers on both, then Sync now.');
-    const url = linkableAddress(computer.url);
+    // Linking again after the other computer's name changed uses its current address, not the one saved with the old key.
+    const offered = [...this.found.values(), ...this.advertised()].filter((item) => item.id === id).at(-1);
+    const url = this.trusted(offered?.url ?? null) ?? linkableAddress(computer.url);
     if (!url) throw new HubError('LINK_ADDRESS', `${computer.name} has no Tailscale HTTPS address yet. On it, turn on Phone access and set up Tailscale HTTPS.`);
+    // Checked before the code is used, so the other computer makes no key this one would refuse.
+    if (this.full(id)) throw limitReached();
     const self = this.self(); let response: Response;
     try { response = await this.fetcher(new URL('api/pair', url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.replace(/\s+/g, ''), name: self.name.slice(0, 60), machineId: self.id }), signal: AbortSignal.timeout(15000) }); }
     catch { throw new HubError('LINK_UNREACHABLE', `${computer.name} could not be reached at ${url}. Check that it is on, Trace is open, and Tailscale is connected on both.`); }
@@ -104,15 +159,29 @@ export class LinkedComputers implements RemoteRelay {
     // A phone's code gives a phone's key, which cannot start or stop channels: say so rather than link half-way.
     if (body.device?.kind !== 'computer') {
       // The other computer already made a phone key for it; hand that back so no unused key is left there.
-      try { await this.fetcher(new URL('api/unpair', url), { method: 'POST', headers: { Authorization: `Bearer ${body.token}`, 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(5000) }); } catch { /* It can be removed there. */ }
+      await this.handBack(url, body.token);
       throw new HubError('LINK_PHONE_CODE', 'That is a phone pairing code. On the other computer, use Settings → Other computers → Show link code.');
     }
     if (body.computer?.id && body.computer.id !== id) throw new HubError('LINK_MISMATCH', 'That address answered as a different computer. Sync now on both computers and try again.');
-    this.declined(id, false); this.removed.delete(id); this.keep({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
+    await this.keepNew({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
+    this.declined(id, false); this.removed.delete(id);
     return this.status();
   }
+  /** Gives a key back to the computer that made it, which then forgets this one (best effort: it can be removed there). */
+  private async handBack(url: string, token: string) {
+    try { await this.fetcher(new URL('api/unpair', url), { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(5000) }); } catch { /* It can be removed there. */ }
+  }
+  /** keep() for a key the other computer has just made: one this computer refuses is handed back, not left unused there. */
+  private async keepNew(link: Link) {
+    try { this.keep(link); }
+    catch (error) { if (error instanceof HubError && (error.code === 'LINK_KEY' || error.code === 'LINK_LIMIT')) await this.handBack(link.url, link.token); throw error; }
+  }
   private keep(link: Link) {
-    save(this.root, FILE, [...this.links().filter((item) => item.id !== link.id), link]);
+    // The key comes from the other computer: one Trace cannot read back is refused here, not saved and dropped later.
+    if (!linkSchema.safeParse(link).success) throw new HubError('LINK_KEY', `${link.name.slice(0, 100)} answered with a key Trace cannot use. Update Trace on both computers and link again.`);
+    const others = this.current().filter((item) => item.id !== link.id);
+    if (others.length >= LINK_LIMIT) throw limitReached();
+    save(this.root, FILE, [...others, link]);
     const existing = this.connections.get(link.id); if (existing) { this.disconnect(existing); this.connections.delete(link.id); }
     this.connect(link); this.notify();
   }
@@ -133,8 +202,9 @@ export class LinkedComputers implements RemoteRelay {
   }
   private async discover() {
     const self = this.self(); const links = this.links(); const declined = this.declined();
-    const peers = await this.peers().catch(() => [] as string[]);
-    const addresses = new Set([...peers, ...this.advertised().map((item) => item.url)].map(linkableAddress).filter((url): url is string => Boolean(url)));
+    const peers = new Set((await this.peers().catch(() => [] as string[])).map(linkableAddress).filter((url): url is string => Boolean(url)));
+    const tailnets = new Set([...peers].map(tailnetOf).filter((tailnet): tailnet is string => Boolean(tailnet))); if (tailnets.size) this.tailnets = tailnets;
+    const addresses = new Set([...peers, ...this.advertised().map((item) => this.trusted(item.url)).filter((url): url is string => Boolean(url))]);
     let changed = false;
     await Promise.all([...addresses].map(async (url) => {
       try {
@@ -143,11 +213,16 @@ export class LinkedComputers implements RemoteRelay {
         const id = z.uuid().safeParse(computer?.id); const name = z.string().min(1).max(100).safeParse(computer?.name);
         if (!id.success || !name.success || id.data === self.id) return;
         const known = this.found.get(id.data); if (known?.url !== url || known.name !== name.data) { this.found.set(id.data, { id: id.data, name: name.data, url }); changed = true; }
+        // A linked computer whose tailnet name changed keeps its key, moved to the new name only as Tailscale lists it.
+        const link = links.find((item) => item.id === id.data);
+        if (link && link.url !== url && peers.has(url)) { this.keep({ ...link, url }); return; }
         if (declined.has(id.data) || links.some((item) => item.id === id.data && item.url === url)) return;
+        // With no room, it is not asked: each ask makes a key there and tells the person a computer linked to it.
+        if (this.full(id.data, links)) return;
         const response = await this.fetcher(new URL('api/auto-link', url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: self.name.slice(0, 60), machineId: self.id }), signal: AbortSignal.timeout(15000) });
         const body = await response.json().catch(() => ({})) as { token?: string; device?: { kind?: string }; computer?: { id?: string } };
         if (!response.ok || !body.token || body.device?.kind !== 'computer' || body.computer?.id !== id.data) return;
-        this.keep({ id: id.data, name: name.data, url, token: body.token, linkedAt: new Date().toISOString() });
+        await this.keepNew({ id: id.data, name: name.data, url, token: body.token, linkedAt: new Date().toISOString() });
       } catch { /* Off, asleep, or a Trace without auto-link: it can still be linked with a code. */ }
     }));
     if (changed) this.notify();
@@ -155,22 +230,26 @@ export class LinkedComputers implements RemoteRelay {
 
   /** The address and key this computer reaches a linked one with (for its screen service, which checks the same key). */
   access(id: string): { name: string; url: string; token: string } | null {
+    // Only the address saved with the key: an address from Drive is never sent the key.
     const link = this.links().find((item) => item.id === id); if (!link) return null;
-    const url = linkableAddress(this.status().find((item) => item.id === id)?.url ?? link.url) ?? link.url;
-    return { name: link.name, url, token: link.token };
+    return { name: link.name, url: link.url, token: link.token };
   }
 
   async unlink(id: string): Promise<LinkedComputer[]> {
-    const link = this.links().find((item) => item.id === id); if (!link) return this.status();
+    const links = this.current(); const link = links.find((item) => item.id === id); if (!link) return this.status();
     const connection = this.connections.get(id); if (connection) { this.disconnect(connection); this.connections.delete(id); }
-    save(this.root, FILE, this.links().filter((item) => item.id !== id)); this.declined(id, true);
+    save(this.root, FILE, links.filter((item) => item.id !== id)); this.declined(id, true);
     // Best effort: the other computer forgets this one's key too. If it is off, remove it there later.
     try { await this.request(link, 'api/unpair', { method: 'POST', body: '{}', signal: AbortSignal.timeout(5000) }); } catch { /* Unreachable. */ }
     this.notify(); this.sink.changed();
     return this.status();
   }
 
-  async input(id: string, sessionId: string, runId: string, data: string) { await this.request(this.linked(id), 'api/input', { method: 'POST', body: JSON.stringify({ sessionId, runId, data }) }); }
+  /**
+   * Both callers, the window's 'linked-input' and a phone's keys (write), pass INPUT_TIMEOUT: each drops what is queued
+   * behind a failed key. The signal is optional only for other uses.
+   */
+  async input(id: string, sessionId: string, runId: string, data: string, signal?: AbortSignal) { await this.request(this.linked(id), 'api/input', { method: 'POST', body: JSON.stringify({ sessionId, runId, data }), ...(signal ? { signal } : {}) }); }
   /** Adds a channel on that computer, in its own workspace. A Trace before 1.11.9 there answers 404. */
   async add(id: string, engine: ChannelEngine, chat = false) {
     const link = this.linked(id);
@@ -260,6 +339,8 @@ export class LinkedComputers implements RemoteRelay {
 
   /** The desktop left a linked computer's tab. */
   unwatch(id: string) { this.watching.delete(id); if (!this.watching.size) this.stopActive(); }
+  /** The desktop window reloaded, crashed or closed: none of its tabs is open any more, so nothing is reported in use for them. */
+  unwatchAll() { this.watching.clear(); this.stopActive(); }
   /**
    * While a linked computer's tab is open and the person is using this computer, tells that computer every 2 s
    * (`/api/active`), so it gives its channels its own size back from a phone, as it does when used directly.
@@ -301,7 +382,7 @@ export class LinkedComputers implements RemoteRelay {
   async write(sessionId: string, runId: string, data: string) {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
     if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
-    await this.input(connection.link.id, sessionId, runId, data);
+    await this.input(connection.link.id, sessionId, runId, data, AbortSignal.timeout(INPUT_TIMEOUT));
   }
 
   private tagged(connection: Connection) { return connection.channels.map((channel) => ({ ...channel, computer: { id: connection.link.id, name: connection.link.name } })); }
@@ -324,12 +405,13 @@ export class LinkedComputers implements RemoteRelay {
     const connection: Connection = { link, controller: null, stopped: false, connected: false, error: null, channels: [], mirrors: new Map(), fits: new Map(), chats: new ChatReplayBuffer() };
     this.connections.set(link.id, connection);
     void (async () => {
-      let delay = 2000;
+      // A computer that keeps sending too much in one piece is retried with the usual backoff, not every 2 s.
+      let delay = 2000; let oversized = false;
       while (!connection.stopped) {
         connection.controller = new AbortController();
         try {
           const response = await this.request(link, 'api/stream?all=1', { signal: connection.controller.signal });
-          connection.connected = true; connection.error = null; delay = 2000; this.notify();
+          connection.connected = true; connection.error = null; if (!oversized) delay = 2000; oversized = false; this.notify();
           // The other computer gave the tiles' sizes back when the last stream closed: ask for them again.
           for (const [sessionId, fit] of connection.fits) void this.request(link, 'api/size', { method: 'POST', body: JSON.stringify({ sessionId, ...fit }) }).catch(() => {});
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
@@ -347,11 +429,12 @@ export class LinkedComputers implements RemoteRelay {
               const lines = block.split(/\r?\n/); const type = lines.find((line) => line.startsWith('event: '))?.slice(7); const data = lines.find((line) => line.startsWith('data: '))?.slice(6);
               if (type && data) try { this.event(connection, type, JSON.parse(data)); } catch { /* One bad event is skipped. */ }
             }
+            if (buffer.length > STREAM_EVENT_LIMIT) { controller.abort(); throw new HubError('LINK_TOO_LARGE', `${link.name} sent more in one piece than Trace takes, so the connection was dropped.`); }
           }
           if (!connection.stopped) connection.error = `${link.name} closed the connection.`;
         } catch (error) {
           if (connection.stopped) return;
-          connection.error = error instanceof HubError ? error.message : `${link.name} could not be reached.`;
+          connection.error = error instanceof HubError ? error.message : `${link.name} could not be reached.`; oversized = error instanceof HubError && error.code === 'LINK_TOO_LARGE';
           // A removed key will not start working again by itself.
           if (error instanceof HubError && error.code === 'LINK_REVOKED') { this.forget(connection); return; }
         }
@@ -372,7 +455,9 @@ export class LinkedComputers implements RemoteRelay {
    */
   private forget(connection: Connection) {
     const { link } = connection; this.disconnect(connection); this.connections.delete(link.id);
-    save(this.root, FILE, this.links().filter((item) => item.id !== link.id)); this.declined(link.id, true);
+    // A list that cannot be saved now keeps the dead key: the next start finds it removed again.
+    try { save(this.root, FILE, this.current().filter((item) => item.id !== link.id)); } catch { /* Kept for now. */ }
+    this.declined(link.id, true);
     this.removed.set(link.id, { name: link.name, url: link.url });
     this.notify(); this.sink.changed();
   }
@@ -402,7 +487,7 @@ export class LinkedComputers implements RemoteRelay {
     }
     const event = data as { sessionId: string; runId: string; data?: string; cols?: number; rows?: number };
     if (typeof event.sessionId !== 'string' || typeof event.runId !== 'string') return;
-    if (type === 'replay' && typeof event.data === 'string' && event.cols && event.rows) {
+    if (type === 'replay' && typeof event.data === 'string' && sized(event)) {
       connection.mirrors.get(event.sessionId)?.dispose();
       const mirror = new ScreenMirror(event.runId, event.cols, event.rows); mirror.write(event.data); connection.mirrors.set(event.sessionId, mirror);
       if (this.watching.has(id)) this.emit({ type: 'replay', id, sessionId: event.sessionId, runId: event.runId, data: event.data, cols: event.cols, rows: event.rows });
@@ -416,7 +501,7 @@ export class LinkedComputers implements RemoteRelay {
       mirror.write(event.data);
       if (this.watching.has(id)) this.emit({ type: 'output', id, sessionId: event.sessionId, runId: event.runId, data: event.data });
       this.sink.output(event.sessionId, event.runId, event.data);
-    } else if (type === 'resize' && event.cols && event.rows) {
+    } else if (type === 'resize' && sized(event)) {
       const mirror = connection.mirrors.get(event.sessionId); if (mirror?.runId === event.runId) mirror.resize(event.cols, event.rows);
       const channel = connection.channels.find((item) => item.sessionId === event.sessionId); if (channel) { channel.cols = event.cols; channel.rows = event.rows; }
       if (this.watching.has(id)) this.emit({ type: 'resize', id, sessionId: event.sessionId, runId: event.runId, cols: event.cols, rows: event.rows });

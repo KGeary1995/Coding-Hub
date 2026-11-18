@@ -52,6 +52,13 @@ describe('the Windows screen as a VNC server', () => {
     await until(() => vnc.events.length >= 3, 'input'); expect(vnc.events).toEqual(['key 61 true', 'pointer 10 20 1', 'clipboard hi']);
   });
 
+  it('sends no security result to a 3.7 viewer, which expects none for "None"', async () => {
+    const vnc = await session([]);
+    vnc.viewer.write('RFB 003.007\n'); vnc.viewer.write(Buffer.from([1])); vnc.viewer.write(Buffer.from([1]));
+    await until(() => vnc.bytes().length >= 14 + 24 + 13, 'the server init');
+    const init = vnc.bytes().subarray(14); expect(init.readUInt16BE(0)).toBe(640); expect(init.subarray(24, 24 + 13).toString()).toBe('Obsidian-Halo');
+  });
+
   it('pushes changes without being asked once the viewer takes continuous updates', async () => {
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]); const rect = (x: number) => [{ x, y: 0, width: 64, height: 64, jpeg }];
     const vnc = await session([rect(0), rect(64), rect(128)]);

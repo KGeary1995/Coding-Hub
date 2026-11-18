@@ -58,11 +58,25 @@ export async function pair(code: string, name: string) {
 
 /** The most the computer takes in one piece of input. */
 export const INPUT_LIMIT = 4096;
-let queue: Promise<unknown> = Promise.resolve();
-/** Input goes out one request at a time, in the order it was typed, so "y" then Enter can never arrive reversed. */
+/** Input the computer has not taken in this long fails, rather than holding every key typed after it on a weak connection. */
+export const INPUT_TIMEOUT = 8000;
+let queue: Promise<unknown> = Promise.resolve(); let failures = 0;
+/**
+ * Input goes out one request at a time, in the order it was typed, so "y" then Enter can never arrive reversed. When
+ * one fails, the keys already waiting behind it are not sent: arriving late, they would answer whatever the CLI shows by then.
+ */
 export function send(sessionId: string, runId: string, data: string) {
-  const body = JSON.stringify({ sessionId, runId, data });
-  const delivery = queue.then(() => api('/api/input', { method: 'POST', body })); queue = delivery.catch(() => {});
+  const body = JSON.stringify({ sessionId, runId, data }); const after = failures;
+  const delivery = queue.then(async () => {
+    if (after !== failures) throw new Error('Not sent, because what was typed before it did not get through. Check the channel, then type it again.');
+    try { return await api('/api/input', { method: 'POST', body, signal: AbortSignal.timeout(INPUT_TIMEOUT) }); }
+    catch (error) {
+      failures++;
+      if ((error as Error).name === 'TimeoutError') throw new Error(`The computer did not answer within ${INPUT_TIMEOUT / 1000} seconds. Check the channel before typing again: that may not have arrived.`);
+      throw error;
+    }
+  });
+  queue = delivery.catch(() => {});
   return delivery;
 }
 /** Asks the computer to draw a channel at this phone's size (it gives it back to the desktop when asked or when the phone leaves). */
@@ -138,6 +152,18 @@ export const control = async (sessionId: string, value: ChannelControl) => { awa
 /** Adds a channel on this computer: a terminal channel, or Claude chat / Codex chat with `chat`. */
 export const addChannel = async (engine: 'claude' | 'codex' | 'shell', chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
 
+/** An open event stream: when it last heard from its computer, and how to replace it. */
+interface OpenStream { heard: number; restart: () => void }
+const streams = new Set<OpenStream>();
+/** The computer pings every 25 seconds: a stream silent for longer than this missed one. */
+export const STREAM_QUIET = 30000;
+/**
+ * Replaces each stream that has heard nothing for `quiet` ms. Called when the page comes back to the front or the
+ * network returns: a phone's browser can keep a connection that died while it was locked without reporting an error,
+ * and the minute-long silence check does not run while it sleeps, so the old screen would show as live meanwhile.
+ */
+export function revive(quiet = STREAM_QUIET) { const now = Date.now(); for (const stream of [...streams]) if (now - stream.heard > quiet) stream.restart(); }
+
 /**
  * Follows a computer's event stream (server-sent events read through fetch, which can send the device key): the one
  * that served this app when it answers, otherwise each other computer the phone has a key for, directly. It reconnects
@@ -146,16 +172,18 @@ export const addChannel = async (engine: 'claude' | 'codex' | 'shell', chatChann
  * and, when no computer could be connected to, why this app's own could not (`problem`).
  */
 export function follow(sessionId: string | null, onEvent: (event: StreamEvent) => void, onState: (connected: boolean, via: Target, problem?: string) => void, onUnpaired: () => void) {
-  let stopped = false; let controller: AbortController | null = null;
+  let stopped = false; let controller: AbortController | null = null; let revived = false;
   const run = async () => {
     while (!stopped) {
       let problem: string | undefined;
       for (const target of [home, ...siblings.list().map(direct)]) {
         if (stopped) return;
         controller = new AbortController(); const connecting = setTimeout(() => controller?.abort(), 6000); let back: ReturnType<typeof setInterval> | null = null; let opened = false;
+        let stream: OpenStream | null = null;
         try {
           const response = await api('/api/stream' + (sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''), { signal: controller.signal }, target);
           clearTimeout(connecting); opened = true; active = target; onState(true, target);
+          const open = controller; stream = { heard: Date.now(), restart: () => { revived = true; open.abort(); } }; streams.add(stream);
           if (target !== home) {
             const current = controller;
             back = setInterval(() => { void api('/api/computers', { signal: AbortSignal.timeout(4000) }, home).then(() => current.abort()).catch(() => {}); }, 30000);
@@ -169,12 +197,13 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
             listen(); let next: ReadableStreamReadResult<Uint8Array>;
             try { next = await reader.read(); } finally { if (silence) clearTimeout(silence); }
             const { value, done } = next; if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+            stream.heard = Date.now(); buffer += decoder.decode(value, { stream: true });
             let end; while ((end = buffer.indexOf('\n\n')) >= 0) {
               const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
               // Split on newlines only: a regular expression's line ends also include U+2028/U+2029, which JSON leaves unescaped in a CLI's output.
               const lines = block.split(/\r?\n/); const type = lines.find((line) => line.startsWith('event: '))?.slice(7); const data = lines.find((line) => line.startsWith('data: '))?.slice(6);
-              if (type && data) onEvent({ type, data: JSON.parse(data) } as StreamEvent);
+              // One event the page cannot handle is skipped: dropping the stream would replay it on every reconnect.
+              if (type && data) try { onEvent({ type, data: JSON.parse(data) } as StreamEvent); } catch { /* Skipped. */ }
             }
           }
           break;
@@ -182,11 +211,12 @@ export function follow(sessionId: string | null, onEvent: (event: StreamEvent) =
           if (error instanceof Unpaired && error.home) { stopped = true; onUnpaired(); return; }
           // Only a connection that never opened is explained: one that dropped is usually back in two seconds.
           if (target === home && !opened && !stopped) problem = connectionProblem(error, homeName(), location.host);
-          if (active === target && target !== home) break;
-        } finally { clearTimeout(connecting); if (back) clearInterval(back); }
+          // Replaced after the phone woke: start again from this app's own computer, at once.
+          if (revived || (active === target && target !== home)) break;
+        } finally { clearTimeout(connecting); if (back) clearInterval(back); if (stream) streams.delete(stream); }
       }
       if (stopped) return;
-      onState(false, active, problem); await new Promise((resolve) => setTimeout(resolve, 2000));
+      onState(false, active, problem); const wait = revived ? 0 : 2000; revived = false; await new Promise((resolve) => setTimeout(resolve, wait));
     }
   };
   void run();

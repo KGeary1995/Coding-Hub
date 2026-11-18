@@ -95,7 +95,7 @@ export async function tailscaleState(run: RunTailscale, port: number): Promise<T
 export async function serveRemote(run: RunTailscale, port: number) { await run(['serve', '--bg', '--https=443', `http://127.0.0.1:${port}`]); }
 /**
  * Turning phone access off also takes Trace's address off the tailnet: `serve` stays set across restarts, and would
- * otherwise go on publishing whatever listens on the port next. Only a handler that points at Trace's port is removed;
- * one the person set up for something else is left alone.
+ * otherwise go on publishing whatever listens on the port next. Only the `/` handler, and only when it points at Trace's
+ * port, is removed: without `--set-path` Tailscale removes every path on 443, the screen service's /api/screen included.
  */
-export async function stopServing(run: RunTailscale, port: number) { if ((await tailscaleState(run, port)).serving) await run(['serve', '--https=443', 'off']); }
+export async function stopServing(run: RunTailscale, port: number) { if ((await tailscaleState(run, port)).serving) await run(['serve', '--https=443', '--set-path=/', 'off']); }

@@ -85,6 +85,45 @@ describe('phone remote', () => {
     expect((await request(server, '/', { 'Tailscale-Funnel-Request': '?1' })).status).toBe(403);
   });
 
+  it('counts only its own whole origin as its own: a page on another local port is another site', async () => {
+    const { server } = await remote(); await server.setEnabled(true); server.tailscale = { ...server.tailscale, host: 'desk.example.ts.net' };
+    const pair = (origin: string) => fetch(base(server) + '/api/pair', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'text/plain' }, body: JSON.stringify({ code: 'AAAAAAAAAA', name: 'x' }) });
+    for (const origin of ['http://localhost:5173', 'http://127.0.0.1:1', 'http://desk.example.ts.net', 'https://desk.example.ts.net:8443']) expect((await pair(origin)).status, origin).toBe(403);
+    // Its own page, on loopback or on the tailnet, reaches the handler (no code is showing, so it is refused there).
+    for (const origin of [`http://127.0.0.1:${server.address}`, `http://localhost:${server.address}`, 'https://desk.example.ts.net']) expect((await pair(origin)).status, origin).toBe(401);
+  });
+
+  it('says why a request body was refused: too large (413) or not JSON (400)', async () => {
+    const { server } = await remote(); await server.setEnabled(true);
+    const pair = (body: string) => fetch(base(server) + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    const large = await pair(JSON.stringify({ code: 'x'.repeat(40 * 1024), name: 'x' })); expect(large.status).toBe(413); expect(await large.json()).toEqual({ error: 'Request too large.' });
+    // Megabytes over: the rest is read and dropped, so the sender still gets the 413 rather than a reset connection.
+    for (const megabytes of [1, 8]) { const huge = await pair('x'.repeat(megabytes * 1024 * 1024)); expect(huge.status, `${megabytes} MB`).toBe(413); }
+    const garbled = await pair('not json'); expect(garbled.status).toBe(400); expect(await garbled.json()).toEqual({ error: 'The request was not valid JSON.' });
+  });
+
+  it('keeps a pairing code when the list filled up after it was made, and says what to do', async () => {
+    const { server, root } = await remote(); await server.setEnabled(true); const code = server.pair().pairing!.code;
+    const full = Array.from({ length: 20 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, name: `Phone ${index}`, tokenHash: 'a'.repeat(64), createdAt: new Date().toISOString(), lastSeen: null }));
+    fs.writeFileSync(path.join(root, 'remote-devices.json'), JSON.stringify(full));
+    const response = await fetch(base(server) + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, name: 'Phone' }) });
+    expect(response.status).toBe(409); expect((await response.json() as { error: string }).error).toMatch(/Remove one/); expect(server.status().pairing?.code).toBe(code);
+  });
+
+  it('starts once when asked twice at once, and a stop during a start leaves it off', async () => {
+    // A fixed port, as in the app: a second listen there would fail with "in use".
+    const probe = net.createServer(); await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve)); const port = (probe.address() as net.AddressInfo).port; await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const server = new RemoteServer(root, { sessions: () => [], running: () => [], write: () => {} }, port, '', async () => 'sent'); cleanup.push(() => server.stop());
+    await Promise.all([server.setEnabled(true), server.start()]);
+    expect(server.status()).toMatchObject({ listening: true, error: null });
+    await server.stop(); const starting = server.start(); await server.setEnabled(false); await starting;
+    expect(server.status()).toMatchObject({ enabled: false, listening: false });
+    // On, off and on again at once: the last one wins, after the stop that waited on the first start.
+    await Promise.all([server.setEnabled(true), server.setEnabled(false), server.setEnabled(true)]);
+    expect(server.status()).toMatchObject({ enabled: true, listening: true, error: null });
+  });
+
   it('pairs a phone once with a short-lived code and stores only a hash of its key', async () => {
     const { server, root } = await remote(); await server.setEnabled(true);
     const code = server.pair().pairing!.code; expect(code).toMatch(/^[A-HJ-NP-Z2-9]{10}$/);
@@ -102,14 +141,16 @@ describe('phone remote', () => {
     const MACHINE = '6f1c2b9e-1d2a-4c3b-8e4f-5a6b7c8d9e0f'; const me = { 'Tailscale-User-Login': 'Person@Example.com' };
     const hello = (headers: Record<string, string>) => fetch(base(server) + '/api/hello', { headers });
     const autoLink = (headers: Record<string, string>, machineId = MACHINE) => fetch(base(server) + '/api/auto-link', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ name: 'Laptop', machineId }) });
+    const shown: string[][] = []; server.onAutoLinked = (name, machineId) => { shown.push([name, machineId]); };
     // Not serving on the tailnet, or no login known: nobody is vouched for.
     expect((await hello(me)).status).toBe(403); expect((await autoLink(me)).status).toBe(403);
     server.tailscale = { ...server.tailscale, host: 'desk.example.ts.net', serving: true, login: 'person@example.com' };
     // Someone else's login, a tagged device or a request without Serve's header, and Funnel traffic, are refused.
-    for (const headers of [{}, { 'Tailscale-User-Login': 'someone@else.com' }, { ...me, 'Tailscale-Funnel-Request': '?1' }]) { expect((await hello(headers)).status).toBe(403); expect((await autoLink(headers)).status).toBe(403); }
+    const strangers: Record<string, string>[] = [{}, { 'Tailscale-User-Login': 'someone@else.com' }, { ...me, 'Tailscale-Funnel-Request': '?1' }];
+    for (const headers of strangers) { expect((await hello(headers)).status).toBe(403); expect((await autoLink(headers)).status).toBe(403); }
     expect(await (await hello(me)).json()).toEqual({ computer: { id: '11111111-1111-4111-8111-111111111111', name: 'Desk' } });
-    // Its own identity is not a computer to link, and a phone cannot get a key this way.
-    expect((await autoLink(me, '11111111-1111-4111-8111-111111111111')).status).toBe(400);
+    // Its own identity is not a computer to link. (Serve says nothing of the device type: whatever asks gets a computer's key.)
+    expect((await autoLink(me, '11111111-1111-4111-8111-111111111111')).status).toBe(400); expect(shown).toEqual([]);
     const response = await autoLink(me); expect(response.status).toBe(200);
     const body = await response.json() as { token: string; device: { kind: string }; computer: { id: string } };
     expect(body.device.kind).toBe('computer'); expect(body.computer.id).toBe('11111111-1111-4111-8111-111111111111');
@@ -117,6 +158,16 @@ describe('phone remote', () => {
     expect(fs.readFileSync(path.join(root, 'remote-devices.json'), 'utf8')).not.toContain(body.token);
     // Linking again replaces the key rather than adding a second one.
     await autoLink(me); expect(server.status().devices.filter((device) => device.kind === 'computer')).toHaveLength(1);
+    // The person here is told each time a computer links itself.
+    expect(shown).toEqual([['Laptop', MACHINE], ['Laptop', MACHINE]]);
+    // Removed here, Trace there (the same machine id) needs a code again; linked with a code, it may link itself again.
+    server.revoke(server.status().devices[0].id);
+    const refused = await autoLink(me); expect(refused.status).toBe(403); expect(await refused.json()).toEqual({ error: 'This computer was removed there. Link it with a code from Settings → Other computers.' });
+    expect(server.status().devices).toEqual([]); expect(shown).toHaveLength(2);
+    // The id is the caller's word: one that sends a new id is not refused, and only the notification shows it.
+    const other = '7a2d3c4b-5e6f-4a1b-9c8d-0e1f2a3b4c5d'; expect((await autoLink(me, other)).status).toBe(200); expect(shown.at(-1)).toEqual(['Laptop', other]);
+    server.revoke(server.status().devices[0].id);
+    await computer(server); expect((await autoLink(me)).status).toBe(200);
     // Turned off, a code is needed again; turning phone access off and on keeps the choice.
     expect(server.setAutoLink(false).autoLink).toBe(false); expect((await autoLink(me)).status).toBe(403);
     await server.setEnabled(false); await server.setEnabled(true); expect(server.autoLink).toBe(false);
@@ -188,6 +239,48 @@ describe('phone remote', () => {
     const { server } = await remote(); await server.setEnabled(true); const token = await paired(server);
     const seen = await events(server, token, null, 2, () => { titles[0] = 'Renamed'; server.channelsChanged(); });
     expect((seen[1].data as { title: string }[])[0].title).toBe('Renamed');
+  });
+
+  it('tells a phone that reconnected when the list goes back to what was sent before it left', async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    const streams = (server as unknown as { streams: Set<unknown> }).streams;
+    await events(server, token, null, 2, () => { titles[0] = 'Renamed'; server.channelsChanged(); });
+    for (let i = 0; i < 100 && streams.size; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    // Changed while no phone was connected: nothing is sent, and the phone that comes back is given the list as it is.
+    titles[0] = 'Claude Code'; server.channelsChanged();
+    const seen = await events(server, token, null, 2, () => { titles[0] = 'Renamed'; server.channelsChanged(); });
+    expect((seen[0].data as { title: string }[])[0].title).toBe('Claude Code'); expect((seen[1].data as { title: string }[])[0].title).toBe('Renamed');
+  });
+
+  it('forgets why a channel failed once it leaves the workspace', async () => {
+    const { server } = await remote();
+    server.onSessionEvent({ type: 'exit', sessionId: 'gone', runId: 'r9', exitCode: 1, diagnostic: 'Error: crashed' });
+    const failures = (server as unknown as { failures: Map<string, string> }).failures; expect(failures.has('gone')).toBe(true);
+    server.channelsChanged(); expect(failures.has('gone')).toBe(false);
+  });
+
+  it('gives a channel back once no stream of the phone that sized it follows it any more', async () => {
+    const { server, running } = await remote(); const resizes: number[][] = [];
+    Object.assign(running[0], { cols: 120, rows: 40 });
+    (server as unknown as { host: RemoteHost }).host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); };
+    await server.setEnabled(true); const token = await paired(server); const id = server.status().devices[0].id;
+    // "Fit to phone" that arrived after the phone's stream had gone.
+    const size = await fetch(base(server) + '/api/size', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20, force: true }) });
+    expect(await size.json()).toEqual({ ok: true, held: true }); expect(resizes).toEqual([[40, 20]]);
+    const inner = server as unknown as { streams: Set<unknown>; releaseOrphans(now?: number): void };
+    // Within a reconnect's time it stays, and while a stream of it follows the channel it stays.
+    inner.releaseOrphans(); expect(resizes).toHaveLength(1);
+    const following = { device: id, kind: 'phone', sessionId: 's1' }; inner.streams.add(following);
+    inner.releaseOrphans(Date.now() + 60000); expect(resizes).toHaveLength(1);
+    inner.streams.delete(following); inner.releaseOrphans(Date.now() + 60000); expect(resizes).toEqual([[40, 20], [120, 40]]);
+    // A linked computer's channel: there the size is this computer's, so this one gives it back when the phone is gone.
+    const relayed: [string, unknown][] = [];
+    server.setRelay({ channels: () => [], snapshot: () => false, write: async () => {}, phoneKey: async () => { throw new Error('unused'); }, size: async (sessionId, _runId, size) => { relayed.push([sessionId, size]); } });
+    const remoteSize = await fetch(base(server) + '/api/size', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'far', runId: 'r9', cols: 40, rows: 20 }) });
+    expect(remoteSize.status).toBe(200); expect(relayed).toEqual([['far', { cols: 40, rows: 20 }]]);
+    inner.releaseOrphans(); const watching = { device: id, kind: 'phone', sessionId: 'far' }; inner.streams.add(watching); inner.releaseOrphans(Date.now() + 60000); expect(relayed).toHaveLength(1);
+    inner.streams.delete(watching); inner.releaseOrphans(Date.now() + 60000); await new Promise((resolve) => setImmediate(resolve));
+    expect(relayed).toEqual([['far', { cols: 40, rows: 20 }], ['far', null]]);
   });
 
   it('sends a new terminal size ahead of the output drawn at that size', async () => {
@@ -301,6 +394,24 @@ describe('phone screen', () => {
     // A ticket works once.
     const again = new WebSocket(`ws://127.0.0.1:${server.address}/api/screen?ticket=${ticket}`);
     expect(await new Promise((resolve) => { again.onopen = () => resolve('open'); again.onerror = () => resolve('refused'); })).toBe('refused');
+  });
+
+  it('holds the screen server back while a phone reads slowly, so Trace does not queue its screen', async () => {
+    const vnc = net.createServer((socket) => { socket.on('error', () => {}); socket.write(Buffer.alloc(48 * 1024 * 1024, 1)); });
+    await new Promise<void>((resolve) => vnc.listen(0, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { vnc.close(() => resolve()); }));
+    const { server } = await remote();
+    (server as unknown as { host: RemoteHost }).host.screenTarget = () => ({ host: '127.0.0.1', port: (vnc.address() as net.AddressInfo).port });
+    await server.setEnabled(true);
+    const { ticket } = await (await fetch(base(server) + '/api/screen-ticket', { method: 'POST', headers: { Authorization: `Bearer ${await paired(server)}` } })).json() as { ticket: string };
+    // A phone that opens the screen and then reads nothing.
+    const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {}); cleanup.push(() => { client.destroy(); });
+    await new Promise<void>((resolve) => client.once('connect', () => resolve()));
+    client.write(`GET /api/screen?ticket=${ticket} HTTP/1.1\r\nHost: 127.0.0.1:${server.address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString('base64')}\r\n\r\n`);
+    client.pause();
+    const screens = (server as unknown as { screens: Set<net.Socket> }).screens;
+    for (let i = 0; i < 100 && !screens.size; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect([...screens][0].writableLength).toBeLessThan(4 * 1024 * 1024);
   });
 });
 
@@ -491,6 +602,14 @@ describe('phone alerts', () => {
     gone(); await server.testAlert(server.status().devices[0].id); expect(server.status().devices[0].notifications).toBe(false);
     await expect(server.testAlert(server.status().devices[0].id)).rejects.toThrow(/not on/);
   });
+  it('shortens a very long approval, so the alert fits one push message and linked computers still list the channel', async () => {
+    const { server, alerts } = await remote(); await server.setEnabled(true); const token = await paired(server);
+    await alertsApi(server, token, 'POST', subscription);
+    server.onSessionEvent({ type: 'attention', sessionId: 's1', runId: 'r1', message: 'Approve Bash: ' + 'x'.repeat(5000), at: new Date().toISOString() });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((alerts[0].message.body as string).length).toBe(200);
+    const attention = server.channels('computer')[0].attention!; expect(attention.length).toBe(1000); expect(attention.endsWith('…')).toBe(true);
+  });
 });
 
 describe('tailscale state', () => {
@@ -517,11 +636,12 @@ describe('tailscale state', () => {
   const runner = (outputs: Record<string, string | Error>) => async (args: string[]) => { const value = outputs[args.join(' ')]; if (value instanceof Error) throw value; if (value === undefined) throw new Error('unexpected ' + args.join(' ')); return value; };
   it('takes Trace off the tailnet when phone access is turned off, and leaves a handler that is not Trace’s', async () => {
     const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'desk.example.ts.net.' } }); const calls: string[] = [];
-    const recording = (serve: unknown) => { const run = runner({ 'status --json': status, 'serve status --json': JSON.stringify(serve), 'serve --https=443 off': '' }); return async (args: string[]) => { calls.push(args.join(' ')); return run(args); }; };
-    await stopServing(recording({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:47821' } } } } }), 47821);
-    expect(calls).toContain('serve --https=443 off');
+    const recording = (serve: unknown) => { const run = runner({ 'status --json': status, 'serve status --json': JSON.stringify(serve), 'serve --https=443 --set-path=/ off': '' }); return async (args: string[]) => { calls.push(args.join(' ')); return run(args); }; };
+    // Only Trace's `/`: the screen service's /api/screen on the same port stays (no --set-path would remove both).
+    await stopServing(recording({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:47821' }, '/api/screen': { Proxy: 'http://127.0.0.1:47822' } } } } }), 47821);
+    expect(calls.filter((call) => call.endsWith(' off'))).toEqual(['serve --https=443 --set-path=/ off']);
     calls.length = 0; await stopServing(recording({ Web: { 'desk.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:3000' } } } } }), 47821);
-    expect(calls).not.toContain('serve --https=443 off');
+    expect(calls.filter((call) => call.endsWith(' off'))).toEqual([]);
   });
   it('reports not installed, stopped, serving and funnel', async () => {
     expect(await tailscaleState(runner({ 'status --json': Object.assign(new Error('spawn tailscale ENOENT'), { code: 'ENOENT' }) }), 47821)).toMatchObject({ installed: false });
@@ -678,6 +798,13 @@ describe('phone permissions and chat channels', () => {
     expect(computers.map((event) => event.type)).toEqual(['channels', 'chat-replay', 'chat']); expect(computers[2].data).toEqual(done);
     // The finished message replaced its streamed text in what is kept.
     expect((kept('s1') as { events: unknown[] }).events).toEqual([{ type: 'user', text: 'hello', images: 2 }, done.event]);
+    // A Round Table state with 3 MB of task images is kept without them, so the thread before it stays.
+    const image = { mediaType: 'image/png' as const, data: 'A'.repeat(3 * 1024 * 1024) };
+    const table = { partner: { sessionId: 's2', runId: RUN, engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false, kind: 'hierarchy' as const,
+      chain: { step: 'implementing' as const, task: 't', plan: '', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', images: [image] }, waiting: 'w', waitingImages: [image] };
+    server.onChat({ sessionId: 's1', runId: RUN, event: { type: 'table', table } });
+    const events = (kept('s1') as { events: { type: string; table?: { chain: object; waitingImageCount?: number; waitingImages?: unknown } }[] }).events;
+    expect(events.map((event) => event.type)).toEqual(['user', 'assistant', 'table']); expect(events[2].table!.chain).not.toHaveProperty('images'); expect(events[2].table).toMatchObject({ waitingImageCount: 1 }); expect(events[2].table).not.toHaveProperty('waitingImages');
   });
 });
 
@@ -691,13 +818,14 @@ describe('usage, tasks, history and memory for phones', () => {
       { id: OTHER, title: 'Docs', directory: '/home/me/secret/app', sessionId: 'gone', scope: ['**'], status: 'queued', notes: '', verificationId: null, createdAt: '2026-11-03T10:00:00.000Z' },
     ];
     Object.assign(host, {
-      usage: () => ({ today: { day: '2026-11-07', claude: 1200, codex: 300, cost: 1.5, complete: true }, limits: [{ engine: 'claude', account: 'Default', windows: [{ label: 'Session', usedPercent: 40, resets: null }], plan: null, checkedAt: '2026-11-07T10:00:00.000Z', error: null }], budget: { dailyTokens: 50000, dailyCost: null, limitWarning: 70 } }),
+      // Both may wait (a log read under way, notes read without holding the process).
+      usage: async () => ({ today: { day: '2026-11-07', claude: 1200, codex: 300, cost: 1.5, complete: true }, limits: [{ engine: 'claude', account: 'Default', windows: [{ label: 'Session', usedPercent: 40, resets: null }], plan: null, checkedAt: '2026-11-07T10:00:00.000Z', error: null }], budget: { dailyTokens: 50000, dailyCost: null, limitWarning: 70 } }),
       tasks: () => tasks,
       taskStatus: async (id, status) => { moved.push({ id, status }); tasks = tasks.map((task) => task.id === id ? { ...task, status } : task); },
       history: async () => Array.from({ length: 120 }, (_, index) => ({ key: `claude:default:${index}`, id: String(index), engine: index % 2 ? 'codex' : 'claude', directory: index === 0 ? null : index % 2 ? `C:\\Users\\me\\private\\proj${index}\\` : `/Users/me/private/proj${index}`, title: `Claude · proj${index} · 1234`, modifiedAt: new Date(Date.UTC(2026, 10, 7) - index * 60000).toISOString(), ...(index === 0 ? { label: 'Named' } : {}) })),
       resume: async (key) => { resumed.push(key); },
       memoryProjects: () => [{ project: 'app-0123456789', directory: 'C:\\Users\\me\\private\\app' }],
-      memoryNotes: (project) => Array.from({ length: 35 }, (_, index) => ({ project, author: 'claude', id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Note ${index}`, content: 'x'.repeat(index === 34 ? 25000 : 10), createdAt: new Date(Date.UTC(2026, 10, 1) + index * 60000).toISOString() })),
+      memoryNotes: async (project) => Array.from({ length: 35 }, (_, index) => ({ project, author: 'claude', id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Note ${index}`, content: 'x'.repeat(index === 34 ? 25000 : 10), createdAt: new Date(Date.UTC(2026, 10, 1) + index * 60000).toISOString() })),
       writeMemory: (project, title, content) => { written.push({ project, title, content }); },
     } satisfies Partial<RemoteHost>);
     await server.setEnabled(true);
@@ -727,6 +855,10 @@ describe('usage, tasks, history and memory for phones', () => {
       { id: TASK, title: 'Fix login', status: 'working', sessionId: 's2', channel: 2, files: ['src/**'], updatedAt: '2026-11-02T10:00:00.000Z' },
     ]);
     expect(JSON.stringify(body)).not.toMatch(/secret/);
+    // A Round Table seat added before s2 has no channel number of its own, so s2 is still channel 2, as the channel list says.
+    const host = (server as unknown as { host: RemoteHost }).host; const sessions = host.sessions;
+    host.sessions = () => { const [first, ...rest] = sessions(); return [first, { id: 'seat', title: 'Codex', engine: 'codex', chat: true, seatedAt: first.id }, ...rest]; };
+    expect((await get(server, token, '/api/tasks')).body.find((task: { id: string }) => task.id === TASK).channel).toBe(2); host.sessions = sessions;
     const refused = await post(server, token, '/api/task-status', { id: TASK, status: 'review' });
     expect(refused.status).toBe(403); expect(refused.body.error).toMatch(/Can start and stop agents/); expect(moved).toEqual([]);
     server.setCanRun(server.status().devices[0].id, true);
@@ -766,12 +898,19 @@ describe('usage, tasks, history and memory for phones', () => {
     expect(body[0].notes[0]).toMatchObject({ title: 'Note 34', author: 'claude' }); expect(body[0].notes[0].content).toHaveLength(20000);
     expect(Object.keys(body[0].notes[0]).sort()).toEqual(['author', 'content', 'createdAt', 'id', 'title']);
     expect(JSON.stringify(body)).not.toMatch(/private/);
+    // A handoff that could not be saved does not count against the next one.
+    const host = (server as unknown as { host: RemoteHost }).host; const write = host.writeMemory;
+    host.writeMemory = () => { throw new HubError('MEMORY_UNAVAILABLE', 'Memory storage is unavailable.'); };
+    expect(await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'x', content: 'y' })).toEqual({ status: 409, body: { error: 'Memory storage is unavailable.' } });
+    host.writeMemory = write;
     // canRun is off: a handoff is notes, not running an agent.
     expect(await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'From my phone', content: 'Check the login fix.' })).toEqual({ status: 200, body: { ok: true } });
     expect(written).toEqual([{ project: 'app-0123456789', title: 'From my phone', content: 'Check the login fix.' }]);
     expect(await post(server, token, '/api/memory', { project: 'other-0123456789', title: 'x', content: 'y' })).toEqual({ status: 400, body: { error: 'Unknown project.' } });
     expect((await post(server, token, '/api/memory', { project: 'app-0123456789', title: '', content: 'y' })).status).toBe(400);
     expect((await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'x', content: 'y', author: 'claude' })).status).toBe(400);
+    // A second one at once waits: each handoff also syncs the project's memory.
+    expect((await post(server, token, '/api/memory', { project: 'app-0123456789', title: 'Again', content: 'y' })).status).toBe(429);
     expect(written).toHaveLength(1);
   });
 });
@@ -815,7 +954,7 @@ describe('the phone app from another of the person’s computers', () => {
     const { server } = await remote(); await server.setEnabled(true);
     server.allowedOrigins = () => ['https://desktop.tail1234.ts.net'];
     const status = async (origin: string) => {
-      const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {}); cleanup.push(() => client.destroy());
+      const client = net.connect(server.address!, '127.0.0.1'); client.on('error', () => {}); cleanup.push(() => { client.destroy(); });
       await new Promise<void>((resolve) => client.once('connect', () => resolve()));
       const first = new Promise<string>((resolve) => client.once('data', (data) => resolve(String(data).split('\r\n')[0])));
       client.write(`GET /api/phone-screen?ticket=none HTTP/1.1\r\nHost: 127.0.0.1:${server.address}\r\nOrigin: ${origin}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString('base64')}\r\n\r\n`);

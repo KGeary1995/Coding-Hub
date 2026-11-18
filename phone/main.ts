@@ -15,7 +15,7 @@ import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/ter
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
-import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
@@ -105,9 +105,12 @@ function header(back?: () => void, title?: Node, ...tools: Node[]) {
     h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, linkText()));
 }
 
+/** A link's encoded part; a mistyped or cut-off link gives '' rather than a blank page. */
+function decoded(value: string) { try { return decodeURIComponent(value); } catch { return ''; } }
+
 function showPair(error = '') {
   stop?.(); stop = null; disposeTerminal(); current = null;
-  const code = location.hash.startsWith(PAIRING_PREFIX) ? decodeURIComponent(location.hash.slice(PAIRING_PREFIX.length)) : '';
+  const code = location.hash.startsWith(PAIRING_PREFIX) ? decoded(location.hash.slice(PAIRING_PREFIX.length)) : '';
   const agent = navigator.userAgent; const name = /iPhone/.test(agent) ? 'iPhone' : /iPad/.test(agent) ? 'iPad' : /Android/.test(agent) ? 'Android phone' : 'Phone';
   const codeInput = h('input', { id: 'code', value: code, autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: false, required: true });
   const nameInput = h('input', { id: 'name', value: name, maxLength: 60 });
@@ -175,8 +178,11 @@ async function openTableHere(channel: RemoteChannel): Promise<string | null> {
     return null;
   } catch (e) { return (e as Error).message; }
 }
-/** A short message in the page's live region (the phone has no toast). */
-function alertText(text: string) { const line = document.getElementById('phone-alert'); if (line) { line.textContent = text; setTimeout(() => { if (line.textContent === text) line.textContent = ''; }, 6000); } }
+/** A short message in the page's live region (the phone has no toast); inside a channel, in that channel's own error line. */
+function alertText(text: string) {
+  const line = document.getElementById('phone-alert') ?? document.getElementById('send-error') ?? document.getElementById('control-error'); if (!line) return;
+  line.textContent = text; line.hidden = false; setTimeout(() => { if (line.textContent === text) { line.textContent = ''; if (line.id === 'control-error') line.hidden = true; } }, 6000);
+}
 
 /** + Channel on the phone: the same kinds as the computer's, in its order (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
 function addMenu() {
@@ -385,7 +391,8 @@ function showChannel(sessionId: string) {
   if (channel?.chat && channel.engine !== 'shell') {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
-    app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), ...channelControls(channel)), container);
+    // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.
+    app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), ...channelControls(channel)), h('p', { id: 'control-error', className: 'error control-error', hidden: true, aria: { role: 'alert' } }), container);
     unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
       ...(me?.canRun && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
       follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
@@ -397,6 +404,7 @@ function showChannel(sessionId: string) {
   const coach = h('div', { id: 'coach', className: 'coach', hidden: true, aria: { role: 'status', label: 'Prompt coaching' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
+  const sendingLine = h('p', { id: 'sending', className: 'dim sending', hidden: true, aria: { role: 'status' } }, 'Sending…');
   const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type here, then Send', enterKeyHint: 'send', aria: { label: 'Message' } });
   const form = h('form', { className: 'compose' }, text, h('button', { className: 'primary', type: 'submit' }, 'Send'));
   // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
@@ -418,7 +426,7 @@ function showChannel(sessionId: string) {
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
-  app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, tools, keys, form));
+  app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   fit = new FitAddon(); terminal.loadAddon(fit);
@@ -626,10 +634,16 @@ async function type(data: string) {
   if (problem) problem.textContent = '';
   if (!channel?.runId || channel.runId !== run) { if (problem) problem.textContent = 'This channel is not running. Start it in Trace on your computer.'; return false; }
   if (data.length > INPUT_LIMIT) { if (problem) problem.textContent = `Messages sent from the phone can be at most ${(INPUT_LIMIT - 1).toLocaleString('en-US')} characters.`; return false; }
+  // A slow network: say the key is on its way, so a tap that shows nothing yet is not taken for one that was lost.
+  // A status, not the alert line; it stays while any key is still on its way.
+  sending++; const slow = setTimeout(() => { const line = document.getElementById('sending'); if (line && sending) line.hidden = false; }, 1000);
   try { await send(channel.sessionId, run, data); return true; }
   // Only this app's own computer unpairing the phone means pairing again; another computer's key being removed does not.
   catch (e) { if (e instanceof Unpaired && e.home) showPair(e.message); else if (problem) problem.textContent = e instanceof Unpaired ? 'That computer no longer accepts this phone. Remove and add it again under Settings → Phone access there.' : (e as Error).message; return false; }
+  finally { clearTimeout(slow); const line = document.getElementById('sending'); if (!--sending && line) line.hidden = true; }
 }
+/** Keys typed on the phone that the computer has not taken yet. */
+let sending = 0;
 
 function onEvent(event: StreamEvent) {
   if (event.type === 'chat') { receiveChat(event.data); return; }
@@ -675,6 +689,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') { holding = true; sentSize = ''; requestSize(); }
   else { void releaseChannel(current).catch(() => {}); sentSize = ''; }
 });
+/** Back at the front, or back online: a stream that died while the phone slept is replaced (after a moment for what was held up to arrive). */
+const wake = () => { if (document.visibilityState === 'visible') setTimeout(() => revive(), 2000); };
+document.addEventListener('visibilitychange', wake); window.addEventListener('online', wake); window.addEventListener('pageshow', (event) => { if (event.persisted) wake(); });
 // Alerts arrive through the service worker; tapping one opens its channel.
 if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -686,6 +703,6 @@ function openChannel(id: string) {
   // Reconnecting brings a fresh channel list straight away, even if this page was asleep with a dead connection.
   opening = id; showList();
 }
-const linked = location.hash.startsWith('#channel=') ? decodeURIComponent(location.hash.slice(9)) : null;
+const linked = location.hash.startsWith('#channel=') ? decoded(location.hash.slice(9)) || null : null;
 if (!token.get() || location.hash.startsWith(PAIRING_PREFIX)) showPair();
 else { if (linked) history.replaceState(null, '', '/'); showList(); if (linked) openChannel(linked); }

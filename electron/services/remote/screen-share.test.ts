@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -52,8 +52,9 @@ describe('sharing the screen as administrator', () => {
     const script = path.join(dir, 'argv.js'); fs.writeFileSync(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
     const args = ['--screen-service', '--storage=D:\\', '--name=Obsidian Halo', '--storage=C:\\Users\\a b\\data', '--elevated'];
     // Verbatim: the arguments go to Windows exactly as commandLine wrote them (argv0 without the space in Program Files).
-    const out = execFileSync(process.execPath, [`"${script}"`, commandLine(args)], { encoding: 'utf8', windowsVerbatimArguments: true, argv0: 'node' });
-    expect(JSON.parse(out)).toEqual(args);
+    // spawnSync, whose options type has windowsVerbatimArguments (execFileSync passes it through, but its type omits it).
+    const run = spawnSync(process.execPath, [`"${script}"`, commandLine(args)], { encoding: 'utf8', windowsVerbatimArguments: true, argv0: 'node' });
+    expect(run.status).toBe(0); expect(JSON.parse(run.stdout)).toEqual(args);
   });
   it.runIf(process.platform === 'win32')('writes scripts PowerShell can read (parsed only, not run)', () => {
     for (const script of [registerTaskScript('C:\\Trace\\Trace.exe', ['--screen-service', '--storage=C:\\x y'], 'PC\\me'), removeTaskScript(), elevatedScript(removeTaskScript())]) {
