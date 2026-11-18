@@ -1,6 +1,8 @@
-// Trace's icon (docs/design/trace/DECISIONS.md): 2a-2 "Lip", chosen 2026-11-08 from the Claude Design rounds. An amber
-// keycap (#ffb547) on a darker amber lip (#b9700f), with a bold T cut out of it, on a near-black tile. The top bar
-// (Topbar.tsx) and the phone (phone/main.ts) draw the same keycap from the 32 px drawing below; change all three together.
+// Trace's icon (docs/design/trace/DECISIONS.md): 2a-2 "Lip", chosen 2026-11-08 from the Claude Design rounds, relit for
+// the Midnight design on 2026-11-18. An amber keycap on a darker amber lip, with a bold T cut out of it, on a navy tile
+// lit softly from the top as the app's window is; from 48 px up the key has a lit top edge and a shadow under it. The top
+// bar (TraceMark.tsx) and the phone (phone/main.ts) draw the same keycap, flat, from the 32 px drawing below; change all
+// three together.
 // Renders it with Electron and writes:
 //   assets/icon.png (1024, macOS), assets/icon.ico (256…16, Windows; PNG entries),
 //   phone/public/icon-512.png, icon-192.png, apple-touch-icon.png (square and opaque: the phone masks them itself).
@@ -27,15 +29,25 @@ const DRAWINGS = {
 /** `square`: a full opaque square with no tile border (phone icons, which the phone masks to its own shape). */
 function svg(size, drawing, square = false) {
   const { tile: [inset, border], face, lip, t } = DRAWINGS[drawing];
-  const background = square
-    ? '<rect width="256" height="256" fill="url(#g)"/>'
-    : `<rect x="${inset}" y="${inset}" width="${256 - 2 * inset}" height="${256 - 2 * inset}" rx="56" fill="url(#g)" stroke="#2a2e33" stroke-width="${border}"/>`;
+  const tile = square ? '<rect width="256" height="256"' : `<rect x="${inset}" y="${inset}" width="${256 - 2 * inset}" height="${256 - 2 * inset}" rx="56"`;
+  // The lit edge and the shadow are a few units on the 256 grid: under 48 px they would only blur the key.
+  const lit = drawing === 'large';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 256 256">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#141619"/><stop offset="1" stop-color="#090a0b"/></linearGradient></defs>
-  ${background}
-  <path transform="translate(0 ${lip})" d="${face}" fill="#b9700f"/>
-  <path d="${face}" fill="#ffb547"/>
-  <path d="${t}" fill="#0b0c0e"/>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#13213d"/><stop offset="1" stop-color="#060a14"/></linearGradient>
+    <radialGradient id="l" cx="0.5" cy="0" r="0.8"><stop offset="0" stop-color="#4c9aff" stop-opacity="0.34"/><stop offset="1" stop-color="#4c9aff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc46a"/><stop offset="1" stop-color="#ffa932"/></linearGradient>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur stdDeviation="7"/></filter>
+    <clipPath id="c"><path d="${face}"/></clipPath>
+  </defs>
+  ${tile} fill="url(#g)"/>
+  ${tile} fill="url(#l)"/>
+  ${square ? '' : `${tile} fill="none" stroke="#2e4878" stroke-width="${border}"/>`}
+  ${lit ? `<path transform="translate(0 ${lip + 10})" d="${face}" fill="#000" opacity="0.5" filter="url(#s)"/>` : ''}
+  <path transform="translate(0 ${lip})" d="${face}" fill="#b56a0a"/>
+  <path d="${face}" fill="url(#f)"/>
+  ${lit ? `<g clip-path="url(#c)"><path d="${face}" fill="none" stroke="#ffe2ad" stroke-width="5" opacity="0.75" transform="translate(0 1.5)"/><path d="${face}" fill="url(#f)" transform="translate(0 4)"/></g>` : ''}
+  <path d="${t}" fill="#071022"/>
 </svg>`;
 }
 const drawingFor = (size) => size <= 16 ? 'tiny' : size <= 32 ? 'small' : 'large';
