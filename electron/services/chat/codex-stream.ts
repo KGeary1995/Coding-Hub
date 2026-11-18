@@ -1,6 +1,7 @@
 import { TOOL_RESULT_LIMIT, type ChatEvent, type ChatImage } from '../../../shared/chat';
 import type { ChatStream } from './claude-stream';
 import type { PermissionLevel } from '../../../shared/types';
+import { Lines, readLines } from './lines';
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 const shorten = (value: string) => value.length > TOOL_RESULT_LIMIT ? value.slice(0, TOOL_RESULT_LIMIT) + `\n… ${(value.length - TOOL_RESULT_LIMIT).toLocaleString('en-US')} more characters` : value;
@@ -21,7 +22,7 @@ const SANDBOX_POLICY = { edits: { type: 'workspaceWrite' }, full: { type: 'dange
  * (server requests) as approvals answered accept / accept for session / decline.
  */
 export class CodexStream implements ChatStream {
-  private buffer = ''; private nextId = 1;
+  private lines = new Lines(); private nextId = 1;
   private calls = new Map<number, (message: Record<string, unknown>) => void>();
   private approvals = new Map<string, { id: number | string; method: string }>();
   private threadId: string | null = null; private turnId: string | null = null;
@@ -118,19 +119,7 @@ export class CodexStream implements ChatStream {
   }
   close() { for (const requestId of this.approvals.keys()) this.emit({ type: 'permission-done', requestId }); this.approvals.clear(); }
 
-  push(data: string) {
-    this.buffer += data; let end;
-    while ((end = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, end).trim(); this.buffer = this.buffer.slice(end + 1);
-      if (!line) continue;
-      let message: unknown; try { message = JSON.parse(line); } catch { continue; }
-      // Only JSON objects are messages; a line that is not one (or one that cannot be handled) is skipped, never let
-      // out of the output listener, where it would bring down the app.
-      if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-      try { this.read(message as Record<string, unknown>); } catch { /* Skipped. */ }
-    }
-    if (this.buffer.length > 64 * 1024 * 1024) this.buffer = '';
-  }
+  push(data: string) { readLines(this.lines, data, 'Codex', this.emit, (message) => this.read(message)); }
 
   private line(value: unknown) { this.write(JSON.stringify(value) + '\n'); }
   private request(method: string, params: unknown, done: (response: Record<string, unknown>) => void) { const id = this.nextId++; this.calls.set(id, done); this.line({ id, method, params }); }

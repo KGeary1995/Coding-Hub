@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import { StringDecoder } from 'node:string_decoder';
 import type { CodexModelCatalog } from '../../../shared/workbench';
-import { findExecutable, hostEnvironment } from './discovery';
+import { findExecutable, freshHostEnvironment } from './discovery';
 import { HubError } from './engine-adapter';
 import { directory } from '../workbench/local-store';
 
@@ -38,7 +38,7 @@ export class ModelCatalog {
   }
 
   private async query(cwd: string): Promise<CodexModelCatalog> {
-    const env = hostEnvironment(); const executable = await (this.dependencies.find ?? findExecutable)('codex', env);
+    const env = await freshHostEnvironment(); const executable = await (this.dependencies.find ?? findExecutable)('codex', env);
     if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
     return new Promise((resolve, reject) => {
       const child = (this.dependencies.spawn ?? spawn)(executable.file, [...executable.prefixArgs, 'app-server'], {

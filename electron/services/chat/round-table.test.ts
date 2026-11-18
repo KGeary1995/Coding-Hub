@@ -114,7 +114,7 @@ describe('Round Table', () => {
     tables.open(1, CLAUDE, CODEX, 'claude', 2);
     tables.send(CLAUDE, 'First', []); tables.send(CLAUDE, 'Also this', []);
     tables.stop(CLAUDE);
-    expect(last().table.waiting).toBe('Also this');
+    expect(last().table!.waiting).toBe('Also this');
     done(CLAUDE); done(CODEX);
     expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Also this'], [CODEX, 'Also this']]);
   });
@@ -124,7 +124,7 @@ describe('Round Table', () => {
     tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'user', text: 'Build the phone chat view', images: 0 } });
     say(CLAUDE, 'Started on ChatView for the phone.');
     tables.open(1, CLAUDE, CODEX, 'claude', 2, { rejoin: true });
-    expect(last().table.phase).toBe('idle'); expect(sent).toHaveLength(0);
+    expect(last().table!.phase).toBe('idle'); expect(sent).toHaveLength(0);
     tables.send(CLAUDE, 'Go on', []);
     expect(sent.map((item) => item.text)).toEqual(['Go on', 'Go on']);
   });
@@ -136,7 +136,7 @@ describe('Round Table', () => {
     expect(interrupted).toEqual([CLAUDE]);
     // The person writes while Claude is still in that old turn: it waits.
     tables.send(CLAUDE, 'What now?', []);
-    expect(sent).toHaveLength(0); expect(last().table.waiting).toBe('What now?');
+    expect(sent).toHaveLength(0); expect(last().table!.waiting).toBe('What now?');
     // The old turn ends: not an answer; the waiting message goes to both.
     say(CLAUDE, 'Half of an old reply.'); done(CLAUDE);
     expect(sent.map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'What now?'], [CODEX, 'What now?']]);
@@ -152,7 +152,7 @@ describe('Round Table', () => {
     tables.send(CLAUDE, 'Review it', []);
     say(CLAUDE, 'Done.'); done(CLAUDE); say(CODEX, 'FINDING high a.ts:1 — new one\nFINDING low b.ts:2 — another'); done(CODEX);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const findings = last().table.findings!;
+    const findings = last().table!.findings!;
     // F1 (verified) made room for F51; the next has no room, and the thread says so.
     expect(findings).toHaveLength(50); expect(findings.at(-1)).toMatchObject({ id: 'F51', text: 'new one' }); expect(findings.some((item) => item.id === 'F1')).toBe(false);
     expect(events.find((envelope) => envelope.event.type === 'notice')?.event).toMatchObject({ text: expect.stringContaining('1 new finding was not recorded') });
@@ -163,7 +163,7 @@ describe('Round Table', () => {
     tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'user', text: 'Build the phone chat view', images: 0 } });
     say(CLAUDE, 'Started on ChatView for the phone.');
     tables.open(1, CLAUDE, CODEX, 'claude', 2);
-    expect(last().table.phase).toBe('joining');
+    expect(last().table!.phase).toBe('joining');
     expect(sent).toEqual([{ runId: CLAUDE, text: expect.stringContaining('Codex is joining now') }]);
     say(CLAUDE, 'Goal: phone chat. State: ChatView started.'); done(CLAUDE);
     expect(sent[1].runId).toBe(CODEX);
@@ -172,7 +172,7 @@ describe('Round Table', () => {
     expect(sent[1].text).toContain('Claude Code: Started on ChatView for the phone.');
     // Its acknowledgement does not start a discussion.
     say(CODEX, 'Caught up.'); done(CODEX);
-    expect(sent).toHaveLength(2); expect(last().table.phase).toBe('idle');
+    expect(sent).toHaveLength(2); expect(last().table!.phase).toBe('idle');
   });
 
   it('refuses two of the same agent, different folders, and a chat already at a table, and closes when a chat ends', () => {
@@ -186,6 +186,45 @@ describe('Round Table', () => {
     // A run that ended is not the person closing it: the window keeps the table to seat both again.
     expect(last().closed).toBeUndefined();
     expect(() => tables.send(CLAUDE, 'x', [])).toThrow('no Round Table');
+  });
+  it('ends the discussion when a turn fails, says which agent, and relays no "(no answer)"', () => {
+    const { tables, sent, say, done, last, events, runs } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 3);
+    tables.send(CLAUDE, 'Plan?', []); say(CLAUDE, 'Plan A'); done(CLAUDE);
+    tables.observe({ sessionId: runs[CODEX].sessionId, runId: CODEX, event: { type: 'done', isError: true, error: 'Usage limit reached.' } });
+    expect(sent).toHaveLength(2); expect(last().table).toMatchObject({ phase: 'idle' });
+    expect(events.find((envelope) => envelope.event.type === 'notice')?.event).toMatchObject({ text: 'Codex ended its turn early, so the Round Table discussion ends here: Usage limit reached.' });
+    // A turn Stop ended is not a failure: no notice.
+    const stopped = setup(); stopped.tables.open(1, CLAUDE, CODEX, 'claude', 3); stopped.tables.send(CLAUDE, 'Plan?', []); stopped.tables.stop(CLAUDE);
+    for (const runId of [CLAUDE, CODEX]) stopped.tables.observe({ sessionId: stopped.runs[runId].sessionId, runId, event: { type: 'done', isError: true, error: 'Interrupted.' } });
+    expect(stopped.events.some((envelope) => envelope.event.type === 'notice')).toBe(false);
+    // The next message starts a fresh discussion with its rounds.
+    stopped.tables.send(CLAUDE, 'Again', []); stopped.say(CLAUDE, 'A'); stopped.done(CLAUDE); stopped.say(CODEX, 'B'); stopped.done(CODEX);
+    expect(stopped.sent.at(-1)!.text).toContain('round 1 of 3');
+  });
+  it('declines a reviewer’s edit by the tool’s own name when Claude shows another name', () => {
+    const { tables, answers } = setup(); tables.open(1, CLAUDE, CODEX, 'codex', 0);
+    expect(tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'permission', requestId: 'r1', toolName: 'Edit file', tool: 'Edit', description: '', input: {}, canAllowEdits: true } })).toContain('reviewer does not edit');
+    expect(answers).toEqual([{ runId: CLAUDE, requestId: 'r1', allow: false }]);
+  });
+  it('stops the other agent at work before lifting its read-only when one seat’s process ends', () => {
+    const { tables, interrupted, modes } = setup(); const order: string[] = [];
+    const host = (tables as unknown as { host: TableHost }).host; const interrupt = host.interrupt; const setReadOnly = host.setReadOnly;
+    host.interrupt = (runId) => { order.push(`interrupt ${runId}`); interrupt(runId); }; host.setReadOnly = (runId, readOnly) => { order.push(`readOnly ${runId} ${readOnly}`); setReadOnly(runId, readOnly); };
+    tables.open(1, CLAUDE, CODEX, 'codex', 2); tables.send(CLAUDE, 'Review', []); order.length = 0;
+    tables.ended(CODEX);
+    expect(interrupted).toEqual([CLAUDE]); expect(order[0]).toBe(`interrupt ${CLAUDE}`); expect(modes[CLAUDE]).toBe(false);
+  });
+  it('passes the lead’s summary to a newcomer whose old turn ended after it', () => {
+    const { tables, sent, say, done, last, runs } = setup();
+    tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'user', text: 'Build the phone chat view', images: 0 } });
+    say(CLAUDE, 'Started on ChatView for the phone.');
+    (runs[CODEX] as { busy?: boolean }).busy = true;
+    tables.open(1, CLAUDE, CODEX, 'claude', 2); expect(last().table!.phase).toBe('joining');
+    say(CLAUDE, 'Goal: phone chat.'); done(CLAUDE);
+    expect(sent).toHaveLength(1);
+    done(CODEX);
+    expect(sent[1]).toMatchObject({ runId: CODEX, text: expect.stringContaining('Goal: phone chat.') }); expect(last().table!.phase).toBe('answering');
   });
   it('marks a table the person closed, so every window forgets it and stops its partner', () => {
     const { tables, last } = setup();

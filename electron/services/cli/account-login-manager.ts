@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { AccountEvent, AccountLogin, AccountResponse } from '../../../shared/accounts';
 import { LOGIN_ARGUMENTS, INSTALL_GUIDES, inspectAccount } from './account-connections';
-import { hostEnvironment } from './discovery';
+import { freshHostEnvironment } from './discovery';
 import type { ClaudeProfiles } from './claude-profiles';
 import { HubError } from './engine-adapter';
 import { nodePty } from './native-pty';
@@ -23,9 +23,10 @@ export class AccountLoginManager {
   async execute(owner: number, input: unknown): Promise<AccountResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_ACCOUNT_REQUEST', 'Invalid account request.'); const request = parsed.data;
     const inspect = this.dependencies.inspect ?? inspectAccount;
-    const profileEnvironment = (id?: string) => {
+    /** A fresh registry PATH, so a CLI installed a moment ago is found by the first Refresh. */
+    const profileEnvironment = async (id?: string) => {
       if (id && !this.dependencies.profiles) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
-      return this.dependencies.profiles?.environment(hostEnvironment(), id) ?? hostEnvironment();
+      const base = await freshHostEnvironment(); return this.dependencies.profiles?.environment(base, id) ?? base;
     };
     if (request.action === 'profile-list' || request.action === 'labels' || request.action === 'profile-create' || request.action === 'profile-rename') {
       const profiles = this.dependencies.profiles;
@@ -37,7 +38,7 @@ export class AccountLoginManager {
       return profiles.rename(request.profileId, request.name);
     }
     if (request.action === 'status') return (await Promise.all((['claude', 'codex', 'github'] as const).map(async (provider) => {
-      const result = await inspect(provider, profileEnvironment(provider === 'claude' ? request.profileId : undefined));
+      const result = await inspect(provider, await profileEnvironment(provider === 'claude' ? request.profileId : undefined));
       return { ...result.connection, ...(provider === 'claude' && request.profileId ? { profileId: request.profileId } : {}) };
     })));
 
@@ -55,7 +56,7 @@ export class AccountLoginManager {
     if (this.active) throw new HubError('LOGIN_BUSY', 'Finish or cancel the current login before connecting another account.');
     const reservation = { owner, cancelled: false, profileId: request.profileId }; this.pending = reservation;
     try {
-      const env = profileEnvironment(request.profileId);
+      const env = await profileEnvironment(request.profileId);
       const discovered = await inspect(request.provider, env);
       if (!discovered.executable || !discovered.connection.canLogin) throw new HubError('LOGIN_UNAVAILABLE', discovered.connection.message);
       if (reservation.cancelled || this.closing) throw new HubError('LOGIN_CANCELLED', 'Login was cancelled.');

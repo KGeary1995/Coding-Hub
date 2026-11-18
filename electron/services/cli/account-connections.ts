@@ -2,7 +2,7 @@ import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import type { AccountConnection, AccountProvider } from '../../../shared/accounts';
-import { hostEnvironment, findExecutable, probeCLI, checkAuthentication, type Executable } from './discovery';
+import { freshHostEnvironment, findExecutable, probeCLI, checkAuthentication, type Executable } from './discovery';
 import { HubError } from './engine-adapter';
 export const INSTALL_GUIDES: Record<AccountProvider, string> = {
   claude: 'https://code.claude.com/docs/en/setup',
@@ -19,19 +19,20 @@ export function githubAuthentication(stdout: string, stderr: string, exitCode: n
   if ((exitCode === 0 || active) && /logged in to github\.com/i.test(text)) return 'authenticated';
   return 'unknown';
 }
-export async function findGitHub(): Promise<Executable> {
-  const env = hostEnvironment(); const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+export async function findGitHub(environment?: Record<string, string>): Promise<Executable> {
+  const env = environment ?? await freshHostEnvironment(); const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   for (const directory of env[pathKey].split(path.delimiter).filter(Boolean)) {
     const file = path.join(directory.replace(/^"|"$/g, ''), process.platform === 'win32' ? 'gh.exe' : 'gh');
     try { await access(file, process.platform === 'win32' ? constants.F_OK : constants.X_OK); if (!(await stat(file)).isFile()) continue; return { file, prefixArgs: [], extraEnv: {}, displayPath: file }; } catch { /* Try next PATH entry. */ }
   }
   throw new HubError('GITHUB_CLI_NOT_FOUND', 'GitHub CLI (gh) is not installed or not on PATH. Open the installation guide, install it, and refresh.');
 }
-export async function inspectAccount(provider: AccountProvider, environment = hostEnvironment()): Promise<{ connection: AccountConnection; executable: Executable | null }> {
+export async function inspectAccount(provider: AccountProvider, environment?: Record<string, string>): Promise<{ connection: AccountConnection; executable: Executable | null }> {
   const connection: AccountConnection = { provider, installed: false, executable: null, version: null, state: 'unknown', message: 'Checking local CLI…', canLogin: false, checkedAt: new Date().toISOString() };
   try {
-    const executable = provider === 'github' ? await findGitHub() : await findExecutable(provider);
-    const env = environment; const [version, help] = await Promise.all([probeCLI(executable, ['--version'], env), probeCLI(executable, ['--help'], env)]);
+    const env = environment ?? await freshHostEnvironment();
+    const executable = provider === 'github' ? await findGitHub(env) : await findExecutable(provider, env);
+    const [version, help] = await Promise.all([probeCLI(executable, ['--version'], env), probeCLI(executable, ['--help'], env)]);
     if (version.exitCode !== 0 || help.exitCode !== 0) throw new HubError('ACCOUNT_CLI_FAILED', 'CLI health check failed or timed out. Repair its installation and refresh.');
     connection.installed = true; connection.executable = executable.displayPath; connection.version = (version.stdout + '\n' + version.stderr).trim().split('\n')[0].slice(0, 120);
     const helpText = help.stdout + '\n' + help.stderr;

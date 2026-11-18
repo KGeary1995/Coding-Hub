@@ -3,6 +3,8 @@ import type { ChatEnvelope, ChatEvent, ChatImage } from '../../../shared/chat';
 import type { TableHost } from './round-table';
 import { FINAL_ROUNDS, isReview, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
 import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
+import { savedChainSchema } from '../../../shared/schemas';
+import { forFollowers } from '../remote/chat-replay';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
 function setup() {
@@ -58,6 +60,20 @@ describe('hierarchy Round Table', () => {
     expect(() => chains.plan(BUILDER, false, ' ')).toThrow(/Say what to change/);
     chains.send(BUILDER, 'Use the existing helper instead.', []);
     expect(sent.at(-1)).toMatchObject({ runId: PLANNER }); expect(sent.at(-1)!.text).toContain('Use the existing helper instead.'); expect(last().chain!.step).toBe('planning');
+  });
+  it('sends the pictures given with a plan sent back to the planner, and keeps them with the task for Continue and the builder', async () => {
+    const { chains, sent, reply } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', [IMAGE(1)]); await reply(PLANNER, 'Plan A\nPLAN READY');
+    chains.send(BUILDER, 'Match this layout.', [IMAGE(2)]);
+    expect(sent.at(-1)).toMatchObject({ runId: PLANNER, images: [IMAGE(2)] }); expect(sent.at(-1)!.text).toContain('Match this layout.');
+    chains.stop(BUILDER); await reply(PLANNER, '', true); chains.continue(BUILDER);
+    expect(sent.at(-1)).toMatchObject({ runId: PLANNER, images: [IMAGE(1), IMAGE(2)] });
+    await reply(PLANNER, 'Plan B\nPLAN READY'); chains.plan(BUILDER, true);
+    expect(sent.at(-1)).toMatchObject({ runId: BUILDER, images: [IMAGE(1), IMAGE(2)] });
+    // More than a message carries is refused, not dropped.
+    const full = setup(); full.chains.open(1, BUILDER, REVIEWER, PLANNER); full.chains.send(BUILDER, 'Task', Array.from({ length: 9 }, (_, n) => IMAGE(n))); await full.reply(PLANNER, 'Plan\nPLAN READY');
+    expect(() => full.chains.send(BUILDER, 'Like these.', [IMAGE(10), IMAGE(11)])).toThrow(/at most 10\. Send at most 1 picture with/); expect(full.last().chain!.step).toBe('plan-review');
+    full.chains.send(BUILDER, 'Like this.', [IMAGE(10)]); await full.reply(PLANNER, 'Plan\nPLAN READY');
+    expect(() => full.chains.send(BUILDER, 'And this.', [IMAGE(11)])).toThrow(/Send the change without pictures/);
   });
   it('skips the fix step when the reviewer finds nothing, sends CHANGES NEEDED back to the builder, and asks the person after the limit', async () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
@@ -210,6 +226,54 @@ describe('hierarchy Round Table', () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
     await reply(REVIEWER, 'FINDING low a.ts:1 — typo'); await reply(BUILDER, 'FIXED F1: spelled it'); expect(last().chain).toMatchObject({ step: 'reviewing', reviewRound: 2 });
     await reply(REVIEWER, 'VERIFIED F1'); expect(last().findings![0].status).toBe('verified'); expect(last().chain!.step).toBe('final'); expect(sent.at(-1)!.runId).toBe(PLANNER);
+  });
+  it('notes the files’ state before the builder’s and reviewer’s turns, not before the planner’s, whose answers are never recorded', async () => {
+    const { chains, reply } = setup(); const asked: number[] = []; let turns = 0;
+    (chains as unknown as { host: TableHost }).host.stateOf = () => { asked.push(turns); return Promise.resolve('a'.repeat(64)); };
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); expect(asked).toEqual([]);
+    turns = 1; await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); expect(asked.length).toBeGreaterThan(0); const before = asked.length;
+    turns = 2; await reply(BUILDER, 'Built.'); expect(asked.length).toBeGreaterThan(before);
+    // The reviewer's NO FINDINGS sends the planner its final review: no snapshot for that turn.
+    const reviewed = asked.length; turns = 3; await reply(REVIEWER, 'NO FINDINGS'); expect(asked.length).toBe(reviewed);
+  });
+  it('says which review lines it could not read, and records the numbered ones it can', async () => {
+    const { chains, reply, last, events } = setup();
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, 'Built.');
+    await reply(REVIEWER, '1. FINDING high a.ts:1 — leaks\nFINDING: the cache never expires');
+    expect(last().findings!.map((finding) => finding.text)).toEqual(['leaks']);
+    expect(events.some((e) => e.event.type === 'notice' && e.event.text.includes('“FINDING: the cache never expires”'))).toBe(true);
+  });
+  it('keeps what it saves within what a workspace can hold: waiting messages and a long plan', async () => {
+    const { chains, reply, last } = setup();
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Task', []);
+    chains.send(BUILDER, 'a'.repeat(150_000), []); expect(() => chains.send(BUILDER, 'b'.repeat(60_000), [])).toThrow(/longer than 200,000 characters/);
+    expect(last().waiting).toBe('a'.repeat(150_000));
+    await reply(PLANNER, 'P'.repeat(250_000) + '\nPLAN READY'); expect(last().chain!.plan.length).toBeLessThanOrEqual(200_000);
+  });
+  it('keeps the task’s images with the saved table, gets them back when it reopens, and never gives them to followers', async () => {
+    const first = setup(); first.chains.open(1, BUILDER, REVIEWER, PLANNER); first.chains.send(BUILDER, 'Match the mockup', [IMAGE(1), IMAGE(2)]);
+    const saved = first.last().chain!; expect(saved.images).toEqual([IMAGE(1), IMAGE(2)]); expect(savedChainSchema.safeParse(saved).success).toBe(true);
+    const shared = forFollowers(first.events.filter((e) => e.event.type === 'table').at(-1)!).event as Extract<ChatEvent, { type: 'table' }>;
+    expect(shared.table!.chain).toMatchObject({ task: 'Match the mockup' }); expect(shared.table!.chain!.images).toBeUndefined(); expect(saved.images).toHaveLength(2);
+    // Reopened after a restart (cut short while planning), the step continues with the same images.
+    const second = setup(); second.chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: savedChainSchema.parse(saved) });
+    expect(second.last().chain).toMatchObject({ step: 'stopped', stoppedAt: 'planning', images: [IMAGE(1), IMAGE(2)] });
+    second.chains.continue(BUILDER); expect(second.sent.at(-1)).toMatchObject({ runId: PLANNER, images: [IMAGE(1), IMAGE(2)] });
+  });
+  it('keeps task images too large for a saved workspace only while the table runs, so the workspace stays saveable', async () => {
+    const { chains, sent, last, reply } = setup(); const big = (n: number) => ({ mediaType: 'image/png' as const, data: String(n).repeat(3_000_001) });
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Match the mockup', [big(1), big(2)]);
+    expect(last().chain!.images).toBeUndefined(); expect(savedChainSchema.safeParse(last().chain).success).toBe(true);
+    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); expect(sent.at(-1)).toMatchObject({ runId: BUILDER }); expect(sent.at(-1)!.images).toHaveLength(2);
+    // The saved shape refuses more than 10 images or more than 6 MB of them, as for a waiting message.
+    const chain = { step: 'idle' as const, task: '', plan: '', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '' };
+    expect(savedChainSchema.safeParse({ ...chain, images: [big(1), big(2)] }).success).toBe(false);
+    expect(savedChainSchema.safeParse({ ...chain, images: Array.from({ length: 11 }, (_, n) => IMAGE(n)) }).success).toBe(false);
+  });
+  it('gives a step continued after a restart the task’s saved images', () => {
+    const { chains, sent } = setup();
+    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: { step: 'stopped', stoppedAt: 'implementing', task: 'Match the mockup', plan: '1. Edit', report: '', reviewRound: 0, finalRound: 0, verdict: null, note: '', challenged: true, images: [IMAGE(1), IMAGE(2)] } });
+    chains.continue(BUILDER); expect(sent.at(-1)).toMatchObject({ runId: BUILDER, images: [IMAGE(1), IMAGE(2)] });
   });
   it('says why when Trace cannot finish a step', async () => {
     const { chains, reply, last } = setup(); let fail = false;

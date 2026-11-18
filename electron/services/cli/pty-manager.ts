@@ -2,7 +2,7 @@ import { stopProcess, type StopDependencies } from './stop-process';
 import { stripVTControlCharacters } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
@@ -12,9 +12,10 @@ import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, E
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
-import { discoverEngine, hostEnvironment } from './discovery';
-import { OscNotifications } from './attention';
-import { nodePty } from './native-pty';
+import { discoverEngine, freshHostEnvironment } from './discovery';
+import { AUTH_TIMED_OUT } from './auth-status';
+import { cleanMessage, OscNotifications } from './attention';
+import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
@@ -33,25 +34,30 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
   return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
 }
 
-/** Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. */
-export function windowsSudoMode(): number {
-  try {
-    const output = execFileSync('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    const value = /Enabled\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(output)?.[1]; return value ? parseInt(value, 16) : 0;
-  } catch { return 0; /* No key: sudo was never turned on. */ }
+/**
+ * Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. Read with
+ * reg.exe off the main process, each time, so turning sudo on applies to the next Terminal channel.
+ */
+export function windowsSudoMode(): Promise<number> {
+  return new Promise((resolve) => execFile('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true }, (error, output) => {
+    // No key: sudo was never turned on.
+    const value = error ? undefined : /Enabled\s+REG_DWORD\s+0x([0-9a-f]+)/i.exec(output)?.[1]; resolve(value ? parseInt(value, 16) : 0);
+  }));
 }
+/** Windows' sudo.exe (Windows 11 24H2 and later); without it the sudo setting is never read. */
+export function windowsSudoPath(env: Record<string, string>): string { return path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'sudo.exe'); }
 /** Shown in a Windows terminal that could not start as administrator, unless PowerShell already is one. */
 const NOT_ADMIN = "if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { Write-Host 'Trace: this terminal is not running as administrator. To open terminals as administrator, turn on sudo in Windows Settings > System > Advanced and set it to Inline.' -ForegroundColor Yellow }";
 /**
  * The program a Terminal channel runs: PowerShell on Windows, as administrator through Windows' sudo when it runs
  * inline (Windows asks for approval each time), otherwise the person's login shell (as Terminal.app starts it),
- * falling back to zsh on macOS and bash elsewhere.
+ * falling back to zsh on macOS and bash elsewhere. `sudoMode` is windowsSudoMode()'s answer, read beforehand.
  */
-export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync, sudoMode: () => number = windowsSudoMode): { file: string; args: string[]; name: string } {
+export function shellProgram(env: Record<string, string>, platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync, sudoMode: () => number = () => 0): { file: string; args: string[]; name: string } {
   if (platform === 'win32') {
     const system = path.win32.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32');
     const powershell = path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'); const file = exists(powershell) ? powershell : 'powershell.exe';
-    const sudo = path.win32.join(system, 'sudo.exe');
+    const sudo = windowsSudoPath(env);
     if (exists(sudo) && sudoMode() === 3) return { file: sudo, args: ['--inline', file, '-NoLogo'], name: 'PowerShell (administrator)' };
     return { file, args: ['-NoLogo', '-NoExit', '-Command', NOT_ADMIN], name: 'PowerShell' };
   }
@@ -93,15 +99,22 @@ interface ManagedRun {
 
 export class PtyManager {
   private runs = new Map<string, ManagedRun>();
-  private pending = new Map<string, { owner: number; cancelled: boolean; nativeKey?: string; profileId?: string }>();
+  private pending = new Map<string, { owner: number; cancelled: boolean; cwd: string; nativeKey?: string; profileId?: string }>();
   private closing = false;
   private spawn: Spawn;
   private discover: typeof discoverEngine;
-  private environment: () => Record<string, string>;
+  private environment: () => Record<string, string> | Promise<Record<string, string>>;
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: typeof hostEnvironment; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+      /**
+       * Work an agent launch waits for before prepareLaunch (a project's shared memory brought up to date), started with
+       * discovery. Its errors are ignored, and a launch waits at most `beforeLaunchMilliseconds` (default 3 s) for it.
+       */
+      beforeLaunch?: (cwd: string, config: CLIEngineConfig) => Promise<unknown>; beforeLaunchMilliseconds?: number;
+      /** Windows' sudo setting, for Terminal channels (tests replace it). */
+      sudoMode?: () => Promise<number>;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
       abandonLaunch?: (session: AgentRunningSession) => void;
       /** Runs just seated at a Round Table without a tile of their own (partner, reviewer, planner). */
@@ -111,7 +124,16 @@ export class PtyManager {
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
-    this.environment = dependencies.environment ?? hostEnvironment;
+    this.environment = dependencies.environment ?? freshHostEnvironment;
+  }
+
+  /** Waits for beforeLaunch, at most its time limit; never fails the launch. */
+  private beforeLaunch(cwd: string, config: CLIEngineConfig): Promise<void> {
+    const work = this.dependencies.beforeLaunch; if (!work) return Promise.resolve();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<void>((resolve) => { timer = setTimeout(resolve, this.dependencies.beforeLaunchMilliseconds ?? 3000); });
+    let started: Promise<unknown>; try { started = work(cwd, config); } catch { started = Promise.resolve(); }
+    return Promise.race([Promise.resolve(started).then(() => {}, () => {}), limit]).finally(() => clearTimeout(timer));
   }
 
   /** Tells the owning window that a run is waiting for the person, after the output that led to it. */
@@ -162,8 +184,13 @@ export class PtyManager {
     if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
     if (run.stopping) return;
     this.flush(run);
-    try { run.pty.resize(Math.min(500, Math.max(2, cols)), Math.min(300, Math.max(1, rows))); }
-    catch { throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
+    this.resizePty(run, Math.min(500, Math.max(2, cols)), Math.min(300, Math.max(1, rows)));
+  }
+
+  /** A run whose process just ended cannot be resized; that is not an error, its exit event follows. */
+  private resizePty(run: ManagedRun, cols: number, rows: number) {
+    try { run.pty.resize(cols, rows); }
+    catch { if (!ptyProcessEnded(run.pty)) throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
   }
 
   private send(owner: number, event: SessionEvent) {
@@ -171,7 +198,8 @@ export class PtyManager {
     catch { try { this.dependencies.onEventError?.(); } catch { /* Reporting must not interrupt process cleanup. */ } }
   }
 
-  usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => isWithinDirectory(directory, run.session.cwd)) || this.pending.size > 0; }
+  /** Includes launches still starting in that folder (their folder is checked as given; it resolves the same way). */
+  usesDirectory(directory: string): boolean { return [...this.runs.values()].some((run) => isWithinDirectory(directory, run.session.cwd)) || [...this.pending.values()].some((run) => isWithinDirectory(directory, run.cwd)); }
 
   usesProfile(id: string): boolean { return [...this.runs.values()].some((run) => run.session.accountProfileId === id) || [...this.pending.values()].some((run) => run.profileId === id); }
 
@@ -193,7 +221,7 @@ export class PtyManager {
     const resumeId = isAgentConfig(request.config) ? request.config.resumeId : undefined;
     const nativeKey = resumeId ? `${request.config.engine}:${profileId ?? 'default'}:${resumeId}` : undefined;
     if (nativeKey && ([...this.runs.values()].some((run) => run.nativeKey === nativeKey) || [...this.pending.values()].some((run) => run.nativeKey === nativeKey))) throw new HubError('RESUME_BUSY', 'This conversation is already running or starting in another tile.');
-    const reservation = { owner, cancelled: false, profileId, nativeKey };
+    const reservation = { owner, cancelled: false, cwd: request.cwd, profileId, nativeKey };
     let prepared: AgentRunningSession | null = null;
     this.pending.set(request.sessionId, reservation);
     try {
@@ -203,13 +231,14 @@ export class PtyManager {
         cwd = await realpath(request.cwd);
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
-      const baseEnvironment = this.environment();
+      const baseEnvironment = await this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
       // A chat run: Claude Code or Codex in structured mode.
       const chat = isAgentConfig(request.config) && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
-        const program = shellProgram(baseEnvironment);
+        const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
+        const program = shellProgram(baseEnvironment, process.platform, existsSync, () => sudo);
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
         session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
         ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
@@ -217,8 +246,11 @@ export class PtyManager {
         const profileEnvironment = this.dependencies.profileEnvironment;
         if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');
         const discoveryEnvironment = profileEnvironment ? profileEnvironment(baseEnvironment, profileId) : baseEnvironment;
-        const engine = await this.discover(request.config.engine, discoveryEnvironment); level = launchedLevel(request.config, engine.info);
-        if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
+        const ready = this.beforeLaunch(cwd, request.config);
+        // The sign-in probes are needed only to refuse a named profile that is not connected.
+        const engine = await this.discover(request.config.engine, discoveryEnvironment, { authentication: Boolean(profileId) }); level = launchedLevel(request.config, engine.info);
+        if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', engine.info.authentication?.message === AUTH_TIMED_OUT ? 'Claude Code did not report this profile’s sign-in in time, so the channel did not start. Start it again; if this keeps happening, run the Claude CLI in a terminal to check it.' : 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
+        await ready;
         // A Codex chat is the app server; its model, reasoning and resumed thread go in its protocol, not on the command line.
         const codexChat = chat && request.config.engine === 'codex';
         const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : buildLaunch(request.config, engine.info);
@@ -279,7 +311,8 @@ export class PtyManager {
       // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
       // At Full access its commands are allowed at once ('' : nothing to show), with no card or alert either.
       if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
-      if (event.type === 'permission') this.notifyAttention(runId, `Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`);
+      // Cut where it is made, as for a terminal's prompt: a whole shell command can be kilobytes.
+      if (event.type === 'permission') this.notifyAttention(runId, cleanMessage(`Approve ${event.toolName}${event.description ? `: ${event.description}` : ''}`));
       if (event.type === 'permission-done' && !run.finished) this.send(run.owner, { type: 'answered', sessionId, runId, at: new Date().toISOString() });
       if (event.type === 'done') run.turnOpen = false;
       try { this.dependencies.onChat?.(run.owner, { sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); }
@@ -436,8 +469,7 @@ export class PtyManager {
     if (!run.stopping) {
       // Output drawn at the old size goes out first, so every terminal following this run sees it before the resize.
       this.flush(run);
-      try { run.pty.resize(parsed.data.cols, parsed.data.rows); }
-      catch { throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
+      this.resizePty(run, parsed.data.cols, parsed.data.rows);
     }
   }
 

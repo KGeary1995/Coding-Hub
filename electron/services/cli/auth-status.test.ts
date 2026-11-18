@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyAuthentication } from './auth-status';
+import { AUTH_TIMED_OUT, classifyAuthentication } from './auth-status';
 import { advertisesFlag } from './discovery';
 const result = (stdout = '', stderr = '', exitCode: number | null = 0, timedOut = false) => ({ stdout, stderr, exitCode, timedOut });
 describe('local authentication diagnostics', () => {
@@ -14,6 +14,10 @@ describe('local authentication diagnostics', () => {
     expect(classifyAuthentication('codex', result('', 'Not logged in', 1)).state).toBe('not-authenticated');
     expect(classifyAuthentication('codex', result('Logged in', '', 1)).state).toBe('unknown');
     expect(classifyAuthentication('codex', result('Logged in', '', 0, true)).state).toBe('unknown');
+  });
+  it('says a login check that timed out did so, instead of calling it unsupported', () => {
+    expect(classifyAuthentication('claude', result('', '', null, true))).toMatchObject({ state: 'unknown', message: AUTH_TIMED_OUT });
+    expect(classifyAuthentication('claude', result('bad-json')).message).not.toBe(AUTH_TIMED_OUT);
   });
   it('does not infer access from malformed output or unrelated flags', () => {
     expect(classifyAuthentication('claude', result('bad-json')).state).toBe('unknown');

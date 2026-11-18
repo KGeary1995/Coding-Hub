@@ -2,11 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { TOOL_RESULT_LIMIT, type ChatBlock, type ChatEvent, type ChatImage } from '../../../shared/chat';
 import type { PermissionLevel } from '../../../shared/types';
 import { CLAUDE_MODE } from '../cli/engine-adapter';
+import { Lines, readLines } from './lines';
 
 /** The flags that run Claude Code in structured mode, answering its permission prompts here (see ClaudeStream). */
 export const CHAT_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio'];
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
+/** Claude's suggestion to accept edits from now on: what offers "Allow edits". */
+const acceptsEdits = (item: unknown) => (item as { mode?: unknown } | null)?.mode === 'acceptEdits';
+/**
+ * What "Allow edits" passes back: the accept-edits mode, and a folder outside the project added for this session only
+ * (accept-edits mode covers only the working folders). Rules or folders saved to settings files are not what the person chose.
+ */
+const allowsEdits = (item: unknown) => { const entry = item as { type?: unknown; destination?: unknown } | null; return acceptsEdits(item) || (entry?.type === 'addDirectories' && entry.destination === 'session'); };
 const shorten = (value: string) => value.length > TOOL_RESULT_LIMIT ? value.slice(0, TOOL_RESULT_LIMIT) + `\n… ${(value.length - TOOL_RESULT_LIMIT).toLocaleString('en-US')} more characters` : value;
 
 /**
@@ -27,7 +35,7 @@ export interface ChatStream {
 }
 
 export class ClaudeStream implements ChatStream {
-  private buffer = '';
+  private lines = new Lines();
   private pending = new Map<string, { input: Record<string, unknown>; suggestions: unknown[] }>();
   /** The permission mode the person's settings started Claude in (from its init message): the mode for `ask`. */
   private ownMode = 'default'; private readOnly = false;
@@ -63,7 +71,7 @@ export class ClaudeStream implements ChatStream {
     const request = this.pending.get(requestId); if (!request) return false;
     this.pending.delete(requestId);
     const response = allow
-      ? { behavior: 'allow', updatedInput: request.input, ...(allowEdits && request.suggestions.length ? { updatedPermissions: request.suggestions } : {}) }
+      ? { behavior: 'allow', updatedInput: request.input, ...(allowEdits && request.suggestions.some(acceptsEdits) ? { updatedPermissions: request.suggestions.filter(allowsEdits) } : {}) }
       : { behavior: 'deny', message: 'The person declined this in Trace.' };
     this.line({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } });
     this.emit({ type: 'permission-done', requestId });
@@ -74,20 +82,7 @@ export class ClaudeStream implements ChatStream {
   close() { for (const requestId of this.pending.keys()) this.emit({ type: 'permission-done', requestId }); this.pending.clear(); }
 
   /** Output from Claude: complete lines are parsed, a partial line waits for the rest. */
-  push(data: string) {
-    this.buffer += data; let end;
-    while ((end = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, end).trim(); this.buffer = this.buffer.slice(end + 1);
-      if (!line) continue;
-      let message: unknown; try { message = JSON.parse(line); } catch { continue; }
-      // Only JSON objects are messages; a line that is not one (or one that cannot be handled) is skipped, never let
-      // out of the output listener, where it would bring down the app.
-      if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-      try { this.read(message as Record<string, unknown>); } catch { /* Skipped. */ }
-    }
-    // A single line this large is not something Claude sends; drop it rather than grow without bound.
-    if (this.buffer.length > 64 * 1024 * 1024) this.buffer = '';
-  }
+  push(data: string) { readLines(this.lines, data, 'Claude Code', this.emit, (message) => this.read(message)); }
 
   private line(value: unknown) { this.write(JSON.stringify(value) + '\n'); }
   private control(request: Record<string, unknown>) { this.line({ type: 'control_request', request_id: randomUUID(), request }); }
@@ -144,7 +139,8 @@ export class ClaudeStream implements ChatStream {
         const input = (request.input && typeof request.input === 'object' ? request.input : {}) as Record<string, unknown>;
         const suggestions = Array.isArray(request.permission_suggestions) ? request.permission_suggestions : [];
         this.pending.set(requestId, { input, suggestions });
-        this.emit({ type: 'permission', requestId, toolName: text(request.display_name) || text(request.tool_name), description: text(request.description), input, canAllowEdits: suggestions.some((item) => (item as { mode?: unknown }).mode === 'acceptEdits') });
+        const shown = text(request.display_name) || text(request.tool_name); const tool = text(request.tool_name);
+        this.emit({ type: 'permission', requestId, toolName: shown, description: text(request.description), input, canAllowEdits: suggestions.some(acceptsEdits), ...(tool && tool !== shown ? { tool } : {}) });
       } else if (requestId) {
         // Requests the host does not handle are answered, so Claude does not wait on them.
         this.line({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: `Trace does not handle ${request?.subtype ?? 'this request'}.` } });

@@ -8,6 +8,13 @@ it('terminates Windows descendants before closing the terminal and checks the ro
   // node-pty throws for any signal on Windows; only kill() without arguments closes ConPTY.
   expect(pty.kill).toHaveBeenCalledWith();
 });
+it('closes the Windows terminal without node-pty ending the stopped tree\'s process ids again later', async () => {
+  const { pty, exited, resolve } = fixture(); const lookup = vi.fn(async () => [pty.pid]);
+  const agent = { _getConsoleProcessList: lookup }; Object.assign(pty, { _agent: agent });
+  (pty.kill as ReturnType<typeof vi.fn>).mockImplementation(() => { void agent._getConsoleProcessList().then((pids) => { expect(pids).toEqual([]); resolve(); }); });
+  await stopProcess(pty, exited, { platform: 'win32', killTree: async () => {}, isAlive: () => false });
+  expect(pty.kill).toHaveBeenCalledWith(); expect(lookup).not.toHaveBeenCalled();
+});
 it('reports Windows kill failure without claiming success or orphaning children via a terminal-first kill', async () => {
   const { pty, exited } = fixture(); await expect(stopProcess(pty, exited, { platform: 'win32', killTree: async () => { throw new Error('Denied'); }, isAlive: () => true })).rejects.toMatchObject({ code: 'STOP_FAILED' }); expect(pty.kill).not.toHaveBeenCalled();
 });
