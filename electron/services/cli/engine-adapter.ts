@@ -22,6 +22,9 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
       args.push('--config', `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`);
     }
     if (engine.supportsNoDaemon) args.push('--no-daemon');
+  } else if (config.engine === 'gemini') {
+    // agy reports working, waiting for you (with the question) and done over OSC 7501 when told to (1.4.0+).
+    env.AGY_CLI_OSC7501 = 'on';
   } else {
     if (config.tokenLimits.maxSessionTokens !== null && !engine.supportsSessionId) throw new HubError('UNSUPPORTED_SESSION_LIMIT', 'This Claude version cannot bind usage to a session ID. Clear the session token limit or update Claude Code.');
     const majorVersion = Number(engine.version?.match(/\d+/)?.[0]);
@@ -45,7 +48,7 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
     }
   }
   args.push(...permissionArgs(config, engine));
-  if (config.resumeId) { if (!engine.supportsResume) throw new HubError('RESUME_UNAVAILABLE', 'This CLI does not advertise conversation resume. Update it before resuming.'); if (config.engine === 'claude') args.push('--resume', config.resumeId); else args.unshift('resume', config.resumeId); }
+  if (config.resumeId) { if (!engine.supportsResume) throw new HubError('RESUME_UNAVAILABLE', 'This CLI does not advertise conversation resume. Update it before resuming.'); if (config.engine === 'claude') args.push('--resume', config.resumeId); else if (config.engine === 'gemini') args.push('--conversation', config.resumeId); else args.unshift('resume', config.resumeId); }
   return { args, env };
 }
 
@@ -53,6 +56,7 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
 export function launchedLevel(config: CLIEngineConfig, engine: EngineInfo): PermissionLevel {
   return config.permissions === undefined && !engine.supportsPermissions ? 'ask' : permissionLevel(config);
 }
+export const GEMINI_ASK_SETTINGS = JSON.stringify({ agentMode: '' });
 /** Claude's modes per level; `ask` keeps the person's own settings. Codex chats take theirs in the app-server protocol. */
 export const CLAUDE_MODE = { edits: 'acceptEdits', full: 'bypassPermissions' } as const;
 /**
@@ -60,7 +64,10 @@ export const CLAUDE_MODE = { edits: 'acceptEdits', full: 'bypassPermissions' } a
  * which Claude allows only when started with --allow-dangerously-skip-permissions (that flag alone changes nothing).
  */
 function permissionArgs(config: CLIEngineConfig, engine: EngineInfo): string[] {
-  const level = permissionLevel(config); const chat = config.chat === true;
+  const level = permissionLevel(config); const chat = config.engine !== 'gemini' && config.chat === true;
+  // agy's own default is Auto (1.5.7+: edits and commands without asking), so Ask names its Default mode, which asks
+  // before edits and commands, for this run only (--settings is never saved).
+  if (config.engine === 'gemini' && engine.supportsPermissions) return level === 'ask' ? ['--settings', GEMINI_ASK_SETTINGS] : level === 'edits' ? ['--mode', 'accept-edits'] : ['--dangerously-skip-permissions'];
   if (level === 'ask' && !(chat && config.engine === 'claude')) return [];
   if (!engine.supportsPermissions) {
     // The default on a CLI too old for these flags: its own settings, as before; only a level the person chose is refused.

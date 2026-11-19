@@ -1,12 +1,14 @@
 import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store';
 import type { Session } from '../../shared/types';
-import { isAgentConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
 /** What each level means for each agent, in the person's words (tooltips and the settings note). */
-export function permissionHelp(engine: 'claude' | 'codex', level: PermissionLevel) {
+export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: PermissionLevel) {
+  // Seen with agy 1.5.12: Ask starts its Default mode (asks before edits and commands), whatever agy itself is set to.
+  if (engine === 'gemini') return level === 'ask' ? 'Gemini CLI asks before edits and commands. Trace starts it in its Default mode for this channel, whatever Gemini CLI is set to.' : level === 'edits' ? 'Gemini CLI edits files in the project without asking; it asks before commands.' : 'Gemini CLI never asks: any command, any file (its own blocked-command list still applies). Use it only for work you trust.';
   const when = engine === 'codex' ? ' A running Codex chat changes from its next message.' : '';
   // Accurate for both cases: started at Ask, the CLI's own settings apply; switched to Ask later, its plain default does.
   if (level === 'ask') return (engine === 'claude' ? 'Claude asks before edits and commands. A channel started at Ask follows Claude’s own permission settings; one switched to Ask while running uses Claude’s plain default.' : 'Codex asks when it needs to and writes only in the project. A channel started at Ask follows Codex’s own settings; one switched to Ask while running uses that default.') + when;
@@ -38,7 +40,7 @@ export async function permissionsRefused(sessionId: string, runId: string, level
   const others = tableSeats(sessions, sessionId).filter((seat) => seat.id !== sessionId);
   const ids = new Set([sessionId, ...others.map((seat) => seat.id)]);
   useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.has(session.id) && tableChat(session.config) ? { ...session, config: withPermissions(session.config, level) } : session) }));
-  for (const other of others) if (tableChat(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
+  for (const other of others) if (isChatEngineConfig(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
 }
 
 /**
@@ -57,7 +59,7 @@ export async function setPermissions(sessionId: string, level: PermissionLevel):
   apply((id) => { const config = before.get(id); return config && tableChat(config) ? withPermissions(config, level) : undefined; });
   const changed: { id: string; runId: string; old: PermissionLevel }[] = [];
   for (const session of useWorkspaceStore.getState().sessions) {
-    if (!ids.has(session.id) || !tableChat(session.config) || !session.config.chat || session.status !== 'running' || !session.runId || !window.codingHub) continue;
+    if (!ids.has(session.id) || !isChatEngineConfig(session.config) || !session.config.chat || session.status !== 'running' || !session.runId || !window.codingHub) continue;
     const result = await window.codingHub.chat({ action: 'permissions', sessionId: session.id, runId: session.runId, level }).catch(() => null);
     const old = before.get(session.id); const oldLevel = old && tableChat(old) ? old.permissions ?? 'edits' : 'edits';
     if (!result?.ok) {

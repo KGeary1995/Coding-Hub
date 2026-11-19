@@ -25,7 +25,7 @@ function useOperation() {
 }
 function Feedback({ error, notice }: { error: string; notice: string }) { return <>{error && <div className="hub-feedback error-message" role="alert">{error}</div>}{notice && <div className="hub-feedback success" role="status"><Check size={15} />{notice}</div>}</>; }
 /** How each engine is named on these pages; its avatar uses the same glyph as its channel tile. */
-const ENGINE_NAMES = { claude: 'Claude Code', codex: 'Codex' } as const;
+const ENGINE_NAMES = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
 function ProjectSelect({ directory, onChange }: { directory: string | null; onChange: (directory: string | null) => void }) {
   const { rootDirectory, sessions } = useWorkspaceStore(); const directories = [...new Set([rootDirectory, ...sessions.map((s) => s.runningCwd ?? (s.binding.mode === 'independent' ? s.binding.cwd : rootDirectory))].filter((d): d is string => !!d))];
   return <label className="ui-field hub-project">Project context<select value={directory ?? ''} onChange={(e) => onChange(e.target.value || null)}><option value="">User configuration only</option>{directories.map((d) => <option key={d} value={d}>{d}</option>)}</select></label>;

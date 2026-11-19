@@ -10,7 +10,7 @@ import { activitySamples } from './activity-store';
 import { sendMark } from './task-evidence';
 import { chatFailed, chatSent, useChatStore } from './chat-store';
 import { hierarchyDetached } from './hierarchy-state';
-import { isAgentConfig } from '../../shared/types';
+import { isChatEngineConfig } from '../../shared/types';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -50,7 +50,8 @@ export async function sendTask(id: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task?.sessionId) throw new Error('Choose the channel to give this task to first.');
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
-  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals.');
+  // A task's outcome is read back from the CLI's transcript, which Gemini CLI keeps in a form Trace does not read.
+  if (!isChatEngineConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini CLI.');
   // A terminal waiting on an approval would take the prompt's Enter as the answer (often Yes): the person answers first.
   if (!session.config.chat && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
@@ -222,7 +223,7 @@ export function startTaskAutomation() {
       // A quiet terminal (Codex, which reports no turn end here): its transcript may say TASK COMPLETE or BLOCKED. A task
       // already marked (blocked, not confirmed, quiet) is read again whenever its reply changed, at most every 30 s, so a
       // later TASK COMPLETE after the person answered is not missed.
-      if (since > 60000 && !(isAgentConfig(session.config) && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) {
+      if (since > 60000 && !(isChatEngineConfig(session.config) && session.config.chat) && recent.length >= 45 && recent.every((value) => value === 0)) {
         const last = rechecked.get(task.id);
         if ((!task.outcome || task.outcome === 'blocked' || task.outcome === 'unconfirmed' || task.outcome === 'quiet') && (!last || Date.now() - last.at > 30000)) void lastReply(session.id, task).then((reply) => {
           const seen = rechecked.get(task.id); rechecked.set(task.id, { at: Date.now(), reply: reply ?? '' }); if (task.outcome && seen && seen.reply === (reply ?? '')) return;

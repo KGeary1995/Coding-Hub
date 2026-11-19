@@ -41,6 +41,7 @@ hr { border-color: var(--tr-line); }
 .tr-engine-square { width: 8px; height: 8px; display: inline-block; border-radius: 2px; }
 .tr-engine-square.claude { background: var(--tr-ch-claude); }
 .tr-engine-square.codex { background: var(--tr-ch-codex); }
+.tr-engine-square.gemini { background: var(--tr-ch-gemini); }
 
 /* Scrollbars: 10 px, a rounded thumb drawn 6 px wide, no track. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -270,6 +271,7 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).limit { --tone: var(--tr-st-limit); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).claude { --tone: var(--tr-ch-claude); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).codex { --tone: var(--tr-ch-codex); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).gemini { --tone: var(--tr-ch-gemini); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).shell { --tone: var(--tr-ch-shell); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).planner { --tone: var(--tr-ch-planner); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).you { --tone: var(--tr-you); }

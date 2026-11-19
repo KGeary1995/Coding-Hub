@@ -6,17 +6,18 @@ import type { NativeConversation, NativeResume } from '../../../shared/workbench
 import type { ClaudeProfiles } from '../cli/claude-profiles';
 import { HubError } from '../cli/engine-adapter';
 import { directory } from './local-store';
+import { geminiConversationFile, geminiConversations } from '../cli/gemini-conversations';
 /** At most this many conversations are listed, the most recent first. */
 const LISTED = 500;
 /** Each CLI home (and Claude profile) is searched through at most this many folder entries. */
 const VISITED_PER_SOURCE = 20000;
-interface Source { engine: 'claude' | 'codex'; root: string; profileId?: string }
+interface Source { engine: 'claude' | 'codex' | 'gemini'; root: string; profileId?: string }
 interface Candidate { source: Source; file: string; id: string; modified: number }
 
 export class NativeSessions {
   private sources = new Map<string, string>();
   /** `hidden`: folders whose conversations are Trace's own (live coaching's reviews), left out of the list. */
-  constructor(private profiles: ClaudeProfiles, private hidden: string[] = [], private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude')) {}
+  constructor(private profiles: ClaudeProfiles, private hidden: string[] = [], private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private gemini: { list: typeof geminiConversations; file: typeof geminiConversationFile } = { list: geminiConversations, file: geminiConversationFile }) {}
   private roots(): Source[] {
     return [{ engine: 'claude', root: this.claudeHome }, { engine: 'codex', root: process.env.CODEX_HOME ?? path.join(homedir(), '.codex') }, ...this.profiles.list().map((profile) => ({ engine: 'claude' as const, root: this.profiles.directory(profile.id), profileId: profile.id }))];
   }
@@ -72,9 +73,18 @@ export class NativeSessions {
   /** The most recent conversations across every CLI home, newest first; read without blocking the app. */
   async list(): Promise<NativeConversation[]> {
     const sources = new Map<string, string>(); const result: NativeConversation[] = [];
-    const candidates = (await Promise.all(this.roots().map((source) => this.listed(source)))).flat().sort((a, b) => b.modified - a.modified);
-    for (const candidate of candidates) {
+    const candidates = (await Promise.all(this.roots().map((source) => this.listed(source)))).flat();
+    // Gemini CLI keeps a list of its conversations (agy's own database), so they are named there, not found as files.
+    const gemini = this.gemini.list(); const geminiSource: Source = { engine: 'gemini', root: '' };
+    const all: (Candidate & { directory?: string | null })[] = [...candidates, ...gemini.map((item) => ({ source: geminiSource, file: item.file, id: item.id, modified: Number.isFinite(item.modified) ? item.modified : 0, directory: item.directory }))].sort((a, b) => b.modified - a.modified);
+    for (const candidate of all) {
       if (result.length >= LISTED) break;
+      if (candidate.source.engine === 'gemini') {
+        const folder = candidate.directory ?? null; if (folder && this.hidden.some((hidden) => path.resolve(folder).toLowerCase() === path.resolve(hidden).toLowerCase())) continue;
+        sources.set(`gemini:default:${candidate.id}`, candidate.file);
+        result.push({ key: `gemini:default:${candidate.id}`, id: candidate.id, engine: 'gemini', directory: folder, title: `Gemini · ${folder ? path.basename(folder) : 'Conversation'} · ${candidate.id.slice(0, 8)}`, modifiedAt: new Date(candidate.modified).toISOString() });
+        continue;
+      }
       const key = `${candidate.source.engine}:${candidate.source.profileId ?? 'default'}:${candidate.id}`; if (sources.has(key)) continue;
       const conversation = await this.describe(candidate); if (!conversation || this.hidden.some((folder) => conversation.directory && path.resolve(conversation.directory).toLowerCase() === path.resolve(folder).toLowerCase())) continue;
       sources.set(key, candidate.file); result.push(conversation);
@@ -83,7 +93,8 @@ export class NativeSessions {
     return result;
   }
   /** A known conversation's file, found by its id however old it is (not only if it is among the listed ones). */
-  source(engine: 'claude' | 'codex', id: string, profileId?: string): string | undefined {
+  source(engine: 'claude' | 'codex' | 'gemini', id: string, profileId?: string): string | undefined {
+    if (engine === 'gemini') return this.gemini.file(id);
     // The last listing usually has it; looking it up again walks the whole history.
     const listed = this.sources.get(`${engine}:${profileId ?? 'default'}:${id}`); if (listed && fs.existsSync(listed)) return listed;
     const home = this.roots().find((source) => source.engine === engine && source.profileId === profileId); if (!home) return undefined;

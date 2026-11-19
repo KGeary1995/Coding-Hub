@@ -1,4 +1,4 @@
-import type { CLIEngine, MCPConfig, LocalExtension } from './types';
+import type { ChatEngine, CLIEngine, MCPConfig, LocalExtension } from './types';
 
 export interface ConfigInventory { servers: MCPConfig[]; extensions: (LocalExtension & { preview: string; enabled: boolean | null })[]; warnings: string[] }
 export type HubRequest =
@@ -19,9 +19,9 @@ export type HubRequest =
   | { action: 'memory-projects' }
   /** Whether commits a note names are in the folder's clone and on remote branches (as of the last fetch). */
   | { action: 'memory-commits'; directory: string; shas: string[] }
-  | { action: 'memory-write'; project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }
+  | { action: 'memory-write'; project: string; title: string; content: string; author: ChatEngine | 'human'; supersedes?: string }
   /** Several notes at once (a closing table's findings), with one Drive sync per project rather than one per note. */
-  | { action: 'memory-write-many'; notes: { project: string; title: string; content: string; author: CLIEngine | 'human'; supersedes?: string }[] }
+  | { action: 'memory-write-many'; notes: { project: string; title: string; content: string; author: ChatEngine | 'human'; supersedes?: string }[] }
   | { action: 'memory-install'; directory: string; project?: string }
   | { action: 'memory-entries'; directory: string }
   | { action: 'memory-use-auto-key'; directory: string }
@@ -35,11 +35,11 @@ export type HubRequest =
   | { action: 'device-sync-now' }
   | { action: 'device-sync-resolve'; document: SyncedDocument; keep: 'local' | 'remote' }
   | { action: 'drive-sync'; project: string };
-export interface MemoryNote { id: string; project: string; title: string; content: string; author: CLIEngine | 'human'; createdAt: string; supersedes?: string }
+export interface MemoryNote { id: string; project: string; title: string; content: string; author: ChatEngine | 'human'; createdAt: string; supersedes?: string }
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 /** `machine` names the other computer a record was synced from; it is absent for this computer's own runs. */
 /** `incomplete`: Trace could not read all of the run's usage log, so its totals may be low. */
-export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl' | 'cli-logs'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: CLIEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null;
+export interface UsageRecord { machine?: string; conversationId?: string; incomplete?: boolean; source?: 'claude-session-jsonl' | 'codex-rollout-jsonl' | 'cli-logs'; confidence?: 'reported'; costBasis?: 'configured-model-rates' | 'unpriced'; eventCount?: number; runId: string; sessionId: string; engine: ChatEngine; model: string; cwd: string; timestamp: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: { used: number; limit: number } | null; cost: number | null;
   /** New tokens and cost by the local day they were used on (`localDay`), for runs that span midnight. */
   days?: Record<string, { tokens: number; cost: number | null }> }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }

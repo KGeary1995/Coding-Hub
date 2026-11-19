@@ -121,6 +121,8 @@ export class LiveCoach {
   /** A channel's last coached prompt, while live coaching is on. */
   latest(sessionId: string): LiveTip | null { return this.enabled() ? this.tips.find((tip) => tip.sessionId === sessionId) ?? null : null; }
   observe(run: AgentRunningSession, config: CLIEngineConfig, raw: Json) {
+    // Prompts are read from Claude's and Codex's own logs; Gemini CLI keeps none Trace reads.
+    if (run.engine === 'gemini') return;
     const turn = conversationTurn(run.engine, raw); if (!turn) return;
     let state = this.runs.get(run.runId);
     if (!state) { state = { prompts: 0, previous: '', resumed: Boolean(config.resumeId) }; this.runs.set(run.runId, state); if (this.runs.size > 50) this.runs.delete(this.runs.keys().next().value!); }

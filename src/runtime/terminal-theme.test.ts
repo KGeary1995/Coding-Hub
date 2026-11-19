@@ -15,6 +15,6 @@ describe('the terminal theme', () => {
     for (const [key, name] of Object.entries(mirrored)) expect(`${key} ${TERMINAL_THEME[key as keyof typeof mirrored]}`).toBe(`${key} ${token(name)}`);
   });
   it('gives each engine its own colour as the cursor', () => {
-    expect(ENGINE_CURSOR).toEqual({ claude: token('ch-claude'), codex: token('ch-codex'), shell: token('ch-shell') });
+    expect(ENGINE_CURSOR).toEqual({ claude: token('ch-claude'), codex: token('ch-codex'), gemini: token('ch-gemini'), shell: token('ch-shell') });
   });
 });

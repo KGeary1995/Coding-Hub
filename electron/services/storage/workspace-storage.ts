@@ -63,8 +63,8 @@ export class WorkspaceStorage {
 
   load(): SavedWorkspace | null { return this.loadMigrated().workspace; }
   /**
-   * The saved workspace in today's shape: one saved by 1.19 or 1.20 can hold Gemini channels and seats, which are
-   * dropped (migrateWorkspace). `removedChannels`: how many Gemini channels the person had, so the window can say so.
+   * The saved workspace in today's shape: one saved by 1.20 can hold hidden Gemini seats, which are dropped
+   * (migrateWorkspace). `removedChannels`: how many of those the person could see, so the window can say so.
    */
   loadMigrated(): { workspace: SavedWorkspace | null; removedChannels: number; rootDirectory: string | null } {
     if (this.saved) return this.saved;
@@ -80,7 +80,7 @@ export class WorkspaceStorage {
     const result = savedWorkspaceSchema.safeParse(payload);
     if (!result.success) throw new HubError('INVALID_WORKSPACE', result.error.issues.map((issue) => issue.message).join(' '));
     this.database.prepare('INSERT INTO workspace(id,snapshot) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot').run(JSON.stringify(result.data));
-    // What a read of the row just written gives (it has no Gemini channels left to drop), without reading it back.
+    // What a read of the row just written gives (it has no Gemini seats left to drop), without reading it back.
     this.saved = migrateWorkspace(result.data);
   }
 

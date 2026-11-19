@@ -41,19 +41,24 @@ const tableRecord = { findings: z.array(findingSchema).max(50).optional(), waiti
 /** A shared memory project key, as memory folders are named (memory.ts projectSchema). */
 export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
 const memoryKey = memoryKeySchema.optional();
-export const engineConfigSchema = z.discriminatedUnion('engine', [
+/** A Gemini CLI channel (1.19 saved the same fields, so its channels load as they are). */
+const geminiFields = { engine: z.literal('gemini'), resumeId: z.uuid().optional(), permissions, model };
+const geminiConfigSchema = z.object(geminiFields).strict();
+/** Claude Code and Codex, the engines with chats, memory and Round Table seats. */
+const chatEngineOptions = [
   z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), memoryKey, model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
   z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
-]);
+] as const;
+export const engineConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, geminiConfigSchema]);
 const shellConfigSchema = z.object({ engine: z.literal('shell') }).strict();
 /** Every channel type: the agents, and a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, shellConfigSchema]);
 /**
- * A Gemini CLI channel or hidden Gemini seat (`chat`) as Trace 1.19 and 1.20 saved it. Loading only: migrateWorkspace
- * removes it, and nothing can start one.
+ * A Gemini channel, or Trace 1.20's hidden Gemini seat at a hierarchy table (`chat`). Loading only: migrateWorkspace
+ * removes the seats, and nothing can start one.
  */
-const legacyGeminiConfigSchema = z.object({ engine: z.literal('gemini'), model: z.string().max(MAX_MODEL_LENGTH), permissions, chat: z.boolean().optional() }).strict();
-const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, legacyGeminiConfigSchema, shellConfigSchema]);
+const legacyGeminiConfigSchema = z.object({ ...geminiFields, chat: z.boolean().optional() }).strict();
+const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, legacyGeminiConfigSchema, shellConfigSchema]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
 export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.'), config: channelConfigSchema, ...dimensions }).strict();

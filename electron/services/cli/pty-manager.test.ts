@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IPty } from 'node-pty';
 import type { SessionEvent } from '../../../shared/ipc';
 import type { ChatEnvelope } from '../../../shared/chat';
+import type { CLIEngine } from '../../../shared/types';
 import { spawnChatProcess } from '../chat/chat-process';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import { exitTail, HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
@@ -24,11 +25,11 @@ class FakePty {
   onExit = (listener: typeof this.exit) => { this.exit = listener; return { dispose() {} }; };
 }
 
-const engines = (engine: 'claude' | 'codex'): DiscoveredEngine => ({ info: { engine, available: true, executable: '/fixture', version: '2.1.296', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null }, executable: { file: '/fixture', prefixArgs: [], extraEnv: {}, displayPath: '/fixture' } });
+const engines = (engine: CLIEngine): DiscoveredEngine => ({ info: { engine, available: true, executable: '/fixture', version: '2.1.296', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, error: null }, executable: { file: '/fixture', prefixArgs: [], extraEnv: {}, displayPath: '/fixture' } });
 const request = (sessionId = 'session-one') => ({ sessionId, cwd: process.cwd(), config: { engine: 'codex' as const, model: '', reasoningEffort: null }, cols: 80, rows: 24 });
 const managers: PtyManager[] = [];
 afterEach(async () => { await Promise.all(managers.splice(0).map((manager) => manager.dispose())); });
-function fixture(discover = async (engine: 'claude' | 'codex') => engines(engine)) {
+function fixture(discover = async (engine: CLIEngine) => engines(engine)) {
   const processes: FakePty[] = [];
   const events: SessionEvent[] = [];
   const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
@@ -51,7 +52,7 @@ describe('PTY lifecycle and IPC ownership', () => {
   });
   it('binds concurrent Claude sessions to their selected profile environments before discovery and spawning', async () => {
     const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
-    const discover = vi.fn(async (engine: 'claude' | 'codex', _env?: Record<string, string>) => { const result = engines(engine); result.info.authentication = { state: 'authenticated', checkedAt: new Date().toISOString(), message: 'Profile authenticated.' }; return result; });
+    const discover = vi.fn(async (engine: CLIEngine, _env?: Record<string, string>) => { const result = engines(engine); result.info.authentication = { state: 'authenticated', checkedAt: new Date().toISOString(), message: 'Profile authenticated.' }; return result; });
     const profileEnvironment = vi.fn((base: Record<string, string>, id?: string) => id ? { PATH: base.PATH, CLAUDE_CONFIG_DIR: '/profiles/' + id } : base);
     const manager = new PtyManager(() => {}, { spawn, discover, profileEnvironment, environment: () => ({ PATH: '/bin', ANTHROPIC_API_KEY: 'inherited' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } });
     managers.push(manager);
@@ -71,7 +72,7 @@ describe('PTY lifecycle and IPC ownership', () => {
   });
   it('asks for the sign-in probes only for a named profile, and says so when they timed out', async () => {
     const options: unknown[] = [];
-    const discover = vi.fn(async (engine: 'claude' | 'codex', _env?: Record<string, string>, option?: { authentication?: boolean }) => { options.push(option); const result = engines(engine); result.info.authentication = { state: 'unknown', checkedAt: new Date().toISOString(), message: AUTH_TIMED_OUT }; return result; });
+    const discover = vi.fn(async (engine: CLIEngine, _env?: Record<string, string>, option?: { authentication?: boolean }) => { options.push(option); const result = engines(engine); result.info.authentication = { state: 'unknown', checkedAt: new Date().toISOString(), message: AUTH_TIMED_OUT }; return result; });
     const manager = new PtyManager(() => {}, { spawn: () => new FakePty() as unknown as IPty, discover, profileEnvironment: (base) => base, environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} } }); managers.push(manager);
     await manager.start(7, request());
     await expect(manager.start(7, { ...request('profiled'), config: { engine: 'claude', accountProfileId: '11111111-1111-4111-8111-111111111111', model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } })).rejects.toMatchObject({ code: 'PROFILE_LOGIN_REQUIRED', message: expect.stringContaining('in time') });
@@ -267,7 +268,7 @@ describe('launches that fail to start', () => {
 
 describe('Terminal channels', () => {
   it('run the login shell in the channel folder without agent discovery, usage, rules or memory', async () => {
-    const discover = vi.fn(async (engine: 'claude' | 'codex') => engines(engine));
+    const discover = vi.fn(async (engine: CLIEngine) => engines(engine));
     const prepareLaunch = vi.fn(); const onStarted = vi.fn();
     const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
     const events: SessionEvent[] = [];
@@ -489,7 +490,7 @@ describe('Chat channels', () => {
   });
   it('runs a read-only seat’s command at Full access without an approval card or alert, and asks at other levels', async () => {
     const processes: (FakePty & { onStderr: () => void })[] = []; const chats: ChatEnvelope[] = []; const events: SessionEvent[] = [];
-    const permitting = (engine: 'claude' | 'codex') => { const found = engines(engine); found.info.supportsPermissions = true; return found; };
+    const permitting = (engine: CLIEngine) => { const found = engines(engine); found.info.supportsPermissions = true; return found; };
     const manager = new PtyManager((_owner, event) => events.push(event), { discover: async (engine) => permitting(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
       spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
     managers.push(manager);
@@ -514,3 +515,43 @@ describe('Chat channels', () => {
   });
 });
 
+
+describe('Gemini CLI terminal runs', () => {
+  const ESC = String.fromCharCode(27); const BEL = String.fromCharCode(7);
+  const status = (body: string) => `${ESC}]7501;${body}${BEL}`;
+  const id = 'caf3f572-52a4-467c-8bc0-c7621834d34a';
+  function geminiFixture(lookup: (cwd: string, since: number) => string | null = () => null) {
+    const processes: FakePty[] = []; const events: SessionEvent[] = []; const looked: [string, number][] = [];
+    const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), geminiConversation: (cwd, since) => { looked.push([cwd, since]); return lookup(cwd, since); } });
+    managers.push(manager);
+    return { manager, processes, events, looked, spawn, start: () => manager.start(1, { sessionId: 'gem', cwd: process.cwd(), config: { engine: 'gemini', model: '' }, cols: 80, rows: 24 }) };
+  }
+  it('says when it waits for the person (with agy’s question), when that was answered, and when the turn ended', async () => {
+    const { processes, events, start } = geminiFixture(); await start(); const pty = processes[0];
+    // agy says idle as it opens: that ends nothing.
+    pty.data(status('state=idle:app=antigravity'));
+    pty.data(status('state=working:app=antigravity'));
+    pty.data(status(`state=blocked:kind=permission:app=antigravity:msg=${Buffer.from('Approve Bash: npm test').toString('base64')}`));
+    pty.data(status('state=working:app=antigravity')); pty.data(status('state=idle:app=antigravity'));
+    expect(events.filter((event) => ['attention', 'answered'].includes(event.type)).map((event) => event.type === 'attention' ? ['attention', event.message] : ['answered', 'finished' in event ? event.finished : false]))
+      .toEqual([['attention', 'Approve Bash: npm test'], ['answered', false], ['answered', true]]);
+  });
+  it('takes the conversation agy prints as it quits, before the exit, without looking it up', async () => {
+    const { processes, events, looked, start } = geminiFixture(); await start();
+    processes[0].data(`Resume with -c (or command below):\r\nagy --conversation=${id.toUpperCase()}\r\n`); processes[0].exit({ exitCode: 0 });
+    const types = events.map((event) => event.type);
+    expect(events.find((event) => event.type === 'conversation')).toMatchObject({ sessionId: 'gem', conversationId: id });
+    expect(types.indexOf('conversation')).toBeLessThan(types.indexOf('exit')); expect(looked).toEqual([]);
+  });
+  it('looks the conversation up when agy printed none (stopped by Trace), and sends none when it is not found', async () => {
+    const found = geminiFixture(() => id); await found.start(); found.processes[0].exit({ exitCode: 130 });
+    expect(found.events.find((event) => event.type === 'conversation')).toMatchObject({ conversationId: id }); expect(found.looked[0][0]).toBe(process.cwd());
+    const none = geminiFixture(() => null); await none.start(); none.processes[0].exit({ exitCode: 0 });
+    expect(none.events.some((event) => event.type === 'conversation')).toBe(false);
+  });
+  it('starts agy with its status reports on', async () => {
+    const { spawn, start } = geminiFixture(); await start();
+    expect((spawn.mock.calls[0] as unknown[])[2]).toMatchObject({ env: expect.objectContaining({ AGY_CLI_OSC7501: 'on' }) });
+  });
+});

@@ -153,3 +153,18 @@ describe('npm launchers on Windows', () => {
     expect(found.file).toBe(path.join(bin, 'claude.exe')); expect(found.file).not.toMatch(/\.cmd$/i);
   });
 });
+
+describe('Gemini CLI on PATH', () => {
+  it('is found as agy, a native program; a script by that name on Windows is passed over', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'trace agy ')); directories.push(root);
+    const scripts = path.join(root, 'scripts'); const bin = path.join(root, 'bin'); await mkdir(scripts); await mkdir(bin);
+    const native = path.join(bin, process.platform === 'win32' ? 'agy.exe' : 'agy');
+    if (process.platform === 'win32') {
+      await writeFile(path.join(scripts, 'agy.cmd'), '@echo off');
+      await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+    }
+    await writeFile(native, 'MZ', { mode: 0o755 });
+    expect((await findExecutable('gemini', { PATH: [scripts, bin].join(path.delimiter) })).file).toBe(native);
+    await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+  });
+});

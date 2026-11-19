@@ -64,3 +64,33 @@ it('passes an explicitly selected catalog model and raw reasoning effort exactly
  const resumeId='11111111-1111-4111-8111-111111111111';expect(buildLaunch({...config,resumeId},{...info('codex'),supportsResume:true}).args).toEqual(['resume',resumeId,'--model','custom/provider-model','--config','model_reasoning_effort="minimal"']);
 });
 
+
+describe('Gemini CLI launch', () => {
+  const gemini = { engine: 'gemini' as const, model: '' };
+  const agy: EngineInfo = { engine: 'gemini', available: true, executable: '/agy', version: '1.5.12', supportsModel: true, supportsConfig: false, supportsNoDaemon: false, supportsPermissions: true, supportsResume: true, error: null };
+  it('turns on its status reports, and names a model only when one is chosen', () => {
+    expect(buildLaunch({ ...gemini, permissions: 'edits' }, agy)).toEqual({ args: ['--mode', 'accept-edits'], env: { AGY_CLI_OSC7501: 'on' } });
+    expect(buildLaunch({ ...gemini, model: 'gemini-4-neon-xhigh', permissions: 'edits' }, agy).args).toEqual(['--model', 'gemini-4-neon-xhigh', '--mode', 'accept-edits']);
+  });
+  it('starts Ask in agy’s Default mode (agy’s own default, Auto, asks nothing), and Full access without prompts', () => {
+    expect(buildLaunch({ ...gemini, permissions: 'ask' }, agy).args).toEqual(['--settings', '{"agentMode":""}']);
+    expect(buildLaunch({ ...gemini, permissions: 'full' }, agy).args).toEqual(['--dangerously-skip-permissions']);
+    // No setting is the default, Allow edits.
+    expect(buildLaunch(gemini, agy).args).toEqual(['--mode', 'accept-edits']);
+  });
+  it('refuses a level an agy without the flags cannot take, and keeps its own settings for the default', () => {
+    const old = { ...agy, supportsPermissions: false };
+    expect(() => buildLaunch({ ...gemini, permissions: 'full' }, old)).toThrow(/permission flags/);
+    expect(buildLaunch(gemini, old).args).toEqual([]); expect(launchedLevel(gemini, old)).toBe('ask');
+  });
+  it('resumes its conversation with --conversation, after the other flags', () => {
+    const id = '7912ead9-5b11-4648-97cd-206300d499d7';
+    expect(buildLaunch({ ...gemini, permissions: 'full', resumeId: id }, agy).args).toEqual(['--dangerously-skip-permissions', '--conversation', id]);
+    expect(() => buildLaunch({ ...gemini, resumeId: id }, { ...agy, supportsResume: false })).toThrow(/resume/);
+  });
+  it('is checked like the other agents: the engine must match and a model needs --model', () => {
+    expect(() => buildLaunch(gemini, { ...agy, engine: 'codex' })).toThrow(/does not match/);
+    expect(() => buildLaunch({ ...gemini, model: 'gemini-4-neon-high' }, { ...agy, supportsModel: false })).toThrow(/--model/);
+    expect(startSessionSchema.safeParse({ sessionId: 'g', cwd: '/p', config: { ...gemini, model: '--yolo' }, cols: 80, rows: 24 }).success).toBe(false);
+  });
+});

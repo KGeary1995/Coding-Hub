@@ -34,7 +34,7 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
   </>;
 }
 
-const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
+const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
 
 /**
  * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read
@@ -107,7 +107,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
-    {channel.chat && channel.engine !== 'shell'
+    {channel.chat && (channel.engine === 'claude' || channel.engine === 'codex')
       ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}

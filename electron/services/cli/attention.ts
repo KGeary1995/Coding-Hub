@@ -10,27 +10,57 @@ export function cleanMessage(text: string) {
 }
 
 /**
- * Extracts OSC 9 desktop notifications (`ESC ] 9 ; message BEL|ST`) from terminal output.
- * Chunks can split a sequence, so an unfinished one is carried into the next call.
- * `OSC 9;4` is ConEmu/Windows Terminal progress, not a notification, and is ignored.
+ * The bodies of one OSC code's sequences (`ESC ] code ; body BEL|ST`) in terminal output. Chunks can split a sequence,
+ * so an unfinished one is carried into the next call.
  */
-export class OscNotifications {
+export class OscSequences {
   private carry = '';
+  private opening: string;
+  constructor(code: string) { this.opening = `\x1b]${code};`; }
   push(chunk: string): string[] {
     const text = this.carry + chunk; this.carry = '';
-    const messages: string[] = []; let index = 0;
+    const bodies: string[] = []; let index = 0;
     for (;;) {
-      const start = text.indexOf('\x1b]9;', index);
+      const start = text.indexOf(this.opening, index);
       if (start < 0) break;
       const end = text.slice(start).search(/\x07|\x1b\\/);
       if (end < 0) { if (text.length - start <= 2048) this.carry = text.slice(start); break; }
-      const body = text.slice(start + 4, start + end);
-      if (!/^4;/.test(body)) { const message = cleanMessage(body); if (message) messages.push(message); }
+      bodies.push(text.slice(start + this.opening.length, start + end));
       index = start + end + 1;
     }
     // A sequence can also be cut inside its opening bytes.
-    if (!this.carry) { const tail = text.slice(-3); const partial = ['\x1b', '\x1b]', '\x1b]9'].find((prefix) => tail.endsWith(prefix)); if (partial) this.carry = partial; }
-    return messages;
+    if (!this.carry) { const tail = text.slice(-this.opening.length + 1); for (let length = this.opening.length - 1; length > 0; length--) if (tail.endsWith(this.opening.slice(0, length))) { this.carry = this.opening.slice(0, length); break; } }
+    return bodies;
+  }
+}
+
+/**
+ * Extracts OSC 9 desktop notifications (Codex's approval requests) from terminal output.
+ * `OSC 9;4` is ConEmu/Windows Terminal progress, not a notification, and is ignored.
+ */
+export class OscNotifications {
+  private sequences = new OscSequences('9');
+  push(chunk: string): string[] { return this.sequences.push(chunk).filter((body) => !/^4;/.test(body)).map(cleanMessage).filter(Boolean); }
+}
+
+export type GeminiStatus = { state: 'blocked'; message: string } | { state: 'working' | 'idle' | 'done' | 'failed' };
+/**
+ * Gemini CLI's status (agy 1.4.0+, with AGY_CLI_OSC7501=on): `ESC ] 7501 ; state=working|idle|blocked|done|failed`
+ * followed by `:key=value` fields; a blocked one has `kind` (permission, question) and `msg`, the question in base64,
+ * such as "Approve Bash: git status". Seen with agy 1.5.12.
+ */
+export class GeminiStatusReader {
+  private sequences = new OscSequences('7501');
+  push(chunk: string): GeminiStatus[] {
+    return this.sequences.push(chunk).flatMap((body): GeminiStatus[] => {
+      const fields = new Map(body.split(':').map((field) => { const at = field.indexOf('='); return [at < 0 ? field : field.slice(0, at), at < 0 ? '' : field.slice(at + 1)] as const; }));
+      const state = fields.get('state');
+      if (state === 'blocked') {
+        let message = ''; try { message = cleanMessage(Buffer.from(fields.get('msg') ?? '', 'base64').toString('utf8')); } catch { /* No readable question. */ }
+        return [{ state, message: message || (fields.get('kind') === 'question' ? 'Gemini CLI has a question for you.' : 'Gemini CLI is waiting for your approval.') }];
+      }
+      return state === 'working' || state === 'idle' || state === 'done' || state === 'failed' ? [{ state }] : [];
+    });
   }
 }
 
@@ -146,7 +176,7 @@ export const CODEX_ATTENTION_CONFIG = ['tui.notifications=["approval-requested"]
 export function supportsHttpHooks(version: string | null) { return atLeast(version, 2, 1, 63); }
 
 /** Whether a CLI's version text names `major.minor.patch` or later. */
-function atLeast(version: string | null, ...wanted: [number, number, number]) {
+export function atLeast(version: string | null, ...wanted: [number, number, number]) {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(version ?? '');
   if (!match) return false;
   const found = match.slice(1).map(Number);

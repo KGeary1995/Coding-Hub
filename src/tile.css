@@ -18,6 +18,7 @@
    then the cover is the row's own height. */
 .session-tile.tr-tile { --ch: var(--tr-ch-codex); --term-top: 12px; --term-cover: calc(round(up, var(--tr-tile-detail-h) - var(--term-top), var(--tr-term-row, 1px)) + var(--term-top)); position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); box-shadow: var(--tr-shadow-card); transition: border-color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease); }
 .session-tile.tr-tile.claude { --ch: var(--tr-ch-claude); }
+.session-tile.tr-tile.gemini { --ch: var(--tr-ch-gemini); }
 .session-tile.tr-tile.shell { --ch: var(--tr-ch-shell); }
 /* Selected or focused: an accent frame and glow. Needs you: both in the waiting colour. Failed: a red frame. The
    accent is solid, as those two are: the tinted line (2.2:1 on the window) would be dimmer than a tile's own frame. */

@@ -1,7 +1,7 @@
 import type { ChannelEngine } from './types';
 
 /** The names new channels start with. A channel still called this is named after its folder instead. */
-export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' };
+export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' };
 
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 

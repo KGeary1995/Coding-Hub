@@ -7,8 +7,13 @@ const session = (id: string, engine: 'claude' | 'codex' | 'gemini') => ({ id, ti
 const tile = (sessionId: string, x: number) => ({ sessionId, x, y: 0, w: 4, h: 12, minW: 3, minH: 10 });
 
 describe('a workspace saved with Gemini channels', () => {
-  it('lays the channels left out again, so no gap is left where a Gemini tile was', () => {
-    const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), session('g', 'gemini'), session('c', 'codex')], tiles: [tile('a', 0), tile('g', 4), tile('c', 8)] });
+  it('keeps a Gemini CLI channel (1.19 saved the same fields) where it was', () => {
+    const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: 'g', sessions: [session('a', 'claude'), session('g', 'gemini')], tiles: [tile('a', 0), tile('g', 4)] });
+    expect(migrateWorkspace(saved)).toEqual({ workspace: saved, removedChannels: 0, rootDirectory: '/p' });
+  });
+  it('lays the channels left out again, so no gap is left where a Gemini chat’s tile was', () => {
+    const chat = { ...session('g', 'gemini'), config: { engine: 'gemini', model: '', chat: true } };
+    const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), chat, session('c', 'codex')], tiles: [tile('a', 0), tile('g', 4), tile('c', 8)] });
     const { workspace } = migrateWorkspace(saved);
     expect(workspace!.tiles.map(({ sessionId, x, w }) => ({ sessionId, x, w }))).toEqual([{ sessionId: 'a', x: 0, w: 6 }, { sessionId: 'c', x: 6, w: 6 }]);
     expect(savedWorkspaceSchema.safeParse(workspace).success).toBe(true);
