@@ -1,5 +1,5 @@
 /** These contracts describe local CLI configuration, never direct API requests. */
-export type CLIEngine = 'claude' | 'codex';
+export type CLIEngine = 'claude' | 'codex' | 'gemini';
 export type ReasoningEffort = string;
 /**
  * What an agent may do without asking (absent: DEFAULT_PERMISSIONS, edits). ask: the CLI's own settings. edits: Claude's acceptEdits;
@@ -40,15 +40,33 @@ export interface CodexCLIEngineConfig {
   reasoningEffort: ReasoningEffort | null;
 }
 
+/**
+ * Gemini CLI (`agy`), always a terminal: no chat, shared memory or Round Table seat (the person's choice, 2026-11-18).
+ * `model` is an agy model ID, which names its effort too (gemini-4-neon-high); empty uses agy's own default.
+ */
+export interface GeminiCLIEngineConfig {
+  engine: 'gemini';
+  /** agy's conversation ID (`--conversation`). */
+  resumeId?: string;
+  permissions?: PermissionLevel;
+  model: string;
+}
+
 /** A discriminated union keeps one engine's settings out of the other's adapter. */
-export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
+export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig | GeminiCLIEngineConfig;
+/** The engines with chat channels, shared memory, tasks and Round Table seats. */
+export type ChatEngine = 'claude' | 'codex';
+export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
 /** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */
 export interface ShellChannelConfig { engine: 'shell' }
 export type ChannelEngine = CLIEngine | 'shell';
 export type ChannelConfig = CLIEngineConfig | ShellChannelConfig;
-/** Claude Code or Codex: the channels with chat, resume, usage, memory, tasks and Round Table seats. */
-export const isAgentConfig = (config: ChannelConfig): config is CLIEngineConfig => config.engine === 'claude' || config.engine === 'codex';
+/** An agent CLI (Claude Code, Codex or Gemini CLI): model, permissions, resume, usage and notices. */
+export const isAgentConfig = (config: ChannelConfig): config is CLIEngineConfig => config.engine === 'claude' || config.engine === 'codex' || config.engine === 'gemini';
+/** Claude Code or Codex: an agent that also has chat, shared memory, tasks and Round Table seats. */
+export const isChatEngineConfig = (config: ChannelConfig): config is ChatEngineConfig => config.engine === 'claude' || config.engine === 'codex';
+export const isChatEngine = (engine: string): engine is ChatEngine => engine === 'claude' || engine === 'codex';
 
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'exited' | 'error';
 export type WorkspaceBinding =

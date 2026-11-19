@@ -2,8 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { StringDecoder } from 'node:string_decoder';
-import type { CodexModelCatalog } from '../../../shared/workbench';
-import { findExecutable, freshHostEnvironment } from './discovery';
+import type { CodexModelCatalog, GeminiModelCatalog } from '../../../shared/workbench';
+import { findExecutable, freshHostEnvironment, probeCLI } from './discovery';
 import { HubError } from './engine-adapter';
 import { directory } from '../workbench/local-store';
 
@@ -83,4 +83,20 @@ export class ModelCatalog {
     });
   }
   close() { this.closing = true; for (const child of this.children) this.stop(child); }
+}
+
+/** `agy models` output: one `id<TAB>name` line per model, after a "Fetching available models..." line. */
+export function parseGeminiModels(output: string): GeminiModelCatalog['models'] {
+  const models = new Map<string, string>();
+  for (const line of output.split(/\r?\n/)) { const [id, name] = line.split('\t'); const model = id?.trim() ?? ''; if (name !== undefined && identifier.safeParse(model).success && !models.has(model)) models.set(model, name.trim().slice(0, 300) || model); }
+  return [...models].slice(0, 1000).map(([model, displayName]) => ({ model, displayName }));
+}
+
+/** Gemini CLI's models for the signed-in account (`agy models`: no prompt, no quota). */
+export async function geminiModels(dependencies: { find?: typeof findExecutable; probe?: typeof probeCLI } = {}): Promise<GeminiModelCatalog> {
+  const env = await freshHostEnvironment(); const executable = await (dependencies.find ?? findExecutable)('gemini', env);
+  const result = await (dependencies.probe ?? probeCLI)(executable, ['models'], env);
+  const models = result.exitCode === 0 ? parseGeminiModels(result.stdout) : [];
+  if (!models.length) throw new HubError(result.timedOut ? 'MODEL_TIMEOUT' : 'MODEL_CATALOG', result.timedOut ? 'Gemini CLI did not list its models in time. Check its connection, then refresh.' : 'Gemini CLI listed no models. Sign in to agy in a terminal, then refresh. You can still enter an exact model ID or use its default.');
+  return { models, checkedAt: new Date().toISOString(), source: 'agy-models' };
 }

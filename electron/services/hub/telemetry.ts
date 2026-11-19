@@ -280,7 +280,7 @@ export class TelemetryService {
       for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
         if (end - start <= 2 * 1024 * 1024) try {
           const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
-          const parsed = parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
+          const parsed = w.run.engine === 'gemini' ? null : parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
           if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.select.get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
             this.upsert.run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
           }

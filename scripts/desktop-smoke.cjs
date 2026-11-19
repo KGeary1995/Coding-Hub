@@ -391,9 +391,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
     await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
-    // + Channel lists Terminal, Claude Code, Codex, then both Round Tables (two channels are open, so both fit).
+    // + Channel lists Terminal, Claude Code, Codex, Gemini CLI, then both Round Tables (two channels are open, so both fit).
     await page.getByRole('button', { name: 'New channel', exact: true }).click();
-    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Round Table', 'Round Table (hierarchy)']);
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini CLI', 'Round Table', 'Round Table (hierarchy)']);
     await page.keyboard.press('Escape');
     // Deliberately close immediately after a layout change; the host requests a final snapshot.
     await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click();

@@ -729,10 +729,11 @@ describe('phone permissions and chat channels', () => {
     expect((await post(server, token, '/api/channel-add', { engine: 'shell' })).status).toBe(200);
     // A terminal cannot be a chat, and a channel on no computer here is unknown.
     expect((await post(server, token, '/api/channel-add', { engine: 'shell', chat: true })).status).toBe(400);
-    // Trace runs no Gemini (removed after 1.20): a phone or older computer asking for one is refused.
-    expect((await post(server, token, '/api/channel-add', { engine: 'gemini' })).status).toBe(400);
+    // A Gemini CLI channel is a terminal: it can be added, but not as a chat.
+    expect((await post(server, token, '/api/channel-add', { engine: 'gemini' })).status).toBe(200);
+    expect((await post(server, token, '/api/channel-add', { engine: 'gemini', chat: true })).status).toBe(400);
     expect((await post(server, token, '/api/control', { sessionId: 'elsewhere', control: 'stop' })).status).toBe(400);
-    expect(controls).toEqual([{ sessionId: 's1', control: 'restart' }]); expect(adds).toEqual([{ engine: 'codex', chat: true }, { engine: 'shell', chat: false }]);
+    expect(controls).toEqual([{ sessionId: 's1', control: 'restart' }]); expect(adds).toEqual([{ engine: 'codex', chat: true }, { engine: 'shell', chat: false }, { engine: 'gemini', chat: false }]);
     server.setCanRun(id, false);
     expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'stop' })).status).toBe(403); expect(controls).toHaveLength(1);
     // A linked computer always may, and its permission cannot be changed here.

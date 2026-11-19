@@ -26,7 +26,7 @@ export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIco
 ];
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
 const CHANNEL_KINDS = {
-  shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' },
+  shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' }, gemini: { label: 'Gemini CLI', icon: ENGINE_ICONS.gemini, tone: 'gemini' },
   table: { label: 'Round Table', icon: UsersRound, tone: 'you' }, hierarchy: { label: 'Round Table (hierarchy)', icon: Network, tone: 'planner' },
 } as const;
 const channelItem = (kind: keyof typeof CHANNEL_KINDS, onSelect: () => void): MenuItem => { const { label, icon: Icon, tone } = CHANNEL_KINDS[kind]; return { label, icon: <span className={`ui-avatar small ${tone}`} aria-hidden="true"><Icon /></span>, onSelect }; };
@@ -63,11 +63,11 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
-  // The order is the person's: Terminal, Claude Code, Codex, then the Round Tables (on the phone too).
+  // The order is the person's: Terminal, Claude Code, Codex, Gemini CLI, then the Round Tables (on the phone too).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   const channelMenu: MenuItem[] = other
-    ? (['shell', 'claude', 'codex'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
-    : [...(['shell', 'claude', 'codex'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
+    ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
+    : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
       ...(sessions.length <= MAX_CHANNELS - 2 ? [channelItem('table', () => void startRoundTable().then((error) => { if (error) tableFailed(error); }))] : []),
       ...(sessions.length <= MAX_CHANNELS - 3 ? [channelItem('hierarchy', () => void startHierarchyTable().then((error) => { if (error) tableFailed(error); }))] : [])];
   return <header className="tr-topbar">

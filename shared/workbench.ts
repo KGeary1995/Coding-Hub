@@ -3,9 +3,11 @@ export interface DiagnosticStep { name: string; state: 'passed' | 'failed' | 'un
 export interface DiagnosticReport { engine: 'claude' | 'codex'; checkedAt: string; steps: DiagnosticStep[] }
 export interface CodexModel { model: string; displayName: string; description: string; hidden: boolean; isDefault: boolean; reasoningEfforts: string[] }
 export interface CodexModelCatalog { models: CodexModel[]; checkedAt: string; source: 'codex-app-server'; directory: string }
+/** The models `agy models` lists for the signed-in account: each ID names its effort too (gemini-4-neon-high). */
+export interface GeminiModelCatalog { models: { model: string; displayName: string }[]; checkedAt: string; source: 'agy-models' }
 /** `stalls` (StallRecord in host-health.ts) is optional so an older host's report still matches. */
 export interface HostHealthReport { previousShutdown: 'clean' | 'unclean' | 'unknown'; events: { time: string; event: string; reason: string | null; exitCode: number | null }[]; stalls?: { time: string; side: 'main' | 'window' | 'gpu'; kind: string; ms: number | null; job: string | null }[] }
-export interface NativeConversation { key: string; id: string; engine: 'claude' | 'codex'; profileId?: string; directory: string | null; title: string; modifiedAt: string }
+export interface NativeConversation { key: string; id: string; engine: 'claude' | 'codex' | 'gemini'; profileId?: string; directory: string | null; title: string; modifiedAt: string }
 export interface NativeResume { conversation: NativeConversation; directory: string }
 export interface Experiment { id: string; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string; createdAt: string }
 export interface Trial { id: string; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: 'successful' | 'partial' | 'failed'; evidence: string; createdAt: string }
@@ -38,6 +40,7 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | import('./productivity').WorkflowRequest
  | { action: 'runtime' } | { action: 'restart' }
  | { action: 'codex-models'; directory: string | null }
+ | { action: 'gemini-models' }
  | { action: 'host-health' }
  | { action: 'diagnose'; engine: 'claude' | 'codex'; directory: string | null; profileId?: string }
  | { action: 'native-list' } | { action: 'native-resume'; key: string; directory?: string }
@@ -48,4 +51,4 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | { action: 'backup-list' } | { action: 'backup-create'; includeLogs: boolean } | { action: 'backup-export'; id: string } | { action: 'backup-restore'; id: string } | { action: 'backup-import' } | { action: 'backup-delete'; id: string }
  | { action: 'task-list' } | { action: 'task-save'; id?: string; title: string; details?: string; directory: string; sessionId: string | null; scope: string[]; status: Task['status']; notes: string; verificationId: string | null } | { action: 'task-audit' } | { action: 'task-watch' } | { action: 'task-send'; id: string } | { action: 'task-remove'; id: string } | { action: 'task-status'; id: string; status: Task['status']; outcome?: TaskOutcome; outcomeNote?: string } | { action: 'task-detail'; id: string } | { action: 'task-pr'; id: string; url: string }
  | { action: 'verification-list' } | { action: 'verification-save'; id?: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number } | { action: 'verification-run'; id: string } | { action: 'verification-cancel' } | { action: 'verification-fresh' };
-export type WorkbenchResponse = import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | TaskDetail | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null;
+export type WorkbenchResponse = import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | TaskDetail | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | GeminiModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null;

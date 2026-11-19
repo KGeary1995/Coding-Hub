@@ -1,5 +1,5 @@
 import type { DayUsage, HubPreferences } from '../../shared/hub';
-import type { PlanLimits } from '../../shared/plan-limits';
+import { PLAN_NAME, type PlanLimits } from '../../shared/plan-limits';
 import type { AlertTarget } from '../../shared/ipc';
 
 /** A desktop notification, and what clicking it opens. */
@@ -43,7 +43,7 @@ export function usageAlerts(today: DayUsage, limits: PlanLimits[], preferences: 
   budget('cost', today.cost, preferences.dailyCost, (value) => `$${value.toFixed(2)}`);
   for (const plan of limits) for (const window of plan.windows) {
     const share = window.usedPercent / 100; const level = share >= 1 ? 100 : share >= warning ? Math.round(warning * 100) : 0; if (!level) continue;
-    const name = `${plan.engine === 'claude' ? 'Claude' : 'Codex'}${plan.account !== 'Default' ? ` (${plan.account})` : ''} ${window.label.toLowerCase()} limit`;
+    const name = `${PLAN_NAME[plan.engine]}${plan.account !== 'Default' ? ` (${plan.account})` : ''} ${window.label.toLowerCase()} limit`;
     once(`${plan.engine}:${plan.account}:${window.label}:${resetKey(window.resets, today.day)}:${level}`, { title: level === 100 ? `${name} reached` : `${Math.round(window.usedPercent)}% of the ${name} used`, body: window.resets ? `It resets ${/^\d{4}-/.test(window.resets) ? new Date(window.resets).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : window.resets}.` : 'Open Usage for details.', target: { view: 'usage' } });
   }
   return alerts;

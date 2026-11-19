@@ -37,14 +37,19 @@ afterEach(() => {
 });
 
 describe('a workspace saved with Gemini (1.19, 1.20)', () => {
-  it('keeps the project folder when only Gemini channels were saved', () => {
+  it('keeps the project folder when only 1.20’s hidden Gemini seats were saved, and a Gemini channel as it is', () => {
     const { root, storage } = open(); storage.close(); databases.splice(databases.indexOf(storage), 1);
     const at = new Date().toISOString();
     const gemini = { version: 1, rootDirectory: '/projects/root', layoutMode: 'columns', focusedSessionId: null, sessions: [{ id: 'gem', title: 'Gemini', config: { engine: 'gemini', model: 'gemini-4-argon-high' }, binding: { mode: 'workspace' }, createdAt: at }], tiles: [{ sessionId: 'gem', x: 0, y: 0, w: 12, h: 12, minW: 3, minH: 10 }] };
     const database = new DatabaseSync(path.join(root, 'storage.db')); database.prepare('INSERT INTO workspace(id,snapshot) VALUES(1,?)').run(JSON.stringify(gemini)); database.close();
     const reopened = new WorkspaceStorage(root); databases.push(reopened);
-    expect(reopened.loadMigrated()).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/projects/root' });
-    expect(reopened.load()).toBeNull();
+    expect(reopened.loadMigrated()).toEqual({ workspace: gemini, removedChannels: 0, rootDirectory: '/projects/root' });
+    const seat = { ...gemini, sessions: [{ ...gemini.sessions[0], config: { ...gemini.sessions[0].config, chat: true } }] };
+    const again = new DatabaseSync(path.join(root, 'storage.db')); again.prepare('UPDATE workspace SET snapshot=? WHERE id=1').run(JSON.stringify(seat)); again.close();
+    // A read is kept (loadMigrated caches it), so the changed row is read by a storage opened again.
+    reopened.close(); databases.splice(databases.indexOf(reopened), 1); const seated = new WorkspaceStorage(root); databases.push(seated);
+    expect(seated.loadMigrated()).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/projects/root' });
+    expect(seated.load()).toBeNull();
   });
 });
 

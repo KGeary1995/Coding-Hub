@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { MemoryProject } from '../../shared/hub';
 import { hubCall } from '../state/hub-store';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
-import type { ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import type { ChatEngineConfig, ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, withPermissions } from '../runtime/permissions';
 import { CodexModelPicker } from './CodexModelPicker';
+import { GeminiModelPicker } from './GeminiModelPicker';
 import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue, permissionLevel } from '../../shared/schemas';
 
 // Claude Code aliases follow the current models; the listed IDs are current releases.
@@ -34,13 +35,13 @@ export function withProfile(config: ClaudeCLIEngineConfig, profileId: string, ke
  * Which shared memory project the channel reads and writes: the folder's automatic one, or another the person picks (a
  * folder that is not the project's own, such as the home folder, would otherwise share notes with everything run there).
  */
-function MemoryProjectControl({ config, directory, onChange }: { config: CLIEngineConfig; directory: string | null; onChange: (config: CLIEngineConfig) => void }) {
+function MemoryProjectControl({ config, directory, onChange }: { config: ChatEngineConfig; directory: string | null; onChange: (config: CLIEngineConfig) => void }) {
   const [automatic, setAutomatic] = useState(''); const [projects, setProjects] = useState<MemoryProject[]>([]);
   useEffect(() => { if (directory) void hubCall<string>({ action: 'memory-key', directory }).then(setAutomatic).catch(() => setAutomatic('')); }, [directory]);
   useEffect(() => { void hubCall<MemoryProject[]>({ action: 'memory-projects' }).then(setProjects).catch(() => {}); }, []);
   const chosen = config.memoryKey ?? '';
   return <label className="model-control ui-field">Shared memory project
-    <select aria-label="Shared memory project" value={chosen} onChange={(event) => { const { memoryKey: _old, ...rest } = config; onChange(event.target.value ? { ...rest, memoryKey: event.target.value } as CLIEngineConfig : rest as CLIEngineConfig); }}>
+    <select aria-label="Shared memory project" value={chosen} onChange={(event) => { const { memoryKey: _old, ...rest } = config; onChange(event.target.value ? { ...rest, memoryKey: event.target.value } as ChatEngineConfig : rest as ChatEngineConfig); }}>
       <option value="">{automatic ? `Automatic · ${automatic}` : 'Automatic for the channel’s folder'}</option>
       {projects.filter((project) => project.key !== automatic).map((project) => <option key={project.key} value={project.key}>{project.key} · {project.notes} {project.notes === 1 ? 'note' : 'notes'}</option>)}
       {chosen && !projects.some((project) => project.key === chosen) && <option value={chosen}>{chosen} · no notes yet</option>}
@@ -62,9 +63,9 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
         <select aria-label={`${config.engine} permissions`} value={permissions} onChange={(event) => onChange(withPermissions(config, event.target.value as PermissionLevel))}>
           {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
         </select>
-        <small className="ui-hint">{permissionHelp(config.engine, permissions)} {config.chat ? 'A running chat can also change this from its message box.' : 'Applies when the channel starts.'}</small>
+        <small className="ui-hint">{permissionHelp(config.engine, permissions)} {config.engine !== 'gemini' && config.chat ? 'A running chat can also change this from its message box.' : 'Applies when the channel starts.'}</small>
       </label>
-      <MemoryProjectControl config={config} directory={directory} onChange={onChange} />
+      {config.engine === 'gemini' ? <GeminiModelPicker id={id} config={config} onChange={onChange} /> : <MemoryProjectControl config={config} directory={directory} onChange={onChange} />}
       {config.engine === 'claude' && <label className="model-control ui-field">Model
         <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />
         <datalist id={`models-${id}`}>{claudeModels.map((model) => <option key={model} value={model} />)}</datalist>
@@ -83,8 +84,8 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
         <label className="ui-field">thinking.budget_tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.thinking.budget_tokens ?? ''} onChange={(event) => onChange({ ...config, thinking: { budget_tokens: tokenValue(event.target.value) } })} /></label>
         <label className="ui-field">Max output tokens<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="CLI default" value={config.tokenLimits.maxOutputTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxOutputTokens: limitValue(event.target.value) } })} /></label>
         <label className="ui-field">Session token limit<input type="number" min="0" max={MAX_TOKEN_SETTING} step="1" placeholder="Unset" value={config.tokenLimits.maxSessionTokens ?? ''} onChange={(event) => onChange({ ...config, tokenLimits: { ...config.tokenLimits, maxSessionTokens: limitValue(event.target.value) } })} /></label>
-      </> : <CodexModelPicker id={id} config={config} directory={directory} onChange={onChange} />}
-      <p className="control-note">Blank values inherit local CLI settings. {config.engine === 'claude' ? 'Thinking budgets require an explicit manual-thinking model. Session limits stop the CLI after reported usage reaches the threshold; a response can exceed it. Usage must be available for enforcement.' : 'Reasoning overrides use model_reasoning_effort. The selected model determines which effort levels it accepts.'}</p>
+      </> : config.engine === 'codex' ? <CodexModelPicker id={id} config={config} directory={directory} onChange={onChange} /> : null}
+      <p className="control-note">{config.engine === 'gemini' ? 'Gemini CLI channels have no shared memory, tasks or Round Table seat, and Trace cannot read their token usage; your plan limits show in the status bar.' : <>Blank values inherit local CLI settings. {config.engine === 'claude' ? 'Thinking budgets require an explicit manual-thinking model. Session limits stop the CLI after reported usage reaches the threshold; a response can exceed it. Usage must be available for enforcement.' : 'Reasoning overrides use model_reasoning_effort. The selected model determines which effort levels it accepts.'}</>}</p>
     </div>
   );
 }

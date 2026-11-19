@@ -5,8 +5,8 @@ import type { ITheme } from '@xterm/xterm';
  * each one repeats a token of src/tokens.css, named beside it; terminal-theme.test.ts fails when the two drift apart.
  */
 export const TERMINAL_FONT = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
-/** The cursor is the engine's colour: --tr-ch-claude, --tr-ch-codex, --tr-ch-shell. */
-export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', shell: '#9fc3b8' } as const;
+/** The cursor is the engine's colour: --tr-ch-claude, --tr-ch-codex, --tr-ch-gemini, --tr-ch-shell. */
+export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', shell: '#9fc3b8' } as const;
 export const TERMINAL_THEME: ITheme = {
   // --tr-term under --tr-fg; a selection is --tr-control-on.
   background: '#050912', foreground: '#dbe4f5', cursor: '#dbe4f5', cursorAccent: '#050912', selectionBackground: '#1b3260',

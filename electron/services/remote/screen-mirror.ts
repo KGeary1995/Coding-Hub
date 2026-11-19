@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/headless';
 import { SerializeAddon } from '@xterm/addon-serialize';
+import { measureLikeTheCLIs } from '../../../shared/terminal-width';
 
 const SCROLLBACK = 1000;
 
@@ -12,7 +13,7 @@ export class ScreenMirror {
   private terminal: Terminal; private serializer = new SerializeAddon();
   constructor(readonly runId: string, cols: number, rows: number) {
     this.terminal = new Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
-    this.terminal.loadAddon(this.serializer);
+    measureLikeTheCLIs(this.terminal); this.terminal.loadAddon(this.serializer);
   }
   write(data: string) { this.terminal.write(data); }
   /** Resizes after everything written so far has been drawn, keeping the order the output and the resize came in. */

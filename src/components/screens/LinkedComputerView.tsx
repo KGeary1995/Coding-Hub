@@ -34,7 +34,7 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
   </>;
 }
 
-const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
+const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
 
 /**
  * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read
@@ -97,7 +97,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
           <button className="tr-detail-button" disabled={Boolean(busy)} onClick={() => void control('restart')}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'restart' ? 'Restarting' : 'Restart'}</span></button>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => void control('stop')}><Square size={12} className="tr-detail-icon" /><span className="tr-detail-label">{busy === 'stop' ? 'Stopping' : 'Stop'}</span></button></>
         : <button className="tr-action start" disabled={Boolean(busy)} onClick={() => void control('start')}><Play size={12} aria-hidden="true" /> {busy === 'start' ? 'Starting' : 'Start'}</button>}
-      {channel.engine !== 'shell' && !channel.chat && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-pressed={conversation} aria-label={`Conversation of channel ${channel.channel} on ${computer.name}`} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
+      {channel.engine !== 'shell' && channel.engine !== 'gemini' && !channel.chat && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-pressed={conversation} aria-label={`Conversation of channel ${channel.channel} on ${computer.name}`} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
       {confirmClose
         ? <span className="linked-close-confirm" role="group" aria-label={`Close channel ${channel.channel} on ${computer.name}?`}><span className="tr-detail-label">{channel.running ? 'Stop and close?' : 'Close?'}</span>
           <button className="tr-detail-button stop" disabled={Boolean(busy)} onClick={() => { setConfirmClose(false); void control('close'); }}><span className="tr-detail-label">{busy === 'close' ? 'Closing' : 'Close'}</span></button>
@@ -107,7 +107,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
-    {channel.chat && channel.engine !== 'shell'
+    {channel.chat && (channel.engine === 'claude' || channel.engine === 'codex')
       ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}

@@ -6,7 +6,7 @@ import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { archiveFindings, forgetTable, rememberTable, restoreTables } from './round-table';
 import { applyChatEvent, chatEnded, chatStarted } from '../state/chat-store';
-import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, leadOf, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsFullNote, channelsOf, createSession, hiddenSeats, resumeConfig, RESUMED_TITLE, leadOf, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
 import { focusTerminal, onWebGLContextLost, releaseRemovedTerminals, routeTerminalEvent, terminalDimensions } from './terminals';
 import { reportWindowHealth } from './window-health';
 import { hubCall, useHubStore } from '../state/hub-store';
@@ -29,7 +29,7 @@ function chatTurnDone(sessionId: string, failed: boolean) {
 }
 import { permissionsRefused } from './permissions';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
-import { isAgentConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -87,7 +87,7 @@ export function useNativeHost() {
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       // A chat's thread: Claude Code's or Codex's.
-      const chatRun = before && isAgentConfig(before.config) && before.config.chat === true;
+      const chatRun = before && isChatEngineConfig(before.config) && before.config.chat === true;
       if (event.type === 'started' && before && chatRun) chatStarted(event.sessionId, event.runId, isAgentConfig(before.config) && Boolean(before.config.resumeId));
       if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
@@ -244,10 +244,8 @@ export function remoteResume(request: RemoteResumeRequest): string | undefined {
   const state = useWorkspaceStore.getState();
   const full = channelsFullNote(state.sessions); if (full) return full;
   const session = createSession(request.engine, { mode: 'independent', cwd: request.directory });
-  session.config = request.engine === 'claude'
-    ? { engine: 'claude', resumeId: request.id, ...(request.profileId ? { accountProfileId: request.profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-    : { engine: 'codex', resumeId: request.id, model: '', reasoningEffort: null };
-  session.title = request.title || (request.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed');
+  session.config = resumeConfig(request.engine, request.id, request.profileId);
+  session.title = request.title || RESUMED_TITLE[request.engine];
   // In the layout the desktop already uses: the person is elsewhere.
   const sessions = [...state.sessions, session];
   useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, state.layoutMode) });

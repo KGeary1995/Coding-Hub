@@ -7,6 +7,7 @@ import path from 'node:path';
 import type { CLIEngine } from '../../../shared/types';
 import type { EngineInfo } from '../../../shared/ipc';
 import { classifyAuthentication, type ProbeResult } from './auth-status';
+import { atLeast } from './attention';
 import { HubError } from './engine-adapter';
 
 export interface Executable { file: string; prefixArgs: string[]; extraEnv: Record<string, string>; displayPath: string }
@@ -174,7 +175,15 @@ async function findNode(directories: string[]): Promise<string | null> {
   return null;
 }
 
+/** The program each engine is: Gemini CLI installs as `agy`. */
+export const ENGINE_COMMAND: Record<CLIEngine, string> = { claude: 'claude', codex: 'codex', gemini: 'agy' };
+/** Each engine's name in messages. */
+export const ENGINE_NAME: Record<CLIEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI (agy)' };
+
 export async function findExecutable(engine: CLIEngine, environment?: Record<string, string>): Promise<Executable> {
+  // Smoke tests start Trace with this set: their fixtures have no agy, and the person's own must not run (or be asked
+  // for its sign-in) from a test.
+  if (engine === 'gemini' && process.env.CODING_HUB_TEST_NO_GEMINI === '1') throw new HubError('CLI_NOT_FOUND', `${ENGINE_NAME.gemini} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
   const env = environment ?? await freshHostEnvironment();
   let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
@@ -183,13 +192,15 @@ export async function findExecutable(engine: CLIEngine, environment?: Record<str
   const extensions = process.platform === 'win32' ? ['.exe', '.com', '.cmd', '.bat'] : [''];
   for (const directory of (env[pathKey] ?? '').split(path.delimiter).filter(Boolean)) {
     for (const extension of extensions) {
-      const candidate = path.join(directory.replace(/^"|"$/g, ''), engine + extension);
+      const candidate = path.join(directory.replace(/^"|"$/g, ''), ENGINE_COMMAND[engine] + extension);
       try {
         await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
         if (!(await stat(candidate)).isFile()) continue;
       } catch { continue; }
       // A yarn/pnpm shim earlier on PATH must not hide a working executable later on PATH.
       if (/\.(cmd|bat)$/i.test(candidate)) {
+        // agy is a native program; a script by its name is not one Trace knows how to run without a shell.
+        if (engine === 'gemini') continue;
         node ??= findNode((env[pathKey] ?? '').split(path.delimiter).filter(Boolean));
         try { return await npmEntryForShim(candidate, engine, process.arch, await node); } catch (error) { shimError ??= error; continue; }
       }
@@ -197,7 +208,7 @@ export async function findExecutable(engine: CLIEngine, environment?: Record<str
     }
   }
   if (shimError) throw shimError;
-  throw new HubError('CLI_NOT_FOUND', `${engine === 'claude' ? 'Claude Code' : 'Codex'} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
+  throw new HubError('CLI_NOT_FOUND', `${ENGINE_NAME[engine]} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
 }
 
 export function probeCLI(executable: Executable, args: string[], env: Record<string, string>): Promise<ProbeResult> {
@@ -216,7 +227,14 @@ function probe(executable: Executable, flag: string, env: Record<string, string>
 export function advertisesFlag(help: string, flag: string): boolean {
   return new RegExp(`(?:^|[\\s,])${flag}(?=[\\s=,]|$)`, 'm').test(help);
 }
-export async function checkAuthentication(engine: CLIEngine, executable: Executable, help: string, env: Record<string, string>) {
+/**
+ * agy 1.1.11 answers `-p "/usage"` itself (no model turn, no quota). An older agy would send the text to the model as a
+ * prompt, so the check runs only from that version.
+ */
+export const GEMINI_USAGE_COMMAND = [1, 1, 11] as const;
+export const GEMINI_USAGE_ARGS = ['-p', '/usage', '--output-format', 'json'];
+export async function checkAuthentication(engine: CLIEngine, executable: Executable, help: string, env: Record<string, string>, version: string | null = null, probe: typeof probeCLI = probeCLI) {
+  if (engine === 'gemini') return atLeast(version, ...GEMINI_USAGE_COMMAND) ? classifyAuthentication(engine, await probe(executable, GEMINI_USAGE_ARGS, env)) : classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
   const command = engine === 'claude' ? 'auth' : 'login';
   const unknown = () => classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
   if (!new RegExp(`^\\s*${command}\\b`, 'm').test(help)) return unknown();
@@ -242,7 +260,7 @@ export async function discoverEngine(engine: CLIEngine, environment?: Record<str
     if (version.exitCode !== 0) throw new HubError('CLI_PROBE_FAILED', 'CLI version/help check failed or timed out. Run the CLI in a terminal to resolve installation issues.');
     // Runtime warnings go to stderr; prefer the first stdout line so launch checks parse the real version.
     info.version = (version.stdout.trim() || version.stderr.trim()).split(/\r?\n/)[0]?.trim().slice(0, 120) || null;
-    info.supportsResume = engine === 'claude' ? advertisesFlag(help, '--resume') : /^\s*resume\b/m.test(help);
+    info.supportsResume = engine === 'claude' ? advertisesFlag(help, '--resume') : engine === 'gemini' ? advertisesFlag(help, '--conversation') : /^\s*resume\b/m.test(help);
     info.supportsModel = advertisesFlag(help, '--model');
     info.supportsConfig = advertisesFlag(help, '--config');
     info.supportsNoDaemon = advertisesFlag(help, '--no-daemon');
@@ -251,8 +269,10 @@ export async function discoverEngine(engine: CLIEngine, environment?: Record<str
     info.supportsMcpConfig = advertisesFlag(help, '--mcp-config');
     info.supportsSettings = advertisesFlag(help, '--settings');
     info.supportsChrome = engine === 'claude' && advertisesFlag(help, '--chrome');
-    info.supportsPermissions =engine === 'claude' ? advertisesFlag(help, '--permission-mode') && advertisesFlag(help, '--allow-dangerously-skip-permissions') : advertisesFlag(help, '--ask-for-approval') && advertisesFlag(help, '--sandbox');
-    if (options.authentication !== false) info.authentication = await checkAuthentication(engine, executable, help, env);
+    info.supportsPermissions = engine === 'claude' ? advertisesFlag(help, '--permission-mode') && advertisesFlag(help, '--allow-dangerously-skip-permissions')
+      : engine === 'gemini' ? advertisesFlag(help, '--mode') && advertisesFlag(help, '--dangerously-skip-permissions') && advertisesFlag(help, '--settings')
+      : advertisesFlag(help, '--ask-for-approval') && advertisesFlag(help, '--sandbox');
+    if (options.authentication !== false) info.authentication = await checkAuthentication(engine, executable, help, env, info.version);
     info.available = true;
     return { info, executable };
   } catch (error) {

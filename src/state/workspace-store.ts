@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChannelEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
+import type { ChannelEngine, CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
 import { isAgentConfig } from '../../shared/types';
@@ -9,13 +9,20 @@ import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/w
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
+/** A channel's settings for resuming a CLI's own conversation (from Session history, here or on a phone). */
+export function resumeConfig(engine: CLIEngine, id: string, profileId?: string): CLIEngineConfig {
+  return engine === 'claude' ? { engine, resumeId: id, ...(profileId ? { accountProfileId: profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
+    : engine === 'codex' ? { engine, resumeId: id, model: '', reasoningEffort: null } : { engine, resumeId: id, model: '' };
+}
+export const RESUMED_TITLE: Record<CLIEngine, string> = { claude: 'Claude · resumed', codex: 'Codex · resumed', gemini: 'Gemini · resumed' };
+
 export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
   return {
     id: crypto.randomUUID(),
     title: DEFAULT_TITLES[engine],
     config: engine === 'claude'
       ? { engine, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : { engine },
+      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : engine === 'gemini' ? { engine, model: '' } : { engine },
     binding,
     status: 'idle',
     pid: null,
@@ -110,11 +117,11 @@ interface WorkspaceState {
   logError: string | null;
   storageInfo: StorageInfo | null;
   /**
-   * Takes a saved workspace in. One saved by 1.19 or 1.20 can hold Gemini channels, which are dropped (migrateWorkspace)
+   * Takes a saved workspace in. One saved by 1.20 can hold hidden Gemini seats, which are dropped (migrateWorkspace)
    * before anything is stored; `removedChannels`: those the host already dropped. Either way `loadNotice` says so.
    */
   hydrate: (workspace: SavedWorkspace | LegacySavedWorkspace | null, info: StorageInfo, removedChannels?: number, rootDirectory?: string) => void;
-  /** A line about what loading the workspace changed (Gemini channels removed), until the person dismisses it. */
+  /** A line about what loading the workspace changed (Gemini seats removed), until the person dismisses it. */
   loadNotice: string | null;
   rootDirectory: string | null;
   sessions: Session[];
@@ -167,7 +174,8 @@ function applied(session: Session, event: Exclude<SessionEvent, { type: 'data' }
   if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
   if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
   if (event.type === 'error') return session.error === event.message ? session : { ...session, error: event.message };
-  if (event.type === 'conversation') return session.config.engine === 'claude' && !session.config.chat && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
+  // A terminal run writes to another conversation (Claude after /clear or /resume), or Gemini CLI said which one as it ended.
+  if (event.type === 'conversation') return (session.config.engine === 'gemini' || (session.config.engine === 'claude' && !session.config.chat)) && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
   return session;
 }
 
@@ -183,8 +191,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   hydrate: (saved, storageInfo, removedByHost = 0, keptRoot) => {
     const migrated = saved ? migrateWorkspace(saved) : { workspace: null, removedChannels: 0, rootDirectory: keptRoot ?? null }; const first = firstUnderRule();
     const removed = removedByHost + migrated.removedChannels;
-    const loadNotice = removed ? `${removed === 1 ? 'A Gemini channel was' : `${removed} Gemini channels were`} removed from this workspace: Trace no longer runs Gemini.` : null;
-    // Nothing but Gemini channels was saved (here, or already dropped by the host): the default channels, in the saved folder.
+    const loadNotice = removed ? `${removed === 1 ? 'A Gemini chat was' : `${removed} Gemini chats were`} removed from this workspace: Gemini runs only in a terminal now.` : null;
+    // Nothing but Gemini seats was saved (here, or already dropped by the host): the default channels, in the saved folder.
     const workspace = migrated.workspace;
     if (!workspace && migrated.rootDirectory) { set({ rootDirectory: migrated.rootDirectory, loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null }); return; }
     const sessions = workspace?.sessions.map((session): Session => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));

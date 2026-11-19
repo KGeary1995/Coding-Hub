@@ -4,14 +4,15 @@ import { LEGACY_CHAIN_STEPS } from './schemas';
 import type { GridTile, SavedWorkspace } from './types';
 
 /**
- * What a saved workspace becomes now that Trace runs no Gemini (removed after 1.20): Gemini channels and hidden Gemini
- * seats are dropped, with their tiles; a hierarchy table forgets its Gemini seat, and a chain saved at a Gemini step
- * (second-reviewing, comparing) is at 'reviewing'. `removedChannels`: the Gemini channels the person saw (tiles), so
- * the window can say why they are gone. `workspace` is null when no channel is left; `rootDirectory` is the saved
- * project folder either way, so it is not lost with the channels.
+ * What a saved workspace becomes now that Gemini has no Round Table seat (Trace 1.20 had one): the hidden Gemini seats
+ * (a chat, or a table's `challenger`) are dropped, with any tile; a hierarchy table forgets its Gemini seat, and a chain
+ * saved at a Gemini step (second-reviewing, comparing) is at 'reviewing'. Gemini terminal channels (1.19 and since) stay.
+ * `removedChannels`: the dropped channels the person saw (tiles), so the window can say why they are gone. `workspace`
+ * is null when no channel is left; `rootDirectory` is the saved project folder either way, so it is not lost with them.
  */
 export function migrateWorkspace(saved: LegacySavedWorkspace | SavedWorkspace): { workspace: SavedWorkspace | null; removedChannels: number; rootDirectory: string | null } {
-  const gemini = new Set(saved.sessions.filter((session) => session.config.engine === 'gemini').map((session) => session.id));
+  const challengers = new Set(saved.sessions.map((session) => (session.roundTable as { challenger?: string } | undefined)?.challenger).filter(Boolean));
+  const gemini = new Set(saved.sessions.filter((session) => (session.config as { engine: string }).engine === 'gemini' && ((session.config as { chat?: boolean }).chat || challengers.has(session.id))).map((session) => session.id));
   const tiled = new Set(saved.tiles.map((tile) => tile.sessionId));
   const removedChannels = [...gemini].filter((id) => tiled.has(id)).length;
   const sessions = saved.sessions.filter((session) => !gemini.has(session.id)).map((session) => {

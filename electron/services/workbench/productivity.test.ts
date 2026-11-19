@@ -71,10 +71,10 @@ describe('durable workflow records and bounded search',()=>{
    expect(ids).not.toContain(reviewer.id);expect(table).toEqual({partner:ids[1],driver:'claude',rounds:2,kind:'hierarchy',planner:ids[2]});expect(applied.tiles.map((tile)=>tile.sessionId)).toEqual([ids[0]]);
   }finally{storage.close();}
  });
- it('refuses a template of Gemini channels only (saved by 1.19 or 1.20) before it writes any rules or checks',async()=>{
+ it('refuses a template of Gemini chats only (1.20’s seats) before it writes any rules or checks',async()=>{
   const data=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);let asked=false;const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>{asked=true;return true;});
    const id=randomUUID();const at=new Date().toISOString();
-   const gemini={version:1,rootDirectory:null,layoutMode:'columns',focusedSessionId:null,sessions:[{id:'gem',title:'Gemini',config:{engine:'gemini',model:'gemini-4-argon-high'},binding:{mode:'workspace'},createdAt:at}],tiles:[{sessionId:'gem',x:0,y:0,w:12,h:12,minW:3,minH:10}]};
+   const gemini={version:1,rootDirectory:null,layoutMode:'columns',focusedSessionId:null,sessions:[{id:'gem',title:'Gemini',config:{engine:'gemini',model:'gemini-4-argon-high',chat:true},binding:{mode:'workspace'},createdAt:at}],tiles:[{sessionId:'gem',x:0,y:0,w:12,h:12,minW:3,minH:10}]};
    fs.writeFileSync(path.join(data,'project-templates.json'),JSON.stringify([{id,name:'Old Gemini',description:'',workspace:gemini,rules:'template rules',checks:[{name:'Check',steps:[{label:'Pass',tool:'python',args:['-c','print(1)']}],timeoutSeconds:10}],createdAt:at}]));
    expect(service.templates().map((item)=>item.id)).toEqual([id]);
    const before=rules.read([]).content;

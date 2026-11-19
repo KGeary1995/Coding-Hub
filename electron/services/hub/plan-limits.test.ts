@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { CLAUDE_USAGE_ARGS, inBatches, readClaudeLimits, readCodexLimits } from './plan-limits';
+import { CLAUDE_USAGE_ARGS, inBatches, readClaudeLimits, readCodexLimits, readGeminiLimits } from './plan-limits';
 
 /** Node itself stands in for a CLI: `--` keeps the CLI's arguments (`-p /usage`, `app-server`) away from Node. */
 const fake = (script: string) => ({ file: process.execPath, prefixArgs: ['-e', script, '--'], extraEnv: {}, displayPath: 'node' });
@@ -46,5 +46,20 @@ describe('usage limit checks', () => {
     expect(await inBatches(tasks, 2)).toEqual(Array.from({ length: 11 }, (_, index) => index));
     expect(most).toBe(2);
     expect(await inBatches([], 2)).toEqual([]);
+  });
+});
+
+describe('Gemini CLI plan limits', () => {
+  const agy = { file: '/agy', prefixArgs: [], extraEnv: {}, displayPath: '/agy' };
+  const usage = JSON.stringify({ command: { name: 'usage', data: { groups: [{ name: 'Gemini Models', buckets: [{ window: '5h', remaining_fraction: 0.9 }] }] } } });
+  const probe = (version: string, out = usage, exitCode = 0) => { const runs: string[][] = []; return { runs, probe: async (_executable: unknown, args: string[]) => { runs.push(args); return args[0] === '--version' ? { stdout: version, stderr: '', exitCode: 0, timedOut: false } : { stdout: out, stderr: '', exitCode, timedOut: false }; } }; };
+  it('asks agy for /usage only from 1.1.11, which answers it without sending it to the model', async () => {
+    const old = probe('1.1.10'); expect(await readGeminiLimits(agy, {}, old.probe as never)).toBeNull(); expect(old.runs).toEqual([['--version']]);
+    const current = probe('1.5.12'); const limits = await readGeminiLimits(agy, {}, current.probe as never);
+    expect(current.runs).toEqual([['--version'], ['-p', '/usage', '--output-format', 'json']]);
+    expect(limits).toMatchObject({ engine: 'gemini', account: 'Default', windows: [{ label: 'Session', usedPercent: 10 }], error: null });
+  });
+  it('says the check failed when agy does not report its limits', async () => {
+    expect(await readGeminiLimits(agy, {}, probe('1.5.12', 'Please sign in', 1).probe as never)).toMatchObject({ windows: [], failed: true, error: 'Gemini CLI did not report usage limits. Check that it is signed in.' });
   });
 });

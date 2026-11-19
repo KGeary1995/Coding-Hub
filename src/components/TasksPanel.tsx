@@ -11,7 +11,7 @@ import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
 import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
-import { isAgentConfig } from '../../shared/types';
+import { isChatEngineConfig } from '../../shared/types';
 import { ConfirmStep } from './ConfirmStep';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
@@ -60,7 +60,8 @@ export function TasksPanel() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
   // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
-  const agents = channelsOf(sessions).filter((session) => isAgentConfig(session.config));
+  // Tasks read their outcome from the CLI's transcript: Claude Code and Codex only.
+  const agents = channelsOf(sessions).filter((session) => isChatEngineConfig(session.config));
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   /** Until the first list arrives, the board says it is loading rather than that there are no tasks. */

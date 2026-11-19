@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
-import type { CLIEngine } from '../../../shared/types';
+import type { ChatEngine, CLIEngine } from '../../../shared/types';
 import type { EngineInfo, AgentRunningSession } from '../../../shared/ipc';
 import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
@@ -117,7 +117,7 @@ export function memoryContext(key: string, notes: MemoryNote[]): string {
 }
 
 /** The final assistant message from a Claude Code session JSONL file or a Codex rollout file. */
-export function lastAssistantMessage(engine: CLIEngine, file: string): string | null {
+export function lastAssistantMessage(engine: ChatEngine, file: string): string | null {
   let tail: string;
   try { const size = fs.statSync(file).size; const length = Math.min(size, 1024 * 1024); const fd = fs.openSync(file, 'r'); const buffer = Buffer.alloc(length); try { fs.readSync(fd, buffer, 0, length, size - length); } finally { fs.closeSync(fd); } tail = buffer.toString('utf8'); }
   catch { return null; }
@@ -151,7 +151,7 @@ function codexInstructions(cwd: string, context: string): string {
   return [...parts, context].join('\n\n');
 }
 
-interface Tracked { engine: CLIEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void>; /** A hidden Round Table seat: the leading channel's summary covers the table. */ seat?: boolean }
+interface Tracked { engine: ChatEngine; cwd: string; key: string; model: string; startedAt: number; files: string[]; head: string | null; ready?: Promise<void>; /** A hidden Round Table seat: the leading channel's summary covers the table. */ seat?: boolean }
 export interface AutoMemoryOptions { memory: MemoryService; enabled: () => boolean; server: string; executable: string; scratch: string; onWrite?: (key: string) => void; refresh?: (key: string) => void; onNotice?: (message: string) => void;
   /** Brings a project's notes up to date from other computers (Drive) before a launch reads them; see ready(). */
   sync?: (key: string) => Promise<unknown>; syncMilliseconds?: number }
@@ -162,14 +162,14 @@ const READY_FOR_MS = 30000;
 /** Memory MCP config files prepare() writes, one per run: `<runId>.mcp.json`. */
 const RUN_CONFIG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mcp\.json$/i;
 /** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
-export interface Configured { engine: CLIEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
+export interface Configured { engine: ChatEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
 
 /** The folder whose `.mcp.json` and `.codex/config.toml` sessions there read: the repository's top folder, else the folder. */
 export function projectConfigRoot(directory: string) { return gitLocation(directory)?.root ?? path.resolve(directory); }
 /** One folder, however it is spelled (case on Windows, relative parts). */
 const samePath = (a: string, b: string) => { const norm = (p: string) => { const full = path.resolve(p); return process.platform === 'win32' ? full.toLowerCase() : full; }; return norm(a) === norm(b); };
-const slotOf = (engine: CLIEngine) => engine === 'claude' ? 'mcpServers' : 'mcp_servers';
-const configFile = (engine: CLIEngine, root: string) => engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
+const slotOf = (engine: ChatEngine) => engine === 'claude' ? 'mcpServers' : 'mcp_servers';
+const configFile = (engine: ChatEngine, root: string) => engine === 'claude' ? path.join(root, '.mcp.json') : path.join(root, '.codex', 'config.toml');
 /** An entry Trace's own install wrote: a program, then memory-server.js, the memory folder and the key. */
 const written = (entry: any): entry is { command: string; args: [string, string, string] } => typeof entry?.command === 'string' && Array.isArray(entry.args) && entry.args.length === 3 && entry.args.every((arg: unknown) => typeof arg === 'string') && path.basename(entry.args[0]) === 'memory-server.js';
 
@@ -249,7 +249,7 @@ export class AutoMemory {
    * The server entry the project installed itself, so a second copy would clash. An entry Trace wrote whose
    * program paths no longer exist (the app moved, as with the rename to Trace) is pointed at this install first.
    */
-  private configured(engine: CLIEngine, directory: string): Configured | null {
+  private configured(engine: ChatEngine, directory: string): Configured | null {
     const file = configFile(engine, projectConfigRoot(directory)); const slot = slotOf(engine);
     let inspected: ReturnType<typeof readConfig>;
     try { inspected = readConfig(file); } catch { return null; }
@@ -287,6 +287,9 @@ export class AutoMemory {
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
   prepare(run: AgentRunningSession, model: string, info: EngineInfo, launch: { args: string[] }, chosenKey?: string) {
+    // Gemini CLI channels get no shared memory: agy takes MCP servers only from the person's global settings.
+    if (run.engine === 'gemini') return;
+    const engine: ChatEngine = run.engine;
     if (!this.options.enabled()) return;
     let key: string; let context: string;
     try {
@@ -300,8 +303,8 @@ export class AutoMemory {
       if (readied && Date.now() - readied.at < READY_FOR_MS) context = memoryContext(key, readied.notes);
       else { try { this.options.refresh?.(key); } catch { /* Local notes only. */ } context = memoryContext(key, this.options.memory.list(key)); }
     } catch { return; }
-    const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key, run.engine, run.cwd], env: { ELECTRON_RUN_AS_NODE: '1' } };
-    const configured = this.configured(run.engine, run.cwd);
+    const server = { command: this.options.executable, args: [this.options.server, this.options.memory.root, key, engine, run.cwd], env: { ELECTRON_RUN_AS_NODE: '1' } };
+    const configured = this.configured(engine, run.cwd);
     // A project entry with another key would read and write a different set of notes than the context above.
     if (configured?.key && (configured.key !== key || configured.root !== this.options.memory.root)) {
       context += `\n\nNote: this project's ${path.basename(configured.file)} starts ${SERVER} with ${configured.key !== key ? `the key ${configured.key}` : 'another notes folder'}, so read_memory and write_handoff use those notes, not the ${key} notes above.`;
@@ -331,7 +334,7 @@ export class AutoMemory {
     }
     if (!extra.length) return;
     launch.args.push(...extra);
-    const tracked: Tracked = { engine: run.engine, cwd: run.cwd, key, model, startedAt: Date.now(), files: [], head: null };
+    const tracked: Tracked = { engine, cwd: run.cwd, key, model, startedAt: Date.now(), files: [], head: null };
     this.runs.set(run.runId, tracked);
     tracked.ready = Promise.all([changedFiles(run.cwd), git(run.cwd, ['rev-parse', 'HEAD'])]).then(([files, head]) => { tracked.files = files; tracked.head = head[0] ?? null; });
   }

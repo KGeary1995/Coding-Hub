@@ -25,6 +25,16 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       // Three channels in the grid: two above, and the third across the whole second row (no empty quarter).
       if (i === 0) await page.waitForFunction(() => { const [a, b, c] = [...document.querySelectorAll('.session-tile')].map((tile) => tile.getBoundingClientRect()); return c && Math.abs(a.top - b.top) < 2 && c.top >= a.bottom && Math.abs(c.left - a.left) < 2 && Math.abs(c.right - b.right) < 2; });
     }
+    // xterm stacks its own layers over the terminal (the WebGL renderer's link layer is a canvas at z-index 2). None may
+    // lie over an idle channel's start area and take its clicks: a layer like it is added here, so this holds without WebGL.
+    await page.waitForFunction(() => [...document.querySelectorAll('.session-tile')].every((tile) => tile.querySelector('.xterm-screen') && tile.querySelector('.session-welcome .button.primary')));
+    const covered = await page.evaluate(() => [...document.querySelectorAll('.session-tile')].filter((tile) => {
+      const layer = document.createElement('canvas'); layer.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;z-index:2'; tile.querySelector('.xterm-screen').append(layer);
+      const button = tile.querySelector('.session-welcome .button.primary'); const box = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); layer.remove();
+      return !button.contains(hit);
+    }).length);
+    assert.equal(covered, 0, 'The Start button in the middle of an idle channel stays on top of the terminal\'s own layers');
     for (const [width, height, scale] of [[1440, 960, 100], [1100, 800, 100], [900, 700, 100], [1100, 800, 125]]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width, height]);
       await page.evaluate((value) => {

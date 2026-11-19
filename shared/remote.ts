@@ -110,14 +110,14 @@ export type RemoteTaskStatus = 'todo' | 'working' | 'review' | 'done';
  * A Claude Code or Codex conversation on this computer (GET /api/history), newest first. `folder` is only the last part
  * of its project folder's path ('' when the CLI did not record one); `key` is what POST /api/history-resume takes.
  */
-export interface RemoteHistoryItem { key: string; engine: 'claude' | 'codex'; title: string; folder: string; modified: string }
+export interface RemoteHistoryItem { key: string; engine: 'claude' | 'codex' | 'gemini'; title: string; folder: string; modified: string }
 /** A project of this computer's channels and its newest handoff notes (GET /api/memory); `name` is its folder's last part. */
 export interface RemoteMemory { project: string; name: string; notes: { id: string; title: string; author: 'claude' | 'codex' | 'human'; createdAt: string; content: string }[] }
 /**
  * A phone resuming a CLI conversation here: the window adds a channel that resumes it in `directory`, as Session
  * history's Resume does, and answers with finishRemoteControl.
  */
-export interface RemoteResumeRequest { requestId: string; engine: 'claude' | 'codex'; id: string; profileId?: string; directory: string; title: string }
+export interface RemoteResumeRequest { requestId: string; engine: 'claude' | 'codex' | 'gemini'; id: string; profileId?: string; directory: string; title: string }
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;

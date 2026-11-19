@@ -293,3 +293,23 @@ it('persists all steps of noisy verification without exceeding the JSON record l
  expect(result.passed).toBe(true); expect(result.steps).toHaveLength(8); expect(result.steps.some((step:any)=>step.truncated)).toBe(true);
  expect(checks.data().results[0].id).toBe(result.id); expect(fs.statSync(path.join(root,'verification.json')).size).toBeLessThanOrEqual(4*1024*1024);
 });
+
+describe('Gemini CLI conversations in Session history', () => {
+  it('lists them among the others by when they changed, leaves out Trace’s own folders, and resumes one agy still has', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-history-')); const claude = path.join(root, 'claude');
+    // Codex's history is looked for in CODEX_HOME: an empty folder here, never the person's.
+    const codexHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'codex');
+    try {
+      const project = path.join(root, 'project'); const hidden = path.join(root, 'coaching'); fs.mkdirSync(project);
+      const id = '7912ead9-5b11-4648-97cd-206300d499d7'; const older = '4bc61dda-c49d-4037-a006-51a82664c8d7'; const mine = 'caf3f572-52a4-467c-8bc0-c7621834d34a';
+      const list = () => [{ id, directory: project, modified: Date.parse('2026-11-19T05:00:00Z'), file: '/agy/a.db' }, { id: mine, directory: hidden, modified: Date.parse('2026-11-19T06:00:00Z'), file: '/agy/m.db' }, { id: older, directory: null, modified: NaN, file: '/agy/o.db' }];
+      const sessions = new NativeSessions(new ClaudeProfiles(root), [hidden], claude, { list, file: (wanted) => wanted === id ? '/agy/a.db' : undefined });
+      const listed = await sessions.list();
+      expect(listed.map((item) => [item.engine, item.id, item.directory])).toEqual([['gemini', id, project], ['gemini', older, null]]);
+      expect(listed[0]).toMatchObject({ key: `gemini:default:${id}`, title: `Gemini · project · ${id.slice(0, 8)}`, modifiedAt: '2026-11-19T05:00:00.000Z' });
+      expect(listed[1].modifiedAt).toBe(new Date(0).toISOString());
+      expect(sessions.source('gemini', id)).toBe('/agy/a.db'); expect(sessions.source('gemini', older)).toBeUndefined();
+      expect(await sessions.execute({ action: 'native-resume', key: `gemini:default:${id}` })).toMatchObject({ conversation: { engine: 'gemini', id }, directory: project });
+    } finally { if (codexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = codexHome; fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});

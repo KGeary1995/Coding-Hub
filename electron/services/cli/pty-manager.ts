@@ -7,14 +7,14 @@ import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
-import { isAgentConfig } from '../../../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
 import { discoverEngine, freshHostEnvironment } from './discovery';
 import { AUTH_TIMED_OUT } from './auth-status';
-import { cleanMessage, OscNotifications } from './attention';
+import { cleanMessage, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
 import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
@@ -92,6 +92,8 @@ interface ManagedRun {
   owner: number;
   /** Codex reports approval requests as OSC 9 notifications in its output. */
   osc?: OscNotifications;
+  /** Gemini CLI reports working, waiting (with the question) and done over OSC 7501; `since` is when the run started. */
+  gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number };
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -135,7 +137,9 @@ export class PtyManager {
       /** Runs just seated at a Round Table without a tile of their own (partner, reviewer, planner). */
       onSeated?: (runIds: string[]) => void; onStall?: () => void; stallMilliseconds?: number; spawnChat?: Spawn; onChat?: (owner: number, envelope: ChatEnvelope) => void;
       /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
-      chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null } = {},
+      chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null;
+      /** The Gemini CLI conversation a run in `cwd` started at `since` (ms) wrote to, when agy did not print it. */
+      geminiConversation?: (cwd: string, since: number) => string | null } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -249,7 +253,7 @@ export class PtyManager {
       const baseEnvironment = await this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
       // A chat run: Claude Code or Codex in structured mode.
-      const chat = isAgentConfig(request.config) && request.config.chat === true;
+      const chat = isChatEngineConfig(request.config) && request.config.chat === true;
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
@@ -284,7 +288,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}) };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now() } } : {}) };
       this.runs.set(request.sessionId, run); prepared = null;
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
       else pty.onData((data) => {
@@ -295,6 +299,7 @@ export class PtyManager {
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
         if (run.osc) for (const message of run.osc.push(data)) this.notifyAttention(run.session.runId, message);
+        if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
@@ -498,8 +503,26 @@ export class PtyManager {
     await run.stopping;
   }
 
+  /**
+   * A Gemini CLI status: waiting for the person is a notice; working again after it, the notice is answered; idle, done
+   * or failed after work, the turn ended. agy says idle when it opens too, which ends nothing.
+   */
+  private geminiStatus(run: ManagedRun, status: GeminiStatus) {
+    const last = run.gemini!.last; const asked = run.gemini!.asked; run.gemini!.last = status.state; run.gemini!.asked = status.state === 'blocked' ? status.message : undefined;
+    // agy may say blocked again while it still waits on the same question: that is one notice, not another.
+    if (status.state === 'blocked') { if (last !== 'blocked' || asked !== status.message) this.notifyAttention(run.session.runId, status.message); }
+    else if (status.state === 'working') { if (last === 'blocked') this.notifyResolved(run.session.runId); }
+    else if (last === 'working' || last === 'blocked') this.notifyResolved(run.session.runId, true);
+  }
+
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
+    // Gemini CLI prints the conversation to resume as it quits; stopped by Trace it prints none, so agy's list says.
+    if (run.gemini && !run.chat) {
+      const printed = [...run.outputTail.matchAll(/agy --conversation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)].at(-1)?.[1];
+      let conversationId = printed ?? null; if (!conversationId) try { conversationId = this.dependencies.geminiConversation?.(run.session.cwd, run.gemini.since) ?? null; } catch { /* Not resumable. */ }
+      if (conversationId) this.send(run.owner, { type: 'conversation', sessionId: run.session.sessionId, runId: run.session.runId, conversationId: conversationId.toLowerCase() });
+    }
     run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();
     if (run.chat) { try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ } try { this.chains.ended(run.session.runId); } catch { /* The table is gone with it. */ } }
     this.flush(run);

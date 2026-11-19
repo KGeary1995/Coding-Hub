@@ -12,9 +12,11 @@ import { mountChat, receiveChat, receiveReplay } from './chat';
 import { ENGINE_ICON, iconSvg, mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { measureLikeTheCLIs } from '../shared/terminal-width';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
+import type { ChannelEngine } from '../shared/types';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 import { atPhoneSize, FIT_KEY, fitsOnOpen, takenBack } from './size';
@@ -28,7 +30,7 @@ const KEYS: { label: string; name?: string; data: string }[][] = [
   [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }],
   [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
-const ENGINE = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
+const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
 
 type Child = Node | string | false | null | undefined;
 /** A DOM element with properties (`className`, `onclick`, …), `data-` and `aria-` attributes, and children. */
@@ -176,7 +178,7 @@ async function channelWhere<T>(find: () => T | undefined | null, ms: number): Pr
  * seated at this chat's table (this chat's agent drives first, two rounds), as the desktop's people button does.
  */
 async function openTableHere(channel: RemoteChannel): Promise<string | null> {
-  if (channel.engine === 'shell' || !channel.runId) return 'This chat is not running.';
+  if ((channel.engine !== 'claude' && channel.engine !== 'codex') || !channel.runId) return 'This chat is not running.';
   const other = channel.engine === 'claude' ? 'codex' : 'claude'; const before = new Set(channels.map((item) => item.sessionId));
   try {
     await addChannel(other, true, channel.sessionId);
@@ -197,8 +199,8 @@ function alertText(text: string) {
 
 /** + Channel on the phone: the same kinds as the computer's, in its order (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
 function addMenu() {
-  const kinds: { label: string; engine: 'claude' | 'codex' | 'shell'; chat: boolean }[] = [
-    { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }];
+  const kinds: { label: string; engine: ChannelEngine; chat: boolean }[] = [
+    { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini CLI', engine: 'gemini', chat: false }];
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
     ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
   const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');
@@ -421,7 +423,7 @@ function showChannel(sessionId: string) {
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
   // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
-  if (channel?.chat && channel.engine !== 'shell') {
+  if (channel?.chat && (channel.engine === 'claude' || channel.engine === 'codex')) {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
     // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.
@@ -460,9 +462,9 @@ function showChannel(sessionId: string) {
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
   app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
-  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
+  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false, allowProposedApi: true,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
-  fit = new FitAddon(); terminal.loadAddon(fit);
+  measureLikeTheCLIs(terminal); fit = new FitAddon(); terminal.loadAddon(fit);
   terminal.open(output);
   // The terminal only shows the channel. Typed straight into it, a phone keyboard's autocorrect and predictions rewrite
   // words as they are typed and every rewrite reaches the CLI, garbling the text; so tapping the terminal opens the

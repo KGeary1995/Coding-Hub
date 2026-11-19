@@ -33,11 +33,12 @@ import { chatHistory, chatText, taskHistory } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment } from './services/cli/discovery';
+import { geminiConversationSince } from './services/cli/gemini-conversations';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
 import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './services/cli/attention';
-import { ModelCatalog } from './services/cli/model-catalog';
+import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
@@ -61,7 +62,7 @@ import { channelName } from '../shared/channel-name';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 import { setBackupRoot } from './services/hub/file-backups';
-import { isAgentConfig } from '../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../shared/types';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -166,10 +167,19 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
-}, chatHistory: (config) => { if (!config.resumeId) return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
+}, geminiConversation: (cwd, since) => geminiConversationSince(cwd, since), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
-  beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
+  beforeLaunch: (cwd, config) => autoMemory && config.engine !== 'gemini' ? autoMemory.ready(cwd, config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
+  // Gemini CLI: no usage log Trace can read, no shared memory (the person's choice); it resumes agy's own conversation.
+  if (config.engine === 'gemini') {
+    if (config.resumeId) {
+      const saved = new Map((storage?.load()?.sessions ?? []).map((session) => [session.id, session.config]));
+      if (manager.running().some((other) => other.runId !== run.runId && other.engine === 'gemini' && (saved.get(other.sessionId) as { resumeId?: string } | undefined)?.resumeId === config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.');
+      if (!nativeSessions.source('gemini', config.resumeId)) throw new HubError('NATIVE_SESSION', 'Gemini CLI no longer has this conversation. Clear the resume, or pick another from Session history.');
+    }
+    return;
+  }
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
@@ -188,6 +198,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   runOwners.set(run.runId, owner);
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
+  if (config.engine === 'gemini') return;
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
   catch {
     // Without a usage watcher a session token limit would silently go unenforced.
@@ -203,7 +214,7 @@ function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
   const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
-  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isAgentConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
+  return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isChatEngineConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
 /** The memory project (projectMemoryKey) of each of this computer's channels' folders, in tile order, each once. */
@@ -265,7 +276,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'shell']), chat: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'gemini')), 'Only Claude Code and Codex channels can be chats.'),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
@@ -356,7 +367,8 @@ async function taskTranscript(sessionId: string, mark: string): Promise<ChannelT
 /** The CLI's own transcript file for a channel; null for terminals and channels never run. */
 function transcriptSource(sessionId: string) {
   const config = storage?.load()?.sessions.find((session) => session.id === sessionId)?.config;
-  if (!config || !isAgentConfig(config) || !config.resumeId) return null;
+  // Gemini CLI's conversations are kept in a form Trace does not read.
+  if (!config || !isChatEngineConfig(config) || !config.resumeId) return null;
   const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined);
   return file ? { engine: config.engine, file } : null;
 }
@@ -371,7 +383,7 @@ function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise
 async function resumeConversation(key: string): Promise<void> {
   const { conversation, directory } = await nativeSessions.execute({ action: 'native-resume', key }) as NativeResume;
   const label = workflows?.labels().find((item) => item.key === conversation.key)?.name;
-  return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || (conversation.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed') }, IPC_CHANNELS.remoteResume);
+  return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || `${({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const)[conversation.engine]} · resumed` }, IPC_CHANNELS.remoteResume);
 }
 function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | Omit<RemoteResumeRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
@@ -646,7 +658,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals.');
+      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -788,6 +800,7 @@ else app.whenReady().then(() => {
     if (action === 'restart') { z.object({ action: z.literal('restart') }).strict().parse(payload); await readyForBackup(); relaunching = true; app.relaunch(); app.quit(); return null; }
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The application is restarting.');
     if (action === 'codex-models') return modelCatalog.execute(payload);
+    if (action === 'gemini-models') { z.object({ action: z.literal('gemini-models') }).strict().parse(payload); return geminiModels(); }
     if (action === 'host-health') { z.object({ action: z.literal('host-health') }).strict().parse(payload); return hostHealth!.report(); }
     if (action.startsWith('remote-')) return remoteControl(payload);
     if (action.startsWith('linked-')) return linkedRequest(payload);
@@ -938,7 +951,7 @@ else app.whenReady().then(() => {
     const report = windowHealthSchema.parse(payload);
     hostHealth?.recordFromWindow(report.kind, report.ms ?? null, report.detail ?? null); return null;
   });
-  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex')])).map((engine) => engine.info));
+  handle(IPC_CHANNELS.discoverEngines, async () => (await Promise.all([discoverEngine('claude'), discoverEngine('codex'), discoverEngine('gemini')])).map((engine) => engine.info));
   handle(IPC_CHANNELS.startSession, (owner, payload) => {
     if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is preparing to install an update.'); refuseDuringScriptUpdate();
     // The manager validates the complete request. This guard also covers pending

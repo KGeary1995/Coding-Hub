@@ -27,3 +27,16 @@ describe('local authentication diagnostics', () => {
     expect(advertisesFlag('--config=value', '--config')).toBe(true);
   });
 });
+
+describe('Gemini CLI sign-in', () => {
+  const usage = JSON.stringify({ conversation_id: '', status: 'SUCCESS', response: 'Gemini Models\tWeekly Limit Remaining\t98%\n', command: { name: 'usage', data: { groups: [{ name: 'Gemini Models', buckets: [] }] } } });
+  it('is signed in when agy reports its plan limits, and unknown otherwise (what it says signed out has not been seen)', () => {
+    expect(classifyAuthentication('gemini', { stdout: usage, stderr: '', exitCode: 0, timedOut: false }).state).toBe('authenticated');
+    for (const result of [{ stdout: usage, stderr: '', exitCode: 2, timedOut: false }, { stdout: 'not json', stderr: '', exitCode: 0, timedOut: false }, { stdout: JSON.stringify({ command: { name: 'usage', data: { groups: [] } } }), stderr: '', exitCode: 0, timedOut: false }, { stdout: '', stderr: '', exitCode: null, timedOut: true }])
+      expect(classifyAuthentication('gemini', result).state).toBe('unknown');
+  });
+  it('never repeats what agy printed', () => {
+    const status = classifyAuthentication('gemini', { stdout: usage.replace('Gemini Models', 'person@example.com'), stderr: 'person@example.com', exitCode: 0, timedOut: false });
+    expect(JSON.stringify(status)).not.toContain('example.com');
+  });
+});

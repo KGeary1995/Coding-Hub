@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AttentionServer, OscNotifications, claudeAttentionSettings, cleanMessage, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
+import { AttentionServer, GeminiStatusReader, OscNotifications, OscSequences, atLeast, claudeAttentionSettings, cleanMessage, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
 
 describe('OSC 9 notifications', () => {
   it('reads notifications ended by BEL or ST and ignores progress reports', () => {
@@ -120,5 +120,40 @@ describe('launch helpers', () => {
   it('adds loopback to NO_PROXY without dropping existing entries', () => {
     expect(withLoopbackNoProxy({ NO_PROXY: 'corp.example, localhost' })).toEqual({ NO_PROXY: 'corp.example,localhost,127.0.0.1', no_proxy: 'corp.example,localhost,127.0.0.1' });
     expect(withLoopbackNoProxy({}).NO_PROXY).toBe('127.0.0.1,localhost');
+  });
+});
+
+describe('Gemini CLI status (OSC 7501)', () => {
+  // As agy 1.5.12 sent them, through a real terminal.
+  const status = (body: string) => `\x1b]7501;${body}\x07`;
+  const ask = (text: string) => `state=blocked:kind=permission:app=antigravity:msg=${Buffer.from(text).toString('base64')}`;
+  it('reads working, idle, done and failed, and a blocked one with its question', () => {
+    const reader = new GeminiStatusReader();
+    expect(reader.push(`a${status(ask('Trust this folder?'))}b${status('state=idle:app=antigravity')}`)).toEqual([{ state: 'blocked', message: 'Trust this folder?' }, { state: 'idle' }]);
+    expect(reader.push(status('state=working:app=antigravity') + status('state=done') + status('state=failed') + status('state=sleeping'))).toEqual([{ state: 'working' }, { state: 'done' }, { state: 'failed' }]);
+  });
+  it('joins a status split across chunks, also inside its opening bytes, and ends at ST too', () => {
+    const reader = new GeminiStatusReader(); const whole = status(ask('Approve Bash: git rm --cached hello.txt'));
+    // The first chunk ends inside the opening (ESC ] 7 5); the rest of it starts the next.
+    expect(reader.push('x\x1b]75')).toEqual([]); expect(reader.push(whole.slice(4, 20))).toEqual([]);
+    expect(reader.push(whole.slice(20))).toEqual([{ state: 'blocked', message: 'Approve Bash: git rm --cached hello.txt' }]);
+    expect(new GeminiStatusReader().push('\x1b]7501;state=idle\x1b\x5c')).toEqual([{ state: 'idle' }]);
+  });
+  it('says what it waits for when the question is missing or unreadable, and cleans what it shows', () => {
+    const reader = new GeminiStatusReader();
+    expect(reader.push(status('state=blocked:kind=question'))).toEqual([{ state: 'blocked', message: 'Gemini CLI has a question for you.' }]);
+    expect(reader.push(status('state=blocked:kind=permission:msg='))).toEqual([{ state: 'blocked', message: 'Gemini CLI is waiting for your approval.' }]);
+    expect(reader.push(status(ask('Run\x1b[31m rm\nnow')))).toEqual([{ state: 'blocked', message: 'Run [31m rm now' }]);
+  });
+  it('keeps a long question split across chunks (a long command to approve)', () => {
+    const reader = new GeminiStatusReader(); const command = 'Approve Bash: ' + 'x'.repeat(4000); const whole = status(ask(command));
+    expect(reader.push(whole.slice(0, 3000))).toEqual([]); expect(reader.push(whole.slice(3000))).toEqual([{ state: 'blocked', message: command.slice(0, 200) }]);
+  });
+  it('leaves other codes alone, and OSC 9 notifications still read as before', () => {
+    expect(new OscSequences('7501').push('\x1b]9;hello\x07\x1b]75010;x\x07')).toEqual([]);
+    expect(new OscNotifications().push('\x1b]7501;state=idle\x07\x1b]9;Approve?\x07')).toEqual(['Approve?']);
+  });
+  it('compares versions by their numbers', () => {
+    expect(atLeast('agy 1.4.0', 1, 4, 0)).toBe(true); expect(atLeast('1.3.99', 1, 4, 0)).toBe(false); expect(atLeast('1.10.0', 1, 4, 0)).toBe(true); expect(atLeast(null, 1, 0, 0)).toBe(false);
   });
 });

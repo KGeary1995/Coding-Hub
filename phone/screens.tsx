@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { PlanLimits } from '../shared/plan-limits';
+import { PLAN_NAME, type PlanLimits } from '../shared/plan-limits';
 import type { RemoteHistoryItem, RemoteMemory, RemoteTask, RemoteUsage } from '../shared/remote';
 import { api } from './api';
 
@@ -21,14 +21,15 @@ function useRoute<T>(path: string): [T | null, string, () => void] {
   return [value, error, () => setLoad((count) => count + 1)];
 }
 
-/** An engine's mark, as on the desktop's tiles (lucide's Asterisk, SquareTerminal and SquareChevronRight). Fixed markup, not data. */
-export const ENGINE_ICON: Record<'claude' | 'codex' | 'shell', string> = {
+/** An engine's mark, as on the desktop's tiles (lucide's Asterisk, SquareTerminal, Sparkle and SquareChevronRight). Fixed markup, not data. */
+export const ENGINE_ICON: Record<'claude' | 'codex' | 'gemini' | 'shell', string> = {
   claude: '<path d="M12 6v12"/><path d="M17.196 9 6.804 15"/><path d="m6.804 9 10.392 6"/>',
   codex: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+  gemini: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
   shell: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 4 4-4 4"/>',
 };
 export const iconSvg = (paths: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-function EngineMark({ engine }: { engine: 'claude' | 'codex' | 'shell' }) { return <span className={`avatar small ${engine}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(ENGINE_ICON[engine]) }} />; }
+function EngineMark({ engine }: { engine: 'claude' | 'codex' | 'gemini' | 'shell' }) { return <span className={`avatar small ${engine}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(ENGINE_ICON[engine]) }} />; }
 
 /** A meter: a 6 px track filled to `ratio` in `tone` (an engine), or in the limit colour from 80%. */
 function Meter({ ratio, tone, label }: { ratio: number; tone: string; label: string }) {
@@ -58,7 +59,7 @@ function UsageScreen() {
     <Section title="Plan limits">
       {!usage.limits.length && <Empty title="No plan limits yet">Shown once an agent reports them.</Empty>}
       {usage.limits.map((limit) => <div key={`${limit.engine}-${limit.account}`} className="limit">
-        <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
+        <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{PLAN_NAME[limit.engine]}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
         <LimitNote limit={limit} />
         {limit.windows.map((window) => <div key={window.label}><p className="measure"><span>{window.label}</span><b>{Math.round(window.usedPercent)}%</b></p><Meter ratio={window.usedPercent / 100} tone={limit.engine} label={`${window.label} ${Math.round(window.usedPercent)}% used`} /></div>)}
       </div>)}
@@ -93,10 +94,10 @@ function HistoryScreen({ canRun }: { canRun: boolean }) {
   if (!items) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="dim" role="status">{note}</p>}
-    {!items.length && <Empty title="No conversations yet">Claude Code and Codex conversations on this computer show here.</Empty>}
+    {!items.length && <Empty title="No conversations yet">Claude Code, Codex and Gemini CLI conversations on this computer show here.</Empty>}
     {items.length > 0 && <ul className="history rows">{items.map((item) => <li key={item.key} className={`history-item engine-${item.engine}`}>
       <EngineMark engine={item.engine} />
-      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{item.engine === 'claude' ? 'Claude Code' : 'Codex'} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
+      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{({ claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const)[item.engine]} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
       {canRun && <button type="button" className="small" onClick={() => void resume(item)}>Resume</button>}
     </li>)}</ul>}
     {!canRun && items.length > 0 && <p className="dim">Resuming needs Can start and stop agents (Settings → Phone access on the computer).</p>}

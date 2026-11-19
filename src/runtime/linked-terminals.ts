@@ -1,10 +1,12 @@
 import { Terminal } from '@xterm/xterm';
 import type { LinkedComputer, LinkedComputerEvent } from '../../shared/remote';
+import type { ChannelEngine } from '../../shared/types';
 import { useLinkedStore } from '../state/linked-store';
 import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { workbench } from './workbench';
 import { withoutTerminalReplies } from '../../shared/terminal-input';
+import { measureLikeTheCLIs } from '../../shared/terminal-width';
 import { attachCopy } from './terminals';
 import { inputPieces } from './input-pieces';
 import { forgetLinkedChatsExcept } from '../state/chat-store';
@@ -38,15 +40,15 @@ export function sendLinkedInput(entry: Pick<Entry, 'runId' | 'queue' | 'failures
 function base64(bytes: Uint8Array) { let text = ''; for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(text); }
 
 /** Sends an image to a channel on a linked computer; what went wrong shows above that computer's channels. */
-function sendImage(entry: Entry, computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell', image: string) {
+function sendImage(entry: Entry, computerId: string, sessionId: string, engine: ChannelEngine, image: string) {
   const runId = entry.runId; if (!runId) return;
-  if (engine === 'shell') { useLinkedStore.setState({ addError: 'Images paste into Claude Code and Codex channels, not terminals.' }); return; }
+  if (engine === 'shell' || engine === 'gemini') { useLinkedStore.setState({ addError: 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.' }); return; }
   useLinkedStore.setState({ addError: '' });
   entry.queue = entry.queue.then(() => workbench({ action: 'linked-paste-image', id: computerId, sessionId, runId, image })).catch((error: Error) => useLinkedStore.setState({ addError: error.message }));
 }
 
 /** Ctrl+V on a Mac: this computer's clipboard image if there is one, else the key itself. */
-async function pasteClipboardImage(entry: Entry, computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell') {
+async function pasteClipboardImage(entry: Entry, computerId: string, sessionId: string, engine: ChannelEngine) {
   const result = await window.codingHub?.clipboardImage().catch(() => null);
   const full = result?.ok ? result.value?.full : undefined;
   if (full) { sendImage(entry, computerId, sessionId, engine, full.slice(full.indexOf(',') + 1)); return; }
@@ -54,11 +56,11 @@ async function pasteClipboardImage(entry: Entry, computerId: string, sessionId: 
 }
 const key = (computerId: string, sessionId: string) => `${computerId}:${sessionId}`;
 
-export function linkedTerminal(computerId: string, sessionId: string, engine: 'claude' | 'codex' | 'shell', size: { cols: number | null; rows: number | null }): Entry {
+export function linkedTerminal(computerId: string, sessionId: string, engine: ChannelEngine, size: { cols: number | null; rows: number | null }): Entry {
   const id = key(computerId, sessionId); const existing = terminals.get(id); if (existing) return existing;
   const element = document.createElement('div'); element.className = 'terminal-surface linked-surface';
-  const terminal = new Terminal({ cols: size.cols ?? 100, rows: size.rows ?? 30, scrollback: 5000, fontFamily: TERMINAL_FONT, fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.3, theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[engine] } });
-  terminal.open(element);
+  const terminal = new Terminal({ cols: size.cols ?? 100, rows: size.rows ?? 30, scrollback: 5000, fontFamily: TERMINAL_FONT, fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.3, allowProposedApi: true, theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[engine] } });
+  measureLikeTheCLIs(terminal); terminal.open(element);
   const entry: Entry = { terminal, element, runId: null, queue: Promise.resolve(), failures: 0 };
   terminal.onData((data) => {
     // The computer running the CLI answers its queries (cursor position, device attributes, colours) and focus

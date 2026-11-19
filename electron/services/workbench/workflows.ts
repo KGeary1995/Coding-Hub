@@ -16,7 +16,7 @@ import { isAgentConfig } from '../../../shared/types';
 const label = z.object({ key: z.string().min(1).max(200), name: z.string().trim().min(1).max(100), pinned: z.boolean() }).strict();
 const check = z.object({ name: z.string().trim().min(1).max(100), steps: z.array(z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['npm','pnpm','yarn','python','cargo','go','dotnet']), args: z.array(z.string().max(500).refine((value) => !value.includes('\0'))).min(1).max(30) }).strict()).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300) }).strict();
 export const templateSchema = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), description: z.string().max(1000), workspace: savedWorkspaceSchema, rules: z.string().max(50000), checks: z.array(check).max(20), createdAt: z.iso.datetime() }).strict();
-/** Templates as saved: one from 1.19 or 1.20 can hold Gemini channels, which are dropped when it is applied. */
+/** Templates as saved: one from 1.20 can hold hidden Gemini Round Table seats, which are dropped when it is applied. */
 const storedTemplateSchema = templateSchema.extend({ workspace: legacyWorkspaceSchema });
 const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-conversations') }).strict(), label.extend({ action: z.literal('flow-conversation-save') }).strict(),
@@ -65,9 +65,9 @@ export class Workflows {
   if (this.busy) throw new HubError('TEMPLATE_BUSY', 'A template operation is already running.');
   const selected = templates.find((item) => item.id === request.id); if (!selected) throw new HubError('TEMPLATE_MISSING', 'Select an available template.');
   const cwd = directory(request.directory);
-  // Checked before anything is written: a template of Gemini channels only (1.19, 1.20) leaves nothing to apply.
+  // Checked before anything is written: a template of 1.20's Gemini seats only leaves nothing to apply.
   const workspace = migrateWorkspace(structuredClone(selected.workspace)).workspace;
-  if (!workspace) throw new HubError('TEMPLATE_EMPTY', 'This template has only Gemini channels, which Trace no longer runs.');
+  if (!workspace) throw new HubError('TEMPLATE_EMPTY', 'This template has only Gemini Round Table seats, which Trace no longer has.');
   this.busy = true;
   try {
    const instructions = this.rules.read([cwd]);

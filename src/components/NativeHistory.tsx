@@ -4,7 +4,7 @@ import { History, Search, SearchX, CircleAlert } from 'lucide-react';
 import { ENGINE_ICONS } from './tile/engine-icons';
 import type { NativeConversation, NativeResume } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
-import { createSession, arrangeTiles, useWorkspaceStore } from '../state/workspace-store';
+import { createSession, arrangeTiles, resumeConfig, RESUMED_TITLE, useWorkspaceStore } from '../state/workspace-store';
 import { MAX_CHANNELS } from '../../shared/schemas';
 export function NativeHistory({ onBack }: { onBack: () => void }) {
   const [labels, setLabels] = useState<ConversationLabel[]>([]);
@@ -17,8 +17,8 @@ export function NativeHistory({ onBack }: { onBack: () => void }) {
       const directory = chooseDirectory ? await window.codingHub?.pickDirectory() : undefined; if (chooseDirectory && !directory) return;
       const prepared = await workbench<NativeResume>({ action: 'native-resume', key: item.key, ...(directory ? { directory } : {}) });
       const session = createSession(item.engine, { mode: 'independent', cwd: prepared.directory });
-      session.config = item.engine === 'claude' ? { engine: 'claude', resumeId: item.id, ...(item.profileId ? { accountProfileId: item.profileId } : {}), model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } : { engine: 'codex', resumeId: item.id, model: '', reasoningEffort: null };
-      session.title = labels.find((label) => label.key === item.key)?.name || (item.engine === 'claude' ? 'Claude · resumed' : 'Codex · resumed');
+      session.config = resumeConfig(item.engine, item.id, item.profileId);
+      session.title = labels.find((label) => label.key === item.key)?.name || RESUMED_TITLE[item.engine];
       const state = useWorkspaceStore.getState(); if (state.sessions.length >= MAX_CHANNELS) throw new Error('The workspace is now full. Close an idle channel.'); const sessions = [...state.sessions, session]; useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), activeView: 'workspace', layoutMode: 'grid', focusedSessionId: null });
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
