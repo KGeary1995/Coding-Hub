@@ -13,7 +13,7 @@ import { RulesService } from './rules';
 import { defaultDriveDirectory, preferencesSchema } from './preferences';
 import { DeviceSync } from './device-sync';
 import { timed } from '../storage/host-health';
-const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
+const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
 export const hubRequestSchema = z.discriminatedUnion('action', [
   // The registry holds up to 200 folders (100 projects plus prepared coaching folders) and the panel adds workspace folders.
   z.object({ action: z.literal('rules-read'), directories: z.array(dir).max(250) }).strict(),

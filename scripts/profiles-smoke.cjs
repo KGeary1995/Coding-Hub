@@ -72,7 +72,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       const tile = page.locator('.session-tile').nth(index); await tile.locator('.xterm-helper-textarea').focus();
       await page.keyboard.type('profile-session-' + index); await page.keyboard.press('Enter');
     }
-    await waitForPage(page, async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; }, undefined, 'Usage was not recorded for both profile sessions.');
+    await waitForPage(page, async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; }, undefined, 'Usage was not recorded for both profile channels.');
     const history = await native(page, 'listHistory'); assert.equal(history.length, 2);
     assert.deepEqual(history.map((run) => run.config.accountProfileId).sort(), profiles.map((profile) => profile.id).sort());
     const reconnect = await page.evaluate((profileId) => window.codingHub.accounts({ action: 'login', provider: 'claude', profileId, cols: 80, rows: 24 }), profiles[0].id);
@@ -102,6 +102,6 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await page.locator('.account-profile-chip').count(), 2);
     assert.equal((await native(page, 'accounts', { action: 'profile-list' })).length, 2);
     if (process.env.CODING_HUB_PROFILES_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_PROFILES_SCREENSHOT });
-    console.log('PASS: independent Claude logins, preserved default account, simultaneous profile sessions, per-profile usage, reconnect guard, private login output, and restored profile assignments. Fixture CLIs; real OAuth requires desktop provider login.');
+    console.log('PASS: independent Claude logins, preserved default account, simultaneous profile channels, per-profile usage, reconnect guard, private login output, and restored profile assignments. Fixture CLIs; real OAuth requires desktop provider login.');
   } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

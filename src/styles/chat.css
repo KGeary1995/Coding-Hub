@@ -2,22 +2,6 @@
    docs/design/midnight/README.md). The phone app loads this file but not ui.css (phone/chat.tsx), so every part of the
    thread it shows is drawn here, field focus included. */
 
-/* shared-candidate: the small quiet button of a tile's detail row, a linked computer's bar and a transcript's bar
-   (SessionTile, LinkedComputerView, LinkedScreen, TranscriptView; the phone does not use it). tile.css tunes it in a tile. */
-.tr-detail-button { flex: none; height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); white-space: nowrap; }
-.tr-detail-button svg { flex: none; width: 14px; height: 14px; }
-.tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
-.tr-detail-button:hover:not(:disabled), .tr-detail-button:is(.selected, [aria-pressed="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); }
-.tr-detail-button.stop { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
-.tr-detail-button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
-.tr-detail-button:disabled { opacity: .45; }
-/* Narrow tiles: a button with an icon keeps only the icon (its label stays its name); one without (Close, Keep) keeps its words. */
-@container (max-width: 560px) {
-  .tr-detail-button:has(.tr-detail-icon) { width: 24px; padding: 0; justify-content: center; }
-  .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
-[data-contrast="high"] .tr-detail-button:not(.stop) { color: var(--tr-fg); }
-
 /* A pasted image, enlarged (desktop chat): an overlay. */
 .pasted-viewer { max-width: min(92vw, 1600px); max-height: 92vh; padding: 0; overflow: hidden; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); }
 .pasted-viewer::backdrop { background: var(--tr-scrim); }
@@ -154,6 +138,11 @@
 .table-roles { color: var(--tr-fg-muted); }
 .table-partner, .table-tokens { color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
 .table-partner b, .table-tokens b { font-weight: 600; }
+/* A narrow tile's bar takes two lines, not three, in a four-tile grid on a small window. At 560 px or less the token
+   counts leave it and Swap keeps only its icon; at 460 px or less who drives leaves too. What leaves stays in a
+   tooltip (TableBar, ChainBar) and is still read out; Swap's label stays its name. */
+@container (max-width: 560px) { .table-tokens, .seat-tokens, .table-swap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+@container (max-width: 460px) { .table-roles { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 /* The hidden partner's state: it has no tile, so a request waiting on it shows here in the waiting colour. */
 .table-partner.waiting { color: var(--tr-st-waiting); }
 .seat-text-claude { color: var(--tr-ch-claude); }

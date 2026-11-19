@@ -100,7 +100,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     const second = page.locator('.session-tile').nth(1);
     await (await tileControl(page, 'Engine settings for channel 2')).click();
-    await second.getByLabel('Working directory', { exact: true }).selectOption('independent');
+    await second.getByLabel('Working folder', { exact: true }).selectOption('independent');
     await second.getByLabel('Repository path', { exact: true }).fill(projects[1]);
     await second.getByLabel('codex model', { exact: true }).fill('fixture-model');
     await (await tileControl(page, 'Engine settings for channel 2')).click();
@@ -536,7 +536,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       if (window) console.error('Resize probe:', JSON.stringify(await window.evaluate(async () => {
         const sizes = () => (window.testEvents ?? []).filter((event) => event.type === 'data' && event.data.includes('SIZE:')).map((event) => event.data.match(/SIZE:\d+x\d+/g)).flat();
         const before = sizes(); const started = (window.testEvents ?? []).filter((event) => event.type === 'started');
-        const run = started[0]; if (!run) return { before, note: 'no started session' };
+        const run = started[0]; if (!run) return { before, note: 'no started channel' };
         const result = await window.codingHub.resizeSession({ sessionId: run.sessionId, runId: run.runId, cols: 61, rows: 17 });
         await new Promise((resolve) => setTimeout(resolve, 2000));
         return { before, resize: result.ok ? 'ok' : result.error, after: sizes() };

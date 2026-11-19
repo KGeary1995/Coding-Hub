@@ -39,7 +39,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
    await first.locator('.xterm-helper-textarea').focus();await page.keyboard.type(prompt);await page.keyboard.press('Enter');
    await page.waitForFunction(({runId,prompt})=>window.events.filter(event=>event.runId===runId&&event.type==='data').map(event=>event.data).join('').includes('ECHO:'+prompt),{runId:claude.runId,prompt});
    assert.equal(app.process().exitCode,null,'Submitting a prompt must keep the native host alive');
-   assert.equal(await page.evaluate(runId=>window.events.some(event=>event.runId===runId&&event.type==='exit'),claude.runId),false,'Submitting a prompt must keep the Claude session running');
+   assert.equal(await page.evaluate(runId=>window.events.some(event=>event.runId===runId&&event.type==='exit'),claude.runId),false,'Submitting a prompt must keep the Claude channel running');
   }
   assert.doesNotThrow(()=>process.kill(claude.pid,0));
   await page.getByRole('link',{name:'Trace home',exact:true}).click();assert.equal(await first.getByRole('button',{name:'Stop',exact:true}).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));

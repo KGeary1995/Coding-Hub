@@ -23,7 +23,7 @@ export class ProjectSetup {
   private busy = false;
   get active() { return this.busy; }
   constructor(private dependencies: { findGitHub?: () => Promise<Executable>; execute?: typeof execute } = {}) {}
-  private canonical(directory: string) { try { const root = fs.realpathSync(directory); if (!fs.statSync(root).isDirectory()) throw new Error('Not a directory'); return root; } catch { throw new HubError('PROJECT_DIRECTORY', 'This folder does not exist or is inaccessible. Browse an existing folder, or create a new project.'); } }
+  private canonical(directory: string) { try { const root = fs.realpathSync(directory); if (!fs.statSync(root).isDirectory()) throw new Error('Not a directory'); return root; } catch { throw new HubError('PROJECT_DIRECTORY', 'This folder does not exist or is inaccessible. Choose an existing folder, or create a new project.'); } }
   async execute(input: unknown): Promise<ProjectResponse> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_PROJECT_REQUEST', 'Use an absolute folder path, a regular project name, and an owner/repository GitHub name.'); const request = parsed.data;
     if (request.action === 'validate') return { directory: this.canonical(request.directory) };
@@ -37,9 +37,9 @@ export class ProjectSetup {
         if (!result.success) throw new HubError('GITHUB_REPOSITORIES', 'Repository list had an unsupported format. Refresh or update GitHub CLI.'); return result.data;
       }
       const parent = this.canonical(request.parent); const name = request.action === 'create' ? request.name : request.repository.split('/')[1];
-      if (!folder.safeParse(name).success) throw new HubError('PROJECT_NAME', 'The repository name cannot be used as a local folder name on this system. Clone it under another name in your system terminal, then browse and open it.'); const target = path.join(parent, name);
+      if (!folder.safeParse(name).success) throw new HubError('PROJECT_NAME', 'The repository name cannot be used as a local folder name on this system. Clone it under another name in your system terminal, then open it with Choose folder.'); const target = path.join(parent, name);
       // Reserve an empty destination atomically. Never replace or delete existing user folders.
-      try { fs.mkdirSync(target, { recursive: false, mode: 0o700 }); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new HubError('PROJECT_EXISTS', 'That project folder already exists. Browse and open it, or choose a different parent folder.'); throw error; }
+      try { fs.mkdirSync(target, { recursive: false, mode: 0o700 }); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new HubError('PROJECT_EXISTS', 'That project folder already exists. Open it with Choose folder, or choose a different parent folder.'); throw error; }
       try {
         if (request.action === 'github-clone') {
           const gh = await (this.dependencies.findGitHub ?? findGitHub)();
@@ -48,7 +48,7 @@ export class ProjectSetup {
           // `git clone --config` persists the setting; restore normal hooks once the clone's own checkout is done.
           await run('git', ['-C', target, 'config', '--unset', 'core.hooksPath'], parent);
         } else if (request.initializeGit) await run('git', ['-c', `core.hooksPath=${noHooksPath()}`, 'init', '-b', 'main', '--', target], parent);
-      } catch { throw new HubError('PROJECT_SETUP_FAILED', `Setup could not finish. The folder and any partial files were preserved at ${target}. Check CLI installation, login, network access, and permissions. You can browse and open this folder.`); }
+      } catch { throw new HubError('PROJECT_SETUP_FAILED', `Setup could not finish. The folder and any partial files were preserved at ${target}. Check CLI installation, login, network access, and permissions. You can open this folder with Choose folder.`); }
       return { directory: this.canonical(target) };
     } finally { this.busy = false; }
   }

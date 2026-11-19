@@ -33,7 +33,7 @@ export function UpdatesPanel() {
   const working = busy || ['checking', 'downloading', 'installing'].includes(status?.phase ?? '');
   const state = status ? PHASES[status.phase] : undefined;
   return <article className="storage-card ui-card settings-card updates-card">
-    <div className="ui-card-head"><Download aria-hidden="true" /><h2>Application updates</h2><span className="ui-badge neutral">{status ? `v${status.version}` : !window.codingHub ? 'Desktop edition' : error ? 'Unavailable' : 'Checking'}</span>{state && <span className={`ui-badge ${state.tone}`}>{state.label}</span>}</div>
+    <div className="ui-card-head"><Download aria-hidden="true" /><h3>Application updates</h3><span className="ui-badge neutral">{status ? `v${status.version}` : !window.codingHub ? 'Desktop edition' : error ? 'Unavailable' : 'Checking'}</span>{state && <span className={`ui-badge ${state.tone}`}>{state.label}</span>}</div>
     {/* A failed update reads as an error; with no status at all, the error banner below says why. */}
     {(status || !error) && <p role="status" className={status?.phase === 'error' ? 'ui-banner danger' : undefined}>{status?.phase === 'error' && <CircleAlert aria-hidden="true" />}<span>{status?.message ?? (window.codingHub ? 'Checking how this copy is updated…' : 'Update controls are available in the desktop app.')}</span></p>}
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}

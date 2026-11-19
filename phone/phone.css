@@ -22,7 +22,7 @@ p { margin: 0; }
 
 /* ---------- Buttons: the secondary form by default; every named form below, and the chat's own, replace it ---------- */
 :where(button) { font: inherit; color: inherit; cursor: pointer; }
-:where(button:not(.chat-link, .chat-image, .chat-icon, .tr-detail-button)) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-hover); color: var(--tr-fg); font: 600 14px/20px var(--tr-font-ui); white-space: nowrap;
+:where(button:not(.chat-link, .chat-image, .chat-icon)) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-hover); color: var(--tr-fg); font: 600 14px/20px var(--tr-font-ui); white-space: nowrap;
   transition: background-color var(--tr-d-fast) var(--tr-ease), border-color var(--tr-d-fast) var(--tr-ease), color var(--tr-d-fast) var(--tr-ease); }
 :where(button):disabled { opacity: .45; cursor: default; }
 :where(button):focus-visible, :where(input, select, textarea, summary):focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
@@ -33,7 +33,7 @@ button.stop, .button.danger { border-color: color-mix(in srgb, var(--tr-danger) 
 /* Allow, in an approval: the solid waiting colour, as on the desktop (src/ui.css). */
 .chat-permission .button.primary { border-color: var(--tr-st-waiting); background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
 @media (hover: hover) {
-  :where(button:not(.chat-link, .chat-image, .chat-icon, .tr-detail-button, .primary, .quiet, .quiet-button, .stop, .danger)):hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
+  :where(button:not(.chat-link, .chat-image, .chat-icon, .primary, .quiet, .quiet-button, .stop, .danger)):hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
   :is(.button.primary, button.primary):hover:not(:disabled) { border-color: var(--tr-accent-solid-hover); background: var(--tr-accent-solid-hover); }
   .chat-permission .button.primary:hover:not(:disabled) { border-color: var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 86%, var(--tr-fg-strong)); }
   :is(.quiet-button, button.quiet):hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }

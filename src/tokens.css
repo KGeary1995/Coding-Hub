@@ -123,10 +123,6 @@
   --tr-tile-head-h: 34px;
   --tr-tile-detail-h: 30px;
   --tr-focus: 2px solid var(--tr-accent);
-
-  /* Left from Flight Deck Lite's corner brackets: 0, so none shows. Kept only until the last rule that reads it is gone
-     (phone/phone.css). */
-  --tr-bracket-alpha: 0;
 }
 
 /* Higher contrast (Settings > Display): tokens, not single rules, since later stylesheets draw the borders from them.

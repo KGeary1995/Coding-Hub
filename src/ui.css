@@ -12,10 +12,7 @@
   /* A chevron pointing right, 16 px square, for clip-path on a box filled with currentColor. */
   --ui-chevron: polygon(40.8% 21.7%, 69.1% 50%, 40.8% 78.3%, 34.2% 71.7%, 55.9% 50%, 34.2% 28.3%);
   /* The same stroke as two diagonal bands, for the one control that takes no pseudo-element (select). */
-  --ui-chevron-down: linear-gradient(45deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px)), linear-gradient(135deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px));
-  /* Names from before the --tr- tokens, still read by a few area sheets. */
-  --accent: var(--tr-accent); --surface: var(--tr-surface); --surface-raised: var(--tr-raised); --canvas: var(--tr-bg); --border: var(--tr-line);
-  --muted: var(--tr-fg-muted); --text: var(--tr-fg); --success: var(--tr-success); --claude: var(--tr-ch-claude); --codex: var(--tr-ch-codex); }
+  --ui-chevron-down: linear-gradient(45deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px)), linear-gradient(135deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px)); }
 * { box-sizing: border-box; }
 /* After Tailwind's reset, which sets the line height back to the page's. */
 body { margin: 0; min-width: calc(860px / var(--display-scale, 1)); font: var(--tr-t-body); }
@@ -40,7 +37,10 @@ hr { border-color: var(--tr-line); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .tr-spacer { flex: 1; }
+/* The small legend square in an engine's colour. */
 .tr-engine-square { width: 8px; height: 8px; display: inline-block; border-radius: 2px; }
+.tr-engine-square.claude { background: var(--tr-ch-claude); }
+.tr-engine-square.codex { background: var(--tr-ch-codex); }
 
 /* Scrollbars: 10 px, a rounded thumb drawn 6 px wide, no track. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -55,8 +55,8 @@ button { font: inherit; cursor: pointer; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button, input, select, textarea, summary, [role="tab"], .ui-row { transition: background-color var(--tr-d-fast) var(--tr-ease), border-color var(--tr-d-fast) var(--tr-ease), color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease), outline-color var(--tr-d-fast) var(--tr-ease); }
 button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .45; }
-.button, .quiet-button, .icon-button, .tr-ghost-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: var(--tr-r-control); white-space: nowrap; text-decoration: none; }
-:is(.button, .quiet-button, .icon-button, .tr-ghost-button) svg { flex: none; width: 16px; height: 16px; }
+.button, .quiet-button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: var(--tr-r-control); white-space: nowrap; text-decoration: none; }
+:is(.button, .quiet-button, .icon-button) svg { flex: none; width: 16px; height: 16px; }
 /* A button with no variant is the secondary form. One primary per card or page region. */
 .button { min-height: 32px; padding: 0 12px; border: 1px solid var(--tr-line-control); background: var(--tr-hover); color: var(--tr-fg); font: 600 13px/16px var(--tr-font-ui); }
 .button:hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
@@ -70,12 +70,22 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .quiet-button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
 .icon-button { width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--tr-fg-dim); }
 .icon-button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
-.icon-button.selected, .icon-button[aria-pressed="true"] { background: var(--tr-raised); color: var(--tr-fg-strong); }
-.tr-ghost-button { height: 28px; padding: 0 12px; border: 1px solid var(--tr-line-control); background: none; color: var(--tr-fg); font: 500 13px/16px var(--tr-font-ui); gap: 6px; }
-.tr-ghost-button:hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-hover); color: var(--tr-fg-strong); }
 :is(.button, .quiet-button).small { min-height: 24px; padding: 0 8px; border-radius: var(--tr-r-small); font: 600 12px/16px var(--tr-font-ui); gap: 6px; }
 .icon-button.small { width: 24px; height: 24px; border-radius: var(--tr-r-small); }
 .button.large { min-height: 40px; padding: 0 16px; font-size: 14px; }
+/* The detail button: the small quiet button with an icon in a tile's detail row, a linked computer's bar and a
+   conversation's bar. Stop is the danger form. tile.css tunes it in a tile. */
+.tr-detail-button { flex: none; height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); white-space: nowrap; }
+.tr-detail-button svg { flex: none; width: 14px; height: 14px; }
+.tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
+.tr-detail-button:hover:not(:disabled), .tr-detail-button:is(.selected, [aria-pressed="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.tr-detail-button.stop { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.tr-detail-button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
+/* Narrow tiles: a button with an icon keeps only the icon (its label stays its name); one without (Close, Keep) keeps its words. */
+@container (max-width: 560px) {
+  .tr-detail-button:has(.tr-detail-icon) { width: 24px; padding: 0; justify-content: center; }
+  .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 /* Here, not in styles/chat.css: the phone app loads that file and never had this rule. */
 /* An approval's Allow is the waiting colour, so it reads as the answer to that card. */
 .chat-permission .button.primary { border-color: var(--tr-st-waiting); background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
@@ -117,6 +127,9 @@ input[type="checkbox"]:indeterminate::before { content: ""; width: 8px; height: 
 input[type="radio"]:checked::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tr-on-accent); }
 /* A field: its label above, the control, one line of hint below. A bare label text inside takes the label's type. */
 .ui-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* A bare label on a page takes the control type (the workspace's labels are the tile's). Zero specificity, so any rule
+   for a label wins. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
 .ui-hint { margin: 0; font: var(--tr-t-small); color: var(--tr-fg-faint); }
 .control-note { grid-column: 1 / -1; margin: 0; font: var(--tr-t-small); color: var(--tr-fg-dim); }
 /* A check box or radio with its words beside it. */
@@ -133,12 +146,11 @@ summary:hover { color: var(--tr-fg-strong); }
 summary::-webkit-details-marker { display: none; }
 summary:where(:not(:has(> svg:first-child, > .engine-glyph:first-child)))::before { content: ""; flex: none; width: 16px; height: 16px; background: currentColor; clip-path: var(--ui-chevron); transition: transform var(--tr-d-fast) var(--tr-ease); }
 details[open] > summary:where(:not(:has(> svg:first-child, > .engine-glyph:first-child)))::before { transform: rotate(90deg); }
-/* Segments: a well; the chosen one is raised. `:root` and the two resets hold until styles/usage.css drops its own copy
-   of this part, which made the chosen segment Codex cyan and the labels capitals in the top bar and the command menu. */
+/* Segments: a well; the chosen one is raised. */
 .tr-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); }
-:root .tr-seg > button { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); letter-spacing: normal; text-transform: none; white-space: nowrap; }
-:root .tr-seg > button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
-:root .tr-seg > button:is(.active, [aria-pressed="true"], [aria-checked="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
+.tr-seg > button { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
+.tr-seg > button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
+.tr-seg > button:is(.active, [aria-pressed="true"], [aria-checked="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
 /* Tabs: the chosen one is an accent pill. */
 [role="tablist"] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 [role="tab"] { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
@@ -151,6 +163,8 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .ui-help { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 50%; background: none; color: var(--tr-fg-dim); font: 600 11px/1 var(--tr-font-ui); cursor: help; }
 .ui-help:empty::before { content: "?"; }
 .ui-help:hover { border-color: var(--tr-line-strong); background: var(--tr-hover); color: var(--tr-fg-strong); }
+/* A hint or a sub-heading that ends in the help button: the two on one line, the button level with the words. */
+.ui-help-line { display: flex; align-items: center; gap: 8px; }
 
 /* ---------- Pages ---------- */
 /* The window: views scroll inside .main-shell, which gives every page its 24 px at the sides. */
@@ -161,7 +175,7 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .needs-you { position: relative; flex: 0 0 auto; display: flex; }
 .more-tools-page { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 /* A page: 24 px above, 32 px below. Reading and form pages stop at 1200 px, left-aligned; a data page adds .wide. */
-.ui-page, .feature-panel, .history-panel, .repository-panel:not(.tr-repo) { width: 100%; max-width: 1200px; padding: 24px 0 32px; }
+.ui-page, .feature-panel, .history-panel { width: 100%; max-width: 1200px; padding: 24px 0 32px; }
 .ui-page.wide { max-width: none; }
 /* Page heading: an icon tile, the title, one line of description, actions at the right. */
 .ui-page-head { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 20px; }
@@ -170,11 +184,15 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .ui-page-icon svg { width: 18px; height: 18px; }
 .ui-page-head p { margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 .ui-page-actions { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A plain heading over a group of cards on a long form page. It takes focus when "On this page" jumps to it
+   (tabindex -1), so it keeps a little room above it and shows the ring only to the keyboard. */
+.ui-section-title { margin: 0; font: var(--tr-t-section); color: var(--tr-fg-strong); scroll-margin-top: 24px; }
+.ui-section-title:focus:not(:focus-visible) { outline: none; }
 /* Cards in a page: a 12-column grid 16 px apart (a child spans all 12 unless it says .span-N), or a plain stack. */
 .ui-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
 .ui-grid > * { grid-column: span 12; min-width: 0; }
-.ui-grid > .span-3 { grid-column: span 3; } .ui-grid > .span-4 { grid-column: span 4; } .ui-grid > .span-6 { grid-column: span 6; } .ui-grid > .span-8 { grid-column: span 8; } .ui-grid > .span-9 { grid-column: span 9; }
-@container shell (max-width: 1024px) { .ui-grid > :is(.span-3, .span-4) { grid-column: span 6; } .ui-grid > :is(.span-8, .span-9) { grid-column: span 12; } }
+.ui-grid > .span-3 { grid-column: span 3; } .ui-grid > .span-4 { grid-column: span 4; } .ui-grid > .span-6 { grid-column: span 6; } .ui-grid > .span-8 { grid-column: span 8; }
+@container shell (max-width: 1024px) { .ui-grid > :is(.span-3, .span-4) { grid-column: span 6; } .ui-grid > .span-8 { grid-column: span 12; } }
 .ui-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .ui-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
@@ -184,14 +202,16 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 .ui-card.accent { border-color: var(--tr-accent-line); box-shadow: var(--tr-shadow-card), var(--tr-glow-accent); }
 .ui-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 12px; }
 .ui-card-head > svg { flex: none; width: 16px; height: 16px; color: var(--tr-accent); }
-.ui-card-head h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A card's title is an h2, or an h3 where the page has section headings above its cards (Settings): the same look. */
+.ui-card-head :is(h2, h3) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-heading); }
 .ui-card-actions { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A caption: one small dim line beside a card's title, at the right of its head or after a value (what the card
+   counts, where its numbers come from, when a limit resets). It shortens with an ellipsis. */
+.ui-caption { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
 /* The cards the pages had before. */
 .storage-card { margin-top: 16px; }
-.storage-card header, .server-card header, .hub-preview header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.server-card header, .hub-preview header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .server-card header > div, .hub-preview header > div { flex: 1; min-width: 0; }
-.storage-card h2 { margin: 0; }
-.storage-card > h2 { margin-bottom: 12px; }
 .storage-card dl { display: grid; grid-template-columns: 125px 1fr; gap: 8px 16px; margin: 16px 0; font-size: 13px; }
 .storage-card dt { color: var(--tr-fg-dim); }
 .storage-card dd { margin: 0; overflow-wrap: anywhere; }
@@ -265,40 +285,49 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 :is(.ui-table, .usage-table) tbody tr:hover { background: var(--tr-hover); }
 :is(.ui-table, .usage-table) :is(th, td).num { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-table { white-space: nowrap; }
-.usage-table td small { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: var(--tr-fg-dim); }
 /* Empty state: centred in its card, never a dashed box. */
 .ui-empty, .hub-empty, .history-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; text-align: center; color: var(--tr-fg-dim); }
 :is(.ui-empty, .hub-empty, .history-empty) > svg { flex: none; width: 44px; height: 44px; padding: 12px; border-radius: 50%; background: var(--tr-accent-soft); color: var(--tr-accent); }
-:is(.ui-empty, .hub-empty, .history-empty) :is(h2, h3, strong) { margin: 0; font: var(--tr-t-heading); color: var(--tr-fg-strong); }
+/* Its title is the heading one level under its card's title (h3 under h2, h4 under h3), or a strong: the same look. */
+:is(.ui-empty, .hub-empty, .history-empty) :is(h2, h3, h4, strong) { margin: 0; font: var(--tr-t-heading); color: var(--tr-fg-strong); }
 :is(.ui-empty, .hub-empty, .history-empty) p { max-width: 440px; margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 :is(.ui-empty, .hub-empty, .history-empty) > .button { margin-top: 8px; }
+/* An empty state that reports a failure takes the danger tone, so it reads as an error, not as "nothing here". */
+.ui-empty.danger > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.ui-empty.danger p { color: var(--tr-fg); }
 .hub-empty { min-height: 240px; }
 .history-empty { min-height: 320px; margin: 24px 0; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-card); }
-.tr-empty-note { margin: 8px 4px; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
 
 /* ---------- The forms and panels the pages had before ---------- */
 /* Native integrations share the workspace's typography, surfaces, and spacing. */
 .hub-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
 .hub-toolbar > .muted { flex: 1; align-self: center; }
 .hub-toolbar label, .hub-form label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
-.hub-toolbar label.update-checkbox, .hub-form label.update-checkbox { flex-direction: row; align-items: center; gap: 8px; font: 400 13px/16px var(--tr-font-ui); color: var(--tr-fg); }
-/* Beside controls that have a label above them, a check box lines up with the control, not the label. */
-.hub-toolbar > :is(.ui-check, .update-checkbox) { min-height: 32px; }
-.hub-panel h2 { margin: 0 0 8px; }
-/* A card head's title sits on the centre line of its icon, count and actions, so it takes no margin of its own. */
-.hub-panel .ui-card-head h2 { margin: 0; }
-/* Every paragraph keeps the 72 characters; hints, control notes, banners and notices keep their own type and colour, as in a card. */
+.hub-form label.update-checkbox { flex-direction: row; align-items: center; gap: 8px; font: 400 13px/16px var(--tr-font-ui); color: var(--tr-fg); }
+/* Every paragraph keeps the 72 characters, but for the page heading's one line; hints, control notes, banners and
+   notices keep their own type and colour, as in a card. */
 .hub-panel p { max-width: 72ch; }
+.hub-panel .ui-page-head p { max-width: none; }
 .hub-panel p:where(:not(.ui-hint, .control-note, .ui-banner, .hub-feedback)) { font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* A hint written as a paragraph takes no margin from a rule for its card's or its section's paragraphs; two in a row
+   stand 4 px apart. */
+.hub-panel p.ui-hint { margin: 0; }
+.hub-panel p.ui-hint + p.ui-hint { margin-top: 4px; }
 .hub-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
-/* A form after a card (Settings: Display and keyboard, then Google Drive) keeps the cards' gap. */
-.storage-card + .hub-form { margin-top: 16px; }
+/* The column's gap already spaces the head from what follows. */
+.hub-panel .hub-form > .ui-card-head { margin-bottom: 0; }
 .hub-form > .button { align-self: start; }
-.hub-feedback, .hub-warning, .persistence-alert, .history-notice { margin: 12px 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
+/* "How this works", closed until asked for: it holds what would otherwise be a paragraph of instructions in a card. */
+.ui-how { margin-top: 12px; }
+.ui-how > summary { width: fit-content; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.ui-how > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding-left: 24px; }
+.hub-feedback, .hub-warning, .persistence-alert { margin: 12px 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
 .hub-feedback { --tone: var(--tr-accent); }
 .hub-feedback.success { --tone: var(--tr-success); }
 .hub-feedback.error-message { --tone: var(--tr-danger); }
-.hub-warning, .persistence-alert, .history-notice { --tone: var(--tr-warning); }
+.hub-warning, .persistence-alert { --tone: var(--tr-warning); }
+/* A notice that starts with an icon (Saved., Pinned.) keeps the icon level with its words. */
+.hub-feedback:has(> svg) { display: flex; align-items: center; gap: 8px; }
 .hub-list { max-height: 580px; overflow: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-well); }
 .extension-row { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 0; border-bottom: 1px solid var(--tr-line-faint); background: none; color: var(--tr-fg-muted); text-align: left; }
 .extension-row strong { flex: 1; overflow-wrap: anywhere; font-size: 13px; color: var(--tr-fg-strong); }
@@ -308,7 +337,6 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 /* Output and file contents: wells. */
 .hub-preview pre, .check-output { max-height: 600px; overflow: auto; padding: 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .check-output { max-height: 300px; }
-.history-output, .file-preview { border-color: var(--tr-line); background: var(--tr-well); }
 .search-results code, .workflow-record > code { display: block; overflow-wrap: anywhere; color: var(--tr-fg-muted); }
 /* Here, not in styles/setup.css: `.hub-panel p` (ui.css) overrides it, so it loads first. */
 .engine-diagnostic p { margin: 0; line-height: 20px; }
@@ -322,18 +350,19 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 .workflow-record { margin: 16px 0; padding-top: 12px; border-top: 1px solid var(--tr-line-faint); }
 .workflow-record[open] > summary { margin-bottom: 12px; }
 .workflow-record .hub-form { margin: 16px 0 0; }
-.linked-screen-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--tr-fg-muted); font: 400 13px/16px var(--tr-font-ui); }
 
 /* ---------- Density and contrast (Settings > Display) ---------- */
 [data-density="compact"] :is(.ui-page, .feature-panel, .history-panel) { padding-top: 16px; }
 [data-density="compact"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection) { padding: 12px; }
 [data-density="compact"] .ui-row { min-height: 32px; padding: 4px 12px; }
-[data-contrast="high"] { --border: var(--tr-fg-dim); --muted: var(--tr-fg); }
 [data-contrast="high"] :is(.muted, .control-note, .eyebrow, .ui-hint) { color: var(--tr-fg); }
 [data-contrast="high"] :is(input, select, textarea) { border-color: var(--tr-fg-dim); }
-[data-contrast="high"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article, .history-empty) { border-color: var(--border); }
-[data-contrast="high"] :is(.ui-row, .hub-list, .diagnostic-step) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article, .history-empty) { border-color: var(--tr-fg-dim); }
+[data-contrast="high"] :is(.ui-row, .hub-list, .diagnostic-step, .check-output) { border-color: var(--tr-line-strong); }
+/* Apart from the list above: inside :is() its element name would outweigh an area's own rule for a row. */
+[data-contrast="high"] .hub-preview pre { border-color: var(--tr-line-strong); }
 [data-contrast="high"] :is(.quiet-button, .icon-button) { color: var(--tr-fg-strong); }
+[data-contrast="high"] .tr-detail-button:not(.stop) { color: var(--tr-fg); }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 
 /* ---------- Workspace grid ---------- */

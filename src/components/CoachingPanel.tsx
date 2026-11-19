@@ -1,7 +1,7 @@
 import { ExperimentsPanel } from './ExperimentsPanel';
 import { LiveCoachingCard } from './LiveCoachingCard';
 import { useEffect, useState } from 'react';
-import { ChartColumn, FileCheck, GraduationCap, Lightbulb, LoaderCircle, MessageSquareText, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { ChartColumn, FileCheck, GraduationCap, Lightbulb, LoaderCircle, MessageSquareText, Plus, Trash2, CircleAlert } from 'lucide-react';
 import { coachingFindings, coachingPacket, type CoachingPrepared, type CoachingRequest, type CoachingResponse, type PromptExample } from '../../shared/coaching';
 import { createSession, arrangeTiles, useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../state/hub-store';
@@ -40,7 +40,7 @@ export function CoachingPanel() {
   const OUTCOME = { successful: ['Successful', 'success'], partial: ['Partial', 'warning'], failed: ['Failed', 'danger'] } as const;
   return <section className="feature-panel hub-panel workbench-page coaching-panel"><header className="ui-page-head"><span className="ui-page-icon"><GraduationCap aria-hidden="true" /></span><div><h1>AI coaching</h1><p>Understand reported usage, review your phrasing, and compare outcomes.</p></div><div className="ui-page-actions"><button type="button" className="ui-help" title="Local findings use heuristics; an agent can provide deeper advice on a report you choose to share." aria-label="Help: AI coaching" /></div></header>
     <div className="hub-toolbar"><label>Usage window <select aria-label="Coaching usage window" value={days} onChange={(event) => { setDays(Number(event.target.value)); setApproved(false); }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label><span className="muted">Local statistics · CLI-reported usage · outcomes are self-reported</span></div>
-    {error && <div role="alert" className="ui-banner danger"><TriangleAlert aria-hidden="true" /><span>{error}</span></div>}
+    {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     <div className="ui-grid coaching-stats">{([['Reported runs', String(findings.runs)], ['Total tokens', formatNumber(findings.tokens)], ['Reported reasoning', formatNumber(findings.reasoning)], ['Estimated cost', dollars(findings.cost)]] as const).map(([label, value]) => <article key={label} className="ui-card span-3"><div className="ui-stat"><span>{label}</span><strong>{value}</strong></div></article>)}</div>
     <LiveCoachingCard save={saveLive} />
     <article className="storage-card"><div className="ui-card-head"><ChartColumn aria-hidden="true" /><h2>Usage over time</h2></div>{findings.days.length ? <div className="coaching-trend">{findings.days.map((day) => <div key={day.date}><span>{dayLabel(day.date)}</span><div className="ui-meter"><i style={{ width: `${day.tokens / max * 100}%` }} /></div><strong>{formatNumber(day.tokens)} tokens · {day.runs} {day.runs === 1 ? 'run' : 'runs'}</strong></div>)}</div> : <div className="ui-empty"><ChartColumn aria-hidden="true" /><h3>No usage in this window</h3><p>Runs appear here once a CLI reports their tokens.</p></div>}<small className="ui-hint">Days are in UTC. Tokens include Claude cache use, and reasoning is counted once. Prices come from Settings.</small></article>

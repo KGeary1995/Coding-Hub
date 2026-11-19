@@ -81,7 +81,7 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
   const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), directNotice(), screen);
-  if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen')));
+  if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Screen')));
   app.replaceChildren(header(), main, tabBar(tab));
   unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
   listen(null);

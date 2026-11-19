@@ -18,8 +18,9 @@ export function readClaudeLimits(executable: Executable, env: Record<string, str
   return new Promise((resolve) => {
     execFile(executable.file, [...executable.prefixArgs, ...CLAUDE_USAGE_ARGS], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
       let result = ''; try { result = text(JSON.parse(stdout).result); } catch { /* Below. */ }
-      const windows = parseClaudeUsage(result);
-      resolve({ engine: 'claude', account, windows, plan: /subscription/i.test(result) ? 'Subscription' : null, checkedAt, error: windows.length ? null : error ? 'Claude Code did not answer /usage.' : /api key|api usage|pay-as-you-go/i.test(result) ? 'This account is billed by API usage, which has no session or weekly limit.' : 'Claude Code did not report usage limits.' });
+      const windows = parseClaudeUsage(result); const billedByApi = !error && /api key|api usage|pay-as-you-go/i.test(result);
+      // API billing is a fact about the account; anything else without windows is a check that failed.
+      resolve({ engine: 'claude', account, windows, plan: /subscription/i.test(result) ? 'Subscription' : null, checkedAt, error: windows.length ? null : error ? 'Claude Code did not answer /usage.' : billedByApi ? 'This account is billed by API usage, which has no session or weekly limit.' : 'Claude Code did not report usage limits.', failed: !windows.length && !billedByApi });
     });
   });
 }
@@ -31,8 +32,8 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
     const child = spawn(executable.file, [...executable.prefixArgs, 'app-server'], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     let buffer = ''; let settled = false;
     const finish = (limits: Omit<PlanLimits, 'engine' | 'account' | 'checkedAt'>) => { if (settled) return; settled = true; clearTimeout(timer); child.kill(); resolve({ engine: 'codex', account: 'Default', checkedAt, ...limits }); };
-    const timer = setTimeout(() => finish({ windows: [], plan: null, error: 'Codex did not report usage limits in time.' }), 30000);
-    child.on('error', () => finish({ windows: [], plan: null, error: 'Codex could not be started.' }));
+    const timer = setTimeout(() => finish({ windows: [], plan: null, error: 'Codex did not report usage limits in time.', failed: true }), 30000);
+    child.on('error', () => finish({ windows: [], plan: null, error: 'Codex could not be started.', failed: true }));
     child.stdin.on('error', () => {});
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -42,10 +43,10 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
         let message: { id?: number; result?: Record<string, unknown>; error?: { message?: string } }; try { message = JSON.parse(line); } catch { continue; }
         if (message.id === 1) { child.stdin.write(JSON.stringify({ method: 'initialized' }) + '\n' + JSON.stringify({ id: 2, method: 'account/rateLimits/read', params: null }) + '\n'); continue; }
         if (message.id !== 2) continue;
-        if (message.error) { finish({ windows: [], plan: null, error: text(message.error.message) || 'Codex did not report usage limits.' }); return; }
+        if (message.error) { finish({ windows: [], plan: null, error: text(message.error.message) || 'Codex did not report usage limits.', failed: true }); return; }
         const limits = (message.result?.rateLimits ?? {}) as { primary?: unknown; secondary?: unknown; planType?: unknown };
         const given = [limits.primary, limits.secondary].filter(Boolean); const windows = codexWindows(given);
-        finish({ windows, plan: text(limits.planType) || null, error: windows.length ? null : given.length ? 'Codex reported its usage limits in a form Trace does not read. Update Trace.' : 'This Codex account has no usage limits to show.' });
+        finish({ windows, plan: text(limits.planType) || null, error: windows.length ? null : given.length ? 'Codex reported its usage limits in a form Trace does not read. Update Trace.' : 'This Codex account has no usage limits to show.', failed: !windows.length && given.length > 0 });
       }
     });
     child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'trace', title: 'Trace', version: '1' }, capabilities: null } }) + '\n');

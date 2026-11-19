@@ -3,7 +3,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { memo, useEffect, useState, type KeyboardEvent } from 'react';
-import { Folder, FolderOpen, GripVertical, OctagonPause, AlertCircle, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList } from 'lucide-react';
+import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -83,7 +83,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
   const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
-  const setupView = !cwd || /working directory|absolute.*directory/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
+  // The host's folder errors say "working folder"; both spellings match, as in recoveryAdvice (shared/productivity.ts).
+  const setupView = !cwd || /working (?:directory|folder)|absolute.*(?:directory|folder)/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
   const busy = session.status === 'running' || session.status === 'starting';
   // A Round Table's hidden partner waiting on an approval holds this tile: its card is in this thread.
   const partner = useWorkspaceStore((s) => partnerOf(s.sessions, session.id));
@@ -125,7 +126,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     : null;
   const facts = [
     stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
-    cwd ? `cwd ${folderName(cwd)}` : 'no working directory',
+    cwd ? `cwd ${folderName(cwd)}` : 'no working folder',
     usage ? `cost ${dollars(usage.cost)}` : null,
     context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : contextUsed !== null ? `ctx ${compact(contextUsed)}` : null,
   ].filter(Boolean);
@@ -165,16 +166,16 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       </div>
       {controlsOpen && <fieldset className="session-config" disabled={busy}>
         {isAgentConfig(session.config) && <EngineControls id={session.id} config={session.config} directory={cwd} onChange={(config) => updateConfig(session.id, config)} />}
-        <label className="binding-control ui-field">Working directory<select aria-label="Working directory" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
-        {session.binding.mode === 'independent' && <label className="binding-control ui-field">Repository path<input aria-label="Repository path" value={session.binding.cwd} placeholder="Absolute directory path" onChange={(event) => updateBinding(session.id, { mode: 'independent', cwd: event.target.value })} spellCheck={false} /><button className="button secondary" type="button" onClick={() => void window.codingHub?.pickDirectory().then((directory) => { if (directory) updateBinding(session.id, { mode: 'independent', cwd: directory }); }).catch(() => useWorkspaceStore.getState().setSessionError(session.id, 'Folder picker unavailable. Use Projects to enter a path.'))}><FolderOpen size={13} />Browse repository folder</button></label>}
+        <label className="binding-control ui-field">Working folder<select aria-label="Working folder" value={session.binding.mode} onChange={(event) => updateBinding(session.id, event.target.value === 'workspace' ? { mode: 'workspace' } : { mode: 'independent', cwd: rootDirectory ?? '' })}><option value="workspace">Use workspace root</option><option value="independent">Independent repository</option></select></label>
+        {session.binding.mode === 'independent' && <label className="binding-control ui-field">Repository path<input aria-label="Repository path" value={session.binding.cwd} placeholder="Absolute folder path" onChange={(event) => updateBinding(session.id, { mode: 'independent', cwd: event.target.value })} spellCheck={false} /><button className="button secondary" type="button" onClick={() => void window.codingHub?.pickDirectory().then((directory) => { if (directory) updateBinding(session.id, { mode: 'independent', cwd: directory }); }).catch(() => useWorkspaceStore.getState().setSessionError(session.id, 'Folder picker unavailable. Use Projects to enter a path.'))}><FolderOpen size={13} />Choose folder</button></label>}
         <SessionPreferences session={session} />
         <WorktreeControls session={session} />
         {busy && <p className="control-note">Stop the channel to change its next launch settings.</p>}
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {chat && attention}
-      {session.error && <div className="session-error" role="alert"><AlertCircle size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button small" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
-      {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><AlertCircle size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
+      {session.error && <div className="session-error" role="alert"><CircleAlert size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button small" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
+      {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
         <span className={`welcome-engine ui-avatar large ${engine}`} aria-hidden="true"><EngineIcon /></span>

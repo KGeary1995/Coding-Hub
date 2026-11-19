@@ -1,9 +1,6 @@
 /* Insight tools: Workflow center, AI coaching (live coaching, experiments), Verification profiles, More tools and Help.
    Loaded last. Built from the shared parts in ui.css; what is here is only the layout of these screens. */
 
-/* shared-candidate: a bare label outside the workspace takes the control type. Zero specificity, so any label rule wins;
-   kept from before because other pages' plain labels may rely on it. */
-:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
 /* An error above the cards keeps their distance. */
 .workbench-page > .ui-banner { margin-bottom: 16px; }
 /* A notice in a card stands off the field or list after it. */
@@ -21,9 +18,6 @@
 /* A check box, or the line a button reports, directly in a card stands off what is above it. */
 .workbench-page .storage-card > .update-checkbox { margin-top: 12px; }
 .workbench-page .storage-card > .button + p { margin-top: 8px; }
-/* shared-candidate: a hint written as a paragraph stays a hint; ui.css's `.hub-panel p` would make it 13 px dim body text. */
-.workbench-page p.ui-hint { font: var(--tr-t-small); color: var(--tr-fg-faint); }
-[data-contrast="high"] .workbench-page p.ui-hint { color: var(--tr-fg); }
 
 /* Workflow center */
 .workflow-tabs { margin-bottom: 16px; }
@@ -103,7 +97,6 @@
 /* More tools: a card per tool, an icon, its name, one line and the way in. */
 .more-tools-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .more-tools-list > .ui-card { display: flex; flex-direction: column; align-items: start; gap: 12px; }
-.workbench-page .more-tools-list :is(h2, p) { margin: 0; }
 .workbench-page .more-tools-list p { flex: 1; margin-top: -4px; }
 .more-tools-back { justify-self: start; margin: 16px 0 0 -8px; }
 
@@ -125,7 +118,8 @@
 .help-topics .ui-row-main > strong { white-space: normal; }
 .help-topics > .ui-empty { padding: 24px 8px; }
 .help-article header { display: flex; flex-direction: column; align-items: start; gap: 8px; padding-bottom: 20px; margin-bottom: 4px; border-bottom: 1px solid var(--tr-line); }
-.help-article header h2 { font: var(--tr-t-title); letter-spacing: -.01em; }
+/* The topic's title, 16 px over its summary (the header's gap and this margin). */
+.help-article header h2 { margin-bottom: 8px; font: var(--tr-t-title); letter-spacing: -.01em; }
 /* The topic's own text only (its header and sections): the empty state in this card keeps the shared form. */
 .help-article section h3 { margin: 24px 0 8px; font: 700 18px/24px var(--tr-font-display); color: var(--tr-fg-strong); }
 .workbench-page .help-article :is(header, section) :is(p, li) { max-width: 72ch; font: 400 14px/24px var(--tr-font-ui); color: var(--tr-fg); }

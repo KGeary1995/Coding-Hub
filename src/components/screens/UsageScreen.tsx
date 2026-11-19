@@ -1,6 +1,6 @@
 import { PlanLimitsCard } from './PlanLimitsCard';
 import { useEffect, useMemo, useState } from 'react';
-import { ChartColumn, ChartPie, RefreshCw, Rows3, TriangleAlert } from 'lucide-react';
+import { ChartColumn, ChartPie, RefreshCw, Rows3, CircleAlert } from 'lucide-react';
 import type { UsageRecord } from '../../../shared/hub';
 import { useHubStore, dollars } from '../../state/hub-store';
 import { channelNumber, useWorkspaceStore } from '../../state/workspace-store';
@@ -70,11 +70,11 @@ export function UsageScreen() {
       </div>
     </header>
     <div className="ui-grid">
-      {error && <p role="alert" className="ui-banner danger"><TriangleAlert aria-hidden="true" /><span>{error}</span></p>}
+      {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
       <PlanLimitsCard />
       <div className="tr-kpis" role="list" aria-label={`Totals for ${windowLabel}`}>{kpis.map((kpi) => <div key={kpi.label} role="listitem" className="ui-card ui-stat"><span>{kpi.label}</span><strong>{kpi.value}</strong><small>{kpi.sub}</small></div>)}</div>
       <article className="ui-card span-8 tr-chart" aria-label="Daily tokens">
-        <div className="ui-card-head"><ChartColumn aria-hidden="true" /><h2>Daily tokens</h2><span className="ui-card-actions tr-chart-caption">input + output · cache excluded</span></div>
+        <div className="ui-card-head"><ChartColumn aria-hidden="true" /><h2>Daily tokens</h2><span className="ui-card-actions ui-caption">input + output · cache excluded</span></div>
         <div className="tr-chart-readout"><strong>{focus.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong><span className="tnum">{compact(focus.claude + focus.codex)} tok</span>
           <span className="tnum"><i className="tr-engine-square claude" aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square codex" aria-hidden="true" /> {compact(focus.codex)}</span>
           <span className="tnum">{dollars(focus.cost)}</span></div>
@@ -100,7 +100,7 @@ export function UsageScreen() {
         <p className="ui-hint">Only Codex reports its context window.</p>
       </aside>
       <section className="ui-card tr-usage-sessions" aria-labelledby="usage-sessions-title">
-        <div className="ui-card-head"><Rows3 aria-hidden="true" /><h2 id="usage-sessions-title">Sessions</h2><span className="ui-count neutral">{current.length}</span><span className="ui-card-actions"><span className="tr-chart-caption">Trace's own sessions</span><button type="button" className="ui-help" aria-label="Help: how sessions are counted" title="Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are inside its totals." /></span></div>
+        <div className="ui-card-head"><Rows3 aria-hidden="true" /><h2 id="usage-sessions-title">Sessions</h2><span className="ui-count neutral">{current.length}</span><span className="ui-card-actions"><span className="ui-caption">Trace's own sessions</span><button type="button" className="ui-help" aria-label="Help: how sessions are counted" title="Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are inside its totals." /></span></div>
         {current.length ? <div className="tr-usage-table-wrap">
           <table className="usage-table ui-table">
             <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>

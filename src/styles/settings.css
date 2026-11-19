@@ -3,11 +3,6 @@
 .settings-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .settings-card > :is(p, dl, ul, ol, label, details, section, div) { margin: 0; }
 .settings-card > :is(.ui-check, .button) { align-self: flex-start; }
-/* .storage-card p dims every paragraph; a banner keeps body text, and the status badge keeps its typed case. */
-.settings-card .ui-banner { color: var(--tr-fg); }
-.settings-card .storage-status { text-transform: none; }
-/* `.hub-panel p` (ui.css) sets a hint written as a paragraph in body type; it stays a hint, a size under the text above. */
-.settings-card p.ui-hint { font: var(--tr-t-small); }
 
 /* Facts (Executable, Application folder) and key hints: a two-column list in a well; long paths wrap. */
 .settings-card .settings-facts { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 8px 16px; margin: 0; padding: 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 13px/20px var(--tr-font-ui); }
@@ -55,18 +50,13 @@
 
 /* Preferences: one form of three cards with its Save button under them. A field or a hint is no wider than a line of
    reading, so a two-digit number does not sit in a field across the page. */
-.settings-form { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.settings-form { display: flex; flex-direction: column; gap: 16px; }
 .settings-form .hub-form { margin: 0; }
 .settings-form .hub-form > label:not(.update-checkbox) { max-width: 560px; }
 .settings-form .control-note { max-width: 72ch; }
 
 /* Higher contrast: the wells this sheet draws take the stronger line that shared rows take. */
 [data-contrast="high"] .settings-card :is(.settings-facts, .phone-guide, .phone-pairing) { border-color: var(--tr-line-strong); }
-
-/* shared-candidate: a plain heading over a group of cards on a long form page. It takes focus when "On this page" jumps
-   to it (tabindex -1), so it keeps a little room above it and shows the ring only to the keyboard. */
-.ui-section-title { margin: 0; font: var(--tr-t-section); color: var(--tr-fg-strong); scroll-margin-top: 24px; }
-.ui-section-title:focus:not(:focus-visible) { outline: none; }
 
 /* The page: "On this page", then sections of cards, 16 px between cards and 32 px between sections. The cards' own
    margins (.storage-card, .engine-health, .hub-form) give way to the gap. */
@@ -76,10 +66,9 @@
 .settings-toc + .settings-section { margin-top: 24px; }
 .hub-panel .settings-section > * { margin: 0; }
 
-/* A hint that ends in the shared help button, and a sub-heading with one. */
-.settings-hint-help { display: flex; align-items: center; gap: 8px; }
-.link-this-head { display: flex; align-items: center; gap: 8px; }
-.link-this-head h3 { margin: 0; }
+/* A card's title here is an h3, under its section's h2, so a sub-heading inside a card is an h4: it keeps the look a
+   sub-heading has in a card titled with an h2 (ui.css's h3). */
+.link-this h4 { font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 
 /* Save preferences with its notice or error beside it; a number needs no field as wide as a path. */
 .settings-save .hub-feedback { flex: 1 1 240px; max-width: 72ch; margin: 0; }

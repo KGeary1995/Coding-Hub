@@ -160,7 +160,7 @@ export async function startSession(id: string) {
   if (!window.codingHub) { state.setSessionError(id, 'Live channels require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
   // A Round Table's lead starts in its table's folder (its hidden seats keep theirs), so the table can be seated again.
   const cwd = tableDirectory(state.sessions, session) ?? (session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory);
-  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository directory first.', true); return; }
+  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository folder first.', true); return; }
   state.markStarting(id);
   try {
     const result = await window.codingHub.startSession({ sessionId: id, cwd, config: session.config, ...terminalDimensions(id) });

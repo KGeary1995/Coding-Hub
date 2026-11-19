@@ -1,6 +1,7 @@
 import type { ConversationLabel } from '../../shared/productivity';
-import { useEffect, useState } from 'react';
-import { History, Search, SearchX, TerminalSquare, TriangleAlert } from 'lucide-react';
+import { createElement, useEffect, useState } from 'react';
+import { History, Search, SearchX, CircleAlert } from 'lucide-react';
+import { ENGINE_ICONS } from './tile/engine-icons';
 import type { NativeConversation, NativeResume } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { createSession, arrangeTiles, useWorkspaceStore } from '../state/workspace-store';
@@ -27,9 +28,9 @@ export function NativeHistory({ onBack }: { onBack: () => void }) {
       <div className="ui-page-actions"><button className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh native conversations</button><button className="quiet-button" onClick={onBack}>Back to recorded output</button></div></header>
     <div className="native-history-search"><Search aria-hidden="true" /><input aria-label="Search native conversations" placeholder="Search project, engine, ID…" value={search} onChange={(event) => setSearch(event.target.value)} />
       <p className="ui-hint">Not claude.ai or Claude desktop chats. Scans up to 4,000 entries and 500 conversations; incomplete files may be skipped.</p></div>
-    {error && <p role="alert" className="ui-banner danger"><TriangleAlert aria-hidden="true" /><span>{error}</span></p>}
+    {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
     <div className="ui-stack">{shown.map((item) => <article className="ui-card" key={item.key}>
-      <div className="ui-card-head"><span className={`ui-avatar small ${item.engine}`} aria-hidden="true"><TerminalSquare /></span><h2>{labels.find((label) => label.key === item.key)?.pinned ? '★ ' : ''}{labels.find((label) => label.key === item.key)?.name ?? item.title}</h2><span className="ui-card-actions native-history-date">{new Date(item.modifiedAt).toLocaleString()}</span></div>
+      <div className="ui-card-head"><span className={`ui-avatar small ${item.engine}`} aria-hidden="true">{createElement(ENGINE_ICONS[item.engine])}</span><h2>{labels.find((label) => label.key === item.key)?.pinned ? '★ ' : ''}{labels.find((label) => label.key === item.key)?.name ?? item.title}</h2><span className="ui-card-actions native-history-date">{new Date(item.modifiedAt).toLocaleString()}</span></div>
       <code className="native-history-path">{item.directory ?? 'Folder not found in metadata'}</code><p className="native-history-meta">{item.profileId ? 'Named Claude profile' : 'Default local CLI account'} · Conversation {item.id}</p>
       <div className="ui-actions"><button className="button primary" disabled={busy} onClick={() => void resume(item, false)}>Resume in new channel</button><button className="button secondary" disabled={busy} onClick={() => void resume(item, true)}>Choose folder and resume</button></div>
       <ConversationPreferences key={item.key} conversation={item} saved={labels.find((label) => label.key === item.key)} onSave={(label) => setLabels([...labels.filter((item) => item.key !== label.key), label])} /></article>)}

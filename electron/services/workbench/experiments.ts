@@ -22,7 +22,7 @@ export class Experiments {
     }
     if (request.action === 'experiment-save') { if (data.experiments.length >= 100) throw new HubError('EXPERIMENT_LIMIT', 'Up to 100 experiments are supported.'); const { action: _action, ...fields } = request; const record = { ...fields, id: randomUUID(), createdAt: new Date().toISOString() }; save(this.root, 'experiments.json', { ...data, experiments: [...data.experiments, record] }); return record; }
     if (!data.experiments.some((e) => e.id === request.experimentId)) throw new HubError('EXPERIMENT_MISSING', 'Select an available experiment.');
-    if (request.runId && !this.knownRun(request.runId)) throw new HubError('EXPERIMENT_RUN', 'Choose a recorded local session run.');
+    if (request.runId && !this.knownRun(request.runId)) throw new HubError('EXPERIMENT_RUN', 'Choose a run recorded in Session history.');
     if (request.runId && data.trials.some((t) => t.experimentId === request.experimentId && t.runId === request.runId)) throw new HubError('EXPERIMENT_RUN', 'This run is already recorded in this experiment.');
     if (data.trials.length >= 1000) throw new HubError('EXPERIMENT_LIMIT', 'Up to 1,000 trials are supported.');
     const { action: _action, ...fields } = request; const record = { ...fields, id: randomUUID(), createdAt: new Date().toISOString() }; save(this.root, 'experiments.json', { ...data, trials: [...data.trials, record] }); return record;

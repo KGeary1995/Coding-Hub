@@ -18,8 +18,9 @@ describe('the hierarchy bar says which model is at work', () => {
   });
   it('lists all three seats with what each is doing and its tokens today, the planner in its own colour', () => {
     const html = bar(table('implementing'));
-    expect(html).toContain('seat-hex seat-planner'); expect(html).toMatch(/Fable 5\.2<\/strong>Planner · running · 12k tok today/); expect(html).toMatch(/class="working"><i class="seat-hex seat-claude"[^>]*><\/i><strong>Opus 5\.5<\/strong>Builder · working/);
-    expect(html).toMatch(/Codex<\/strong>Reviewer · running<\/li>/);
+    expect(html).toContain('seat-hex seat-planner'); expect(html).toMatch(/Fable 5\.2<\/strong><span>Planner · running<span class="seat-tokens"> · 12k tok today<\/span>/); expect(html).toMatch(/class="working" title="48k new tokens today"><i class="seat-hex seat-claude"[^>]*><\/i><strong>Opus 5\.5<\/strong><span>Builder · working/);
+    // A seat with no tokens yet shows none, and has no tooltip.
+    expect(html).toMatch(/<li class=""><i class="seat-hex seat-codex"[^>]*><\/i><strong>Codex<\/strong><span>Reviewer · running<\/span><\/li>/);
   });
   it('labels the planner’s messages with its model, in its own colour', () => {
     const html = renderToStaticMarkup(<Item item={{ kind: 'assistant', id: 'a', blocks: [{ type: 'text', text: 'The plan.' }], streaming: '' }} results={{}} agent="Fable 5.2" author="planner" role="Planner" answer={() => () => {}} view={() => {}} />);

@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent } from 'react';
-import { ClipboardList, Inbox, Plus, Send, TriangleAlert } from 'lucide-react';
+import { ClipboardList, Inbox, Plus, Send, CircleAlert, CircleCheck } from 'lucide-react';
 import type { Task, TaskDetail, TaskOutcome, VerificationData, VerificationFreshness } from '../../shared/workbench';
 import { useChatStore } from '../state/chat-store';
 import { startTaskInWorktree } from '../runtime/task-worktree';
@@ -86,7 +86,7 @@ export function TasksPanel() {
     <header className="ui-page-head"><span className="ui-page-icon" aria-hidden="true"><ClipboardList /></span><div><h1>Tasks</h1>
       <p>Give each channel a job and, if you like, the files it may change.</p></div>
       {!open && <div className="ui-page-actions"><button className="button primary" onClick={() => { setForm({ ...EMPTY_FORM, directory: rootDirectory ?? '' }); setOpen(true); }}><Plus />New task</button></div>}</header>
-    {error && <p className="ui-banner danger" role="alert"><TriangleAlert aria-hidden="true" /><span>{error}</span></p>}{note && <p className="ui-banner success" role="status">{note}</p>}
+    {error && <p className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}{note && <p className="ui-banner success" role="status"><CircleCheck aria-hidden="true" /><span>{note}</span></p>}
     <details className="task-howto"><summary>How this works</summary><ol><li><strong>Write a task</strong> and pick the channel to do it, or press <strong>Task</strong> on a channel.</li><li><strong>Send it.</strong> Trace types it into that agent, with its files and a request to say what it changed, and moves it along as the agent works.</li><li><strong>Check the result.</strong> When the agent finishes, the task moves to Ready for review with the files it changed. Look them over and mark it done.</li></ol><p>Trace warns you when an agent changes files outside its task or the same files as another task.</p></details>
     {open && <form className="ui-card task-form" onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       <div className="ui-card-head"><ClipboardList aria-hidden="true" /><h2>{form.id ? 'Edit task' : 'New task'}</h2></div>
@@ -94,7 +94,7 @@ export function TasksPanel() {
       <label className="ui-field">More details (optional)<textarea aria-label="Task details" rows={3} maxLength={2000} value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} placeholder="What it should look like, what to avoid, how to check it" /></label>
       <div className="task-form-pair">
         <label className="ui-field">Channel<select aria-label="Task agent channel" value={form.sessionId} onChange={(e) => setForm({ ...form, sessionId: e.target.value, directory: e.target.value ? folderOf(e.target.value) : form.directory })}><option value="">Choose later</option>{agents.map((session) => <option key={session.id} value={session.id}>{channelLabel(session.id)}{session.status === 'running' ? '' : ' (not running)'}</option>)}</select></label>
-        <label className="ui-field">Project folder<div className="input-with-button"><input aria-label="Task directory" required value={form.directory || folderOf(form.sessionId)} onChange={(e) => setForm({ ...form, directory: e.target.value })} /><button type="button" className="button secondary" onClick={() => void window.codingHub?.pickDirectory().then((value) => { if (value) setForm({ ...form, directory: value }); })}>Choose folder</button></div></label>
+        <label className="ui-field">Project folder<div className="input-with-button"><input aria-label="Task folder" required value={form.directory || folderOf(form.sessionId)} onChange={(e) => setForm({ ...form, directory: e.target.value })} /><button type="button" className="button secondary" onClick={() => void window.codingHub?.pickDirectory().then((value) => { if (value) setForm({ ...form, directory: value }); })}>Choose folder</button></div></label>
       </div>
       <label className="ui-field">Only these files or folders (optional)<textarea aria-label="Task file scope" rows={2} value={form.files} onChange={(e) => setForm({ ...form, files: e.target.value })} placeholder={'src/settings/**\nREADME.md'} /><small className="ui-hint">One per line. Empty means the whole project.</small></label>
       <details><summary>Review notes and checks</summary>

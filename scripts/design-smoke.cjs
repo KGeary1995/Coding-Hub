@@ -69,7 +69,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
+    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
   } finally {
     await app?.close().catch(() => {});
     await removeFolder(root);

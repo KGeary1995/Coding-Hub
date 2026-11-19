@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { AlertCircle, LockKeyhole, MousePointer2, RotateCcw, X } from 'lucide-react';
+import { CircleAlert, LockKeyhole, MousePointer2, RotateCcw, TriangleAlert, X } from 'lucide-react';
 import type RFB from '@novnc/novnc';
 import type { LinkedComputer, LinkedScreenState } from '../../../shared/remote';
 import { fitPaste, type ScreenKind } from '../../../shared/screen';
@@ -185,12 +185,12 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
       <button className="tr-detail-button" onClick={retry}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Reconnect</span></button>
       <button className="tr-detail-button icon" title="Close the screen" aria-label="Close the screen" onClick={onClose}><X size={13} /></button>
     </header>
-    {message && <p className="ui-banner danger" role="alert"><AlertCircle aria-hidden="true" /><span>{message}</span></p>}
+    {message && <p className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{message}</span></p>}
     {/* What cannot work stays in the banner; how to keep it from locking is behind the help mark. */}
-    {windowsLocked && <div className="linked-screen-unlock ui-banner warning" role="status"><LockKeyhole aria-hidden="true" /><span><strong>{computer.name} is locked.</strong> Windows takes no keys or clicks from other programs at its lock screen, so typing here does nothing until it is unlocked there, at the computer.</span>
+    {windowsLocked && <div className="linked-screen-unlock ui-banner warning" role="status"><TriangleAlert aria-hidden="true" /><span><strong>{computer.name} is locked.</strong> Windows takes no keys or clicks from other programs at its lock screen, so typing here does nothing until it is unlocked there, at the computer.</span>
       <button type="button" className="ui-help" aria-label="Help: keeping it unlocked" title="To keep it from locking while you are away, set Settings → Accounts → Sign-in options → “If you’ve been away” to Never there." /></div>}
     {showUnlock && <form className="linked-screen-signin linked-screen-unlock ui-card" onSubmit={(event) => { event.preventDefault(); void unlock(unlockPassword); }}>
-      <p className="ui-banner warning"><LockKeyhole aria-hidden="true" /><span>{locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} With only Screen Sharing turned on there, macOS 26 also takes no keys from Trace at its lock screen, so unlock it at the Mac.</span></p>
+      <p className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>{locked ? <><strong>{computer.name} is locked</strong>, so its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</> : <>If <strong>{computer.name}</strong> is locked, its screen shows black here: macOS shows its lock screen only to Apple’s own viewer.</>} With only Screen Sharing turned on there, macOS 26 also takes no keys from Trace at its lock screen, so unlock it at the Mac.</span></p>
       {/* The hint sits outside the label, so it does not become part of the field's name. */}
       <span className="linked-screen-field"><label className="ui-field">Password for {computer.name} <input type="password" autoFocus value={unlockPassword} autoComplete="off" disabled={unlocking} aria-describedby={`unlock-hint-${computer.id}`} onChange={(event) => setUnlockPassword(event.target.value)} /></label>
         <small className="ui-hint" id={`unlock-hint-${computer.id}`}>Trace wakes it and types this password at its lock screen. Works only with Remote Management on there, with Control allowed.</small></span>

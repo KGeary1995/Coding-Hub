@@ -89,7 +89,7 @@ export class Backups {
     if (request.action === 'backup-list') return this.list();
     if (request.action === 'backup-create') {
       await this.callbacks.ready(); const existing = this.list(); if (existing.length >= 50) throw new HubError('BACKUP_LIMIT', 'Up to 50 local backups are supported. Export any you want to keep, then delete older ones before adding more.');
-      fs.mkdirSync(this.root, { recursive: true, mode: 0o700 }); if (fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('BACKUP_PATH', 'Backup directory must not be a link.');
+      fs.mkdirSync(this.root, { recursive: true, mode: 0o700 }); if (fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('BACKUP_PATH', 'Backup folder must not be a link.');
       const temporary = path.join(this.root, '.' + randomUUID()); fs.mkdirSync(temporary, { mode: 0o700 });
       const entries: z.infer<typeof entrySchema>[] = []; let total = 0;
       const tooLarge = (relative: string) => new HubError('BACKUP_SIZE', `${relative} is too large to back up (over ${relative.endsWith('.db') ? 64 : 16} MiB). Back it up by copying the file yourself.`);
@@ -102,7 +102,7 @@ export class Backups {
         entries.push({ path: relative, hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.toString('base64') });
       };
       const scan = async (folder: string, prefix: string, depth: number) => {
-        if (depth > 12) throw new HubError('BACKUP_LIMIT', 'Backup directory nesting exceeds the supported limit.');
+        if (depth > 12) throw new HubError('BACKUP_LIMIT', 'Backup folder nesting exceeds the supported limit.');
         for (const entry of await fs.promises.readdir(folder, { withFileTypes: true })) {
           if (entry.isSymbolicLink()) continue; const relative = prefix ? prefix + '/' + entry.name : entry.name; const file = path.join(folder, entry.name);
           if (entry.isDirectory()) { if (['memory', 'designs', 'coaching', ...(request.includeLogs ? ['logs'] : [])].includes(relative) || ['memory/', 'designs/', 'coaching/', ...(request.includeLogs ? ['logs/'] : [])].some((p) => relative.startsWith(p))) await scan(file, relative, depth + 1); continue; }
@@ -134,7 +134,7 @@ export class Backups {
     if (request.action === 'backup-export') { const selected = await this.callbacks.exportFile(); if (!selected) return null; if (path.resolve(selected) !== path.resolve(file)) await fs.promises.copyFile(file, selected); return { record: manifest.record }; }
     await this.callbacks.ready();
     const restored = path.join(this.base, 'restores', randomUUID());
-    if (fs.existsSync(path.dirname(restored)) && fs.lstatSync(path.dirname(restored)).isSymbolicLink()) throw new HubError('BACKUP_PATH', 'Restore directory must not be a link.');
+    if (fs.existsSync(path.dirname(restored)) && fs.lstatSync(path.dirname(restored)).isSymbolicLink()) throw new HubError('BACKUP_PATH', 'Restore folder must not be a link.');
     fs.mkdirSync(restored, { recursive: true, mode: 0o700 });
     try {
       for (const entry of manifest.entries) { const target = path.join(restored, ...entry.path.split('/')); await fs.promises.mkdir(path.dirname(target), { recursive: true, mode: 0o700 }); await fs.promises.writeFile(target, Buffer.from(entry.content, 'base64'), { flag: 'wx', mode: 0o600 }); }

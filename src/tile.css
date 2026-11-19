@@ -101,18 +101,11 @@
 /* Close on a running channel asks in the detail row: the row stays shown and holds only the question. */
 .tr-tile.closing .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
 .tr-tile.closing .tr-tile-detail > .tr-detail-button { display: none; }
-/* The row's buttons, and a linked tile's in its header, are the small quiet form (24 px) with their icon; Stop is the
-   danger form. `.tr-detail-button` is drawn in styles/chat.css, which the phone loads too: these rules bring it to the
-   shared small button inside a tile. */
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button { height: 24px; gap: 4px; padding: 0 6px; border-color: transparent; border-radius: var(--tr-r-small); color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button svg { flex: none; width: 14px; height: 14px; }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-icon { display: block; }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:is(.selected, [aria-pressed="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button.stop { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
-:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
-/* Below 680 px the labelled buttons do not fit beside the facts: a button with an icon keeps only the icon (its label
-   stays its accessible name). One without an icon (the close question's) keeps its words. */
+/* The row's buttons, and a linked tile's in its header, are the shared detail button (ui.css). A labelled one is 2 px
+   tighter at each side here, where it shares the row with the facts. */
+:is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:not(.icon) { padding: 0 6px; }
+/* Below 680 px (ui.css: 560 px elsewhere) the labelled buttons do not fit beside the facts: a button with an icon keeps
+   only the icon (its label stays its accessible name). One without an icon (the close question's) keeps its words. */
 @container (max-width: 680px) {
   :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:has(.tr-detail-icon) { width: 24px; padding: 0; justify-content: center; }
   :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -278,4 +271,4 @@
 
 /* ---------- Higher contrast (Settings > Display) ---------- */
 /* The tile's frame and its inner dividers come from --tr-tile-border, which that setting raises; the dim words follow. */
-[data-contrast="high"] :is(.tr-tile-topic, .tr-tile-model, .tr-detail-facts, .tr-tile-foot, .session-welcome p), [data-contrast="high"] :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:not(.stop) { color: var(--tr-fg); }
+[data-contrast="high"] :is(.tr-tile-topic, .tr-tile-model, .tr-detail-facts, .tr-tile-foot, .session-welcome p) { color: var(--tr-fg); }

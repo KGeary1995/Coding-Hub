@@ -51,7 +51,7 @@ export class AccountLoginManager {
       return null;
     }
     if (request.profileId && request.provider !== 'claude') throw new HubError('INVALID_ACCOUNT_REQUEST', 'Named profiles are available for Claude only.');
-    if (request.profileId && this.dependencies.profileInUse?.(request.profileId)) throw new HubError('PROFILE_BUSY', 'Stop coding sessions using this Claude profile before reconnecting it. Other profiles can keep running.');
+    if (request.profileId && this.dependencies.profileInUse?.(request.profileId)) throw new HubError('PROFILE_BUSY', 'Stop the channels using this Claude profile before reconnecting it. Other profiles can keep running.');
     if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
     if (this.active) throw new HubError('LOGIN_BUSY', 'Finish or cancel the current login before connecting another account.');
     const reservation = { owner, cancelled: false, profileId: request.profileId }; this.pending = reservation;

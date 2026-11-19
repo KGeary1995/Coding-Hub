@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, FolderOpen, FolderTree, RefreshCw, X } from 'lucide-react';
+import { CircleAlert, FolderOpen, FolderTree, RefreshCw, X } from 'lucide-react';
 import type { RepositoryContext } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { FileTree } from './FileTree';
@@ -16,7 +16,7 @@ export function WorkspaceExplorer({ onClose }: { onClose: () => void }) {
   useEffect(() => { if (!repo || !selected) return; let cancelled = false; window.codingHub!.readFile({ repositoryId: repo.id, path: selected }).then((result) => { if (cancelled) return; setShown(selected); setTone(!result.ok ? 'error' : result.value.binary ? 'hint' : 'text'); setText(result.ok ? result.value.binary ? 'Binary or unsupported text encoding.' : (result.value.truncated ? '[Preview truncated]\n' : '') + result.value.text!.slice(0, 32000) : result.error.message); }).catch(() => { if (!cancelled) { setTone('error'); setText('Preview unavailable.'); } }); return () => { cancelled = true; }; }, [repo, selected, revision]);
   return <aside className="workspace-explorer ui-card" aria-label="Workspace explorer"><header className="ui-card-head"><FolderTree size={16} /><h2>Explorer</h2><div className="ui-card-actions"><button className="icon-button" aria-label="Refresh workspace explorer" onClick={() => setRevision(revision + 1)}><RefreshCw size={14} /></button><button className="icon-button" aria-label="Close workspace explorer" onClick={onClose}><X size={14} /></button></div></header>
     <div className="repository-list-scroll">{repo ? <FileTree repository={repo} selected={selected} revision={revision} onSelect={setSelected} />
-      : error ? <p className="tree-message error-message" role="alert"><AlertTriangle size={12} />{error}</p>
+      : error ? <p className="tree-message error-message" role="alert"><CircleAlert size={12} />{error}</p>
       : root ? <p className="control-note" role="status">Opening project…</p>
       : <div className="ui-empty"><FolderOpen /><h3>No project open</h3><p>Open a project to browse its files.</p></div>}</div>
     {/* The file's name heads its text; messages are words, not file text, so they are not mono. */}

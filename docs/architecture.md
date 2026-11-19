@@ -30,7 +30,8 @@ shared/  typed contracts and pure logic used by both sides
 | `phone/` | Phone web app, built to `dist/phone` |
 | `shared/` | Types and pure logic shared by host and renderer (`ipc.ts`, `hub.ts`, `types.ts`, `chat.ts`, `schemas.ts`, `terminal-input.ts`, `help-content.ts`, …) |
 | `scripts/` | Build, packaging and smoke-test scripts. See [development.md](development.md) |
-| `docs/design/trace/` | The visual design hand-off (tokens, prototypes, decisions) |
+| `docs/design/midnight/` | The visual design specification (Midnight): tokens, shared parts, rules for changing a screen |
+| `docs/design/trace/` | The earlier design hand-off and prototypes (historical), and `DECISIONS.md` |
 
 ## Host process
 

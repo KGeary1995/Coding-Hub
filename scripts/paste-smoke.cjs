@@ -46,7 +46,7 @@ const hex = (text) => Buffer.from(text).toString('hex');
   const useFolder = async (tile) => {
     const name = await tile.getByRole('button', { name: /^Engine settings for channel \d+$/ }).getAttribute('aria-label');
     await (await tileControl(tile, name)).click();
-    await tile.getByLabel('Working directory', { exact: true }).selectOption('independent'); await tile.getByLabel('Repository path', { exact: true }).fill(project);
+    await tile.getByLabel('Working folder', { exact: true }).selectOption('independent'); await tile.getByLabel('Repository path', { exact: true }).fill(project);
     await (await tileControl(tile, name)).click();
   };
   let app;

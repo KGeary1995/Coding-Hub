@@ -32,7 +32,7 @@ export function DeviceSyncCard() {
     const load = () => void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then(setStatus).catch((e) => setError(e.message));
     load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
   }, []);
-  const head = (state: string, tone: string) => <div className="ui-card-head"><MonitorSmartphone aria-hidden="true" /><h2 id="device-sync-title">Sync between computers</h2>
+  const head = (state: string, tone: string) => <div className="ui-card-head"><MonitorSmartphone aria-hidden="true" /><h3 id="device-sync-title">Sync between computers</h3>
     <span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
   // Before the first answer the card is already there, so the Sync section is never a heading over nothing.
   if (!status) return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">{error ? <>{head('Unavailable', 'danger')}<p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p></> : <>{head('Checking', 'neutral')}<p className="ui-hint">Checking sync…</p></>}</article>;

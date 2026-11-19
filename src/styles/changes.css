@@ -12,10 +12,6 @@
 /* A message fills the page as a card with the shared empty state in it (ui-card and ui-empty are in the markup). */
 .repository-empty { flex: 1; min-height: 180px; }
 .tr-repo .repository-message { min-height: 240px; }
-.repository-empty .error-message { color: var(--tr-danger); }
-/* shared-candidate: an empty state that reports a failure takes the danger tone, so it reads as an error, not as
-   "nothing here". The start screen (EmptyWorkspace.tsx) uses it too; styles/setup.css holds the same rule. */
-.ui-empty.danger > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
 
 /* Changes: the review card (branch line above it) and the delivery card side by side; stacked in a narrow window. */
 .tr-changes-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
@@ -58,7 +54,7 @@
 .tree-message.error-message { color: var(--tr-danger); }
 
 /* Code and diff: mono on the terminal well, under a heading on the card. */
-.file-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.file-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tr-well); }
 .file-preview > .ui-banner { flex: none; margin: 12px 16px 0; }
 .file-preview > .ui-banner + :not(.ui-banner) { margin-top: 12px; }
 .code-heading { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--tr-line-faint); }

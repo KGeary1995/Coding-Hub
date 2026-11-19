@@ -19,7 +19,10 @@ export interface PlanLimits {
   /** The plan the CLI reports, when it does (Codex). */
   plan: string | null;
   checkedAt: string;
+  /** Why there are no windows: a failed check ("Codex could not be started.") or a plain fact about the account. */
   error: string | null;
+  /** True when `error` is a failed check rather than a fact, so it can read as a failure. Older readings lack it: a fact. */
+  failed?: boolean;
 }
 
 /** Parses Claude Code's `/usage` text ("Current session: 5% used · resets Oct 25 at 11:59pm (America/Los_Angeles)"). */

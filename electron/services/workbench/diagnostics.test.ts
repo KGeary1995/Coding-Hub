@@ -19,6 +19,6 @@ describe('diagnostics', () => {
     const profiles = { environment: (base: Record<string, string>) => base } as unknown as ClaudeProfiles;
     const chosen = process.cwd() + path.sep + '.';
     const report = await new Diagnostics(profiles).execute({ action: 'diagnose', engine: 'codex', directory: chosen });
-    expect(report.steps.find((step) => step.name === 'Working directory')).toMatchObject({ state: 'passed', message: chosen });
+    expect(report.steps.find((step) => step.name === 'Working folder')).toMatchObject({ state: 'passed', message: chosen });
   });
 });

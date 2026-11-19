@@ -36,14 +36,14 @@ export function OtherComputersCard() {
   const linkedHere = remote?.devices.filter((device) => device.kind === 'computer') ?? [];
   const ready = Boolean(remote?.listening && remote.tailscale.serving); const connected = computers.filter((item) => item.connected).length;
   return <article className="storage-card ui-card settings-card other-computers" aria-labelledby="other-computers-title">
-    <div className="ui-card-head"><Monitor aria-hidden="true" /><h2 id="other-computers-title">Other computers</h2><span className={`ui-badge dot storage-status ${connected ? 'success saved' : 'neutral'}`}>{connected ? `${connected} connected` : 'None connected'}</span></div>
+    <div className="ui-card-head"><Monitor aria-hidden="true" /><h3 id="other-computers-title">Other computers</h3><span className={`ui-badge dot storage-status ${connected ? 'success saved' : 'neutral'}`}>{connected ? `${connected} connected` : 'None connected'}</span></div>
     <p>Watch, type into, start and stop the channels on your other computers, each in its own tab.</p>
     {/* Who else gets to see these channels stays in view, not behind the help button: it is what linking gives away. */}
-    <p className="ui-hint settings-hint-help">They connect over Tailscale, and each link's key stays on this computer.<button type="button" className="ui-help" aria-label="Help: how computers find each other" title="Computers find each other on your tailnet and through the Drive sync folder." /></p>
+    <p className="ui-hint ui-help-line">They connect over Tailscale, and each link's key stays on this computer.<button type="button" className="ui-help" aria-label="Help: how computers find each other" title="Computers find each other on your tailnet and through the Drive sync folder." /></p>
     <p className="ui-hint">A phone paired with either computer sees the channels of both.</p>
     <label className="ui-check"><input type="checkbox" checked={remote?.autoLink ?? true} disabled={busy || !remote} onChange={(event) => { const enabled = event.target.checked; void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-auto-link', enabled }))); }} />Link my computers automatically</label>
     <p className="ui-hint">Computers signed in to your Tailscale account ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>
-    {!computers.length && <div className="ui-empty"><Monitor aria-hidden="true" /><h3>No other computers yet</h3><p>On each computer, turn on Phone access with Tailscale HTTPS; computers on your Tailscale account appear here within a minute.</p></div>}
+    {!computers.length && <div className="ui-empty"><Monitor aria-hidden="true" /><h4>No other computers yet</h4><p>On each computer, turn on Phone access with Tailscale HTTPS; computers on your Tailscale account appear here within a minute.</p></div>}
     {computers.length > 0 && <ul className="ui-list linked-computers" aria-label="Other computers">{computers.map((computer) => <li key={computer.id} className="ui-row">
       <div className="ui-row-main"><strong>{computer.name}</strong>
       <small>{computer.linked ? (computer.connected ? `Connected · ${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…') : computer.url ? computer.error ?? 'Not linked' : 'Phone access with Tailscale HTTPS is not set up there yet'}</small></div>
@@ -52,7 +52,7 @@ export function OtherComputersCard() {
         : computer.url && <span className="link-code"><input aria-label={`Link code from ${computer.name}`} placeholder="Code from that computer" value={codes[computer.id] ?? ''} maxLength={20} spellCheck={false} autoCapitalize="characters" onChange={(event) => setCodes((current) => ({ ...current, [computer.id]: event.target.value.toUpperCase() }))} onKeyDown={(event) => { if (event.key === 'Enter' && codes[computer.id]) void link(computer); }} /><button className="button primary" disabled={busy || !codes[computer.id]?.trim()} onClick={() => void link(computer)}>Link</button></span>}
     </li>)}</ul>}
     <section className="link-this">
-      <h3>Link this computer from another one</h3>
+      <h4>Link this computer from another one</h4>
       {!ready ? <p className="ui-hint">Turn on Phone access and set up Tailscale HTTPS above first; the other computer reaches this one the same way your phone does.</p>
         : pairing ? <div className="phone-pairing" role="group" aria-label="Link code">
           <div>
@@ -69,7 +69,7 @@ export function OtherComputersCard() {
       </li>)}</ul>}
     </section>
     {share?.supported && <section className="link-this">
-      <div className="link-this-head"><h3>Share this screen</h3><button type="button" className="ui-help" aria-label="Help: opening this screen from elsewhere" title="A linked computer opens it with Screen on this computer’s tab, and a paired phone with Screen in its app." /></div>
+      <div className="ui-help-line"><h4>Share this screen</h4><button type="button" className="ui-help" aria-label="Help: opening this screen from elsewhere" title="A linked computer opens it with Screen on this computer’s tab, and a paired phone with Screen in its app." /></div>
       <label className="ui-check"><input type="checkbox" checked={share.enabled} disabled={busy || (!ready && !share.enabled)} onChange={(event) => { const enabled = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled }))); }} />Let linked computers see and control this screen</label>
       {share.enabled && <label className="ui-check"><input type="checkbox" checked={share.elevated} disabled={busy} onChange={(event) => { const elevated = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled: true, elevated }))); }} />Also control apps running as administrator</label>}
       <p className="ui-hint">A paired phone can see and control it too, once <strong>Can start and stop agents</strong> is on for it under Phone access.</p>

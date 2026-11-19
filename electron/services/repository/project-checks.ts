@@ -12,8 +12,8 @@ export class ProjectChecks {
   get running() { return Boolean(this.child); }
   constructor(private rules: (directory: string) => void) {}
   inspect(selected: string): ProjectAudit {
-    if (!path.isAbsolute(selected)) throw new HubError('PROJECT_PATH', 'Choose an absolute project directory.');
-    const directory = fs.realpathSync(selected); if (!fs.statSync(directory).isDirectory()) throw new HubError('PROJECT_PATH', 'Choose a project directory.');
+    if (!path.isAbsolute(selected)) throw new HubError('PROJECT_PATH', 'Choose an absolute project folder.');
+    const directory = fs.realpathSync(selected); if (!fs.statSync(directory).isDirectory()) throw new HubError('PROJECT_PATH', 'Choose a project folder.');
     const report: ProjectAudit = { directory, instructions: [], truncated: false, scripts: [], rulesApplied: false, warnings: [] }; let visited = 0;
     const scan = (root: string, depth: number) => {
       if (depth > 6 || visited > 500) { report.truncated = true; return; }
@@ -27,7 +27,7 @@ export class ProjectChecks {
     };
     scan(directory, 0);
     if (report.instructions.some((file) => file.scope === 'nested' || file.path.endsWith('override.md') || file.path === 'CLAUDE.local.md')) report.warnings.push('Nested, local, or override instructions may change agent behavior. Inspect them for conflicts; semantic agreement cannot be guaranteed by this scan.');
-    if (report.truncated) report.warnings.push('Instruction scan was bounded or encountered an unreadable directory. Additional instructions may exist.');
+    if (report.truncated) report.warnings.push('Instruction scan was bounded or encountered an unreadable folder. Additional instructions may exist.');
     report.warnings.push('User-level instructions, CLI configuration, and higher-priority provider instructions also apply. This scan covers this project only.');
     try { this.rules(directory); report.rulesApplied = true; } catch { report.warnings.push('The current shared rules have not been applied to both engine files.'); }
     const file = path.join(directory, 'package.json');

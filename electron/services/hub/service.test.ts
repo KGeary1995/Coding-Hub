@@ -8,8 +8,8 @@ import { defaultDriveDirectory } from './preferences';
 import { mainStalls } from '../storage/host-health';
 import { DEFAULT_PREFERENCES, type MemoryNote } from '../../../shared/hub';
 
-const cleanup: (() => void)[] = [];
-afterEach(() => { for (const step of cleanup.splice(0)) step(); });
+const cleanup: (() => void | Promise<void>)[] = [];
+afterEach(async () => { for (const step of cleanup.splice(0)) await step(); });
 
 describe('installing project memory', () => {
   it('refuses a subfolder of a repository, where CLIs never read project MCP settings', () => {
@@ -26,7 +26,9 @@ describe('Drive sync from the hub', () => {
   /** A hub whose Drive folder is a temporary one (never the person's real Drive), or none. */
   function hub(drive: boolean) {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-service-'))); const folder = path.join(root, 'drive'); if (drive) fs.mkdirSync(folder);
-    const service = new HubService(path.join(root, 'hub')); cleanup.push(() => { service.close(); fs.rmSync(root, { recursive: true, force: true }); });
+    const service = new HubService(path.join(root, 'hub'));
+    // A note write starts a Drive sync the test need not wait for: removing the folder under it left the folder behind.
+    cleanup.push(async () => { await service.drain(5000); service.close(); fs.rmSync(root, { recursive: true, force: true }); });
     service.execute({ action: 'save-preferences', preferences: { ...DEFAULT_PREFERENCES, driveDirectory: drive ? folder : '' } });
     return { service, copy: (note: MemoryNote) => path.join(folder, 'AI-Coding-Hub-Memory', note.project, note.id + '.json'), tracked: () => (service as unknown as { projects: Set<string> }).projects };
   }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
-import { AlertCircle, Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
+import { CircleAlert, Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
 import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import type { ChatRequest } from '../../../shared/chat';
 import { TranscriptView } from '../chat/TranscriptView';
@@ -134,14 +134,14 @@ export function LinkedComputerView() {
       <UpdateThere computer={computer} />
       {/* Its own screen-sharing server answers even while Trace there is closed. */}
       <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => setScreenOf(showScreen ? null : computer.id)}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
-    {addError && <div className="ui-banner danger" role="alert"><AlertCircle aria-hidden="true" /><span>{addError}</span><button className="icon-button small" aria-label="Dismiss this notice" onClick={() => useLinkedStore.setState({ addError: '' })}><X /></button></div>}
+    {addError && <div className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{addError}</span><button className="icon-button small" aria-label="Dismiss this notice" onClick={() => useLinkedStore.setState({ addError: '' })}><X /></button></div>}
     {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
       {computer.connected && !computer.channels.length && <div className="ui-empty linked-empty"><Monitor aria-hidden="true" /><h3>No channels on {computer.name}</h3><p>Add one with + Channel.</p></div>}
       {/* Not connected and no reason yet: still connecting, which is not a failure. */}
       {!computer.connected && !computer.error && computer.linked && <div className="ui-empty linked-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h3>Connecting to {computer.name}…</h3></div>}
       {/* Its screen-sharing server answers even while Trace there is closed, so the screen is the one action offered. */}
-      {!computer.connected && (computer.error || !computer.linked) && <div className="ui-empty linked-empty off"><MonitorOff aria-hidden="true" /><h3>{computer.name} is not reachable; Trace keeps trying</h3><p>Check that it is on, with Trace open and Tailscale connected.</p>
-        <button className="button secondary" title={`If Trace has closed on ${computer.name}, its screen still answers`} onClick={() => setScreenOf(computer.id)}><MonitorPlay aria-hidden="true" />Show its screen</button></div>}
+      {!computer.connected && (computer.error || !computer.linked) && <div className="ui-empty linked-empty danger"><MonitorOff aria-hidden="true" /><h3>{computer.name} is not reachable; Trace keeps trying</h3><p>Check that it is on, with Trace open and Tailscale connected.</p>
+        {/* The header's Screen does the same; this one is named apart so each name stays unique. */}<button className="button secondary" aria-label={`Screen of ${computer.name}`} title={`If Trace has closed on ${computer.name}, its screen still answers`} onClick={() => setScreenOf(computer.id)}><MonitorPlay aria-hidden="true" />Screen</button></div>}
       {computer.channels.length > 0 && <LinkedGrid computer={computer} />}</>}
   </section>;
 }

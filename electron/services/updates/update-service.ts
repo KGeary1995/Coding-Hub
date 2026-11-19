@@ -67,7 +67,7 @@ export class UpdateService {
     });
     updater.on('update-downloaded', (info: { version: string }) => {
       this.recoveryPhase = 'ready';
-      this.set({ phase: 'ready', availableVersion: info.version, progress: 100, message: 'Update downloaded. Stop all sessions, then restart to install.' });
+      this.set({ phase: 'ready', availableVersion: info.version, progress: 100, message: 'Update downloaded. Stop all channels, then restart to install.' });
     });
     updater.on('error', () => this.fail());
   }
@@ -142,7 +142,7 @@ export class UpdateService {
         this.set({ phase: 'downloading', progress: 0, message: 'Downloading and verifying the update…' });
         await this.dependencies.updater.downloadUpdate();
       } else {
-        if (this.dependencies.hasSessions()) throw new HubError('ACTIVE_SESSIONS', 'Stop all running or starting CLI sessions before installing an update.');
+        if (this.dependencies.hasSessions()) throw new HubError('ACTIVE_SESSIONS', 'Stop all running or starting channels before installing an update.');
         if (!await this.dependencies.prepareRestart()) return this.status();
         this.set({ phase: 'installing', message: 'Restarting to install the update…' });
         this.dependencies.updater.quitAndInstall(false, true);

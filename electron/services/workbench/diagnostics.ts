@@ -29,7 +29,7 @@ export class Diagnostics {
     let cwd = homedir(); let valid = true;
     try { if (request.directory) cwd = directory(request.directory); } catch { valid = false; }
     // The folder as the person chose it, not where a link or junction leads: the export hides that spelling.
-    report.steps.push({ name: 'Working directory', state: valid ? 'passed' : 'failed', message: valid ? request.directory ? request.directory : 'No project selected; terminal test uses the home directory.' : 'Project directory is missing or unreadable.', recovery: 'Choose an existing folder in Projects or use an independent session directory.' });
+    report.steps.push({ name: 'Working folder', state: valid ? 'passed' : 'failed', message: valid ? request.directory ? request.directory : 'No project selected; terminal test uses the home folder.' : 'Project folder is missing or unreadable.', recovery: 'Choose an existing folder in Projects or give the channel a folder of its own.' });
     let terminal = false;
     if (valid) terminal = await new Promise<boolean>((resolve) => {
       let done = false; let output = ''; let pty: import('node-pty').IPty | undefined;
@@ -41,7 +41,7 @@ export class Diagnostics {
       try { pty = nodePty().spawn(file, args, { cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1', TERM: 'xterm-256color' }, cols: 80, rows: 24 }); pty.onData((data) => { output += data; if (output.includes('HUB_TERMINAL_OK')) finish(true); }); pty.onExit(() => setTimeout(() => finish(output.includes('HUB_TERMINAL_OK')), 500)); } catch { finish(false); }
     });
     report.steps.push({ name: 'Interactive terminal transport', state: terminal ? 'passed' : 'failed', message: terminal ? 'A local terminal probe verified stdin/stdout TTY handles. No model request was sent.' : 'The native terminal probe failed or timed out.', recovery: 'Restart the app; repair native terminal dependencies. Use a supported Windows ConPTY system.' });
-    report.steps.push({ name: 'Provider and model completion', state: 'unverified', message: 'A paid/model completion is not sent automatically. Start a session and submit a small task to test actual provider access.', recovery: 'Review the session diagnostic if the CLI exits. Check subscription, limits, model availability, and provider settings.' });
+    report.steps.push({ name: 'Provider and model completion', state: 'unverified', message: 'A paid/model completion is not sent automatically. Start a channel and submit a small task to test actual provider access.', recovery: 'Review the channel’s diagnostic if the CLI exits. Check subscription, limits, model availability, and provider settings.' });
     return report;
   }
 }

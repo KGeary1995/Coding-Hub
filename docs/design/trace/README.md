@@ -1,5 +1,7 @@
 # Handoff: Coding Hub → "Trace" redesign
 
+> **Historical.** This is the October 2026 hand-off. Its fonts, colours and look have been replaced twice since: by Flight Deck Lite, then on 2026-11-18 by **Midnight**, whose specification, [`docs/design/midnight/README.md`](../midnight/README.md), is the source of truth for the look. [DECISIONS.md](DECISIONS.md) records what changed and why.
+
 ## Overview
 This is a full visual and structural redesign of Coding Hub, the Electron + React 18 desktop app (repo `KGeary1995/Coding-Hub`) that runs Claude Code and Codex in terminal tiles. The chosen direction is **Trace**, which works like a lab oscilloscope. Each agent session is a *channel*. Its tile header carries a **scope strip** that plots the session's token throughput over the last 120 s, and the shape of that trace encodes the session's state. Navigation is reorganised by how often each area is used, and one bottom status bar becomes the only global status layer.
 

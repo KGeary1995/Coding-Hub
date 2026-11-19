@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, GitPullRequestArrow, LoaderCircle, RefreshCw } from 'lucide-react';
+import { CircleAlert, GitPullRequestArrow, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { DeliveryResult, DeliveryStatus } from '../../shared/productivity';
 import { workbench } from '../runtime/workbench';
 import { loadTasks, useTaskStore } from '../state/task-store';
@@ -17,15 +17,25 @@ function Step({ index, title, meta, done, children }: { index: number; title: st
  * Every write or remote action still needs native confirmation and a fresh repository fingerprint; there is no force
  * push or discard.
  */
-export function GitDeliveryPanel({ directory, onChanged }: { directory: string; onChanged: () => void }) {
+export function GitDeliveryPanel({ directory, revision, onChanged }: { directory: string; revision: number; onChanged: () => void }) {
   const [state, setState] = useState<DeliveryStatus | null>(null); const [paths, setPaths] = useState<string[]>([]);
   const [message, setMessage] = useState(''); const [remote, setRemote] = useState('');
   const [title, setTitle] = useState(''); const [body, setBody] = useState(''); const [base, setBase] = useState('main'); const [draft, setDraft] = useState(true);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [result, setResult] = useState<DeliveryResult | null>(null);
   // The task this pull request is for, chosen by the person; none by default, so no task takes another's pull request.
   const openTasks = useTaskStore((s) => s.tasks).filter((task) => (task.status === 'active' || task.status === 'review') && task.directory.replace(/[\\/]+$/, '').toLowerCase() === directory.replace(/[\\/]+$/, '').toLowerCase()); const [forTask, setForTask] = useState('');
-  async function refresh() { const value = await workbench<DeliveryStatus>({ action: 'flow-git-inspect', directory }); setState(value); setRemote((current) => value.remotes.includes(current) ? current : value.remotes[0] ?? ''); setPaths([]); }
+  /** The host's NOT_A_REPOSITORY, and only that: the folder has no Git, so there is nothing to deliver and the review card already says Git review is unavailable. */
+  const [notRepository, setNotRepository] = useState(false);
+  async function refresh() {
+    if (!window.codingHub) throw new Error('This feature requires the desktop app.');
+    const answer = await window.codingHub.workbench({ action: 'flow-git-inspect', directory });
+    // Any other failure brings a hidden card back, or its error would have nowhere to show.
+    if (!answer.ok) { if (answer.error.code !== 'NOT_A_REPOSITORY') { setNotRepository(false); throw new Error(answer.error.message); } setNotRepository(true); setState(null); return; }
+    const value = answer.value as DeliveryStatus; setNotRepository(false); setState(value); setRemote((current) => value.remotes.includes(current) ? current : value.remotes[0] ?? ''); setPaths([]);
+  }
   useEffect(() => { void refresh().catch((e) => setError((e as Error).message)); }, [directory]);
+  // Hidden, the card has no Refresh of its own: the page's Refresh checks again, so a folder that has just become a repository gets it back.
+  useEffect(() => { if (notRepository) void refresh().catch((e) => setError((e as Error).message)); }, [revision]);
   async function execute(action: 'stage' | 'unstage' | 'commit' | 'push' | 'pr') {
     if (!state) return; setBusy(true); setError(''); setResult(null);
     try {
@@ -37,9 +47,10 @@ export function GitDeliveryPanel({ directory, onChanged }: { directory: string; 
   }
   const files = state ? [...new Set([...state.unstaged, ...state.staged])] : [];
   const clean = Boolean(state && !state.staged.length && !state.unstaged.length);
+  if (notRepository) return null;
   return <aside className="delivery-panel tr-delivery ui-card" aria-label="Git delivery">
     <header className="ui-card-head"><GitPullRequestArrow size={16} /><h2>Delivery</h2><div className="ui-card-actions"><button className="icon-button" aria-label="Refresh delivery state" title="Refresh delivery state" disabled={busy} onClick={() => void refresh().catch((e) => setError((e as Error).message))}><RefreshCw size={16} /></button></div></header>
-    {error && <div role="alert" className="ui-banner danger"><AlertTriangle size={16} /><span>{error}</span></div>}
+    {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     {/* Only the steps scroll. The head, an error, the last step's output and the closing note stay in sight. */}
     <div className="tr-delivery-scroll">
     {!state ? !error && <p className="tr-step-meta" role="status"><LoaderCircle size={12} className="spin" />Reading the repository…</p> : <ol className="tr-steps">

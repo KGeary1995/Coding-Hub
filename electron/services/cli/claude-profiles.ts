@@ -28,13 +28,13 @@ export class ClaudeProfiles {
   private readonly file: string;
   /** The default sign-in's folder: CLAUDE_CONFIG_DIR when set, otherwise Claude Code's settings sit in the home folder. */
   constructor(storageRoot: string, private readonly home = os.homedir(), private readonly defaultDirectory: string | null = process.env.CLAUDE_CONFIG_DIR ?? null) {
-    if (!path.isAbsolute(storageRoot)) throw new HubError('PROFILE_STORAGE', 'Profile storage requires an absolute local directory.');
+    if (!path.isAbsolute(storageRoot)) throw new HubError('PROFILE_STORAGE', 'Profile storage requires an absolute local folder.');
     this.root = path.join(storageRoot, 'claude-profiles');
     this.file = path.join(this.root, 'profiles.json');
   }
   private read(): ClaudeAccountProfile[] {
     if (!fs.existsSync(this.root)) return [];
-    if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('PROFILE_STORAGE', 'The profile directory must be a real local directory.');
+    if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('PROFILE_STORAGE', 'The profile folder must be a real local folder.');
     if (!fs.existsSync(this.file)) return [];
     try {
       if (!fs.lstatSync(this.file).isFile() || fs.lstatSync(this.file).isSymbolicLink() || fs.statSync(this.file).size > 32768) throw new Error();
@@ -66,16 +66,16 @@ export class ClaudeProfiles {
   }
   rename(id: string, name: string): ClaudeAccountProfile {
     const profiles = this.read(); const profile = profiles.find((p) => p.id === id);
-    if (!profile) throw new HubError('PROFILE_NOT_FOUND', 'This Claude profile is unavailable. Select another profile in session settings.');
+    if (!profile) throw new HubError('PROFILE_NOT_FOUND', 'This Claude profile is unavailable. Select another profile in the channel’s settings.');
     const parsed = nameSchema.safeParse(name);
     if (!parsed.success || profiles.some((p) => p.id !== id && p.name.toLowerCase() === parsed.data.toLowerCase())) throw new HubError('PROFILE_NAME', 'Use a unique profile name between 1 and 60 characters.');
     const renamed = { ...profile, name: parsed.data }; this.write(profiles.map((p) => p.id === id ? renamed : p)); return renamed;
   }
   directory(id: string): string {
-    if (!z.uuid().safeParse(id).success || !this.read().some((p) => p.id === id)) throw new HubError('PROFILE_NOT_FOUND', 'This Claude profile is unavailable. Select another profile in session settings.');
+    if (!z.uuid().safeParse(id).success || !this.read().some((p) => p.id === id)) throw new HubError('PROFILE_NOT_FOUND', 'This Claude profile is unavailable. Select another profile in the channel’s settings.');
     const directory = path.join(this.root, id);
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new HubError('PROFILE_STORAGE', 'The profile configuration directory must not be a link.');
+    if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new HubError('PROFILE_STORAGE', 'The profile configuration folder must not be a link.');
     return directory;
   }
   /**

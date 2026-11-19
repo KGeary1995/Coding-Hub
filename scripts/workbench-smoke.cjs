@@ -27,7 +27,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     await page.getByRole('button', { name: 'Use channels without a project', exact: true }).click(); assert.equal(await page.locator('.tr-empty').count(), 0);
     await (await tileControl(page, 'Engine settings for channel 1')).click();
-    await page.locator('.session-tile').first().getByLabel('Working directory', { exact: true }).selectOption('independent');
+    await page.locator('.session-tile').first().getByLabel('Working folder', { exact: true }).selectOption('independent');
     await page.locator('.session-tile').first().getByLabel('Repository path', { exact: true }).fill(project);
     await (await tileControl(page, 'Engine settings for channel 1')).click();
     assert.equal(await page.locator('.tr-empty').count(), 0);
@@ -120,7 +120,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await app.close(); app = null;
     app = await _electron.launch({ executablePath: require('electron'), args, env }); page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     assert.equal(await page.locator('.tr-empty').count(), 0); assert.equal((await native(page, 'coaching', { action: 'list' })).length, 1);
-    console.log('PASS: coding tiles, curated coaching selection/review/consent, separate idle report session, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
+    console.log('PASS: coding tiles, curated coaching selection/review/consent, separate idle report channel, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
   } catch (error) {
     // Print what each tile showed, so a CI failure includes the CLI's own output and the app's diagnostic.
     try { for (const window of app ? app.windows() : []) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.session-tile')].map((tile, index) => `tile ${index}: error=${JSON.stringify(tile.querySelector('.session-error')?.textContent ?? null)} terminal=${JSON.stringify((tile.querySelector('.xterm-rows')?.textContent ?? '').slice(-600))}`).join('\n') + '\nevents=' + JSON.stringify((window.events ?? []).filter((event) => event.type !== 'data' || /Error|fixture/.test(event.data)).slice(-12)))); } catch { /* The window may be gone. */ }

@@ -20,7 +20,7 @@ function useSetupStatus() {
   const connected = accounts?.filter((item) => item.state === 'authenticated').length ?? 0;
   const status: Partial<Record<NavigationView, { text: string; tone: 'success' | 'warning' | 'neutral' }>> = {
     // GitHub is optional (project cloning only): it alone not being signed in is no warning.
-    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking…', tone: 'neutral' },
+    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking', tone: 'neutral' },
     memory: automaticMemory ? { text: 'On for every project', tone: 'success' } : { text: 'Off', tone: 'neutral' },
   };
   return { status, version };

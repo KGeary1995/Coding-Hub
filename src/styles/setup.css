@@ -22,28 +22,8 @@
 [data-contrast="high"] .tr-setup-nav footer { color: var(--tr-fg-dim); }
 [data-contrast="high"] .tr-setup-nav .ui-row[aria-current="page"] { border-color: var(--tr-line-strong); }
 
-/* shared-candidate: a notice that starts with an icon (Saved., Pinned.) keeps the icon level with its words. */
-.hub-feedback:has(> svg) { display: flex; align-items: center; gap: 8px; }
-/* A notice written as a paragraph took `.hub-panel p`'s dim text. */
-.hub-panel p.hub-feedback { color: var(--tr-fg); }
 /* An error among dim lines keeps the danger colour: `.ui-row small` (ui.css) and these pages' own dim lines outrank `.error-message`. */
 :is(.engine-diagnostic, .rules-target, .memory-connection) .error-message { color: var(--tr-danger); }
-/* shared-candidate: in a .hub-form the column gap already spaces the head from what follows. */
-.hub-panel .hub-form > .ui-card-head { margin-bottom: 0; }
-/* shared-candidate: `.hub-panel p` (ui.css) stops paragraphs at 72ch, which also wrapped the page heading's one line. */
-.hub-panel .ui-page-head p { max-width: none; }
-/* shared-candidate: a hint written as a paragraph; `.hub-panel p` (ui.css) outranks .ui-hint's size and colour. */
-.hub-panel p.ui-hint { max-width: 72ch; margin: 0; font: var(--tr-t-small); color: var(--tr-fg-faint); }
-.hub-panel p.ui-hint + p.ui-hint { margin-top: 4px; }
-[data-contrast="high"] .hub-panel p.ui-hint { color: var(--tr-fg); }
-/* shared-candidate: an empty state that reports a failure reads as one. */
-.ui-empty.danger > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
-.ui-empty.danger p { color: var(--tr-fg); }
-/* shared-candidate: "How this works", closed until asked for; it holds what would otherwise be a paragraph in a card. */
-.ui-how { margin-top: 12px; }
-.ui-how > summary { width: fit-content; font: var(--tr-t-small); color: var(--tr-fg-dim); }
-.ui-how > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding-left: 24px; }
-.hub-panel .ui-how p { margin: 0; }
 
 /* Accounts: one row per CLI (avatar, name and detail, state, actions), its details and install line under the words. */
 .accounts-panel > .ui-card + .ui-card, .accounts-panel > .ui-banner { margin-top: 16px; }
@@ -86,8 +66,6 @@
 .form-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 /* A new server's fields are as wide as a line of reading, not as the page. */
 .config-panel .hub-form > :is(label, .form-columns) { max-width: 560px; }
-/* `.hub-panel h2` (ui.css) gives a title a bottom margin, which pushed it off the avatar's centre line and away from the line under it. */
-.config-panel :is(.server-card, .hub-preview) header h2 { margin: 0; }
 .server-command { display: block; margin: 4px 0 8px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); color: var(--tr-fg); font: var(--tr-t-meta); overflow-wrap: anywhere; }
 .server-card .ui-banner { align-items: center; margin-top: 12px; }
 .server-card .ui-banner > span { flex: 1; }
@@ -139,7 +117,6 @@
 [data-contrast="high"] .memory-notes .extension-row { border-color: var(--tr-line-strong); }
 /* A handoff opened under the list: its title, who and when, the note, then each action and what a revision does on its own line. */
 .memory-history .hub-preview { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.memory-history .hub-preview h2 { margin: 0; }
 .memory-history .hub-preview pre { align-self: stretch; }
 @container shell (max-width: 1180px) { .memory-columns { grid-template-columns: 1fr; } }
 @container shell (max-width: 900px) { .memory-items-grid { grid-template-columns: 1fr; } }

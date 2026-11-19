@@ -175,17 +175,20 @@ export function TableBar({ leadEngine, table, busy, onRequest, tokens, partnerSt
   const reviewer = table.driver === 'claude' ? 'codex' : 'claude';
   const run = onRequest; const images = waitingImageCount(table);
   const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? 'They agree. Your turn' : PHASE[table.phase];
+  // In a narrow tile the token counts, then who drives, leave the bar (chat.css): there they are this tooltip, and still read out.
+  const roles = `${AGENT[table.driver]} drives · ${AGENT[reviewer]} reviews`;
+  const about = tokens ? `${roles}. New tokens today: ${AGENT[leadEngine]} ${short(tokens.lead)} · ${AGENT[table.partner.engine]} ${short(tokens.partner)}` : roles;
   // Grouped, so a narrow tile wraps whole groups (who sits there; how the partner is doing; Swap and Rounds; where it is and its buttons), never one control alone.
   return <div className="table-bar" role="group" aria-label="Round Table">
-    <span className="table-group">
+    <span className="table-group" title={about}>
       <span className="table-seats" aria-hidden="true"><i className="seat-you" /><i className={`seat-${leadEngine}`} /><i className={`seat-${table.partner.engine}`} /></span>
       <strong>Round Table</strong>
-      <span className="table-roles">{AGENT[table.driver]} drives · {AGENT[reviewer]} reviews</span></span>
+      <span className="table-roles">{roles}</span></span>
     {(partnerState || tokens) && <span className="table-group">
       {partnerState && <span className={`table-partner ${partnerState === 'needs approval' ? 'waiting' : ''}`} title={`${AGENT[table.partner.engine]} runs in the background in this channel`}><b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]}</b> {partnerState}</span>}
       {tokens && <span className="table-tokens tnum" title="New tokens today in each agent's channel"><b className={`seat-text-${leadEngine}`}>{AGENT[leadEngine]} {short(tokens.lead)}</b> · <b className={`seat-text-${table.partner.engine}`}>{AGENT[table.partner.engine]} {short(tokens.partner)}</b></span>}</span>}
     <span className="table-group">
-      <button className="quiet-button small" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} />Swap</button>
+      <button className="quiet-button small" title={`Let ${AGENT[reviewer]} edit files and make ${AGENT[table.driver]} the reviewer`} onClick={() => run({ action: 'table-driver', driver: reviewer })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>
       <label className="table-rounds">Rounds<select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label></span>
     <span className="table-group table-end">
       <span className="table-status" aria-live="polite">{status}</span>
@@ -286,7 +289,8 @@ export function ChainBar({ table, busy, plannerName, builderName, lead, planner,
     {table.waiting !== undefined && <span className="table-waiting" role="status">{table.waitingKept ? 'Kept from before Trace restarted: ' : waitingLabel(table)}<q>{table.waiting.length > 80 ? table.waiting.slice(0, 80) + '…' : table.waiting}</q>{table.waitingKept && <><button className="quiet-button small" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button><button className="quiet-button small" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button></>}{chain?.held && <> ({chain.held})</>}{!table.waitingKept && step === 'needs-you' && <button className="quiet-button small" onClick={() => onRequest({ action: 'table-waiting', send: true })}>Send now</button>}{!table.waitingKept && (step === 'needs-you' || (step === 'stopped' && !table.stopping)) && <button className="quiet-button small" onClick={() => onRequest({ action: 'table-waiting', send: false })}>Drop it</button>}</span>}
     {chain?.nextTasks?.length ? <div className="table-waiting" role="status">{chain.nextTasks.length === 1 ? 'From Tasks, starts once this task is approved:' : `${chain.nextTasks.length} tasks from Tasks, starting one by one as each task before is approved:`}
       <ol className="chain-next-tasks">{chain.nextTasks.map((task, index) => { const shown = task.replace(SIGNAL_INSTRUCTION, '').trim(); return <li key={`${index}:${task.slice(0, 40)}`}><q>{shown.length > 80 ? shown.slice(0, 80) + '…' : shown}</q>{!detached && <button className="quiet-button small" aria-label={`Drop it: ${shown.slice(0, 60)}`} onClick={() => onRequest({ action: 'table-next-drop', index, head: task.slice(0, 200) })}>Drop it</button>}</li>; })}</ol></div> : null}
-    {seats && <ul className="chain-seats" aria-label="Seats">{seats.map((seat) => <li key={seat.role} className={seat.state === 'working' ? 'working' : ''}><i className={`seat-hex seat-${seat.colour}`} aria-hidden="true" /><strong>{seat.name}</strong>{seat.role} · {seat.state}{seat.tokens ? ` · ${short(seat.tokens)} tok today` : ''}</li>)}</ul>}
+    {/* A seat's tokens leave the bar in a narrow tile too (chat.css): there they are its tooltip, and still read out. */}
+    {seats && <ul className="chain-seats" aria-label="Seats">{seats.map((seat) => <li key={seat.role} className={seat.state === 'working' ? 'working' : ''} title={seat.tokens ? `${short(seat.tokens)} new tokens today` : undefined}><i className={`seat-hex seat-${seat.colour}`} aria-hidden="true" /><strong>{seat.name}</strong><span>{seat.role} · {seat.state}{seat.tokens ? <span className="seat-tokens"> · {short(seat.tokens)} tok today</span> : null}</span></li>)}</ul>}
     {table.findings && table.findings.length > 0 && <FindingsList findings={table.findings} />}
   </div>;
 }

@@ -62,7 +62,7 @@ export function PhoneAccessCard() {
     window.addEventListener('focus', retry);
     return () => window.removeEventListener('focus', retry);
   }, [fixable]);
-  const head = (state: string, tone: string) => <div className="ui-card-head"><Smartphone aria-hidden="true" /><h2 id="phone-access-title">Phone access</h2><span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
+  const head = (state: string, tone: string) => <div className="ui-card-head"><Smartphone aria-hidden="true" /><h3 id="phone-access-title">Phone access</h3><span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
   if (!status) return <article className="storage-card ui-card settings-card phone-access" aria-labelledby="phone-access-title">{error ? <>{head('Unavailable', 'danger')}<p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p></> : <>{head('Checking', 'neutral')}<p className="ui-hint">Checking phone access…</p></>}</article>;
   const { tailscale } = status; const ready = status.listening && tailscale.serving && !tailscale.funnel;
   // Computers linked to this one, and codes for linking one, belong to the Other computers card.

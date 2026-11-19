@@ -11,8 +11,8 @@ describe('command menu search', () => {
   });
 
   it('finds the first case-insensitive match for highlighting', () => {
-    expect(matchRange('Open workspace settings', 'SETTINGS')).toEqual([15, 23]);
-    expect(matchRange('Open workspace settings', 'nope')).toBeNull();
+    expect(matchRange('Open settings', 'SETTINGS')).toEqual([5, 13]);
+    expect(matchRange('Open settings', 'nope')).toBeNull();
     expect(matchRange('Anything', '')).toBeNull();
   });
 

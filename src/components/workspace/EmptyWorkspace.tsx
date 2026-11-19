@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Asterisk, Cpu, Folder, FolderOpen, FolderPlus, Github, History, TerminalSquare, type LucideIcon } from 'lucide-react';
+import { CircleAlert, Cpu, Folder, FolderOpen, FolderPlus, Github, History, type LucideIcon } from 'lucide-react';
 import type { AccountConnection } from '../../../shared/accounts';
 import type { SessionHistoryRun } from '../../../shared/types';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { openProjectFolder } from '../shell/Topbar';
 import { TraceMark } from '../shell/TraceMark';
+import { ENGINE_ICONS } from '../tile/engine-icons';
 
 const SETUP_KEY = 'coding-hub-setup-complete';
 const absolute = (directory: string) => /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(directory);
@@ -38,7 +39,7 @@ export function recentProjects(runs: SessionHistoryRun[], limit = 5) {
 
 const ENGINE_NAMES: Record<AccountConnection['provider'], string> = { claude: 'Claude Code', codex: 'Codex CLI', github: 'GitHub CLI' };
 /** The same marks and tones as the new-channel menu (Topbar.tsx); GitHub is not an engine, so it stays neutral. */
-const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; tone: string }> = { claude: { icon: Asterisk, tone: 'claude' }, codex: { icon: TerminalSquare, tone: 'codex' }, github: { icon: Github, tone: 'neutral' } };
+const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; tone: string }> = { claude: { icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { icon: ENGINE_ICONS.codex, tone: 'codex' }, github: { icon: Github, tone: 'neutral' } };
 
 /** Workspace with no project: a centred welcome with the ways in, then recent folders and what is installed. */
 export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
@@ -80,12 +81,12 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
         <button className="button large" onClick={() => setView('projects')}><FolderPlus size={16} aria-hidden="true" />New project</button>
       </div>
       <p className="tr-start-keys"><span><kbd>Ctrl O</kbd> Open folder</span><span><kbd>Ctrl ⇧ N</kbd> New project</span></p>
-      {error && <div role="alert" className="ui-banner danger"><AlertTriangle aria-hidden="true" /><span>{error}</span></div>}
+      {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     </div>
     <div className="ui-grid">
       <section className="ui-card span-6" aria-labelledby="tr-recent-title">
         <div className="ui-card-head"><History aria-hidden="true" /><h2 id="tr-recent-title">Recent projects</h2>{!!recent?.length && <span className="ui-count neutral">{recent.length}</span>}</div>
-        {recentError ? <div className="ui-empty danger" role="alert"><AlertTriangle aria-hidden="true" /><h3>Recent projects unavailable</h3><p>{recentError}</p></div>
+        {recentError ? <div className="ui-empty danger" role="alert"><CircleAlert aria-hidden="true" /><h3>Recent projects unavailable</h3><p>{recentError}</p></div>
           : !recent ? <div className="ui-empty" role="status"><History aria-hidden="true" /><h3>Loading recent projects</h3><p>Looking for folders you ran channels in.</p></div>
           : recent.length ? <ul className="ui-list">{recent.map(({ directory, at }) => <li key={directory}><button className="ui-row" onClick={() => setRootDirectory(directory)} title={`Open ${directory}`}><span className="ui-avatar neutral" aria-hidden="true"><Folder /></span><span className="ui-row-main"><strong>{folderName(directory)}</strong><small className="tr-row-path">{directory}</small></span><small className="tr-row-meta">{ago(at)}</small></button></li>)}</ul>
           : <div className="ui-empty"><History aria-hidden="true" /><h3>No recent projects</h3><p>Folders you run channels in appear here.</p></div>}
@@ -97,7 +98,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
           <span className="ui-row-main"><strong>{ENGINE_NAMES[item.provider]}</strong><small>{item.installed ? item.version ?? 'Installed' : 'Not installed'}</small></span>
           {item.state === 'authenticated' ? <span className="ui-badge success dot">Signed in</span> : <button className="button small" onClick={() => setView('accounts')} aria-label={`Sign in to ${ENGINE_NAMES[item.provider]}`}>{item.installed ? 'Sign in' : 'Set up'}</button>}
         </li>; })}</ul>
-          : enginesError ? <div className="ui-empty danger" role="alert"><AlertTriangle aria-hidden="true" /><h3>Engines not checked</h3><p>{enginesError}</p><button className="button secondary" onClick={() => setView('accounts')}>Open Accounts & connections</button></div>
+          : enginesError ? <div className="ui-empty danger" role="alert"><CircleAlert aria-hidden="true" /><h3>Engines not checked</h3><p>{enginesError}</p><button className="button secondary" onClick={() => setView('accounts')}>Open Accounts & connections</button></div>
           : window.codingHub ? <div className="ui-empty" role="status"><Cpu aria-hidden="true" /><h3>Checking engines</h3><p>Looking for Claude Code, Codex and GitHub CLI.</p></div>
           : <div className="ui-empty"><Cpu aria-hidden="true" /><h3>Engines not checked</h3><p>The desktop app checks local CLIs.</p></div>}
       </section>

@@ -1,16 +1,11 @@
 /* Usage and Session history: only what the shared parts (ui.css) do not draw: the chart, the engine split, plan-limit rows,
    the sessions table's cells, and Session history's two panes. */
 
-/* shared-candidate: an engine's colour on the small legend square; ui.css's .tr-engine-square has none of its own. */
-:is(.tr-usage, .tr-plan-limits) .tr-engine-square.claude, .tr-split > i.claude { background: var(--tr-ch-claude); }
-:is(.tr-usage, .tr-plan-limits) .tr-engine-square.codex, .tr-split > i.codex { background: var(--tr-ch-codex); }
-
 /* Usage: totals in a row, the chart beside the engine split, then the sessions. */
 .tr-usage .ui-page-actions { flex-wrap: wrap; justify-content: flex-end; }
 .tr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 16px; }
 /* A sub-line such as "▲ 20% vs prior 14 d" wraps in a narrow card rather than losing its end. */
 .tr-kpis .ui-stat > small { white-space: normal; }
-.tr-chart-caption { font: var(--tr-t-small); color: var(--tr-fg-faint); }
 .tr-chart-hint { margin-top: 8px; }
 /* A window with no tokens: the plot keeps its axis and days, with the empty state over it. */
 .tr-chart-empty { position: absolute; inset: 16px 16px 32px 48px; pointer-events: none; }
@@ -40,6 +35,8 @@
 .tr-usage-side .ui-hint { margin-top: auto; }
 .tr-split { height: 8px; display: flex; overflow: hidden; border-radius: var(--tr-r-chip); background: var(--tr-well); }
 .tr-split i { display: block; min-width: 0; }
+.tr-split > i.claude { background: var(--tr-ch-claude); }
+.tr-split > i.codex { background: var(--tr-ch-codex); }
 .tr-split i + i { border-left: 2px solid var(--tr-well); }
 .tr-side-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; font: var(--tr-t-control); color: var(--tr-fg); }
 .tr-side-row > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
@@ -54,10 +51,9 @@
 .tr-peak .ui-meter { width: 80px; }
 
 /* Plan limits on Usage: one meter per limit, green with room, amber near it, red at it. */
-.tr-plan-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
-p.tr-plan-meta { margin: 0; white-space: normal; }
 .tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px 32px; }
 .tr-plan-accounts:empty { display: none; }
+/* "Checking…" before the first answer: a caption (ui.css) with its spinner. */
 .tr-plan-checking { display: flex; align-items: center; gap: 8px; }
 .tr-plan-checking > svg { width: 16px; height: 16px; }
 .tr-plan-account > .ui-banner { margin: 0; }
