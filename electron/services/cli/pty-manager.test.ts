@@ -4,7 +4,7 @@ import type { SessionEvent } from '../../../shared/ipc';
 import type { ChatEnvelope } from '../../../shared/chat';
 import { spawnChatProcess } from '../chat/chat-process';
 import { MAX_CHANNELS } from '../../../shared/schemas';
-import { HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
+import { exitTail, HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -117,6 +117,18 @@ describe('PTY lifecycle and IPC ownership', () => {
     expect(events.filter((event) => event.type === 'conversation')).toEqual([{ type: 'conversation', sessionId: 'claude-one', runId: claude.runId, conversationId: id }]);
     processes[0].exit({ exitCode: 0 });
     manager.notifyConversation(claude.runId, id); expect(events.filter((event) => event.type === 'conversation')).toHaveLength(1);
+  });
+  it('starts a cut exit diagnostic at a whole line', () => {
+    // Short output is kept whole.
+    expect(exitTail('SIZE:85x30\r\nError: invalid model\r\n')).toBe('SIZE:85x30\r\nError: invalid model');
+    // The raw tail (8,192 characters) was cut inside "SIZE:85x30": the fragment before the first line break goes.
+    const raw = '5x30\r\n' + '\x1b[0m'.repeat(2038) + 'SIZE:85x13\r\nError: invalid model\r\n';
+    expect(raw).toHaveLength(8192); expect(exitTail(raw)).toBe('SIZE:85x13\r\nError: invalid model');
+    // The 2,000-character cut falls inside a line: the text starts at the next one and stays within the limit.
+    const long = exitTail('a line of output 123\n'.repeat(150) + 'Error: invalid model');
+    expect(long.length).toBeLessThanOrEqual(2000); expect(long.startsWith('a line of output 123\n')).toBe(true); expect(long.endsWith('Error: invalid model')).toBe(true);
+    // One long line without a break is kept: there is no whole line to start at.
+    expect(exitTail('x'.repeat(9000))).toHaveLength(2000);
   });
   it('retains a bounded ANSI-free failure diagnostic even when the CLI clears its alternate screen', async () => {
     const { manager, processes, events } = fixture(); const run = await manager.start(7, request());

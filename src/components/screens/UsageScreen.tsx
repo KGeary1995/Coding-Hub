@@ -79,24 +79,25 @@ export function UsageScreen() {
           <span className="tnum"><i className="tr-engine-square claude" aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square codex" aria-hidden="true" /> {compact(focus.codex)}</span>
           <span className="tnum">{dollars(focus.cost)}</span></div>
         <div className="tr-chart-plot">
+          {/* A window with no tokens shows the empty state alone: axis lines behind it would cross its words. */}
+          {!series.some((day) => day.claude + day.codex > 0) ? <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code or Codex report their use.</p></div> : <>
           <div className="tr-chart-axis" aria-hidden="true">{[1, 0.5, 0].map((step) => <span key={step} style={{ bottom: `${step * 100}%` }}>{compact(top * step)}</span>)}</div>
           <div className="tr-chart-bars" onMouseLeave={() => setHovered(null)}>
             {series.map((day, index) => { const total = day.claude + day.codex; return <button key={day.key} className={`tr-chart-col ${index === (hovered ?? series.length - 1) ? 'hot' : ''}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} aria-label={`${day.date.toLocaleDateString()}: ${total} tokens, Claude ${day.claude}, Codex ${day.codex}`}>
               <span className="tr-chart-stack" style={{ height: `${total / top * 100}%` }}>{day.codex > 0 && <i className="codex" style={{ flexGrow: day.codex }} />}{day.claude > 0 && <i className="claude" style={{ flexGrow: day.claude }} />}</span>
               <span className="tr-chart-x">{day.date.getDate()}</span>
             </button>; })}
-          </div>
-          {!series.some((day) => day.claude + day.codex > 0) && <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code or Codex report their use.</p></div>}
+          </div></>}
         </div>
         <p className="ui-hint tr-chart-hint">{logs ? "This computer's CLI logs for the last 60 days, in Trace or not, plus other computers' synced sessions." : "Days follow each session's start."}</p>
       </article>
       <aside className="ui-card span-4 tr-usage-side">
         <div className="ui-card-head"><ChartPie aria-hidden="true" /><h2>By engine · {windowLabel}</h2></div>
         <div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} className={item.name} style={{ flexGrow: item.tokens }} />)}</div>
-        {byEngine.map((item) => <div key={item.name} className="tr-side-row"><span><i className={`tr-engine-square ${item.name}`} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}
+        <div className="ui-list">{byEngine.map((item) => <div key={item.name} className="ui-row tr-side-row"><span><i className={`tr-engine-square ${item.name}`} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}</div>
         <h3>Context at last report</h3>
-        <div className="tr-side-row"><span>Sessions at 80% or more</span><span className={`ui-count ${totals.overContext ? 'limit' : 'neutral'}`}>{totals.overContext}</span></div>
-        <div className="tr-side-row"><span>Median</span><span className="tnum">{percent(median(contexts))}</span></div>
+        <div className="ui-list"><div className="ui-row tr-side-row"><span>Sessions at 80% or more</span><span className={`ui-count ${totals.overContext ? 'limit' : 'neutral'}`}>{totals.overContext}</span></div>
+          <div className="ui-row tr-side-row"><span>Median</span><span className="tnum">{percent(median(contexts))}</span></div></div>
         <p className="ui-hint">Only Codex reports its context window.</p>
       </aside>
       <section className="ui-card tr-usage-sessions" aria-labelledby="usage-sessions-title">

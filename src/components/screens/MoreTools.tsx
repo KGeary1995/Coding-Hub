@@ -4,6 +4,11 @@ import { MORE_TOOLS } from '../shell/Topbar';
 
 /** Each tool's mark on its card; the same as the tool's own page heading. */
 const TOOL_ICONS: Partial<Record<NavigationView, LucideIcon>> = { coaching: GraduationCap, verification: ListChecks };
+/**
+ * Each tool's button in sentence case (AI keeps its capitals). Its accessible name stays "Open <tool name>", which the
+ * scripts select (scripts/lib/navigate.cjs); the words read out are the same.
+ */
+const OPEN_LABELS: Partial<Record<NavigationView, string>> = { coaching: 'Open AI coaching', verification: 'Open verification profiles' };
 
 /** Tools kept out of the menus because they are rarely used. Each works as before, one click from here. */
 export function MoreTools() {
@@ -13,7 +18,7 @@ export function MoreTools() {
     <div className="more-tools-list">{MORE_TOOLS.map(({ view, label, detail }) => { const Icon = TOOL_ICONS[view] ?? Wrench; return <article key={view} className="ui-card">
       <span className="ui-avatar large accent" aria-hidden="true"><Icon /></span>
       <h2>{label}</h2><p>{detail}</p>
-      <button className="button secondary" onClick={() => setView(view)}>Open {label}</button>
+      <button className="button secondary" aria-label={`Open ${label}`} onClick={() => setView(view)}>{OPEN_LABELS[view] ?? `Open ${label}`}</button>
     </article>; })}</div>
   </section>;
 }

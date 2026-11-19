@@ -72,7 +72,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
       ...(sessions.length <= MAX_CHANNELS - 3 ? [channelItem('hierarchy', () => void startHierarchyTable().then((error) => { if (error) tableFailed(error); }))] : [])];
   return <header className="tr-topbar">
     <Wordmark />
-    {/* The folder mark tells the project switcher from the tab beside it, whose chosen form has nearly the same fill and border. */}
+    {/* A secondary button with a folder mark; the chosen tab beside it takes the accent (shell.css). */}
     {project
       ? <MenuButton className="tr-project" buttonClassName="button secondary" ariaLabel={`Project ${project}`} label={<><Folder className="tr-project-icon" size={16} aria-hidden="true" /><span className="tr-project-name" title={rootDirectory ?? undefined}>{project}</span></>} items={[{ label: 'Change project', icon: <FolderOpen size={16} aria-hidden="true" />, onSelect: () => void openProjectFolder() }, { label: 'Manage projects', icon: <FolderCog size={16} aria-hidden="true" />, onSelect: () => setView('projects') }]} />
       : <button className="tr-project button secondary" onClick={() => void openProjectFolder()}><Folder className="tr-project-icon" size={16} aria-hidden="true" />Open project</button>}

@@ -7,10 +7,8 @@
 /* A sub-line such as "▲ 20% vs prior 14 d" wraps in a narrow card rather than losing its end. */
 .tr-kpis .ui-stat > small { white-space: normal; }
 .tr-chart-hint { margin-top: 8px; }
-/* A window with no tokens: the plot keeps its axis and days, with the empty state over it. */
-.tr-chart-empty { position: absolute; inset: 16px 16px 32px 48px; pointer-events: none; }
-/* With nothing to read out, the day band would sit behind those words (on Today it is the middle of the plot). */
-.tr-chart-plot:has(.tr-chart-empty) .tr-chart-col.hot { background: none; }
+/* A window with no tokens: the plot keeps its well and holds the empty state alone, centred, with no axis behind it. */
+.tr-chart-empty { position: absolute; inset: 0; }
 .tr-chart-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; margin-bottom: 12px; font: var(--tr-t-small); color: var(--tr-fg-muted); font-variant-numeric: tabular-nums; }
 .tr-chart-readout strong { font: var(--tr-t-heading); color: var(--tr-fg-strong); }
 /* The plot is a well (--tr-term); the axis box sits inside its padding, 20 px above the bottom for the day numbers. */
@@ -38,8 +36,9 @@
 .tr-split > i.claude { background: var(--tr-ch-claude); }
 .tr-split > i.codex { background: var(--tr-ch-codex); }
 .tr-split i + i { border-left: 2px solid var(--tr-well); }
-.tr-side-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; font: var(--tr-t-control); color: var(--tr-fg); }
-.tr-side-row > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
+/* Each figure is a row (a well inside the card): the rows take the card down to its hint, level with the chart's, so the
+   card beside the taller chart holds no gap. */
+.tr-side-row > span:first-child { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; }
 .tr-side-row .tnum { color: var(--tr-fg-muted); }
 .tr-usage-table-wrap { overflow-x: auto; }
 .tr-usage-sessions td { white-space: nowrap; }

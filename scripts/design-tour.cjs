@@ -239,7 +239,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
         const runs = page.getByRole('list', { name: 'Recorded CLI runs' });
         // The refreshed list can put a newer run above the others: wait for it, so the pointer is not left on another run.
         await page.getByRole('button', { name: 'Refresh history', exact: true }).click(); await page.waitForTimeout(600);
-        await runs.getByRole('button').filter({ hasNotText: 'running' }).first().click(); await page.getByLabel('Saved terminal output', { exact: true }).waitFor();
+        await runs.getByRole('button').filter({ hasNotText: 'Working' }).first().click(); await page.getByLabel('Saved terminal output', { exact: true }).waitFor();
         // A click on a run below the fold scrolls the box that clips the list, which a person cannot do: put it back.
         await runs.evaluate((list) => { for (let box = list; box; box = box.parentElement) if (getComputedStyle(box).overflowY === 'hidden') box.scrollTop = 0; }); await page.mouse.move(1, 1);
       }

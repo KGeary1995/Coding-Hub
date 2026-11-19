@@ -11,12 +11,17 @@
 
 /* ---------- The tile: a card whose well is the terminal ---------- */
 .session-tile { container-type: inline-size; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-/* --ch is the engine's colour: the channel number, Start, a working state and the output trace take it. */
-.session-tile.tr-tile { --ch: var(--tr-ch-codex); position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); box-shadow: var(--tr-shadow-card); transition: border-color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease); }
+/* --ch is the engine's colour: the channel number, Start, a working state and the output trace take it.
+   --term-top is the well's padding over the terminal's first line. --term-cover is how far down the well a row laid over
+   its top reaches: the detail row's height, then on to the end of the terminal line that height falls in, so a line is
+   covered whole or not at all. --tr-term-row is one line's height, which SessionTile measures (useTerminalRow); until
+   then the cover is the row's own height. */
+.session-tile.tr-tile { --ch: var(--tr-ch-codex); --term-top: 12px; --term-cover: calc(round(up, var(--tr-tile-detail-h) - var(--term-top), var(--tr-term-row, 1px)) + var(--term-top)); position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); box-shadow: var(--tr-shadow-card); transition: border-color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease); }
 .session-tile.tr-tile.claude { --ch: var(--tr-ch-claude); }
 .session-tile.tr-tile.shell { --ch: var(--tr-ch-shell); }
-/* Selected or focused: an accent frame and glow. Needs you: both in the waiting colour. Failed: a red frame. */
-.session-tile.tr-tile:focus-within, .session-tile.tr-tile.selected { border-color: var(--tr-accent-line); box-shadow: var(--tr-shadow-card), var(--tr-glow-accent); }
+/* Selected or focused: an accent frame and glow. Needs you: both in the waiting colour. Failed: a red frame. The
+   accent is solid, as those two are: the tinted line (2.2:1 on the window) would be dimmer than a tile's own frame. */
+.session-tile.tr-tile:focus-within, .session-tile.tr-tile.selected { border-color: var(--tr-accent); box-shadow: var(--tr-shadow-card), var(--tr-glow-accent); }
 /* With higher contrast every frame is --tr-line-strong, so the focused one is lighter still; a waiting or failed frame keeps its colour. */
 :where([data-contrast="high"]) .session-tile.tr-tile:focus-within, :where([data-contrast="high"]) .session-tile.tr-tile.selected { border-color: var(--tr-fg-strong); }
 /* The ring is drawn on the tile's own edge, not 2 px outside it: there the grid's scroll box cut it off on the outer sides. */
@@ -89,6 +94,11 @@
 .tr-tile-detail { position: absolute; left: 0; right: 0; top: var(--tr-tile-head-h); height: var(--tr-tile-detail-h); display: flex; align-items: center; gap: 4px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--tr-tile-border); background: var(--tr-surface); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--tr-d-fast) var(--tr-ease), transform var(--tr-d-fast) var(--tr-ease); }
 .tr-tile-head:hover ~ .tr-tile-detail, .tr-tile-detail:hover, .tr-tile-top:focus-within .tr-tile-detail, .config-open .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
 .config-open .tr-tile-detail, .tr-tile-top:not(:has(+ .terminal-frame)) .tr-tile-detail { position: static; height: var(--tr-tile-detail-h); opacity: 1; transform: none; pointer-events: auto; }
+/* Over a terminal the row ends inside the first line (the lines start 12 px down, the row is 30 px high), which left a
+   sliver of cut letters under it: the well is covered on to the end of that line (--term-cover). Not over a conversation,
+   which starts under the row. */
+.tr-tile-top:has(+ .terminal-frame:not(.chat-frame)) > .tr-tile-detail::after { content: ""; position: absolute; left: 0; right: 0; top: calc(100% + 1px); height: calc(var(--term-cover) - var(--tr-tile-detail-h)); background: var(--tr-term); pointer-events: none; }
+.tr-tile:has(> .terminal-frame > .transcript-overlay) .tr-tile-detail::after { content: none; }
 /* The facts give way whole, last first, never mid-word: each is an item that wraps to a second line when the row is
    short, and the one-line box clips that line. Only the first, which cannot wrap, shortens with an ellipsis. */
 .tr-detail-facts { flex: 1; min-width: 0; height: 16px; display: flex; flex-wrap: wrap; overflow: hidden; white-space: pre; font: var(--tr-t-small); font-variant-numeric: tabular-nums; color: var(--tr-fg-dim); }
@@ -112,7 +122,9 @@
 }
 
 /* ---------- Notices under the header: full-width strips in a banner's colours ---------- */
-.session-error { --tone: var(--tr-danger); flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 68px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
+/* Three lines at most, then it scrolls: 60 px of lines, 8 of padding and the line under them (at 68 px, three lines
+   already scrolled by that one pixel). */
+.session-error { --tone: var(--tr-danger); flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 69px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
 /* A prepared request waiting to be sent is information; a missing login is a warning. */
 .session-error.notice { --tone: var(--tr-accent); }
 .session-error.warning { --tone: var(--tr-warning); }
@@ -126,15 +138,16 @@
 .session-attention > span:first-child { color: var(--tr-st-waiting); font-size: 11px; }
 .session-attention > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* On a terminal channel it lies over the top of the terminal, so the terminal (and the CLI's size) stays as it is.
-   It holds nothing to press, so clicks and selection reach the terminal under it. */
-.terminal-frame > .session-attention.over-terminal { position: absolute; top: 0; left: 0; right: 0; z-index: 3; pointer-events: none; }
+   It holds nothing to press, so clicks and selection reach the terminal under it. It ends where a terminal line ends
+   (--term-cover), as the detail row's cover does. */
+.terminal-frame > .session-attention.over-terminal { position: absolute; top: 0; left: 0; right: 0; z-index: 3; height: var(--term-cover); pointer-events: none; }
 .budget-notice { --tone: var(--tr-st-limit); flex-shrink: 0; max-height: 96px; overflow: auto; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
 .budget-notice summary { font: 500 12px/20px var(--tr-font-ui); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); }
 .budget-notice p { margin: 4px 0; }
 
 /* ---------- The terminal well ---------- */
 .terminal-frame { flex: 1; min-height: 70px; position: relative; container-type: size; }
-.tr-tile .terminal-frame { padding: 12px 12px 8px; background: var(--tr-term); }
+.tr-tile .terminal-frame { padding: var(--term-top) 12px 8px; background: var(--tr-term); }
 /* Chat channels: the conversation drawn by Trace fills the well. */
 .terminal-frame.chat-frame { padding: 0; display: flex; min-height: 0; }
 .terminal-viewport, .terminal-surface { width: 100%; height: 100%; }

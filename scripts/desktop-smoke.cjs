@@ -94,7 +94,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     }
     assert.equal((await page.evaluate(() => window.codingHub.listHistory())).value.length, 0);
     assert.equal((await page.evaluate(() => window.codingHub.loadWorkspace())).value.workspace, null);
-    await page.getByRole('button', { name: 'Go to workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
     // Mock only the OS dialog selection. Everything after it uses actual native IPC and PTYs.
     await app.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }); }, projects[0]);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();

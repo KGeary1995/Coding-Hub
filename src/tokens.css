@@ -18,10 +18,10 @@
 
   /* lines */
   --tr-line-faint: #131e36;    /* row dividers */
-  --tr-line: #22355c;          /* card borders, dividers: 1.6:1 on the window, as in the reference */
+  --tr-line: #2c4474;          /* card borders, dividers: 2.1:1 on the window, toward the reference's card edges */
   --tr-line-control: #4e6ba9;  /* control borders: 3:1 against every surface up to --tr-hover */
   --tr-line-strong: #6584c8;   /* overlay borders, hovered control: 3:1 against --tr-raised */
-  --tr-tile-border: #263b66;   /* channel tile frame: 1.8:1 on the window */
+  --tr-tile-border: #314c80;   /* channel tile frame: 2.3:1 on the window */
 
   /* text */
   --tr-fg-strong: #f4f7ff;     /* titles, values */
@@ -104,7 +104,7 @@
   --tr-r-overlay: 14px;
   --tr-r-chip: 999px;          /* badges */
 
-  /* depth: a card has a lit top edge, a highlighted card or tile glows, only overlays cast a real shadow */
+  /* depth: a card has a lit top edge, a selected tile glows, only overlays cast a real shadow */
   --tr-shadow-card: inset 0 1px 0 rgba(120,160,255,.06), 0 1px 2px rgba(0,0,0,.4);
   --tr-glow-accent: 0 0 0 1px rgba(76,154,255,.12), 0 0 28px rgba(46,110,255,.14);
   --tr-glow-waiting: 0 0 0 1px rgba(255,106,213,.12), 0 0 28px rgba(255,106,213,.14);  /* a channel that needs the person */
@@ -126,7 +126,7 @@
 }
 
 /* Higher contrast (Settings > Display): tokens, not single rules, since later stylesheets draw the borders from them.
-   Control outlines go from 3.4:1 to 7.3:1 on a card, tile frames from 1.8:1 to 5.4:1 on the window, and the dimmest
+   Control outlines go from 3.4:1 to 7.3:1 on a card, tile frames from 2.3:1 to 5.4:1 on the window, and the dimmest
    marks (idle trace, drag handle, offline computer) to readable text. */
 :root[data-contrast="high"] { --tr-line-control: var(--tr-fg-dim); --tr-tile-border: var(--tr-line-strong); --tr-fg-off: var(--tr-fg-faint); }
 

@@ -23,6 +23,8 @@
 .workflow-tabs { margin-bottom: 16px; }
 .workflow-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .workflow-columns > .storage-card { margin-top: 0; }
+/* Two short cards side by side (Support) are one height; Recovery's long and short card keep their own. */
+.workflow-columns.even { align-items: stretch; }
 .recovery-advice { margin: 12px 0; }
 .recovery-advice > div { display: flex; flex-direction: column; gap: 4px; }
 .recovery-advice strong { color: var(--tr-fg-strong); }
@@ -82,6 +84,10 @@
 .experiment-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .trial-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .experiment-form > label:first-child, .trial-form > :is(h3, label:has(textarea)) { grid-column: 1 / -1; }
+/* A field is as wide as what it holds, as in Settings: a name or a folder at most 560 px, a number 200 px. Text areas
+   (prompts, evidence, the commands' JSON) keep the card's width. */
+.experiment-form > label:first-child, .verification-panel .hub-form > label:not(:has(textarea)) { max-width: 560px; }
+:is(.trial-form, .verification-panel .hub-form) > label > input[type="number"] { max-width: 200px; }
 .experiment-form > .button, .trial-form > .button { grid-column: 1 / -1; justify-self: start; }
 .experiment-summary { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--tr-line-faint); }
 .experiment-summary > small { color: var(--tr-fg-dim); }
@@ -107,9 +113,11 @@
 .help-search > small { flex: none; color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
 [data-contrast="high"] .help-search { border-color: var(--tr-fg-dim); }
 .help-categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-.help-categories > button { height: 28px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-dim); font: var(--tr-t-control); }
+/* 8 px at the sides, as a badge has: the eight topics' chips then fit one row in an 1100 px window. */
+.help-categories > button { height: 28px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-dim); font: var(--tr-t-control); }
 .help-categories > button:hover { background: var(--tr-hover); color: var(--tr-fg); }
-.help-categories > button[aria-pressed="true"] { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); font-weight: 600; }
+/* The pressed chip takes the accent itself, as a chosen tab does (ui.css): the tint's own line is dimmer than its neighbours' border. */
+.help-categories > button[aria-pressed="true"] { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); font-weight: 600; }
 .help-workbench { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
 .help-topics { position: sticky; top: 16px; max-height: calc(100vh - 140px); overflow-y: auto; }
 .help-topics .ui-row-main { gap: 0; }

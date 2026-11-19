@@ -8,13 +8,18 @@
 .tr-setup-nav h2 { margin: 0 12px; }
 .tr-setup-nav .ui-list { gap: 4px; }
 /* An area is a row with no well until it is pointed at or chosen, so the list reads as navigation, not as content. */
-.tr-setup-nav .ui-row { align-items: flex-start; border-color: transparent; background: none; }
-.tr-setup-nav .ui-row:hover { background: var(--tr-hover); }
-.tr-setup-nav .ui-row[aria-current="page"] { border-color: var(--tr-line); background: var(--tr-raised); }
+.tr-setup-nav .ui-row { --ring: var(--tr-panel); border-color: transparent; background: none; }
+.tr-setup-nav .ui-row:hover { --ring: var(--tr-hover); background: var(--tr-hover); }
+.tr-setup-nav .ui-row[aria-current="page"] { --ring: var(--tr-raised); border-color: var(--tr-line); background: var(--tr-raised); }
+.tr-setup-mark { position: relative; flex: none; display: flex; }
 .tr-setup-icon { flex: none; color: var(--tr-fg-dim); }
 .tr-setup-nav .ui-row[aria-current="page"] .tr-setup-icon { color: var(--tr-accent); }
-.tr-setup-nav .ui-row-main { gap: 4px; }
-.tr-setup-nav .ui-row-main > .tr-setup-status { align-self: flex-start; }
+/* An area's known state: a dot on its icon, ringed in the row's fill, so a status adds no line and every row is one height.
+   Its words are the row's tooltip and are read out after the name. */
+.tr-setup-dot { --tone: var(--tr-fg-dim); position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 2px var(--ring); }
+.tr-setup-dot.success { --tone: var(--tr-success); }
+.tr-setup-dot.warning { --tone: var(--tr-warning); }
+.tr-setup-nav .ui-row-main > .tr-setup-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tr-setup-nav footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 0; border-top: 1px solid var(--tr-line-faint); font: var(--tr-t-small); color: var(--tr-fg-faint); }
 .tr-setup-nav footer > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-setup-nav footer code { font: var(--tr-t-meta); }
@@ -34,8 +39,7 @@
 .account-install p { margin: 0; font: var(--tr-t-small); }
 .account-path, .account-command { display: block; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); color: var(--tr-fg-muted); font: var(--tr-t-meta); overflow-wrap: anywhere; white-space: pre-wrap; }
 .hub-panel p.account-hint { margin-top: 12px; }
-/* The note under the cards is as wide as a line of reading, like the banners inside them. */
-.account-note { width: fit-content; }
+/* The note under the cards ends at their right edge; its words keep a line of reading. */
 .account-note > span { max-width: 72ch; }
 .profile-create, .profile-connect { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
 .profile-create .ui-field, .profile-connect .ui-field { min-width: 240px; }

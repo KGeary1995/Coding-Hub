@@ -31,8 +31,10 @@ export function RunningApplicationCard({ state: { runtime, error } }: { state: R
 }
 export function LocalBackupCard({ state: { backups, loaded, includeLogs, setIncludeLogs, busy, error, notice, run, runtime } }: { state: RuntimeBackup }) {
   return <article className="storage-card ui-card settings-card"><div className="ui-card-head"><ArchiveRestore aria-hidden="true" /><h3>Local backup and recovery</h3></div>
-    {/* What the unencrypted file contains is shown, not kept behind a help button. */}<p className="ui-hint">A backup holds verified settings, SQLite history and usage, shared rules, curated memory, experiments, tasks and verification profiles.</p>
-    <p className="ui-hint">CLI credentials and external project files are excluded. Restore creates a new copy and activates it on restart; current data remains intact.</p>
+    {/* What the unencrypted file contains is shown, not kept behind a help button. The two hints share a box: the card's
+        12 px gap would otherwise add to the 4 px that two hints in a row keep (ui.css). */}
+    <div><p className="ui-hint">A backup holds verified settings, SQLite history and usage, shared rules, curated memory, experiments, tasks and verification profiles.</p>
+    <p className="ui-hint">CLI credentials and external project files are excluded. Restore creates a new copy and activates it on restart; current data remains intact.</p></div>
     <p className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>Stop channels and verification first. Backups are unencrypted and limited to 64 MiB / 10,000 files, with up to 50 local backups. Profile labels are preserved; named accounts must sign in again after restore. Project instructions and repository files are not restored.</span></p>
     <label className="ui-check"><input type="checkbox" aria-label="Include session output in backup" checked={includeLogs} onChange={(e) => setIncludeLogs(e.target.checked)} />Include session output logs</label>
     <div className="ui-actions"><button className="button secondary" disabled={busy} onClick={() => void run('backup-create')}>Create local backup</button><button className="button secondary" disabled={busy} onClick={() => void run('backup-import')}>Import and restore backup</button>{runtime?.restartRequired && <button className="button primary" disabled={busy} onClick={() => void run('restart')}>Restart with restored data</button>}</div>

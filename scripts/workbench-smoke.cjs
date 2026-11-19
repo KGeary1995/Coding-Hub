@@ -72,7 +72,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       for (const other of others) assert.ok(other.right <= row.left || other.left >= row.right || other.bottom <= row.top || other.top >= row.bottom, 'The detail row lies over the header');
     };
     await detailShown();
-    assert.match(await detail.textContent(), /pid \d+ · cwd /);
+    assert.match(await detail.textContent(), /pid \d+ · folder /);
     await page.mouse.move(1, 1);
     // Enter on the tile itself moves into its terminal.
     await tile.focus(); await page.keyboard.press('Enter');

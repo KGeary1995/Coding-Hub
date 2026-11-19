@@ -19,13 +19,13 @@ import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type Remot
 import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
-/** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
+/** In three rows, all in view without scrolling and each key at least 44 px wide: the named keys, the arrows, the usual answers. */
 const KEYS: { label: string; name?: string; data: string }[][] = [
   // Shift+Tab switches Claude Code's mode (plan, auto-accept); a phone keyboard has neither it nor a reliable Backspace here.
   [{ label: 'Enter', data: '\r' }, { label: 'Esc', data: '\x1b' }, { label: 'Tab', data: '\t' }, { label: '⇧Tab', name: 'Shift Tab', data: '\x1b[Z' },
     { label: 'Ctrl C', data: '\x03' }, { label: '⌫', name: 'Backspace', data: '\x7f' }],
-  [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' },
-    { label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
+  [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }],
+  [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
 const ENGINE = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 
@@ -226,7 +226,8 @@ function showList() {
 }
 
 /** Keys a phone keyboard lacks, as X keysyms. */
-const SCREEN_KEYS: [string, number, string][] = [['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']];
+/** Two rows of four, so each key is at least 44 px wide on a phone. */
+const SCREEN_KEYS: [string, number, string][][] = [[['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter']], [['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]];
 let viewer: RFB | null = null;
 /**
  * The computer's own screen, carried over this remote: a Mac's through its screen-sharing server (macOS Screen Sharing),
@@ -248,7 +249,7 @@ async function showScreen() {
   // What the phone's keyboard inserts goes over as key presses; the field itself stays empty.
   typing.addEventListener('input', () => { if (typing.value) { send(unlockKeys(typing.value).filter((key) => key.keysym !== 0xff0d)); typing.value = ''; } });
   typing.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === 'Backspace') { event.preventDefault(); send([{ keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: true }, { keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: false }]); } });
-  const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, h('div', {}, ...SCREEN_KEYS.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label))));
+  const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, ...SCREEN_KEYS.map((row) => h('div', {}, ...row.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label)))));
   const back = () => { viewer?.disconnect(); viewer = null; showList(); };
   app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
   try {

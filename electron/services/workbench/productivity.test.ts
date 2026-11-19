@@ -161,6 +161,8 @@ describe('diagnostic helper regressions',()=>{
   expect(recoveryAdvice('CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project folder.',1,true).view).toBe('accounts');
   expect(recoveryAdvice('The working folder does not exist or is not accessible.',null,true).view).toBe('projects');
   expect(recoveryAdvice('The working directory does not exist or is not accessible.',null,true).view).toBe('projects');
+  // A CLI's own output names its "cwd" (a start banner, the fixture's READY line): that is no folder problem either.
+  expect(recoveryAdvice('CLI exited with code 1.\nREADY CWD:C:\\x\ncwd: C:\\x',1,true).title).toBe('Investigate CLI exit 1');
  });
  it('hides a folder however the report spells it, and only as a whole folder name',()=>{
   expect(redactDiagnostic('D:\\clients\\acme-corp','C:\\Users\\kg','D:\\clients\\acme-corp\\')).toBe('<project>');

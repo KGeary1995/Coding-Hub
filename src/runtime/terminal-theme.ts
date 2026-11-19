@@ -12,7 +12,7 @@ export const TERMINAL_THEME: ITheme = {
   background: '#050912', foreground: '#dbe4f5', cursor: '#dbe4f5', cursorAccent: '#050912', selectionBackground: '#1b3260',
   // xterm draws its own scroll slider, coloured like the window's scrollbars: --tr-line, --tr-line-strong when pointed at,
   // and --tr-accent while dragged.
-  scrollbarSliderBackground: '#22355c', scrollbarSliderHoverBackground: '#6584c8', scrollbarSliderActiveBackground: '#4c9aff',
+  scrollbarSliderBackground: '#2c4474', scrollbarSliderHoverBackground: '#6584c8', scrollbarSliderActiveBackground: '#4c9aff',
   // --tr-surface, --tr-danger, --tr-success, --tr-warning, --tr-accent, --tr-st-waiting, --tr-ch-codex, --tr-fg.
   black: '#0d1628', red: '#ff6b6b', green: '#3ddc97', yellow: '#f7b84b', blue: '#4c9aff', magenta: '#ff6ad5', cyan: '#5fe1ff', white: '#dbe4f5',
   // --tr-fg-faint (dim text), --tr-del, --tr-add, then lighter tints of the four above with no token of their own, and --tr-fg-strong.

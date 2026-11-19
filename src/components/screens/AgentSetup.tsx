@@ -4,7 +4,11 @@ import { useWorkspaceStore, type NavigationView } from '../../state/workspace-st
 import { useHubStore } from '../../state/hub-store';
 import { SETUP_VIEWS } from '../shell/Topbar';
 
-/** A status badge for the areas whose state the app already knows; the others show only their name (docs/design/midnight, section 6). */
+/**
+ * A status for the areas whose state the app already knows; the others show only their name (docs/design/midnight,
+ * section 6). The renderer holds no state for rules, servers or skills, and reading it would run the CLIs, so the status
+ * is a dot on the area's icon (its words in the tooltip and read out with the name): every row keeps one height.
+ */
 function useSetupStatus() {
   const [accounts, setAccounts] = useState<AccountConnection[] | null>(null);
   const [version, setVersion] = useState<string | null>(null);
@@ -35,9 +39,9 @@ export function AgentSetup({ children }: { children: ReactNode }) {
     <nav className="tr-setup-nav" aria-label="Agent setup">
       <h2>Agent setup</h2>
       <ul className="ui-list">{SETUP_VIEWS.map(({ view, label, icon: Icon }) => { const line = status[view]; return <li key={view}>
-        <button className={`ui-row ${activeView === view ? 'active' : ''}`} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>
-          <Icon className="tr-setup-icon" size={16} aria-hidden="true" />
-          <span className="ui-row-main"><strong className="tr-setup-name">{label}</strong>{line && <span className={`ui-badge dot tr-setup-status ${line.tone}`}>{line.text}</span>}</span>
+        <button className={`ui-row ${activeView === view ? 'active' : ''}`} aria-current={activeView === view ? 'page' : undefined} title={line?.text} onClick={() => setView(view)}>
+          <span className="tr-setup-mark"><Icon className="tr-setup-icon" size={16} aria-hidden="true" />{line && <span className={`tr-setup-dot ${line.tone}`} aria-hidden="true" />}</span>
+          <span className="ui-row-main"><strong className="tr-setup-name">{label}</strong>{line && <span className="tr-setup-status">{line.text}</span>}</span>
         </button>
       </li>; })}</ul>
       <footer>{version && <span>Trace {version} · Electron {navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1] ?? '—'}</span>}{dataPath && <code title={dataPath}>{dataPath}</code>}</footer>

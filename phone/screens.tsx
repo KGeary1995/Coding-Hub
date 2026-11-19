@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { PlanLimits } from '../shared/plan-limits';
 import type { RemoteHistoryItem, RemoteMemory, RemoteTask, RemoteUsage } from '../shared/remote';
 import { api } from './api';
 
@@ -35,6 +36,9 @@ function Meter({ ratio, tone, label }: { ratio: number; tone: string; label: str
   return <div className={`meter ${ratio >= 0.8 ? 'near' : tone}`} role="img" aria-label={label}><i style={{ width: `${share * 100}%` }} /></div>;
 }
 
+/** Why a reading has no windows: a failed check in the danger colour, a fact dim. An older Trace's reading has no mark: a fact. */
+export function LimitNote({ limit }: { limit: Pick<PlanLimits, 'error' | 'failed'> }) { return limit.error ? <p className={limit.failed === true ? 'limit-failed' : 'dim'}>{limit.error}</p> : null; }
+
 function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) { return <section className="phone-card"><h2>{title}{count !== undefined && <span className="count neutral">{count}</span>}</h2>{children}</section>; }
 /** No data yet: the card keeps its place, with a title and one line saying why. */
 function Empty({ title, children }: { title: string; children: ReactNode }) { return <div className="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg><strong>{title}</strong><p>{children}</p></div>; }
@@ -55,7 +59,7 @@ function UsageScreen() {
       {!usage.limits.length && <Empty title="No plan limits yet">Shown once an agent reports them.</Empty>}
       {usage.limits.map((limit) => <div key={`${limit.engine}-${limit.account}`} className="limit">
         <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
-        {limit.error && <p className="dim">{limit.error}</p>}
+        <LimitNote limit={limit} />
         {limit.windows.map((window) => <div key={window.label}><p className="measure"><span>{window.label}</span><b>{Math.round(window.usedPercent)}%</b></p><Meter ratio={window.usedPercent / 100} tone={limit.engine} label={`${window.label} ${Math.round(window.usedPercent)}% used`} /></div>)}
       </div>)}
       <div className="card-actions"><button type="button" className="quiet" onClick={reload}>Refresh</button></div>

@@ -31,7 +31,6 @@
 .task-card ul { margin: 4px 0 0; padding-left: 16px; }
 .task-card code { font: var(--tr-t-meta); color: var(--tr-fg); overflow-wrap: anywhere; }
 .task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--tr-line-faint); }
-.task-actions .task-worktree { width: auto; min-height: 24px; height: 24px; padding-left: 8px; border-radius: var(--tr-r-small); font-size: 12px; }
 /* "Remove this task and its notes?" is read whole: in a narrow card the question takes its own line above Remove and Keep. */
 .task-actions .confirm-step { flex: 1 1 100%; flex-wrap: wrap; }
 .task-actions .confirm-step-question { flex: 1 1 100%; white-space: normal; }

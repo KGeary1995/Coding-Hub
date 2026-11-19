@@ -70,6 +70,11 @@
    sub-heading has in a card titled with an h2 (ui.css's h3). */
 .link-this h4 { font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 
-/* Save preferences with its notice or error beside it; a number needs no field as wide as a path. */
+/* Save preferences is the Preferences section's footer: it sticks to the bottom of the page while any of the fields it
+   saves is on screen and settles under the last of them, with what it saves and its notice or error beside it. A number
+   needs no field as wide as a path. Its last shadow is a skirt in the window's colour over the 12 px under it: the
+   fields that scroll past showed there as a sliver of cut letters. */
+.settings-save { position: sticky; bottom: 12px; z-index: 2; gap: 8px 16px; padding: 12px 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay), 0 16px 0 4px var(--tr-bg); }
 .settings-save .hub-feedback { flex: 1 1 240px; max-width: 72ch; margin: 0; }
+[data-contrast="high"] .settings-save { border-color: var(--tr-fg-dim); }
 .settings-form .hub-form > label > input[type="number"] { max-width: 200px; }

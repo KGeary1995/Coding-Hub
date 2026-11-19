@@ -7,10 +7,10 @@ import { ENGINE_ICONS } from './tile/engine-icons';
 
 function date(value: string) { return new Date(value).toLocaleString(); }
 function bytes(value: number) { return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KiB`; }
-/** A run's status as a badge: a word in sentence case and its state colour. */
-const STATUS: Record<SessionHistoryRun['status'], { word: string; tone: string }> = { running: { word: 'Running', tone: 'accent' }, completed: { word: 'Completed', tone: 'success' }, interrupted: { word: 'Interrupted', tone: 'limit' } };
-/** A run's badge in the list. One that ended with an error shows its exit code in red, as its record does: green "Completed" read as a success. */
-function runBadge(run: SessionHistoryRun) { return run.status === 'completed' && run.exitCode ? { word: `Exit ${run.exitCode}`, tone: 'danger' } : STATUS[run.status]; }
+/** A run's status as a badge: a word in sentence case and its state colour. An active run is "Working" in its engine's colour, as a channel is. */
+const STATUS: Record<SessionHistoryRun['status'], { word: string; tone: string }> = { running: { word: 'Working', tone: '' }, completed: { word: 'Completed', tone: 'success' }, interrupted: { word: 'Interrupted', tone: 'limit' } };
+/** A run's badge, the same in the list and in its record. One that ended with an error shows its exit code in red: green "Completed" read as a success. */
+export function runBadge(run: Pick<SessionHistoryRun, 'status' | 'exitCode' | 'engine'>) { const status = STATUS[run.status]; return run.status === 'completed' && run.exitCode ? { word: `Exit ${run.exitCode}`, tone: 'danger' } : { word: status.word, tone: status.tone || run.engine }; }
 
 export function SessionHistory() {
   const [native, setNative] = useState(false);
@@ -59,7 +59,7 @@ export function SessionHistory() {
           <span className="ui-row-main"><span className="history-run-title"><strong>{item.engine === 'claude' ? 'Claude Code' : 'Codex'}</strong><span className={`ui-badge ${runBadge(item).tone}`}>{runBadge(item).word}</span></span><small>{item.config.model || 'CLI default model'}</small><span className="history-path" title={item.cwd}>{item.cwd}</span><small>{date(item.startedAt)} · {bytes(item.recordedBytes)}</small></span>
         </button>)}</div></div>
       <article className="ui-card history-record">
-        <div className="ui-card-head"><span className={`ui-avatar small ${run?.engine ?? 'neutral'}`} aria-hidden="true">{createElement(run ? ENGINE_ICONS[run.engine] : TerminalSquare)}</span><h2>{run?.engine === 'claude' ? 'Claude Code' : 'Codex'} <span className="history-model">{run?.config.model || 'CLI default model'}</span></h2><span className={`ui-badge ${run?.exitCode ? 'danger' : 'neutral'}`}>{run?.exitCode !== null ? `Exit ${run?.exitCode}` : run && STATUS[run.status].word}</span></div>
+        <div className="ui-card-head"><span className={`ui-avatar small ${run?.engine ?? 'neutral'}`} aria-hidden="true">{createElement(run ? ENGINE_ICONS[run.engine] : TerminalSquare)}</span><h2>{run?.engine === 'claude' ? 'Claude Code' : 'Codex'} <span className="history-model">{run?.config.model || 'CLI default model'}</span></h2>{run && <span className={`ui-badge ${runBadge(run).tone}`}>{runBadge(run).word}</span>}</div>
         <code className="history-cwd">{run?.cwd}</code>
         <div className="history-metadata"><span>Started {run && date(run.startedAt)}</span><span>{run?.endedAt ? `Ended ${date(run.endedAt)}` : 'Run is active · Refresh to update'}</span>{run && run.status !== 'running' && <button className="button secondary small" onClick={() => setConfirmRestore(true)}>Restore launch settings to a channel</button>}</div>
         {run?.status === 'interrupted' && <div className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>This process was interrupted. Its recorded output is history; no CLI process was recovered.</span></div>}

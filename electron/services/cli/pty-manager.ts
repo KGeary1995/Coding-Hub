@@ -38,6 +38,21 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
  * Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. Read with
  * reg.exe off the main process, each time, so turning sudo on applies to the next Terminal channel.
  */
+/** How much of a run's raw output is kept for its exit diagnostic. */
+const OUTPUT_TAIL = 8192;
+/**
+ * A run's last output as the text of its exit diagnostic, at most 2,000 characters. The Windows console repaints by
+ * moving the cursor, not with newlines, so those moves become line breaks to keep repainted lines apart. Both cuts (the
+ * raw tail kept per run, and the 2,000 characters) can fall inside a line or an escape sequence; the text then starts
+ * at the next whole line, so a diagnostic never opens with the end of one ("5x30" of "SIZE:85x30").
+ */
+export function exitTail(output: string): string {
+  const text = stripVTControlCharacters(output.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
+  const kept = text.slice(-2000), at = kept.indexOf('\n');
+  const cut = output.length >= OUTPUT_TAIL || text.length > 2000;
+  return cut && at >= 0 && kept.slice(at + 1).trim() ? kept.slice(at + 1).trim() : kept;
+}
+
 export function windowsSudoMode(): Promise<number> {
   return new Promise((resolve) => execFile('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true }, (error, output) => {
     // No key: sudo was never turned on.
@@ -274,7 +289,7 @@ export class PtyManager {
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
       else pty.onData((data) => {
         if (run.finished) return;
-        run.outputTail = (run.outputTail + data).slice(-8192);
+        run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
         if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
@@ -323,7 +338,7 @@ export class PtyManager {
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
-    child.onStderr((data) => { run.outputTail = (run.outputTail + data).slice(-8192); });
+    child.onStderr((data) => { run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL); });
     stream.start();
   }
 
@@ -489,8 +504,7 @@ export class PtyManager {
     if (run.chat) { try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ } try { this.chains.ended(run.session.runId); } catch { /* The table is gone with it. */ } }
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
-    // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.
-    const tail = stripVTControlCharacters(run.outputTail.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
+    const tail = exitTail(run.outputTail);
     // On POSIX a signalled exit reports code 0 plus the signal (OOM kill, crash); that is still a failure.
     const failed = (exitCode !== 0 || Boolean(signal)) && !run.stopping;
     if (failed && exitCode === 0 && signal) exitCode = 128 + signal;

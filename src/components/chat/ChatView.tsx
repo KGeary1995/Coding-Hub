@@ -138,7 +138,7 @@ export function ChatView({ session }: { session: Session }) {
       <span className="table-partner" title={partnerSession.error ?? undefined}><b className={`seat-text-${partnerEngine}`}>{AGENT[partnerEngine]}</b> {partnerState}</span>
       <span className="table-status" aria-live="polite">{!running ? `${AGENT[partnerEngine]} starts with this channel` : partnerSession.status === 'running' ? 'Seating again…' : partnerLive ? '' : `Start ${AGENT[partnerEngine]} to talk to both again`}</span>
       {running && !partnerLive && <button className="quiet-button small" onClick={() => void startSession(partnerSession.id)}>Start {AGENT[partnerEngine]}</button>}
-      {partnerThread.items.length > 0 && <button className="quiet-button small" aria-pressed={showPartner} onClick={() => setShowPartner(!showPartner)}>{showPartner ? 'Back to the table' : `Show ${AGENT[partnerEngine]}`}</button>}
+      {partnerThread.items.length > 0 && <button className="quiet-button small" aria-pressed={showPartner} title={showPartner ? 'Back to the Round Table thread' : `${AGENT[partnerEngine]}'s own conversation, with what Trace passed to it`} onClick={() => setShowPartner(!showPartner)}><MessagesSquare size={13} /><span className="table-label">{showPartner ? 'Back to the table' : `Show ${AGENT[partnerEngine]}`}</span></button>}
       <button className="quiet-button small" aria-label="Close the Round Table" title={`Close the Round Table and stop ${AGENT[partnerEngine]}`} onClick={closeTable}><X size={13} /></button>
     </div>}
     {showPartner && partnerSession && <p className="table-seated" role="note">{AGENT[partnerEngine]}'s own conversation, with what Trace passed to it. Your messages still go to the Round Table.</p>}

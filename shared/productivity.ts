@@ -36,16 +36,18 @@ export function budgetAlerts(budget: SessionBudget | undefined, usage: UsageReco
   if (usage.context && usage.context.limit > 0 && usage.context.used / usage.context.limit * 100 >= budget.contextPercent) messages.push(`Context usage reached ${budget.contextPercent}%`);
   return messages;
 }
+/** A sign-in problem, in the CLI's words or the host's. A channel's error strip reads it too (src/components/tile/error-strip.ts). */
+export const SIGN_IN = /\b401\b|\bo?auth(?:entication|orization|enticated?)?\b|\btoken (?:has )?expired\b|\bnot logged in\b|\blog ?in\b|\bsign(?:ed)?.in\b|unauthori[sz]ed/i;
 /**
  * Advice for a channel that failed. `message` holds the CLI's last output, so the patterns are whole words and phrases
  * that name a cause ("author" is no sign-in problem, port 14290 no rate limit), and the folder and rules cases match only
  * Trace's own launch errors (a missing command's "No such file or directory" is not about the project folder).
  */
 export function recoveryAdvice(message: string, exitCode: number | null, hasDirectory: boolean) {
-  // The host's generic exit diagnostic mentions "this project folder": that is no folder problem.
-  if (!hasDirectory || /working (?:directory|folder)|absolute local|\bcwd\b/i.test(message)) return { title: 'Choose an existing project folder', view: 'projects' as const, detail: 'Select a project folder or give the channel a folder of its own, then retry.' };
+  // The host's generic exit diagnostic mentions "this project folder", and a CLI's own output its "cwd": neither is a folder problem.
+  if (!hasDirectory || /working (?:directory|folder)|absolute local/i.test(message)) return { title: 'Choose an existing project folder', view: 'projects' as const, detail: 'Select a project folder or give the channel a folder of its own, then retry.' };
   if (/shared rules/i.test(message)) return { title: 'Apply current shared rules', view: 'rules' as const, detail: 'Apply the saved rules to this channel’s folder before retrying.' };
-  if (/\b(?:401|429)\b|\bo?auth(?:entication|orization|enticated?)?\b|\btoken (?:has )?expired\b|\bnot logged in\b|\blog ?in\b|\bsign(?:ed)?.in\b|unauthori[sz]ed|\bsubscription\b|\bbilling\b|\bquota\b|\brate.limit/i.test(message)) return { title: 'Review the CLI account and provider limits', view: 'accounts' as const, detail: 'Use the correct account profile. Login checks do not verify model access or billing.' };
+  if (SIGN_IN.test(message) || /\b429\b|\bsubscription\b|\bbilling\b|\bquota\b|\brate.limit/i.test(message)) return { title: 'Review the CLI account and provider limits', view: 'accounts' as const, detail: 'Use the correct account profile. Login checks do not verify model access or billing.' };
   if (/\bmodel\b|\breasoning\b|\bconfig(?:uration)?\b|\.toml\b|invalid json|unknown (?:option|flag|argument)|\bflag\b|\bargument\b/i.test(message)) return { title: 'Review model and CLI configuration', view: 'accounts' as const, detail: 'Run diagnostics and test local CLI defaults. Engine settings retain their raw values.' };
   return { title: exitCode ? `Investigate CLI exit ${exitCode}` : 'Check the local CLI', view: 'accounts' as const, detail: 'Review the recorded diagnostic and run connection checks. The exit code alone does not identify the cause.' };
 }

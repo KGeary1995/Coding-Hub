@@ -157,7 +157,7 @@ main.list { flex: 1; min-width: 0; padding: 16px 16px 24px; }
 .switcher { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 .switcher[hidden] { display: none; }
 .switcher button { flex: none; padding: 0 12px; border-radius: var(--tr-r-chip); font-weight: 500; }
-.switcher button.active { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); }
+.switcher button.active { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); }
 .switcher .count { --tone: var(--tr-st-waiting); }
 .switcher .count:empty { display: none; }
 
@@ -194,10 +194,12 @@ footer { padding: 0 16px 16px; text-align: center; }
 .terminal:not(.xterm) { flex: 1; min-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); }
 .terminal .xterm-viewport { background: var(--tr-term) !important; }
 .terminal .xterm-screen { -webkit-touch-callout: none; }
-/* The channel's tools, then every key in view: rows whose keys share the width, rather than one row that scrolls sideways. */
+/* The channel's tools, then every key in view: rows whose keys share the width, rather than one row that scrolls sideways.
+   A key is a 44 px target both ways (section 6); the rows are short enough that a 320 px phone still fits each. */
 .tools, .keys > div { display: flex; gap: 4px; }
 .keys { display: flex; flex-direction: column; gap: 4px; }
 .tools button, .keys button { flex: 1 1 0; min-width: 0; padding: 0 4px; font: 600 13px/16px var(--tr-font-ui); }
+.keys button { min-width: 44px; }
 .tools button { flex-basis: auto; padding: 0 8px; }
 .tools #fit-phone { flex-grow: 3; }
 /* The named keys get room for their names; the single symbols below share the width evenly. */
@@ -275,6 +277,8 @@ main.screen { flex: 1; min-width: 0; min-height: 0; display: flex; flex-directio
 .limit-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 .limit-head .badge::before { display: none; }
 .limit > p { font: var(--tr-t-small); }
+/* A failed check, in the danger colour but not the .error line's form: the row's own gap spaces it, so no margins of its own. */
+.limit-failed { color: var(--tr-danger); }
 .card-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 /* Rows inside a card: a well, 8 px apart. */
 .rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }

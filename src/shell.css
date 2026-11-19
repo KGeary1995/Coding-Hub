@@ -31,12 +31,13 @@
 .tr-keycap-face { fill: var(--tr-ch-claude); }
 .tr-keycap-lip { fill: color-mix(in srgb, var(--tr-ch-claude) 70%, var(--tr-on-light)); }
 /* Views: the tabs and the two view menus (Insight, Agent setup) take the shared tab's form. The one in view is the
-   accent pill; its weight stays, so the bar does not shift when the view changes. */
+   accent pill (ui.css says why its border and words are the accent itself); its weight stays, so the bar does not
+   shift when the view changes. */
 .tr-tabs { display: flex; gap: 4px; }
 .tr-tabs > button, .tr-menu-button:not(.button) { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: var(--tr-t-control); white-space: nowrap; }
 :is(.tr-tabs > button, .tr-menu-button) > svg { flex: none; }
 .tr-tabs > button:hover, .tr-menu-button:not(.button):is(:hover, [aria-expanded="true"]) { background: var(--tr-hover); color: var(--tr-fg-strong); }
-.tr-tabs > button.active, .tr-menu-button:not(.button).active { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); }
+.tr-tabs > button.active, .tr-menu-button:not(.button).active { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); }
 /* Linked computers get tabs after the main views; a count marks channels there that need the person. */
 /* An offline computer's name stays readable (it is still a tab to open); its dimmed screen icon says it is offline. */
 .tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-faint); }
@@ -45,7 +46,7 @@
 /* The project switcher and + Channel are shared buttons (secondary, primary) that open a menu. */
 .tr-menu { position: relative; display: flex; min-width: 0; }
 .tr-menu > .button { min-width: 0; max-width: 100%; }
-/* Its folder mark tells it from the tab beside it. */
+/* A secondary button with a folder mark; the chosen tab beside it is the accent's colour. */
 .tr-project-icon { color: var(--tr-fg-dim); }
 .tr-project-name, .tr-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tr-menu-label { max-width: 160px; }
@@ -208,7 +209,7 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 /* ---------- Notices ---------- */
 /* Channels that need the person or failed, and what a restart or loading changed. They stay until handled or dismissed.
    A card with the overlay shadow and a 3 px left edge in the state's colour. */
-.tr-toasts { position: fixed; right: 12px; bottom: calc(var(--tr-statusbar-h) + 12px); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: min(400px, calc(100% - 24px)); }
+.tr-toasts { --toasts-w: min(400px, calc(100% - 24px)); position: fixed; right: 12px; bottom: calc(var(--tr-statusbar-h) + 12px); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: var(--toasts-w); }
 /* They step aside while the Needs you list is open: it holds the same things, over the same corner. */
 .tr-statusbar:has(.needs-you-list) ~ .tr-toasts { visibility: hidden; }
 /* Where that corner holds a chat's message row, or the tile the person types in, they stand at the top instead
@@ -219,9 +220,14 @@ button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-toasts.raised { top: max(calc(var(--tr-topbar-h) + 8px + var(--tr-tile-head-h) + var(--tr-tile-detail-h) + 12px), calc(var(--tr-toasts-under, 0%) + 12px)); bottom: auto; }
 /* A stack that would reach the next message row down that side, or the next chat that starts under it, ends 12 px
    above it and scrolls in itself: --tr-toasts-room is that edge, measured from the stack's top. The padding holds the
-   notices' shadow and the scrollbar inside the box that scrolls. With less room than a notice's title and first line
+   notices' shadow inside the box that scrolls. Its scrollbar stands in the 12 px beside the notices: 8 px wide after
+   4 px of padding, kept whether or not it is needed, and the box that much wider, since a scrollbar takes its width out
+   of the content. So the notices are as wide as in a stack that is not cut short, and stand where they do there (a
+   10 px scrollbar inside 12 px of padding made them 10 px narrower). With less room than a notice's title and first line
    (72 px; Toasts decides), they step aside as for the Needs you list, so none lies over the message being written. */
-.tr-toasts.short { box-sizing: content-box; right: 0; padding: 0 12px 12px 16px; max-height: calc(var(--tr-toasts-room) - 12px); overflow-y: auto; }
+.tr-toasts.short { box-sizing: content-box; right: 0; width: calc(var(--toasts-w) + 8px); padding: 0 4px 12px 16px; max-height: calc(var(--tr-toasts-room) - 12px); overflow-y: auto; scrollbar-gutter: stable; }
+.tr-toasts.short::-webkit-scrollbar { width: 8px; }
+.tr-toasts.short::-webkit-scrollbar-thumb { border-width: 1px; }
 .tr-toasts.away { visibility: hidden; }
 .tr-toast { --tone: var(--tr-accent); position: relative; flex: none; padding: 12px 12px 12px 16px; overflow: hidden; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-toast); animation: tr-toast-in var(--tr-d-base) var(--tr-ease); }
 .tr-toast::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone); }

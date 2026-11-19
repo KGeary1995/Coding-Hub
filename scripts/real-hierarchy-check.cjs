@@ -44,6 +44,8 @@ async function until(page, test, minutes, label) {
       // The planner's model, changed on the bar, is used once the table starts again.
       // Models change while the channel is stopped (a running seat keeps its model).
       const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' }); await (await tileControl(tile, 'Stop')).click(); await page.waitForTimeout(3000);
+      // In a tile too short for the whole bar, Models is behind the bar's disclosure.
+      const fold = page.locator('.chain-bar .chain-fold-toggle'); if (await fold.isVisible()) await fold.click();
       await page.locator('.chain-models summary').click(); const field = page.getByLabel('Planner model'); await field.waitFor(); await page.waitForFunction(() => !document.querySelector('[aria-label="Planner model"]')?.disabled, null, { timeout: 30000 }).catch(() => {});
       await field.fill('claude-sonnet-5-5'); await field.press('Tab'); note('model-set', { label: await page.locator('.chain-models').innerText() });
       // A stopped channel offers Restart in its detail row.

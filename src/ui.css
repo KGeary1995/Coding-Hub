@@ -151,14 +151,16 @@ details[open] > summary:where(:not(:has(> svg:first-child, > .engine-glyph:first
 .tr-seg > button { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
 .tr-seg > button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
 .tr-seg > button:is(.active, [aria-pressed="true"], [aria-checked="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
-/* Tabs: the chosen one is an accent pill. */
+/* Tabs: the chosen one is an accent pill, its border and words the accent itself. On these navy surfaces the tinted
+   fill is all but a secondary button's (--tr-hover) and the tint's own line (--tr-accent-line) dimmer than a button's
+   border, so with strong words a chosen tab beside a button (the project switcher in the top bar) read as a second one. */
 [role="tablist"] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 [role="tab"] { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
 [role="tab"] svg { flex: none; width: 16px; height: 16px; }
 [role="tab"]:hover { background: var(--tr-hover); color: var(--tr-fg); }
-[role="tab"][aria-selected="true"] { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); font-weight: 600; }
+[role="tab"][aria-selected="true"] { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); font-weight: 600; }
 /* Key hint */
-kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg-dim); font: 400 11px/1 var(--tr-font-mono); white-space: nowrap; vertical-align: middle; }
+kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg-dim); font: 400 11px/1 var(--tr-font-mono); white-space: nowrap; vertical-align: middle; }
 /* Help: a round ? whose title holds the explanation. Leave the button empty and give it an aria-label. */
 .ui-help { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 50%; background: none; color: var(--tr-fg-dim); font: 600 11px/1 var(--tr-font-ui); cursor: help; }
 .ui-help:empty::before { content: "?"; }
@@ -198,8 +200,6 @@ kbd, .ui-kbd { display: inline-flex; align-items: center; height: 20px; padding:
 
 /* ---------- Cards ---------- */
 .ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article { padding: 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-card); }
-/* The highlighted card: one per screen at most. */
-.ui-card.accent { border-color: var(--tr-accent-line); box-shadow: var(--tr-shadow-card), var(--tr-glow-accent); }
 .ui-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 12px; }
 .ui-card-head > svg { flex: none; width: 16px; height: 16px; color: var(--tr-accent); }
 /* A card's title is an h2, or an h3 where the page has section headings above its cards (Settings): the same look. */

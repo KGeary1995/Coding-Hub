@@ -2,7 +2,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
-import { memo, useEffect, useState, type KeyboardEvent } from 'react';
+import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
@@ -28,6 +28,8 @@ import { ScopeStrip } from './tile/ScopeStrip';
 import { ENGINE_ICONS } from './tile/engine-icons';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
+import { errorText, setupTarget, SETUP_TARGETS } from './tile/error-strip';
+import { useTerminalRow } from './tile/terminal-row';
 import { newTaskFor } from '../state/task-store';
 import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
@@ -83,8 +85,10 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
   const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
-  // The host's folder errors say "working folder"; both spellings match, as in recoveryAdvice (shared/productivity.ts).
-  const setupView = !cwd || /working (?:directory|folder)|absolute.*(?:directory|folder)/i.test(session.error ?? '') ? 'projects' : /rules/i.test(session.error ?? '') ? 'rules' : 'accounts';
+  // The setup page the error names, if it names one: a plain failure has Retry and Open log in the header.
+  const setupView = session.error ? setupTarget(session.error, Boolean(cwd)) : null;
+  // One terminal line's height, for what lies over the terminal's top (tile.css, --term-cover).
+  const tile = useRef<HTMLElement>(null); useTerminalRow(tile, session.id, !chat);
   const busy = session.status === 'running' || session.status === 'starting';
   // A Round Table's hidden partner waiting on an approval holds this tile: its card is in this thread.
   const partner = useWorkspaceStore((s) => partnerOf(s.sessions, session.id));
@@ -126,12 +130,12 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     : null;
   const facts = [
     stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
-    cwd ? `cwd ${folderName(cwd)}` : 'no working folder',
+    cwd ? `folder ${folderName(cwd)}` : 'no working folder',
     usage ? `cost ${dollars(usage.cost)}` : null,
     context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : contextUsed !== null ? `ctx ${compact(contextUsed)}` : null,
   ].filter(Boolean);
   return (
-    <article className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
+    <article ref={tile} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
       data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
@@ -174,7 +178,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {chat && attention}
-      {session.error && <div className="session-error" role="alert"><CircleAlert size={14} /><span>{session.error}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && <button className="quiet-button small" onClick={() => setView(setupView)}>{setupView === 'projects' ? 'Choose project' : setupView === 'rules' ? 'Apply shared rules' : 'Account setup'}</button>}</div>}
+      {session.error && <div className="session-error" role="alert"><CircleAlert size={14} /><span>{errorText(session.error)}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && setupView && <button className="quiet-button small" onClick={() => setView(setupView)}>{SETUP_TARGETS[setupView]}</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">

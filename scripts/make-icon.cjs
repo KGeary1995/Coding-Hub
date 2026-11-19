@@ -19,12 +19,14 @@ function cap(left, top, height) {
 }
 /**
  * The three optical drawings from the design, on a 256 grid: `large` (48 px and up), `small` (24-32 px: heavier T,
- * deeper lip) and `tiny` (16 px: bigger keycap, deeper lip, heavier T). `tile`: the dark tile's inset and border width.
+ * deeper lip) and `tiny` (16 px: the key on whole pixels, 14 px wide with a 1 px lip, and a T of 3 px bar and 4 px stem).
+ * `tile`: the dark tile's inset and border width. Under 48 px there is no border: its lighter blue reads as a frame as
+ * strong as the key, so the tile fills the square and the key takes the room.
  */
 const DRAWINGS = {
   large: { tile: [1, 2], face: cap(41, 37, 168), lip: 14, t: 'M79 70H177A9 9 0 0 1 186 79V95A9 9 0 0 1 177 104H154A7 7 0 0 0 147 111V167A9 9 0 0 1 138 176H118A9 9 0 0 1 109 167V111A7 7 0 0 0 102 104H79A9 9 0 0 1 70 95V79A9 9 0 0 1 79 70Z' },
-  small: { tile: [4, 8], face: cap(39, 35, 168), lip: 16, t: 'M76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z' },
-  tiny: { tile: [8, 16], face: cap(31, 26, 182), lip: 22, t: 'M69 60H187A7 7 0 0 1 194 67V97A7 7 0 0 1 187 104H157A5 5 0 0 0 152 109V169A7 7 0 0 1 145 176H111A7 7 0 0 1 104 169V109A5 5 0 0 0 99 104H69A7 7 0 0 1 62 97V67A7 7 0 0 1 69 60Z' },
+  small: { tile: [0, 0], face: cap(39, 35, 168), lip: 16, t: 'M76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z' },
+  tiny: { tile: [0, 0], face: cap(16, 16, 208), lip: 16, t: 'M54 48H202A6 6 0 0 1 208 54V90A6 6 0 0 1 202 96H160V186A6 6 0 0 1 154 192H102A6 6 0 0 1 96 186V96H54A6 6 0 0 1 48 90V54A6 6 0 0 1 54 48Z' },
 };
 /** `square`: a full opaque square with no tile border (phone icons, which the phone masks to its own shape). */
 function svg(size, drawing, square = false) {
@@ -42,7 +44,7 @@ function svg(size, drawing, square = false) {
   </defs>
   ${tile} fill="url(#g)"/>
   ${tile} fill="url(#l)"/>
-  ${square ? '' : `${tile} fill="none" stroke="#2e4878" stroke-width="${border}"/>`}
+  ${square || !border ? '' : `${tile} fill="none" stroke="#2e4878" stroke-width="${border}"/>`}
   ${lit ? `<path transform="translate(0 ${lip + 10})" d="${face}" fill="#000" opacity="0.5" filter="url(#s)"/>` : ''}
   <path transform="translate(0 ${lip})" d="${face}" fill="#b56a0a"/>
   <path d="${face}" fill="url(#f)"/>
