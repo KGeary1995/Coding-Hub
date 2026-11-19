@@ -170,6 +170,10 @@
 /* Chat channels: the conversation drawn by Trace fills the well. */
 .terminal-frame.chat-frame { padding: 0; display: flex; min-height: 0; }
 .terminal-viewport, .terminal-surface { width: 100%; height: 100%; }
+/* xterm stacks its own layers up to z-index 11 (its scroll slider; the WebGL renderer's link layer is a canvas at 2).
+   They stay in the terminal's own stacking context: in the frame's they lay over the idle channel's start area, the
+   conversation and the request strip, and took their clicks (with WebGL drawing on, the middle Start did nothing). */
+.terminal-viewport { isolation: isolate; }
 .terminal-viewport .xterm { height: 100%; }
 /* xterm paints its viewport black; the rows rarely fill it, and the remainder showed as a black band above the footer. */
 .terminal-viewport .xterm .xterm-viewport { background-color: transparent; }
