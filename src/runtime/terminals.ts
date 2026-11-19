@@ -9,6 +9,7 @@ import { useHubStore } from '../state/hub-store';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 import { exitNotice } from '../../shared/terminal-input';
+import { measureLikeTheCLIs } from '../../shared/terminal-width';
 import { addPastedImage, clearPastedImages, markPastedImagesSent, quotePath } from '../state/pasted-images';
 import { clearTerminalTitle, setTerminalTitle } from '../state/channel-names';
 import { forgetChatsExcept } from '../state/chat-store';
@@ -140,11 +141,12 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   element.className = 'terminal-surface';
   container?.appendChild(element);
   const terminal = new Terminal({
-    disableStdin: true, cursorBlink: false, scrollback: 5000,
+    disableStdin: true, cursorBlink: false, scrollback: 5000, allowProposedApi: true,
     fontFamily: TERMINAL_FONT,
     fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.45,
     theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[session.config.engine] },
   });
+  measureLikeTheCLIs(terminal);
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(element);

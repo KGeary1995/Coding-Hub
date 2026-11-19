@@ -12,6 +12,7 @@ import { mountChat, receiveChat, receiveReplay } from './chat';
 import { ENGINE_ICON, iconSvg, mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { measureLikeTheCLIs } from '../shared/terminal-width';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
@@ -460,9 +461,9 @@ function showChannel(sessionId: string) {
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
   app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
-  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false,
+  terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false, allowProposedApi: true,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
-  fit = new FitAddon(); terminal.loadAddon(fit);
+  measureLikeTheCLIs(terminal); fit = new FitAddon(); terminal.loadAddon(fit);
   terminal.open(output);
   // The terminal only shows the channel. Typed straight into it, a phone keyboard's autocorrect and predictions rewrite
   // words as they are typed and every rewrite reaches the CLI, garbling the text; so tapping the terminal opens the
