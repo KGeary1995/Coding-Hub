@@ -8,7 +8,7 @@ import { CHANNEL_STATES, channelAlerts, channelState, channelTokensToday, todayT
 import { focusTerminal } from '../../runtime/terminals';
 import { useLinkedStore } from '../../state/linked-store';
 import type { LinkedComputer } from '../../../shared/remote';
-import type { LimitWindow, PlanLimits } from '../../../shared/plan-limits';
+import { PLAN_NAME, type LimitWindow, type PlanLimits } from '../../../shared/plan-limits';
 import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
 import { NeedsYouCell } from './NeedsYou';
 
@@ -80,15 +80,15 @@ function PlanLimitCells() {
     window.addEventListener('focus', focus);
     return () => { clearInterval(timer); window.removeEventListener('focus', focus); };
   }, []);
-  return <>{(['claude', 'codex'] as const).map((engine) => {
+  return <>{(['claude', 'codex', 'gemini'] as const).map((engine) => {
     const all = limits.filter((item) => item.engine === engine); const shown = planReading(all);
     if (!shown) return null;
     const worst = Math.max(0, ...shown.map((window) => window.usedPercent));
     // The one window that stays when the bar is short (shell.css): the fullest, and of equals the first.
     const kept = shown.findIndex((window) => window.usedPercent === worst);
-    const title = all.map((item) => `${engine === 'claude' ? 'Claude' : 'Codex'}${all.length > 1 || item.account !== 'Default' ? ` · ${item.account}` : ''}${item.plan ? ` (${item.plan})` : ''}\n${item.error ?? item.windows.map((window) => `  ${window.label}: ${window.usedPercent}% used${resetText(window) ? `, resets ${resetText(window)}` : ''}`).join('\n')}`).join('\n\n');
+    const title = all.map((item) => `${PLAN_NAME[engine]}${all.length > 1 || item.account !== 'Default' ? ` · ${item.account}` : ''}${item.plan ? ` (${item.plan})` : ''}\n${item.error ?? item.windows.map((window) => `  ${window.label}: ${window.usedPercent}% used${resetText(window) ? `, resets ${resetText(window)}` : ''}`).join('\n')}`).join('\n\n');
     return <button key={engine} className="tr-sb-cell tr-sb-plan" title={title} onClick={() => useWorkspaceStore.getState().setView('usage')}>
-      <i className={`tr-sb-dot ${engine}`} aria-hidden="true" /><span className="tr-sb-plan-name">{engine === 'claude' ? 'Claude' : 'Codex'}</span>
+      <i className={`tr-sb-dot ${engine}`} aria-hidden="true" /><span className="tr-sb-plan-name">{PLAN_NAME[engine]}</span>
       {shown.length ? shown.map((window, index) => <span key={window.label} className={`tr-sb-window ${limitLevel(window.usedPercent)} ${index === kept ? 'worst' : ''}`}><small>{SHORT[window.label] ?? window.label}</small> {Math.round(window.usedPercent)}%</span>) : <span className="tr-sb-window worst">no data</span>}
     </button>;
   })}</>;

@@ -1,8 +1,9 @@
 import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
-import { codexWindows, parseClaudeUsage, type PlanLimits } from '../../../shared/plan-limits';
+import { codexWindows, parseClaudeUsage, parseGeminiUsage, type PlanLimits } from '../../../shared/plan-limits';
 import type { ClaudeAccountProfile } from '../../../shared/accounts';
-import { findExecutable, hostEnvironment, type Executable } from '../cli/discovery';
+import { findExecutable, GEMINI_USAGE_ARGS, GEMINI_USAGE_COMMAND, hostEnvironment, probeCLI, type Executable } from '../cli/discovery';
+import { atLeast } from '../cli/attention';
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
@@ -23,6 +24,19 @@ export function readClaudeLimits(executable: Executable, env: Record<string, str
       resolve({ engine: 'claude', account, windows, plan: /subscription/i.test(result) ? 'Subscription' : null, checkedAt, error: windows.length ? null : error ? 'Claude Code did not answer /usage.' : billedByApi ? 'This account is billed by API usage, which has no session or weekly limit.' : 'Claude Code did not report usage limits.', failed: !windows.length && !billedByApi });
     });
   });
+}
+
+/**
+ * Gemini CLI's `/usage`, which agy answers itself from 1.1.11 (no model turn, no conversation). An older agy would send
+ * "/usage" to the model as a prompt, every five minutes, so its version is read first and an older one is left alone.
+ */
+export async function readGeminiLimits(executable: Executable, env: Record<string, string>, probe: typeof probeCLI = probeCLI): Promise<PlanLimits | null> {
+  const checkedAt = new Date().toISOString();
+  const version = await probe(executable, ['--version'], env);
+  if (version.exitCode !== 0 || !atLeast(version.stdout, ...GEMINI_USAGE_COMMAND)) return null;
+  const result = await probe(executable, GEMINI_USAGE_ARGS, env);
+  const windows = result.exitCode === 0 ? parseGeminiUsage(result.stdout) : null;
+  return { engine: 'gemini', account: 'Default', windows: windows ?? [], plan: null, checkedAt, error: windows?.length ? null : result.timedOut ? 'Gemini CLI did not answer /usage in time.' : windows ? 'Gemini CLI reported no usage limits.' : 'Gemini CLI did not report usage limits. Check that it is signed in.', ...(windows?.length ? {} : { failed: true }) };
 }
 
 /** Codex's app server: `account/rateLimits/read` after the initialize handshake; no model request. */
@@ -85,9 +99,9 @@ export class PlanLimitsService {
         let profiles: ClaudeAccountProfile[] = []; try { profiles = this.profiles(); } catch { /* Unreadable registry: default account only. */ }
         for (const profile of profiles) accounts.push(() => readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name));
       }
-      const codex = await findExecutable('codex', env).catch(() => null);
-      const [claudeLimits, codexLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? readCodexLimits(codex, env) : null]);
-      this.latest = codexLimits ? [...claudeLimits, codexLimits] : claudeLimits; this.last = Date.now();
+      const [codex, gemini] = await Promise.all([findExecutable('codex', env).catch(() => null), findExecutable('gemini', env).catch(() => null)]);
+      const [claudeLimits, codexLimits, geminiLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? readCodexLimits(codex, env) : null, gemini ? readGeminiLimits(gemini, env).catch(() => null) : null]);
+      this.latest = [...claudeLimits, ...(codexLimits ? [codexLimits] : []), ...(geminiLimits ? [geminiLimits] : [])]; this.last = Date.now();
       return this.latest;
     })().finally(() => { this.reading = null; });
     return this.reading;

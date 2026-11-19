@@ -1,6 +1,7 @@
 /**
  * How much of a subscription's usage limits is used: Claude's 5-hour session and weekly limits, Codex's limits (a
- * weekly one, and a 5-hour one on plans that have it). Read from each CLI without a model request.
+ * weekly one, and a 5-hour one on plans that have it), Gemini CLI's per model group. Read from each CLI without a model
+ * request.
  */
 export interface LimitWindow {
   /** "Session" (the rolling 5-hour window), "Week", or a named weekly limit such as "Week (Fable)". */
@@ -10,7 +11,7 @@ export interface LimitWindow {
   resets: string | null;
 }
 export interface PlanLimits {
-  engine: 'claude' | 'codex';
+  engine: 'claude' | 'codex' | 'gemini';
   /** "Default" for the CLI's own login, or a Claude account profile's name. */
   account: string;
   /** Who the default login is (its email, or the profile signed in to the same account), so the wrong account shows. */
@@ -53,4 +54,31 @@ export function codexWindows(windows: unknown[]): LimitWindow[] {
   const read = windows.flatMap((window) => { const parsed = codexWindow(window); return parsed ? [{ parsed, minutes: Number((window as { windowDurationMins?: unknown }).windowDurationMins) || 0 }] : []; });
   const named = read.map(({ parsed, minutes }) => read.filter((other) => other.parsed.label === parsed.label).length > 1 && minutes ? { ...parsed, label: `${parsed.label} (${minutes % 60 ? `${minutes} min` : `${minutes / 60} h`})` } : parsed);
   return named.sort((a, b) => (a.label.startsWith('Session') ? -1 : 0) - (b.label.startsWith('Session') ? -1 : 0));
+}
+
+/** Each engine's name on a plan's limits (status bar, Usage, alerts, the phone). */
+export const PLAN_NAME: Record<PlanLimits['engine'], string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
+
+/**
+ * Gemini CLI's `/usage` (agy -p "/usage" --output-format json, seen with agy 1.5.12): model groups, each with a weekly
+ * and a 5-hour bucket giving the share remaining and when it refills. The first group (Gemini's own models) is the
+ * plan's Session and Week; the others are named after their group ("Week (Gemini 4 Argon)"). Null when the reply is not
+ * that shape (signed out, or another agy).
+ */
+export function parseGeminiUsage(stdout: string): LimitWindow[] | null {
+  let groups: unknown;
+  try { const value = JSON.parse(stdout) as { command?: { name?: unknown; data?: { groups?: unknown } } }; if (value.command?.name !== 'usage') return null; groups = value.command.data?.groups; } catch { return null; }
+  if (!Array.isArray(groups)) return null;
+  const windows: LimitWindow[] = [];
+  groups.slice(0, 20).forEach((group, index) => {
+    const { name, buckets } = (group && typeof group === 'object' ? group : {}) as { name?: unknown; buckets?: unknown };
+    for (const bucket of Array.isArray(buckets) ? buckets.slice(0, 10) : []) {
+      const { window, remaining_fraction: left, reset_time: reset } = (bucket && typeof bucket === 'object' ? bucket : {}) as Record<string, unknown>;
+      if (typeof left !== 'number' || !Number.isFinite(left) || left < 0 || left > 1 || (window !== '5h' && window !== 'weekly')) continue;
+      const base = window === '5h' ? 'Session' : 'Week'; const group = typeof name === 'string' ? name.trim().slice(0, 60) : '';
+      const at = typeof reset === 'string' ? Date.parse(reset) : NaN;
+      windows.push({ label: index === 0 || !group ? base : `${base} (${group})`, usedPercent: Math.round((1 - left) * 1000) / 10, resets: Number.isFinite(at) ? new Date(at).toISOString() : null });
+    }
+  });
+  return windows.sort((a, b) => (a.label === 'Session' ? -1 : 0) - (b.label === 'Session' ? -1 : 0));
 }

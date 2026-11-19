@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { PlanLimits } from '../shared/plan-limits';
+import { PLAN_NAME, type PlanLimits } from '../shared/plan-limits';
 import type { RemoteHistoryItem, RemoteMemory, RemoteTask, RemoteUsage } from '../shared/remote';
 import { api } from './api';
 
@@ -59,7 +59,7 @@ function UsageScreen() {
     <Section title="Plan limits">
       {!usage.limits.length && <Empty title="No plan limits yet">Shown once an agent reports them.</Empty>}
       {usage.limits.map((limit) => <div key={`${limit.engine}-${limit.account}`} className="limit">
-        <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{limit.engine === 'claude' ? 'Claude' : 'Codex'}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
+        <p className="limit-head"><EngineMark engine={limit.engine} /><strong>{PLAN_NAME[limit.engine]}{limit.account !== 'Default' ? ` · ${limit.account}` : limit.signedInAs ? ` · ${limit.signedInAs}` : ''}</strong>{limit.plan && <span className="badge neutral">{limit.plan}</span>}</p>
         <LimitNote limit={limit} />
         {limit.windows.map((window) => <div key={window.label}><p className="measure"><span>{window.label}</span><b>{Math.round(window.usedPercent)}%</b></p><Meter ratio={window.usedPercent / 100} tone={limit.engine} label={`${window.label} ${Math.round(window.usedPercent)}% used`} /></div>)}
       </div>)}

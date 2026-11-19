@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codexWindow, codexWindows, parseClaudeUsage } from './plan-limits';
+import { codexWindow, codexWindows, parseClaudeUsage, parseGeminiUsage, PLAN_NAME } from './plan-limits';
 
 describe('plan limits', () => {
   it('reads Claude Code’s /usage text', () => {
@@ -32,4 +32,25 @@ What's contributing to your limits usage?`;
     expect(codexWindows([{ usedPercent: 10, windowDurationMins: 60, resetsAt: null }, { usedPercent: 20, windowDurationMins: 300, resetsAt: null }, { used: 1 }]).map((window) => window.label)).toEqual(['Session (1 h)', 'Session (5 h)']);
     expect(codexWindows([{ usedPercent: 3, windowDurationMins: 10080, resetsAt: null }, { usedPercent: 40, windowDurationMins: 300, resetsAt: null }]).map((window) => window.label)).toEqual(['Session', 'Week']);
   });
+});
+
+describe('Gemini CLI plan limits', () => {
+  // agy 1.5.12's reply to -p "/usage" --output-format json, cut to its fields.
+  const reply = (groups: unknown) => JSON.stringify({ conversation_id: '', status: 'SUCCESS', command: { name: 'usage', data: { groups } } });
+  const groups = [
+    { name: 'Gemini Models', buckets: [{ id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.9848442077636719, reset_time: '2026-11-26T04:49:19Z' }, { id: 'gemini-5h', window: '5h', remaining_fraction: 0.9719548225402832, reset_time: '2026-11-19T09:49:19Z' }] },
+    { name: 'Claude and GPT models', buckets: [{ window: 'weekly', remaining_fraction: 1, reset_time: '2026-11-26T04:53:50Z' }] },
+    { name: 'Gemini 4 Argon', buckets: [{ window: 'weekly', remaining_fraction: 0.5 }] },
+  ];
+  it('reads each group’s share used: Gemini’s own models as Session and Week, the others by name', () => {
+    expect(parseGeminiUsage(reply(groups))).toEqual([
+      { label: 'Session', usedPercent: 2.8, resets: '2026-11-19T09:49:19.000Z' }, { label: 'Week', usedPercent: 1.5, resets: '2026-11-26T04:49:19.000Z' },
+      { label: 'Week (Claude and GPT models)', usedPercent: 0, resets: '2026-11-26T04:53:50.000Z' }, { label: 'Week (Gemini 4 Argon)', usedPercent: 50, resets: null },
+    ]);
+  });
+  it('is null for another reply, and skips a bucket it cannot read', () => {
+    expect(parseGeminiUsage('not json')).toBeNull(); expect(parseGeminiUsage(JSON.stringify({ command: { name: 'model' } }))).toBeNull();
+    expect(parseGeminiUsage(reply([{ name: 'X', buckets: [{ window: 'weekly', remaining_fraction: 2 }, { window: 'daily', remaining_fraction: 0.5 }, { window: '5h', remaining_fraction: 0.25 }] }]))).toEqual([{ label: 'Session', usedPercent: 75, resets: null }]);
+  });
+  it('names each engine’s plan', () => { expect(PLAN_NAME).toEqual({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini' }); });
 });
