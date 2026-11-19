@@ -16,7 +16,8 @@ export function cleanMessage(text: string) {
 export class OscSequences {
   private carry = '';
   private opening: string;
-  constructor(code: string) { this.opening = `\x1b]${code};`; }
+  /** `longest`: an unfinished sequence carried into the next chunk, at most (a longer one is dropped). */
+  constructor(code: string, private longest = 2048) { this.opening = `\x1b]${code};`; }
   push(chunk: string): string[] {
     const text = this.carry + chunk; this.carry = '';
     const bodies: string[] = []; let index = 0;
@@ -24,7 +25,7 @@ export class OscSequences {
       const start = text.indexOf(this.opening, index);
       if (start < 0) break;
       const end = text.slice(start).search(/\x07|\x1b\\/);
-      if (end < 0) { if (text.length - start <= 2048) this.carry = text.slice(start); break; }
+      if (end < 0) { if (text.length - start <= this.longest) this.carry = text.slice(start); break; }
       bodies.push(text.slice(start + this.opening.length, start + end));
       index = start + end + 1;
     }
@@ -50,7 +51,8 @@ export type GeminiStatus = { state: 'blocked'; message: string } | { state: 'wor
  * such as "Approve Bash: git status". Seen with agy 1.5.12.
  */
 export class GeminiStatusReader {
-  private sequences = new OscSequences('7501');
+  // A question (a long command to approve) is base64 in the sequence: room for one of several kilobytes split across chunks.
+  private sequences = new OscSequences('7501', 16384);
   push(chunk: string): GeminiStatus[] {
     return this.sequences.push(chunk).flatMap((body): GeminiStatus[] => {
       const fields = new Map(body.split(':').map((field) => { const at = field.indexOf('='); return [at < 0 ? field : field.slice(0, at), at < 0 ? '' : field.slice(at + 1)] as const; }));

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, CLEAR_RUN_AS_NODE, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, RegistryPath, windowsRegistryPath, withoutAgentSession } from './discovery';
+import { adoptLoginShellPath, checkAuthentication, CLEAR_RUN_AS_NODE, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, RegistryPath, windowsRegistryPath, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -166,5 +166,24 @@ describe('Gemini CLI on PATH', () => {
     await writeFile(native, 'MZ', { mode: 0o755 });
     expect((await findExecutable('gemini', { PATH: [scripts, bin].join(path.delimiter) })).file).toBe(native);
     await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+  });
+});
+
+describe('Gemini CLI sign-in check', () => {
+  const agy = { file: '/agy', prefixArgs: [], extraEnv: {}, displayPath: '/agy' };
+  const usage = JSON.stringify({ command: { name: 'usage', data: { groups: [{ name: 'Gemini Models', buckets: [] }] } } });
+  it('asks agy for /usage only from 1.1.11; an older or unreadable version would send it to the model', async () => {
+    for (const version of ['1.1.10', '0.9.0', 'agy', null]) {
+      const runs: string[][] = [];
+      const status = await checkAuthentication('gemini', agy, '', {}, version, async (_executable, args) => { runs.push(args); return { stdout: usage, stderr: '', exitCode: 0, timedOut: false }; });
+      expect(runs).toEqual([]); expect(status.state).toBe('unknown');
+    }
+    const runs: string[][] = [];
+    expect((await checkAuthentication('gemini', agy, '', {}, '1.1.11', async (_executable, args) => { runs.push(args); return { stdout: usage, stderr: '', exitCode: 0, timedOut: false }; })).state).toBe('authenticated');
+    expect(runs).toEqual([['-p', '/usage', '--output-format', 'json']]);
+  });
+  it('is never looked for when a test says Gemini CLI is not installed', async () => {
+    process.env.CODING_HUB_TEST_NO_GEMINI = '1';
+    try { await expect(findExecutable('gemini', { PATH: process.cwd() })).rejects.toMatchObject({ code: 'CLI_NOT_FOUND' }); } finally { delete process.env.CODING_HUB_TEST_NO_GEMINI; }
   });
 });

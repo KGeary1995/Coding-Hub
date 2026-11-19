@@ -37,7 +37,7 @@ if (require.main === module) (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'coding-hub-gpu-')));
   const storage = path.join(root, 'storage'); const shots = path.join(root, 'shots');
   await Promise.all([storage, shots, path.join(root, 'home')].map((directory) => mkdir(directory)));
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude-config'), CODEX_HOME: path.join(root, 'codex-config'), USERPROFILE: path.join(root, 'home') };
+  const env = { ...process.env, CODING_HUB_TEST_NO_GEMINI: '1', CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude-config'), CODEX_HOME: path.join(root, 'codex-config'), USERPROFILE: path.join(root, 'home') };
   delete env.ELECTRON_RUN_AS_NODE;
   // No --disable-gpu or any other switch that turns hardware acceleration off.
   const args = ['--user-data-dir=' + path.join(root, 'electron-profile'), path.resolve(__dirname, '..'), '--production'];

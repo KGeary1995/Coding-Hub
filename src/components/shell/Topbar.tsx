@@ -63,7 +63,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
-  // The order is the person's: Terminal, Claude Code, Codex, then the Round Tables (on the phone too).
+  // The order is the person's: Terminal, Claude Code, Codex, Gemini CLI, then the Round Tables (on the phone too).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   const channelMenu: MenuItem[] = other
     ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))

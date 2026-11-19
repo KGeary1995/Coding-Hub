@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 /** Where Gemini CLI (agy) keeps its conversations; CODING_HUB_GEMINI_HOME points tests and smoke runs elsewhere. */
@@ -23,7 +23,10 @@ export function geminiConversations(home = geminiHome(), limit = 500): GeminiCon
   const list = path.join(home, 'conversation_summaries.db'); if (!fs.existsSync(list)) return [];
   let database: DatabaseSync | null = null;
   try {
-    database = new DatabaseSync(list, { readOnly: true });
+    // Opened read only, SQLite still makes the -wal and -shm files of a WAL database that lacks them (agy not running):
+    // then the file is opened as immutable, which writes nothing. With both there (agy's own), they hold its newest rows.
+    const live = fs.existsSync(`${list}-wal`) && fs.existsSync(`${list}-shm`);
+    database = new DatabaseSync(live ? list : `${pathToFileURL(list).href}?immutable=1`, { readOnly: true });
     const rows = database.prepare("SELECT conversation_id id, workspace_uris uris, last_modified_time modified FROM conversation_summaries WHERE nesting_depth = 0 AND parent_conversation_id = '' ORDER BY last_modified_time DESC LIMIT ?").all(limit) as { id: unknown; uris: unknown; modified: unknown }[];
     return rows.flatMap((row) => {
       if (typeof row.id !== 'string' || !UUID.test(row.id)) return [];

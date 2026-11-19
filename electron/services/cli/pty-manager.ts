@@ -93,7 +93,7 @@ interface ManagedRun {
   /** Codex reports approval requests as OSC 9 notifications in its output. */
   osc?: OscNotifications;
   /** Gemini CLI reports working, waiting (with the question) and done over OSC 7501; `since` is when the run started. */
-  gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; since: number };
+  gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number };
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -508,8 +508,9 @@ export class PtyManager {
    * or failed after work, the turn ended. agy says idle when it opens too, which ends nothing.
    */
   private geminiStatus(run: ManagedRun, status: GeminiStatus) {
-    const last = run.gemini!.last; run.gemini!.last = status.state;
-    if (status.state === 'blocked') this.notifyAttention(run.session.runId, status.message);
+    const last = run.gemini!.last; const asked = run.gemini!.asked; run.gemini!.last = status.state; run.gemini!.asked = status.state === 'blocked' ? status.message : undefined;
+    // agy may say blocked again while it still waits on the same question: that is one notice, not another.
+    if (status.state === 'blocked') { if (last !== 'blocked' || asked !== status.message) this.notifyAttention(run.session.runId, status.message); }
     else if (status.state === 'working') { if (last === 'blocked') this.notifyResolved(run.session.runId); }
     else if (last === 'working' || last === 'blocked') this.notifyResolved(run.session.runId, true);
   }

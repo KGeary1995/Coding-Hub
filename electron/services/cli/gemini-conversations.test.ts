@@ -34,6 +34,13 @@ describe('Gemini CLI conversations', () => {
     expect(list.map((item) => [item.id, item.directory])).toEqual([[B, null], [A, project]]);
     expect(list[1].file).toBe(path.join(root, 'conversations', `${A}.db`)); expect(JSON.stringify(list)).not.toContain('Private title');
   });
+  it('reads agy’s list without making files beside it, in WAL mode as agy keeps it', () => {
+    const root = home([{ id: A, folder: project, at: '2026-11-19 05:00:00+00:00' }]);
+    const list = path.join(root, 'conversation_summaries.db'); const wal = new DatabaseSync(list); wal.exec('PRAGMA journal_mode=WAL'); wal.close();
+    for (const extra of ['-wal', '-shm']) fs.rmSync(list + extra, { force: true });
+    expect(geminiConversations(root).map((item) => item.id)).toEqual([A]);
+    expect(fs.readdirSync(root).sort()).toEqual(['conversation_summaries.db', 'conversations']);
+  });
   it('gives an empty list for a missing or unreadable list, never an error', () => {
     expect(geminiConversations(path.join(os.tmpdir(), 'trace-no-agy-here'))).toEqual([]);
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-agy-')); homes.push(root); fs.writeFileSync(path.join(root, 'conversation_summaries.db'), 'not a database');

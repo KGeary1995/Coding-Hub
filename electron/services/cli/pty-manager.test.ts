@@ -537,6 +537,12 @@ describe('Gemini CLI terminal runs', () => {
     expect(events.filter((event) => ['attention', 'answered'].includes(event.type)).map((event) => event.type === 'attention' ? ['attention', event.message] : ['answered', 'finished' in event ? event.finished : false]))
       .toEqual([['attention', 'Approve Bash: npm test'], ['answered', false], ['answered', true]]);
   });
+  it('gives one notice for a question agy repeats while it waits, and a new one for another question', async () => {
+    const { processes, events, start } = geminiFixture(); await start(); const pty = processes[0];
+    const blocked = (text: string) => status(`state=blocked:kind=permission:msg=${Buffer.from(text).toString('base64')}`);
+    pty.data(status('state=working')); pty.data(blocked('Approve Bash: npm test')); pty.data(blocked('Approve Bash: npm test')); pty.data(blocked('Approve Bash: rm a.txt'));
+    expect(events.filter((event) => event.type === 'attention').map((event) => (event as { message: string }).message)).toEqual(['Approve Bash: npm test', 'Approve Bash: rm a.txt']);
+  });
   it('takes the conversation agy prints as it quits, before the exit, without looking it up', async () => {
     const { processes, events, looked, start } = geminiFixture(); await start();
     processes[0].data(`Resume with -c (or command below):\r\nagy --conversation=${id.toUpperCase()}\r\n`); processes[0].exit({ exitCode: 0 });

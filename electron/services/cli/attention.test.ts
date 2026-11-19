@@ -145,6 +145,10 @@ describe('Gemini CLI status (OSC 7501)', () => {
     expect(reader.push(status('state=blocked:kind=permission:msg='))).toEqual([{ state: 'blocked', message: 'Gemini CLI is waiting for your approval.' }]);
     expect(reader.push(status(ask('Run\x1b[31m rm\nnow')))).toEqual([{ state: 'blocked', message: 'Run [31m rm now' }]);
   });
+  it('keeps a long question split across chunks (a long command to approve)', () => {
+    const reader = new GeminiStatusReader(); const command = 'Approve Bash: ' + 'x'.repeat(4000); const whole = status(ask(command));
+    expect(reader.push(whole.slice(0, 3000))).toEqual([]); expect(reader.push(whole.slice(3000))).toEqual([{ state: 'blocked', message: command.slice(0, 200) }]);
+  });
   it('leaves other codes alone, and OSC 9 notifications still read as before', () => {
     expect(new OscSequences('7501').push('\x1b]9;hello\x07\x1b]75010;x\x07')).toEqual([]);
     expect(new OscNotifications().push('\x1b]7501;state=idle\x07\x1b]9;Approve?\x07')).toEqual(['Approve?']);

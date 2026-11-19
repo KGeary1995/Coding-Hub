@@ -181,6 +181,9 @@ export const ENGINE_COMMAND: Record<CLIEngine, string> = { claude: 'claude', cod
 export const ENGINE_NAME: Record<CLIEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI (agy)' };
 
 export async function findExecutable(engine: CLIEngine, environment?: Record<string, string>): Promise<Executable> {
+  // Smoke tests start Trace with this set: their fixtures have no agy, and the person's own must not run (or be asked
+  // for its sign-in) from a test.
+  if (engine === 'gemini' && process.env.CODING_HUB_TEST_NO_GEMINI === '1') throw new HubError('CLI_NOT_FOUND', `${ENGINE_NAME.gemini} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
   const env = environment ?? await freshHostEnvironment();
   let shimError: unknown = null;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
@@ -230,8 +233,8 @@ export function advertisesFlag(help: string, flag: string): boolean {
  */
 export const GEMINI_USAGE_COMMAND = [1, 1, 11] as const;
 export const GEMINI_USAGE_ARGS = ['-p', '/usage', '--output-format', 'json'];
-export async function checkAuthentication(engine: CLIEngine, executable: Executable, help: string, env: Record<string, string>, version: string | null = null) {
-  if (engine === 'gemini') return atLeast(version, ...GEMINI_USAGE_COMMAND) ? classifyAuthentication(engine, await probeCLI(executable, GEMINI_USAGE_ARGS, env)) : classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
+export async function checkAuthentication(engine: CLIEngine, executable: Executable, help: string, env: Record<string, string>, version: string | null = null, probe: typeof probeCLI = probeCLI) {
+  if (engine === 'gemini') return atLeast(version, ...GEMINI_USAGE_COMMAND) ? classifyAuthentication(engine, await probe(executable, GEMINI_USAGE_ARGS, env)) : classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
   const command = engine === 'claude' ? 'auth' : 'login';
   const unknown = () => classifyAuthentication(engine, { stdout: '', stderr: '', exitCode: null, timedOut: false });
   if (!new RegExp(`^\\s*${command}\\b`, 'm').test(help)) return unknown();
