@@ -17,12 +17,15 @@ export function loadPlaces(computerId: string): Record<string, Place> {
   } catch { return {}; }
 }
 export function savePlaces(computerId: string, places: Record<string, Place>) { try { localStorage.setItem(layoutKey(computerId), JSON.stringify(places)); } catch { /* Kept for this visit only. */ } }
-/** Saved places for the channels that still exist; new channels go two to a row below them. */
+/**
+ * Saved places for the channels that still exist; new channels go two to a row below them, and a last one alone in its
+ * row takes the whole width (as the third of three does in this computer's own grid), so no half of the tab stays empty.
+ */
 export function arrangeLinked(sessionIds: string[], saved: Record<string, Place>): Layout[] {
   const placed = sessionIds.filter((id) => saved[id]).map((id) => ({ i: id, ...saved[id], minW: 3, minH: 6 }));
   let bottom = placed.reduce((max, tile) => Math.max(max, tile.y + tile.h), 0);
-  const added = sessionIds.filter((id) => !saved[id]).map((id, index) => {
-    const tile = { i: id, x: (index % 2) * TILE.w, y: bottom, ...TILE, minW: 3, minH: 6 };
+  const added = sessionIds.filter((id) => !saved[id]).map((id, index, all) => {
+    const tile = { i: id, x: (index % 2) * TILE.w, y: bottom, ...TILE, ...(index % 2 === 0 && index === all.length - 1 ? { w: 12 } : {}), minW: 3, minH: 6 };
     if (index % 2 === 1) bottom += TILE.h; return tile;
   });
   return [...placed, ...added];

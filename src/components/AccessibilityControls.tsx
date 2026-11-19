@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, Keyboard } from 'lucide-react';
-import { focusTerminal } from '../runtime/terminals';
+import { jumpToChannel } from './shell/StatusBar';
 import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { CHANNEL_KEYS, channelKey } from './channel-key';
 interface DisplaySettings { scale: number; density: 'comfortable' | 'compact'; contrast: boolean }
@@ -15,10 +15,8 @@ export function useAccessibility() {
       if (channel !== null) {
         const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[channel];
         if (session) {
-          event.preventDefault(); event.stopPropagation(); state.setView('workspace');
-          // Only the isolated tile's terminal is mounted; isolate the requested one instead.
-          if (state.focusedSessionId && state.focusedSessionId !== session.id) state.toggleFocus(session.id);
-          requestAnimationFrame(() => focusTerminal(session.id));
+          // As Answer on a notice does (its key hint is this shortcut): the workspace, the channel isolated if another is, its grid scrolled to the tile.
+          event.preventDefault(); event.stopPropagation(); jumpToChannel(session.id);
         }
       }
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.setState({ workflowTab: 'search' }); useWorkspaceStore.getState().setView('workflow'); }

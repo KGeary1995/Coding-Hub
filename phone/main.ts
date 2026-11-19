@@ -17,6 +17,7 @@ import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { atPhoneSize, FIT_KEY, fitsOnOpen, takenBack } from './size';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In three rows, all in view without scrolling and each key at least 44 px wide: the named keys, the arrows, the usual answers. */
@@ -348,23 +349,28 @@ function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
  * when the phone leaves the channel or disconnects, or the person types at the desktop. A− / A+ change the text size
  * (remembered on the phone), which changes how much fits.
  *
- * The phone holds that size only while it is in use: it is given back when the phone is locked or the app is in the
- * background, and once the desktop has taken it back the phone asks again only when the person uses the phone (opens
- * the channel, touches it, types or changes the text size), not when it merely reconnects or its screen changes.
+ * Opening a terminal channel takes it at the phone's size at once, even while the computer is in use, as "Fit to
+ * phone" does (phone/size.ts): every request carries `force`. The phone holds that size only while it is in use: it
+ * is given back when the phone is locked or the app is in the background, and once the desktop has taken it back the
+ * phone asks again only when the person uses the phone (opens the channel, touches it, types or changes the text
+ * size), not when it merely reconnects, wakes or its screen changes. "Desktop size" is remembered on the phone: the
+ * next channel opens at the desktop's size, and the phone asks for nothing until "Fit to phone".
  */
 const SIZE_KEY = 'trace-remote-font';
 let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) || 13));
+let chosenSize = localStorage.getItem(FIT_KEY);
 let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
 /** Whether the phone wants the channel at its size, and the size it last asked for. */
 let holding = false; let asked: { cols: number; rows: number } | null = null; let askedBefore: { cols: number; rows: number } | null = null;
 /**
- * Whether the channel is drawn at the phone's size right now. While the person uses the computer it keeps the
- * desktop's size (the desktop wins), and the phone shows that layout with its text shrunk to fit the screen's width.
+ * Whether the computer has drawn the channel at the phone's size. At the desktop's size the phone shows that layout
+ * with its text shrunk to fit the screen's width. `shownAtPhone`: what the button shows, and so what pressing it does.
  */
-let granted = false; let forceNext = false;
-/** The person is using the phone: the channel is drawn at the phone's size again. */
-function useChannel() { if (holding && sentSize) return; holding = true; sentSize = ''; requestSize(); }
-function requestSize() {
+let granted = false; let askAgain = false; let shownAtPhone = false;
+/** The person is using the phone: the channel is drawn at the phone's size again, unless they chose "Desktop size". */
+function useChannel() { if (!fitsOnOpen(chosenSize) || (holding && sentSize)) return; holding = true; sentSize = ''; requestSize(); }
+/** `wait` gathers a burst of screen changes into one request; a channel's fresh screen asks at once. */
+function requestSize(wait = 200) {
   if (!holding || document.visibilityState !== 'visible') return;
   if (sizeTimer) clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => {
@@ -374,41 +380,43 @@ function requestSize() {
     if (!current || !run || !terminal || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
     // What fits at the chosen text size, even while the text is shrunk to show the desktop's layout.
     const scale = (terminal.options.fontSize ?? textSize) / textSize;
-    const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const force = forceNext; forceNext = false;
+    const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const again = askAgain; askAgain = false;
     const key = `${current}:${run}:${cols}x${rows}`;
-    if (key === sentSize && !force) return; sentSize = key; askedBefore = asked; asked = { cols, rows };
+    if (key === sentSize && !again) return; sentSize = key; askedBefore = asked; asked = { cols, rows };
     const channel = current; const asking = run;
-    void sizeChannel(channel, asking, cols, rows, force).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
-  }, 200);
+    // Always with force: the phone asks only while the person holds it, and an unforced request waits for the computer to go unused.
+    void sizeChannel(channel, asking, cols, rows, true).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
+  }, wait);
 }
 /** Gives the channel being left back to the desktop's size. */
 function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
-  if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
+  if (terminal) { terminal.options.fontSize = textSize; if (fitsOnOpen(chosenSize)) holding = true; fitText(); requestSize(); }
 }
 /** At the phone's size, the chosen text size; at the desktop's size, small enough that its width fits the screen. */
 function fitText() {
   if (!terminal || !fit) return;
-  document.getElementById('fit-phone')?.replaceChildren(granted ? 'Desktop size' : 'Fit to phone');
+  shownAtPhone = atPhoneSize(granted, holding);
+  document.getElementById('fit-phone')?.replaceChildren(shownAtPhone ? 'Desktop size' : 'Fit to phone');
   // Back at the chosen text size, ask again: the size asked for while the text was shrunk can be a row or column short.
-  if (granted) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
+  if (shownAtPhone) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
   const dims = fit.proposeDimensions(); if (!dims || !Number.isFinite(dims.cols) || dims.cols <= 0) return;
   const fits = (terminal.options.fontSize ?? textSize) * dims.cols / terminal.cols;
   // Below 6 px the text cannot be read; the screen then pans sideways instead.
   const size = Math.max(6, Math.min(textSize, Math.floor(fits * 2) / 2));
   if (terminal.options.fontSize !== size) terminal.options.fontSize = size;
 }
-/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. */
+/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. The choice is kept on the phone for the next channel. */
 function toggleFit() {
   if (!current) return;
-  if (granted) { void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
-  holding = true; forceNext = true; sentSize = ''; requestSize();
+  if (shownAtPhone) { chosenSize = 'desktop'; localStorage.setItem(FIT_KEY, chosenSize); void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
+  chosenSize = null; localStorage.removeItem(FIT_KEY); holding = true; askAgain = true; sentSize = ''; fitText(); requestSize();
 }
 
 function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
-  current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
+  current = sessionId; run = null; holding = fitsOnOpen(chosenSize); granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
@@ -447,7 +455,7 @@ function showChannel(sessionId: string) {
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
   const tools = h('div', { className: 'tools', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
     channel && channel.engine !== 'shell' ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
-    h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'While you use the computer, the channel keeps its desktop size. Fit to phone redraws it at this screen\'s size until you type in it on the computer.' }, 'Fit to phone'),
+    h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'Fit to phone draws the channel at this screen\'s size until you type in it on the computer. Desktop size shows the computer\'s size, and this phone opens the next channel that way too.' }, 'Fit to phone'),
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
@@ -463,7 +471,7 @@ function showChannel(sessionId: string) {
   terminal.options.disableStdin = true; terminal.textarea?.setAttribute('inputmode', 'none'); terminal.textarea?.setAttribute('tabindex', '-1');
   output.addEventListener('click', (event) => { if (terminal && !tapScreen(output, terminal, event)) text.focus(); });
   selectByHold(output, terminal, selected); scrollBySwipe(output, terminal);
-  renderChannel(); listen(sessionId);
+  fitText(); renderChannel(); listen(sessionId);
 }
 
 /**
@@ -638,8 +646,8 @@ function renderChannel() {
   renderCoach(channel);
   // A chat has no screen to size or reset: its view follows the conversation itself.
   if (channel.chat) return;
-  // A restarted channel is a new process: its screen starts afresh, as on the desktop.
-  if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); requestSize(); }
+  // A restarted channel is a new process: its screen starts afresh, as on the desktop, at the desktop's size until the phone's is granted.
+  if (channel.runId && channel.runId !== run) { run = channel.runId; granted = false; inOrder((screen) => screen.reset()); requestSize(); }
   if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);
 }
 
@@ -690,29 +698,29 @@ function onEvent(event: StreamEvent) {
   if (event.data.sessionId !== current || !terminal) return;
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
-    // The computer applied the phone's size (it went idle, or "Fit to phone"), or took it back (the person is there).
+    // The computer applied the phone's size, or took it back (the person typed there).
     // The size the phone asked for before its latest can still arrive after it: that is the phone's too, not the desktop's.
     const mine = (size: typeof asked) => Boolean(size && event.data.cols === size.cols && event.data.rows === size.rows);
-    if (event.data.runId === run) granted = mine(asked) || mine(askedBefore);
+    const had = granted; if (event.data.runId === run) granted = mine(asked) || mine(askedBefore);
     if (event.data.runId === run) resizeTo(event.data.cols, event.data.rows);
     // The desktop took the channel back (the person typed there): the phone leaves it at that size until it is used.
-    if (event.data.runId === run && holding && asked && sentSize && !mine(asked) && !mine(askedBefore)) { holding = false; sentSize = ''; }
+    if (event.data.runId === run && takenBack(had, holding, Boolean(asked && sentSize), mine(asked) || mine(askedBefore))) { holding = false; sentSize = ''; }
     return;
   }
   if (event.type === 'replay') {
     run = event.data.runId; inOrder((screen) => screen.reset()); resizeTo(event.data.cols, event.data.rows);
     // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
-    terminal.write(event.data.data); sentSize = ''; requestSize(); return;
+    terminal.write(event.data.data); sentSize = ''; requestSize(0); return;
   }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 
 // Rotating the phone, or the keyboard opening or closing, changes how much fits.
-window.addEventListener('resize', requestSize); window.visualViewport?.addEventListener('resize', requestSize);
-// A locked phone, or one showing another app, gives the channel back; coming back to it takes it again.
+window.addEventListener('resize', () => requestSize()); window.visualViewport?.addEventListener('resize', () => requestSize());
+// A locked phone, or one showing another app, gives the channel back; coming back to it takes it again, if it held it.
 document.addEventListener('visibilitychange', () => {
   if (!current) return;
-  if (document.visibilityState === 'visible') { holding = true; sentSize = ''; requestSize(); }
+  if (document.visibilityState === 'visible') { sentSize = ''; requestSize(); }
   else { void releaseChannel(current).catch(() => {}); sentSize = ''; }
 });
 /** Back at the front, or back online: a stream that died while the phone slept is replaced (after a moment for what was held up to arrive). */

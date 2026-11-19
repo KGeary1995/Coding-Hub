@@ -22,6 +22,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     for (let i = 0; i < 2; i++) {
       await addChannel(page, 'Claude Code');
+      // Three channels in the grid: two above, and the third across the whole second row (no empty quarter).
+      if (i === 0) await page.waitForFunction(() => { const [a, b, c] = [...document.querySelectorAll('.session-tile')].map((tile) => tile.getBoundingClientRect()); return c && Math.abs(a.top - b.top) < 2 && c.top >= a.bottom && Math.abs(c.left - a.left) < 2 && Math.abs(c.right - b.right) < 2; });
     }
     for (const [width, height, scale] of [[1440, 960, 100], [1100, 800, 100], [900, 700, 100], [1100, 800, 125]]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width, height]);

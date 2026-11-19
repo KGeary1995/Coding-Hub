@@ -133,6 +133,25 @@
 .session-error > svg { flex: none; width: 14px; height: 24px; color: var(--tone); }
 .session-error > span { flex: 1; align-self: safe center; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-error > button { flex: none; }
+/* A failed channel's strip, closed: three lines that never scroll (errorLines). An output line wider than the tile ends
+   in an ellipsis (its title holds it whole); a one-line error wraps to three lines. Show all opens the whole text, up to
+   40% of the tile so the terminal keeps the rest, and only then may it scroll. Where the words would get less than
+   16em beside the buttons (a narrow tile), the buttons move to a row of their own under them, at the right; in a tile
+   narrower than those 16em the words take what the icon leaves (its 14 px and the gap), so the icon never stands alone.
+   Open, only the words scroll (their row takes what the 40% leaves): each button has a row under them, at the right at
+   every width, so Show less stays in view (in a strip that scrolled whole it lay at the text's scrolled-out end), and
+   the icon stays at the first line. */
+.session-error.failure { flex-wrap: wrap; justify-content: flex-end; max-height: none; overflow: hidden; }
+.session-error.failure > span { flex: 1 1 min(16em, calc(100% - 22px)); }
+.session-error.failure.open { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); max-height: 40%; }
+.session-error.failure.open > span { align-self: stretch; overflow-y: auto; }
+.session-error.failure.open > button { grid-column: 1 / -1; justify-self: end; }
+.session-error-lines > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-error-lines > span:only-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: normal; }
+.session-error > .session-error-log { display: none; }
+.session-error-more > svg { transition: transform var(--tr-d-fast) var(--tr-ease); }
+.session-error-more[aria-expanded="true"] > svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .session-error-more > svg { transition: none; } }
 /* A channel waiting for the person. Answering happens in the CLI's own prompt. Its fill is solid, since it can lie over text. */
 .session-attention { display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tr-st-waiting) 40%, var(--tr-term)); background: color-mix(in srgb, var(--tr-st-waiting) 14%, var(--tr-term)); color: var(--tr-fg-strong); font: 500 13px/20px var(--tr-font-ui); }
 .session-attention > span:first-child { color: var(--tr-st-waiting); font-size: 11px; }
@@ -279,6 +298,8 @@
 @container (max-width: 400px) {
   .tr-tile .tr-tile-head { gap: 4px; }
   .tr-tile-topic, .tr-action.retry + .tr-action.ghost { display: none; }
+  /* The header's Open log gives way here, so the failed channel's strip carries it. */
+  .session-error > .session-error-log { display: inline-flex; }
 }
 @container (max-width: 320px) { .tr-tile-head > .ui-avatar, .tr-tile-head .tr-action svg { display: none; } }
 

@@ -4,7 +4,7 @@ import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
 import { isAgentConfig } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
-import { arrangeChannels, migrateWorkspace } from '../../shared/workspace-migration';
+import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
 
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -77,16 +77,31 @@ export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
   return arrangeChannels(channelsOf(all).map((session) => session.id), mode);
 }
 
+/** Whether tiles stand exactly as Trace arranges them in this layout: the person has not dragged or resized one since. */
+const standArranged = (tiles: GridTile[], mode: LayoutMode) => { const own = arrangeChannels(tiles.map((tile) => tile.sessionId), mode); return tiles.every((tile, index) => tile.x === own[index].x && tile.y === own[index].y && tile.w === own[index].w && tile.h === own[index].h); };
+
 /**
  * Tiles that match the channels the person sees: one each, none for a hidden Round Table seat or a removed session.
- * The same tiles when they already match; extra tiles are dropped in place; a channel without a tile lays all out again.
+ * The same tiles when they already match; a channel without a tile lays all out again. Extra tiles are dropped in place
+ * from a layout the person dragged or resized (it is theirs); tiles that still stood as Trace arranged them are laid
+ * out again, so the rest close the gap (in the grid, the third of three takes the spare width).
  */
 export function fitTiles(sessions: Session[], tiles: GridTile[], mode: LayoutMode): GridTile[] {
   const shown = new Set(channelsOf(sessions).map((session) => session.id));
   const kept = tiles.filter((tile, index) => shown.has(tile.sessionId) && tiles.findIndex((other) => other.sessionId === tile.sessionId) === index);
   if (kept.length !== shown.size || !kept.length) return arrangeTiles(sessions, mode);
-  return kept.length === tiles.length ? tiles : kept;
+  if (kept.length === tiles.length) return tiles;
+  return standArranged(tiles, mode) ? arrangeTiles(sessions, mode) : kept;
 }
+
+/** Where this window remembers the arrangement rule its saved workspace was last opened under. */
+const RULE_KEY = 'coding-hub-layout-rule'; const LAYOUT_RULE = '2';
+/**
+ * Whether this is the first workspace opened since the grid's rule changed (after 1.23: a short second row shares the whole
+ * width). Only then is a grid that still stands as the older rule arranged it laid out again (widenShortRow): after
+ * that, a third tile at half width is the person's own choice. False where the window cannot remember it.
+ */
+function firstUnderRule() { try { if (localStorage.getItem(RULE_KEY) === LAYOUT_RULE) return false; localStorage.setItem(RULE_KEY, LAYOUT_RULE); return true; } catch { return false; } }
 
 interface WorkspaceState {
   persistenceReady: boolean;
@@ -166,7 +181,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   storageInfo: null,
   loadNotice: null,
   hydrate: (saved, storageInfo, removedByHost = 0, keptRoot) => {
-    const migrated = saved ? migrateWorkspace(saved) : { workspace: null, removedChannels: 0, rootDirectory: keptRoot ?? null };
+    const migrated = saved ? migrateWorkspace(saved) : { workspace: null, removedChannels: 0, rootDirectory: keptRoot ?? null }; const first = firstUnderRule();
     const removed = removedByHost + migrated.removedChannels;
     const loadNotice = removed ? `${removed === 1 ? 'A Gemini channel was' : `${removed} Gemini channels were`} removed from this workspace: Trace no longer runs Gemini.` : null;
     // Nothing but Gemini channels was saved (here, or already dropped by the host): the default channels, in the saved folder.
@@ -175,7 +190,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const sessions = workspace?.sessions.map((session): Session => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));
     // A workspace from 1.16 gave a Round Table's partner its own tile: laid out again without it.
     const seated = sessions ? seatedIds(sessions) : new Set<string>();
-    const tiles = workspace && sessions && workspace.tiles.some((tile) => seated.has(tile.sessionId)) ? arrangeTiles(sessions, workspace.layoutMode) : workspace?.tiles;
+    const tiles = workspace && sessions && workspace.tiles.some((tile) => seated.has(tile.sessionId)) ? arrangeTiles(sessions, workspace.layoutMode) : workspace && first ? widenShortRow(workspace.tiles, workspace.layoutMode) : workspace?.tiles;
     const focused = workspace?.focusedSessionId && seated.has(workspace.focusedSessionId) ? null : workspace?.focusedSessionId ?? null;
     set({ ...(workspace && sessions && tiles ? { ...workspace, sessions, tiles, focusedSessionId: focused } : {}), loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null });
   },

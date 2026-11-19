@@ -3,7 +3,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList } from 'lucide-react';
+import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -28,7 +28,7 @@ import { ScopeStrip } from './tile/ScopeStrip';
 import { ENGINE_ICONS } from './tile/engine-icons';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
-import { errorText, setupTarget, SETUP_TARGETS } from './tile/error-strip';
+import { errorLines, errorText, setupTarget, SETUP_TARGETS, useErrorStrip } from './tile/error-strip';
 import { useTerminalRow } from './tile/terminal-row';
 import { newTaskFor } from '../state/task-store';
 import { compact } from './shell/StatusBar';
@@ -87,6 +87,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const channel = index + 1;
   // The setup page the error names, if it names one: a plain failure has Retry and Open log in the header.
   const setupView = session.error ? setupTarget(session.error, Boolean(cwd)) : null;
+  // Closed, the error strip shows three lines and never scrolls; Show all opens the whole text (tile/error-strip.ts).
+  const strip = useErrorStrip(session.error); const closedError = errorLines(session.error ?? '');
   // One terminal line's height, for what lies over the terminal's top (tile.css, --term-cover).
   const tile = useRef<HTMLElement>(null); useTerminalRow(tile, session.id, !chat);
   const busy = session.status === 'running' || session.status === 'starting';
@@ -178,7 +180,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {chat && attention}
-      {session.error && <div className="session-error" role="alert"><CircleAlert size={14} /><span>{errorText(session.error)}</span>{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && setupView && <button className="quiet-button small" onClick={() => setView(setupView)}>{SETUP_TARGETS[setupView]}</button>}</div>}
+      {session.error && <div className={`session-error failure ${strip.open ? 'open' : ''}`} role="alert"><CircleAlert size={14} />{strip.open ? <span>{errorText(session.error)}</span> : <span className="session-error-lines" ref={strip.lines}>{closedError.lines.map((line, at) => <span key={at} title={line}>{line}</span>)}</span>}{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && setupView && <button className="quiet-button small" onClick={() => setView(setupView)}>{SETUP_TARGETS[setupView]}</button>}{(closedError.more || strip.cut || strip.open) && <button className="quiet-button small session-error-more" aria-expanded={strip.open} aria-label={`${strip.open ? 'Show less' : 'Show all'} of channel ${channel}'s error`} onClick={() => strip.setOpen(!strip.open)}>{strip.open ? 'Show less' : 'Show all'}<ChevronDown size={16} aria-hidden="true" /></button>}{/* A narrow tile's header has no room for Open log (tile.css, 400 px), and a tile on screen has no notice to carry it. */}{state === 'failed' && <button className="quiet-button small session-error-log" onClick={openLog}>Open log</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">

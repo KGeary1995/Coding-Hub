@@ -83,14 +83,24 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await tile.getByRole('status', { name: 'Channel 3 needs you', exact: true }).textContent(), 'Needs you');
     assert.equal(await tile.getAttribute('data-state'), 'waiting');
     const toast = page.locator('.tr-toast.waiting');
-    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
+    // Its tile is on screen and says so itself (the strip, the badge), so no notice is drawn; the status bar always says it.
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
+    assert.equal(await toast.count(), 0, 'A channel whose tile is on screen raises no notice');
+    // On another page its tile is not on screen: the notice is drawn there, and leaves again back on the workspace.
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
+    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
+    await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+    await tile.locator('.session-attention').waitFor(); await toast.waitFor({ state: 'detached' });
     // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
     await (await tileControl(page, 'Isolate channel 1')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
+    // Hidden behind the isolated channel, CH3 has its notice.
+    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
     await page.locator('.tr-sb-alert').click();
     await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile')?.textContent.includes('Approval requested'));
+    // Its tile is on screen again, so the notice has left.
+    await toast.waitFor({ state: 'detached' });
     await (await tileControl(page, 'Restore grid')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 3);
     await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
@@ -106,7 +116,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile') === document.querySelectorAll('.session-tile')[2]);
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
-    await page.getByRole('button', { name: 'Retry CH3', exact: true }).waitFor();
+    // The failed tile is on screen: Retry is in its header, and no notice is drawn.
+    await tile.getByRole('button', { name: 'Retry', exact: true }).waitFor(); assert.equal(await page.locator('.tr-toast.failed').count(), 0, 'A failed channel whose tile is on screen raises no notice');
     // With an error line under the header the row sits in the flow and stays shown, so it never covers the line or its button.
     await detailShown(); await page.mouse.move(1, 1);
     assert.equal(await page.evaluate(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.position + ' ' + style.opacity; }), 'static 1');

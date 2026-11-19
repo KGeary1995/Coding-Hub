@@ -16,8 +16,11 @@
 //   00-start (-1100, -contrast)  empty window, no project      01-workspace-idle   project opened, two channels not started
 //   02-channels-running  Claude, Codex and a Terminal running  03-chat             Round Table chat: messages and an approval
 //   04-tile-detail       detail row under a tile header        05-layout-single    one channel maximised
-//   06/07/08-layout-columns/rows/grid                          09-needs-you        approval wait: notice and status-bar alert
+//   06/07/08-layout-columns/rows/grid                          09-needs-you        approval wait: the asking tile and the status bar
+//   09-needs-you-other-page, -behind, -scrolled   a notice, drawn only while the asking tile is not on screen: on Changes,
+//                        behind a maximised channel, and scrolled out of the grid's view (rows, a second channel asking)
 //   10-needs-you-list    the Needs you list                    11-failed-channel   a channel whose CLI failed to start
+//   11-failed-channel-other-page   its notice, on Tasks
 //   12-close-question    Close on a running channel            13-menu-project … 16-menu-new-channel   the top-bar menus
 //   17-command-menu, 18-command-menu-query                     19-changes          diff of a file, delivery column
 //   20-files … 30-settings, 31-34-workflow-*, 35-ai-coaching, 36-verification-profiles, 37-more-tools, 38-help-topic
@@ -183,16 +186,41 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
     await scene('09-needs-you', async () => {
       await typeIn(2, 'need-approval');
       await page.getByRole('button', { name: /^Needs you · \d+$/ }).waitFor(); await page.mouse.move(1, 1);
+      // The asking tile is on screen, so no notice is drawn: its strip, its badge and Answer say it, and the status bar.
+      const notice = page.locator('.tr-toast.waiting');
+      await tile(2).locator('.session-attention').waitFor(); await notice.waitFor({ state: 'detached' });
       await shot('09-needs-you');
+      // Its notice is drawn while that tile is not on screen: on another page, and behind a maximised channel.
+      if (wanted('09-needs-you-other-page')) { await open('Changes'); await notice.waitFor(); await page.getByRole('button', { name: 'Unstaged src/greet.ts', exact: true }).waitFor(); await shot('09-needs-you-other-page'); await open('Workspace'); await notice.waitFor({ state: 'detached' }); }
+      if (wanted('09-needs-you-behind')) {
+        await (await tileControl(tile(1), 'Isolate channel 1')).click(); await page.mouse.move(1, 1); await notice.waitFor(); await shot('09-needs-you-behind');
+        await (await tileControl(tile(1), 'Restore grid')).click(); await page.mouse.move(1, 1); await notice.waitFor({ state: 'detached' });
+      }
       await page.getByRole('button', { name: /^Needs you · \d+$/ }).click(); await page.getByRole('dialog', { name: 'Needs you' }).waitFor();
       await shot('10-needs-you-list'); await page.keyboard.press('Escape');
+      // And scrolled out of its grid's view. Four rows are taller than the window: the first row asks too, and with the
+      // grid at its end that channel has a notice (in a short window the second row is cut as well, and has one too).
+      // Answer on it brings the tile back, and the notices leave.
+      if (wanted('09-needs-you-scrolled')) {
+        await typeIn(1, 'need-approval'); await tile(1).locator('.session-attention').waitFor(); await notice.waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click(); await page.mouse.move(1, 1);
+        await page.locator('.session-grid-container').evaluate((grid) => { grid.scrollTop = grid.scrollHeight; }); await notice.filter({ hasText: 'CH1 needs approval' }).waitFor(); await shot('09-needs-you-scrolled');
+        await page.getByRole('button', { name: 'Answer CH1 in its terminal', exact: true }).click(); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting'));
+        await page.keyboard.type('y'); await page.keyboard.press('Enter'); await tile(1).locator('.session-attention').waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Arrange in grid', exact: true }).click(); await page.mouse.move(1, 1);
+      }
       await tile(2).getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
     });
     await scene('11-failed-channel', async () => {
       await typeIn(1, 'fail-launch');
-      await page.getByRole('button', { name: 'Retry CH1', exact: true }).first().waitFor({ timeout: 15_000 }); await page.mouse.move(1, 1);
+      // The failed tile is on screen: Retry is in its header, and no notice is drawn.
+      const retry = tile(1).getByRole('button', { name: 'Retry', exact: true });
+      await retry.waitFor({ timeout: 15_000 }); await page.mouse.move(1, 1); await page.locator('.tr-toast.failed').waitFor({ state: 'detached' });
       await shot('11-failed-channel');
-      await page.getByRole('button', { name: 'Retry CH1', exact: true }).first().click(); await terminalShows(1, 'READY');
+      // On another page the failure is a notice, and its Retry starts the channel again.
+      if (wanted('11-failed-channel-other-page')) { await open('Tasks'); await page.locator('.tr-toast.failed').waitFor(); await shot('11-failed-channel-other-page'); await page.getByRole('button', { name: 'Retry CH1', exact: true }).click(); }
+      else await retry.click();
+      await terminalShows(1, 'READY');
       await typeIn(1, 'Run the tests again');
     });
     await scene('12-close-question', async () => {

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { SIGN_IN } from '../../../shared/productivity';
 
 /** The setup pages a channel's error strip can lead to, each with its button's words. */
@@ -27,9 +28,43 @@ export function setupTarget(error: string, hasFolder: boolean): SetupTarget | nu
 }
 
 /**
- * An error as its strip shows it, one line of text after the other. An exit diagnostic carries the console's carriage
- * returns and the blank lines its repaints leave, which stood as empty lines in a strip that shows three. The output is
- * shown whole (up to 2,000 characters, so the strip scrolls): its last lines are not reliably the cause, since on
- * Windows lines the console repaints can follow a CLI's last words (the fixture's "invalid model" is not the last line).
+ * An error as its strip shows it opened, one line of text after the other. An exit diagnostic carries the console's
+ * carriage returns and the blank lines its repaints leave, which stood as empty lines in the strip.
  */
 export const errorText = (error: string) => error.split(/[\r\n]+/).map((line) => line.trimEnd()).filter(Boolean).join('\n');
+
+/**
+ * An output line that reads as a failure's cause: error words in the forms CLIs print them ("Error:", "TypeError",
+ * "npm ERR!", "fatal:", "E: …", "✗ …"), and the sign-in words setupTarget reads. A drive letter ("E:\") is not "E:".
+ */
+const CAUSE = /error|\berr!|\bfatal\b|\bfail(?:ed|ure|s)\b|\binvalid\b|\bdenied\b|\bnot found\b|\bno such\b|\bcannot\b|\bcan['’]t\b|\bcould not\b|\bunable to\b|\bforbidden\b|\brefused\b|\bexception\b|\bpanic\b|\btraceback\b|^\s*(?:E:(?![\\/])|[✗×✖])/i;
+
+/**
+ * What a closed strip shows, three lines at most: the error's first line ("CLI exited with code N." for an exit
+ * diagnostic), then the two most recent output lines that read as a cause, in the order printed, or the last two lines
+ * when none does. The cause is not reliably last (on Windows the console repaints older lines after a CLI's last words,
+ * and the fixture's "invalid model" sits mid-output). `more` says lines were left out, for the strip's Show all.
+ */
+export function errorLines(error: string): { lines: string[]; more: boolean } {
+  const all = errorText(error).split('\n');
+  if (all.length <= 3) return { lines: all, more: false };
+  const output = all.slice(1); const causes = output.filter((line) => CAUSE.test(line) || SIGN_IN.test(line));
+  return { lines: [all[0], ...(causes.length ? causes : output).slice(-2)], more: true };
+}
+
+/**
+ * A failed channel's strip: whether it is open, and whether its closed lines are cut (a line wider than the tile, or a
+ * one-line error longer than three wrapped lines), measured as the tile resizes. A new error closes it again.
+ */
+export function useErrorStrip(error: string | null | undefined) {
+  const [open, setOpen] = useState(false); const [cut, setCut] = useState(false);
+  const lines = useRef<HTMLSpanElement>(null);
+  useEffect(() => setOpen(false), [error]);
+  useEffect(() => {
+    const box = lines.current; if (!box || open) return;
+    const measure = () => setCut([...box.children].some((line) => line.scrollWidth > line.clientWidth + 1 || line.scrollHeight > line.clientHeight + 1));
+    const observer = new ResizeObserver(measure); observer.observe(box); measure();
+    return () => observer.disconnect();
+  }, [error, open]);
+  return { open, setOpen, cut, lines };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { errorText, setupTarget, SETUP_TARGETS } from './error-strip';
+import { errorLines, errorText, setupTarget, SETUP_TARGETS } from './error-strip';
 
 describe('where a channel’s error strip leads', () => {
   it('is Projects for a missing folder, as the host says it now and said it before', () => {
@@ -48,5 +48,35 @@ describe('an error as its strip shows it', () => {
   });
   it('leaves a one-line error as it is', () => {
     expect(errorText('The working folder does not exist or is not accessible.')).toBe('The working folder does not exist or is not accessible.');
+  });
+});
+
+describe('the lines a closed error strip shows', () => {
+  /** The fixture CLI's failure as a probe of the dev window read it on Windows: the cause mid-output, repainted lines after it. */
+  const start = 'READY CWD:C:\\Users\\kg\\tour-project\r\nMODEL_OVERRIDE:CLI_DEFAULT\r\nSIZE:85x13\r\n';
+  const fixture = `CLI exited with code 1.\n${start}\n${start}${'\r\n'.repeat(9)}\nECHO:Add a check for an empty name to greet()\r\nECHO:Then run the tests\r\n\n${'\r\n'.repeat(5)}Error: fixture invalid model${'\r\n'.repeat(7)}\n\n${start}ECHO:Add a check for an empty name to greet()\r\nECHO:Then run the tests`;
+  it('keeps the fixture’s cause, which is neither among the first lines nor the last (the smoke tests look for it)', () => {
+    expect(errorLines(fixture)).toEqual({ lines: ['CLI exited with code 1.', 'Error: fixture invalid model'], more: true });
+  });
+  it('shows the last lines when no line reads as an error', () => {
+    expect(errorLines('CLI exited with code 2.\nREADY\nMODEL_OVERRIDE:CLI_DEFAULT\nSIZE:85x30\nECHO:done')).toEqual({ lines: ['CLI exited with code 2.', 'SIZE:85x30', 'ECHO:done'], more: true });
+  });
+  it('shows a Trace launch error of one sentence whole, with nothing left out', () => {
+    for (const error of ['The working folder does not exist or is not accessible.', 'CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project folder.'])
+      expect(errorLines(error)).toEqual({ lines: [error], more: false });
+  });
+  it('leaves a long single line whole (the strip cuts it to its width, and its title keeps it)', () => {
+    const long = 'Error: ' + 'x'.repeat(1990);
+    expect(errorLines(`CLI exited with code 1.\n${long}`)).toEqual({ lines: ['CLI exited with code 1.', long], more: false });
+  });
+  it('keeps the two most recent of more error lines than fit, in the order printed', () => {
+    expect(errorLines('CLI exited with code 1.\nfatal: not a git repository\nnpm ERR! code ENOENT\nworking…\nTypeError: x is undefined\nE: Unable to locate package\nE:\\project> ').lines).toEqual(['CLI exited with code 1.', 'TypeError: x is undefined', 'E: Unable to locate package']);
+  });
+  it('reads a sign-in problem as a cause, as setupTarget does', () => {
+    expect(errorLines('CLI exited with code 1.\nWelcome\nNot logged in · Please run /login\nSIZE:80x24\nSIZE:81x24').lines).toEqual(['CLI exited with code 1.', 'Not logged in · Please run /login']);
+  });
+  it('reads Windows line endings and the console’s blank lines as one line break', () => {
+    expect(errorLines('CLI exited with code 1.\r\n\r\nREADY\r\n\r\n\r\nError: invalid model\r\n\r\nSIZE:85x13\r\n')).toEqual({ lines: ['CLI exited with code 1.', 'Error: invalid model'], more: true });
+    expect(errorLines('CLI exited with code 1.\r\nError: invalid model\r\n')).toEqual({ lines: ['CLI exited with code 1.', 'Error: invalid model'], more: false });
   });
 });

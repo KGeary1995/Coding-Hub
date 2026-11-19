@@ -15,14 +15,41 @@ import { NeedsYouCell } from './NeedsYou';
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
 
-/** Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–8 does). */
+/**
+ * A channel's tile in the workspace's grid, or null where it is not drawn. Tiles stand in channel order, one to a
+ * place, and a maximised one alone (SessionGrid); a place holds no tile when its drawing failed.
+ */
+export function channelTile(id: string): Element | null {
+  const { sessions, focusedSessionId } = useWorkspaceStore.getState(); const grid = document.querySelector('.session-grid-container');
+  const alone = grid?.querySelector('.focused-session');
+  const place = alone ? (focusedSessionId === id ? alone : null) : grid?.querySelectorAll('.session-grid > .react-grid-item:not(.react-grid-placeholder)')[channelsOf(sessions).findIndex((session) => session.id === id)];
+  return place?.querySelector('.session-tile') ?? null;
+}
+
+/**
+ * How far a grid scrolls so a tile shows whole, or from its top edge where it is taller than what the grid shows: 0
+ * for one that already does. In the window's pixels, down positive.
+ */
+export function scrollToTile(tile: { top: number; bottom: number }, view: { top: number; bottom: number }) {
+  const down = Math.max(0, tile.bottom - view.bottom);
+  return down + Math.min(0, tile.top - down - view.top);
+}
+
+/**
+ * Shows a channel in the workspace and focuses its terminal, isolating it if another channel is isolated (as Alt+1–8
+ * does), and scrolls its grid to the tile: a terminal takes the focus without scrolling to it.
+ */
 export function jumpToChannel(id: string) {
   const state = useWorkspaceStore.getState();
   // A Round Table's hidden partner is answered in its lead's tile.
   id = leadOf(state.sessions, id)?.id ?? id;
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
   if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
-  state.setView('workspace'); requestAnimationFrame(() => focusTerminal(id));
+  state.setView('workspace'); requestAnimationFrame(() => {
+    focusTerminal(id);
+    const tile = channelTile(id); const grid = tile?.closest('.session-grid-container');
+    if (tile && grid) grid.scrollTop += scrollToTile(tile.getBoundingClientRect(), grid.getBoundingClientRect());
+  });
 }
 
 const SHORT: Record<string, string> = { Session: '5h', Week: 'wk' };

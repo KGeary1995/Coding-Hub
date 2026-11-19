@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noticePlace, type TileUnder } from './Toasts';
+import { noticePlace, noticeSpeaks, tileShows, type TileSeen, type TileUnder } from './Toasts';
 
 // A 1100 x 800 window: the status bar starts at 772, tiles are 352 tall in a grid, one notice is 110 tall.
 const bar = 772; const gap = 12;
@@ -64,5 +64,73 @@ describe('where the notices stand', () => {
     expect(place(grown, 110, { top: 164, raised: true })).toEqual({ raised: true, under: 152, room: 0 });
     // 84 px with the gap off is enough for one cut short.
     expect(place([{ ...chat(52), composer: { top: 260, bottom: 380 } }, chat(412)], 110, { top: 164, raised: true }).room).toBe(96);
+  });
+});
+
+// The same window: the grid shows 52 to 764. A tile's header row is 34 px tall, and a terminal's request strip lies over
+// the 32 px under it.
+const grid = { top: 52, bottom: 764 };
+const quiet = (top: number): TileSeen => ({ need: { top, bottom: top + 34 }, view: grid });
+const asking = (top: number): TileSeen => ({ need: { top, bottom: top + 66 }, view: grid });
+const shows = (extra: Partial<Parameters<typeof tileShows>[0]> = {}) => tileShows({ view: 'workspace', isolated: null, tile: 'ch2', seen: asking(52), ...extra });
+
+describe('whether the window shows a channel’s tile, so that its notice is not drawn', () => {
+  it('shows a tile in the workspace’s grid whose header row and request strip are in view', () => {
+    expect(shows()).toBe('shown');
+    expect(shows({ seen: asking(412) })).toBe('shown');
+    // The lowest it can stand: its strip ends where the grid's view does.
+    expect(shows({ seen: asking(698) })).toBe('shown');
+    // The channel that is isolated is the one on screen.
+    expect(shows({ isolated: 'ch2' })).toBe('shown');
+  });
+  it('hides it while another page is shown', () => {
+    for (const view of ['diff', 'tasks', 'projects', 'usage', 'settings', 'files', 'history', 'memory', 'workflow', 'help'] as const) expect(shows({ view })).toBe('hidden');
+  });
+  it('hides it while another computer’s tab is shown', () => {
+    expect(shows({ view: 'computer' })).toBe('hidden');
+  });
+  it('hides it while another channel is isolated or maximised over it', () => {
+    expect(shows({ isolated: 'ch1' })).toBe('hidden');
+    // Its last measure is from the grid, before the other channel took the window.
+    expect(shows({ isolated: 'ch1', seen: asking(412) })).toBe('hidden');
+  });
+  it('hides it where its place holds no tile', () => {
+    expect(shows({ seen: null })).toBe('hidden');
+  });
+  it('counts it as scrolled out of view when its header row or its request strip is cut by the grid’s edge', () => {
+    // Scrolled down: the header row starts above what the grid shows.
+    expect(shows({ seen: asking(40) })).toBe('scrolled');
+    expect(shows({ seen: asking(-300) })).toBe('scrolled');
+    // Scrolled up: the strip ends below it, though the header row is in view; then the whole tile is below.
+    expect(shows({ seen: asking(710) })).toBe('scrolled');
+    expect(shows({ seen: asking(790) })).toBe('scrolled');
+    // With no strip (a Round Table partner's request is a card in the thread), the header row alone decides.
+    expect(shows({ seen: quiet(710) })).toBe('shown');
+    expect(shows({ seen: quiet(740) })).toBe('scrolled');
+  });
+  it('allows one pixel for rounding, and no more', () => {
+    expect(shows({ seen: asking(51) })).toBe('shown');
+    expect(shows({ seen: asking(699) })).toBe('shown');
+    expect(shows({ seen: asking(50) })).toBe('scrolled');
+    expect(shows({ seen: asking(700) })).toBe('scrolled');
+  });
+  it('takes a tile drawn this frame, not measured yet, as shown', () => {
+    expect(shows({ seen: undefined })).toBe('shown');
+    // The page and an isolated channel still decide before any measure.
+    expect(shows({ seen: undefined, view: 'diff' })).toBe('hidden');
+    expect(shows({ seen: undefined, isolated: 'ch1' })).toBe('hidden');
+  });
+});
+
+describe('whether a notice tells a screen reader, so each request or failure is heard once', () => {
+  it('speaks for a request that comes while no tile is drawn for it', () => {
+    expect(noticeSpeaks('hidden', false)).toBe(true);
+  });
+  it('is silent when it comes back for a request already heard, as the person leaves the workspace', () => {
+    expect(noticeSpeaks('hidden', true)).toBe(false);
+  });
+  it('is silent over a tile that is drawn but scrolled out of view, whose own strip is the alert', () => {
+    expect(noticeSpeaks('scrolled', false)).toBe(false);
+    expect(noticeSpeaks('scrolled', true)).toBe(false);
   });
 });
