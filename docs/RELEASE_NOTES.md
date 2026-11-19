@@ -1,5 +1,10 @@
 ## What's new
 
+1.24.1 makes the Start button in the middle of a channel work with WebGL drawing on (update every computer; the phone app needs no reload):
+
+- **The middle Start button works again.** With **Enable terminal WebGL acceleration** on (**Settings → Preferences → Terminal**), the **Start** button and the folder button in the middle of a channel that has not started did nothing. The terminal's WebGL drawing adds a layer over the terminal, and it lay over those buttons and took their clicks. The **Start** button in the channel's header and Enter on the tile were not affected. The terminal's layers now stay inside the terminal. With WebGL drawing off, which is the default, nothing changes.
+- **Not tried yet:** the installed app and anything on a Mac. Checked on Windows in a test window with WebGL drawing on (the middle Start in three channels: none started before, all three after), and with the unit tests and the desktop smoke tests.
+
 1.24.0 gives Trace a new look, calls every tile a channel, and changes how notices, the grid, the phone's terminal and a failed channel behave (update every computer and reload the phone app):
 
 - **A new look ("Midnight").** Every screen and the phone app are redrawn: navy surfaces, cards and tiles with a visible edge, one form for buttons, badges, banners and empty states, and state shown as a dot and a word (Working, Idle, Needs you, Failed). Text is set in Inter, Plus Jakarta Sans and IBM Plex Mono. **Higher contrast** under **Settings → Display and keyboard** still strengthens every edge. The app icon is redrawn to match.
