@@ -13,7 +13,7 @@ const addons: FakeWebgl[] = [];
 class FakeWebgl { disposed = false; loss: (() => void) | null = null; constructor() { addons.push(this); } onContextLoss(listener: () => void) { this.loss = listener; } dispose() { this.disposed = true; } }
 let osc: ((data: string) => boolean) | null = null;
 class FakeTerminal {
-  options: Record<string, unknown> = {}; cols = 80; rows = 24; parser = { registerOscHandler: (_code: number, handler: (data: string) => boolean) => { osc = handler; } };
+  options: Record<string, unknown> = {}; cols = 80; rows = 24; unicode = { activeVersion: '6' }; parser = { registerOscHandler: (_code: number, handler: (data: string) => boolean) => { osc = handler; } };
   loadAddon(addon: unknown) { if (addon instanceof FakeWebgl && failLoads) throw new Error('no WebGL'); }
   open() {} onData() {} onTitleChange() {} onResize() {} attachCustomKeyEventHandler() {} writeln() {} write() {} reset() {} focus() {} dispose() {}
   hasSelection() { return false; } clearSelection() {}
