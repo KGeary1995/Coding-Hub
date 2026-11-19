@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ImagePlus, Send, Square, Users, X } from 'lucide-react';
+import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
-import { AGENT, ChainBar, EMPTY, Item, readImage, TableBar, useSteady } from './ChatParts';
+import { AGENT, ChainBar, EMPTY, Item, readImage, TableBar, useHint, useSteady } from './ChatParts';
 
 /**
  * A chat channel that runs on another device's computer: on the phone, and in another computer's tab on the desktop. The
@@ -52,7 +52,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   const busy = chat.busy || (table !== null && (partner.busy || planner.busy));
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState(''); const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const file = useRef<HTMLInputElement>(null);
+  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const file = useRef<HTMLInputElement>(null); const input = useRef<HTMLTextAreaElement>(null);
   // A Round Table's partner answers here too, so its events are followed while the table is open.
   useEffect(() => table && follow ? follow(table.partner.sessionId) : undefined, [table?.partner.sessionId, follow]);
   useEffect(() => plannerId && follow ? follow(plannerId) : undefined, [plannerId, follow]);
@@ -82,12 +82,14 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   const attach = async (files: Blob[]) => { try { const read = await Promise.all(files.filter((item) => item.type.startsWith('image/')).map(readImage)); setImages((current) => [...current, ...read].slice(0, 10)); } catch (e) { setError((e as Error).message); } };
   const agent = AGENT[engine];
   const workers = table ? [chat.busy ? (hierarchy ? 'The builder' : agent) : null, partner.busy ? AGENT[table.partner.engine] : null, planner.busy ? 'The planner' : null].filter(Boolean) : [agent];
+  /** The message box's hint, then shorter forms for a narrow tile or the phone (useHint). */
+  const placeholder = useHint(input, !live ? ['Not running'] : hierarchy ? (table?.chain?.step === 'plan-review' ? ['Say what to change in the plan, or Approve plan', 'What to change in the plan', 'Plan changes'] : ['Give the Round Table a task', 'Give it a task']) : table ? [`Message ${agent} and ${AGENT[table.partner.engine]}`, 'Message both'] : [`Message ${agent}`]);
 
   return <div className={`chat-view remote-chat ${className} ${table ? 'at-table' : ''}`}>
     {table && runId && hierarchy && <ChainBar table={table} busy={busy} plannerName="The planner" builderName="The builder" onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     {table && runId && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
-      {!items.length && <p className="chat-empty">{live ? `Ask ${agent} anything. The conversation is the same one as on the computer.` : 'This chat is not running. Start it to write to it.'}</p>}
+      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{live ? <><strong>No messages yet</strong><p>Ask {agent} anything. The conversation is the same one as on the computer.</p></> : <><strong>This chat is not running</strong><p>Start it to write to it.</p></>}</div>}
       {items.map(({ item, from }) => from === 'lead'
         ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
         : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={planner.results} agent="Claude" author="claude" role="Planner" answer={answerPlanner} view={setViewing} />
@@ -101,12 +103,12 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
         <button type="button" className="chat-icon" aria-label="Attach images or take a photo" disabled={!live} onClick={() => file.current?.click()}><ImagePlus size={18} /></button>
         {openTable && !table && live && <button type="button" className="chat-icon" aria-label={`Round Table: add ${engine === 'claude' ? 'Codex' : 'Claude'}`} title={opening ? 'Adding the other agent…' : `Round Table: bring ${engine === 'claude' ? 'Codex' : 'Claude Code'} into this conversation`} disabled={opening} onClick={() => { setOpening(true); setError(''); void openTable().then((failure) => { setOpening(false); if (failure) setError(failure); }); }}><Users size={18} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
-        <textarea rows={1} value={text} disabled={!live} placeholder={!live ? 'Not running' : hierarchy ? (table?.chain?.step === 'plan-review' ? 'Say what to change in the plan, or Approve plan' : 'Give the Round Table a task') : table ? `Message ${agent} and ${AGENT[table.partner.engine]}` : `Message ${agent}`} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} />
+        <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} />
         {busy && !text.trim()
           ? <button type="button" className="chat-icon stop" aria-label={table ? 'Stop both agents' : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>
           : <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}
       </div>
     </form>
-    {viewing && <div className="phone-image" role="dialog" aria-label="Image"><button type="button" className="quiet" onClick={() => setViewing(null)}>Close</button><img src={viewing} alt="" /></div>}
+    {viewing && <div className="phone-image" role="dialog" aria-label="Image"><button type="button" className="button secondary" onClick={() => setViewing(null)}>Close</button><img src={viewing} alt="" /></div>}
   </div>;
 }

@@ -549,8 +549,8 @@ export class RemoteServer {
   /**
    * A phone asking to draw a channel at its own size. The desktop wins while the person is using this computer: the
    * request is kept and applied once the computer has gone unused for DESKTOP_IDLE_SECONDS, and given back as soon as it
-   * is used again (`checkDesktop`). `force` (the phone's "Fit to phone") applies it at once, until the person types in
-   * that channel on the desktop. Returns whether the phone now has its size.
+   * is used again (`checkDesktop`). `force` (the phone app, whenever it asks: opening a channel, "Fit to phone") applies
+   * it at once, until the person types in that channel on the desktop. Returns whether the phone now has its size.
    */
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);

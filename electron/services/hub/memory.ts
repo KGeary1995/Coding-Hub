@@ -25,7 +25,7 @@ async function readNote(file: string, project: string, id: string): Promise<Memo
 export class MemoryService {
   /** `limit`: notes a project keeps listed (MAX_NOTES; smaller in tests). */
   constructor(readonly root: string, private readonly limit = MAX_NOTES) { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.checkRoot(); }
-  private checkRoot() { if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real directory, not a symbolic link.'); }
+  private checkRoot() { if (!fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real folder, not a symbolic link.'); }
   directory(project: string) { this.checkRoot(); projectSchema.parse(project); const target = path.join(this.root, project); if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new HubError('MEMORY_PATH', 'Memory project cannot be a symbolic link.'); return target; }
   /** Each project's count and newest date as last read, by the folder's modification time: notes are added or archived, never edited. */
   private counted = new Map<string, { stamp: number; notes: number; latest: string }>();
@@ -47,7 +47,7 @@ export class MemoryService {
     return out.sort((a, b) => b.latest.localeCompare(a.latest)).slice(0, 200);
   }
   /** checkRoot() without holding the process on a slow folder such as Google Drive (lstat does not follow a link, so a linked root is no directory here). */
-  private async checkRootLater() { if (!(await fs.promises.lstat(this.root)).isDirectory()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real directory, not a symbolic link.'); }
+  private async checkRootLater() { if (!(await fs.promises.lstat(this.root)).isDirectory()) throw new HubError('MEMORY_PATH', 'Memory storage must be a real folder, not a symbolic link.'); }
   /** directory() without holding the process on a slow folder. */
   async directoryLater(project: string): Promise<string> {
     projectSchema.parse(project); await this.checkRootLater(); const target = path.join(this.root, project);
@@ -179,7 +179,7 @@ export class MemoryService {
   private fullMessage() { return `This project holds ${this.limit.toLocaleString('en-US')} notes and none can move to its archive: they are open items, decisions or files Trace cannot read. Resolve or retire some open items before adding more.`; }
   write(project: string, title: string, content: string, author: MemoryNote['author'], supersedes?: string): MemoryNote { if (supersedes && !this.note(project, supersedes)) throw new HubError('MEMORY_REVISION', 'The original handoff is unavailable. Refresh before saving a revision.'); const note = noteSchema.parse({ id: randomUUID(), project, title, content, author, createdAt: new Date().toISOString(), ...(supersedes ? { supersedes } : {}) }); this.import(note); return note; }
   install(directory: string, project: string, server: string, executable: string) {
-    projectSchema.parse(project); if (!path.isAbsolute(directory) || !fs.statSync(directory).isDirectory() || fs.realpathSync(directory) !== path.resolve(directory)) throw new HubError('PROJECT_PATH', 'Use the canonical project directory for memory installation.');
+    projectSchema.parse(project); if (!path.isAbsolute(directory) || !fs.statSync(directory).isDirectory() || fs.realpathSync(directory) !== path.resolve(directory)) throw new HubError('PROJECT_PATH', 'Use the canonical project folder for memory installation.');
     const args = [server, this.root, project];
     // Refuse any partial replacement of an existing server with this reserved name.
     const targets = [path.join(directory, '.mcp.json'), path.join(directory, '.codex', 'config.toml')];

@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 // A linked computer's screen end to end: the Screen button on its tab connects noVNC, through the host, to a stand-in
 // screen-sharing server on loopback (CODING_HUB_TEST_SCREEN_PORT). It checks sign-in with a saved password, the
 // picture, the note and unlock when that Mac is locked (or when Trace there cannot say), Ctrl sent as ⌘, Ctrl+V handing this computer's text over first,
@@ -68,7 +69,7 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
   const other = await remote();
   await fs.writeFile(path.join(storage, 'linked-computers.json'), JSON.stringify([{ id: MAC, name: 'Test-Mac', url: other.url, token: 'a'.repeat(43), linkedAt: new Date().toISOString() }]));
   const vnc = await vncServer();
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_SCREEN_PORT: String(vnc.port) }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_SCREEN_PORT: String(vnc.port) }; delete env.ELECTRON_RUN_AS_NODE;
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
   let app;

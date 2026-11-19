@@ -4,13 +4,12 @@ import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startWindowHealth } from './runtime/window-health';
 // Fonts ship with the app so it renders the same offline.
-import '@fontsource/chakra-petch/400.css';
-import '@fontsource/chakra-petch/500.css';
-import '@fontsource/chakra-petch/600.css';
-import '@fontsource/chakra-petch/700.css';
-import '@fontsource/ibm-plex-sans-condensed/400.css';
-import '@fontsource/ibm-plex-sans-condensed/500.css';
-import '@fontsource/ibm-plex-sans-condensed/600.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/plus-jakarta-sans/800.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
@@ -18,13 +17,19 @@ import './tokens.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import '@xterm/xterm/css/xterm.css';
-import './styles.css';
-import './workbench.css';
+// One stylesheet per owner: shared pieces first, then each area's (src/styles/), in this order.
+import './ui.css';
 import './shell.css';
 import './tile.css';
-import './screens.css';
-import './views.css';
-import './flight-deck.css';
+import './styles/chat.css';
+import './styles/linked.css';
+import './styles/start.css';
+import './styles/changes.css';
+import './styles/usage.css';
+import './styles/tasks.css';
+import './styles/setup.css';
+import './styles/settings.css';
+import './styles/workbench.css';
 
 // A stall or lost GPU context in this window is recorded in host-health.json, as the main process's are.
 startWindowHealth();

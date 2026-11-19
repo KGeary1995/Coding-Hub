@@ -80,3 +80,20 @@ describe('a Round Table message waiting to go', () => {
     expect(bar({})).not.toContain('image');
   });
 });
+
+describe('a Round Table bar and its token counts', () => {
+  const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
+  it('keeps who drives and the counts in a tooltip as well as in the bar, so a narrow tile can take them out of the bar', () => {
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} tokens={{ lead: 12_400, partner: 800 }} onRequest={() => {}} />);
+    expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews. New tokens today: Claude 12k · Codex 800">');
+    expect(html).toContain('<span class="table-roles">Claude drives · Codex reviews</span>');
+    expect(html).toMatch(/class="table-tokens tnum"[^>]*><b class="seat-text-claude">Claude 12k<\/b> · <b class="seat-text-codex">Codex 800<\/b>/);
+  });
+  it('has no counts where it is given none (a phone, a linked computer)', () => {
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} onRequest={() => {}} />);
+    expect(html).not.toContain('tokens'); expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews">');
+  });
+  it('keeps Swap’s label as its name where a narrow tile shows only its icon', () => {
+    expect(renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} onRequest={() => {}} />)).toMatch(/<span class="table-swap">Swap<\/span><\/button>/);
+  });
+});

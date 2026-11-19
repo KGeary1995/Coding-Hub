@@ -11,7 +11,7 @@ function windowsTree(pid: number): Promise<void> {
 }
 /** Returns true only when the root was verified gone but the PTY failed to report its exit. */
 export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: StopDependencies = {}): Promise<boolean> {
-  if (!Number.isSafeInteger(pty.pid) || pty.pid <= 1 || pty.pid === process.pid) throw new HubError('STOP_FAILED', 'The session PID is invalid. No process was terminated.');
+  if (!Number.isSafeInteger(pty.pid) || pty.pid <= 1 || pty.pid === process.pid) throw new HubError('STOP_FAILED', 'The channel’s process ID is invalid. No process was terminated.');
   const platform = dependencies.platform ?? process.platform; const alive = dependencies.isAlive ?? processAlive;
   let exited = false; void exit.then(() => { exited = true; });
   const wait = (milliseconds: number) => new Promise<boolean>((resolve) => { const timer = setTimeout(() => resolve(false), milliseconds); void exit.then(() => { clearTimeout(timer); resolve(true); }); });
@@ -19,7 +19,7 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
   if (platform === 'win32') {
     // Kill the child tree before closing ConPTY; killing its launcher first can orphan descendants.
     try { await (dependencies.killTree ?? windowsTree)(pty.pid); }
-    catch { if (!exited && alive(pty.pid)) throw new HubError('STOP_FAILED', 'Windows could not stop the CLI process tree. Retry Stop or check the session PID in Task Manager.'); }
+    catch { if (!exited && alive(pty.pid)) throw new HubError('STOP_FAILED', 'Windows could not stop the CLI process tree. Retry Stop or check the channel’s process ID in Task Manager.'); }
     // node-pty rejects every signal on Windows (and a deferred rejection throws later, outside this
     // try); only the argument-less kill closes the pseudoconsole. The tree is already gone, so node-pty
     // must not look up and end the console's processes by id itself (see skipConsoleProcessLookup).

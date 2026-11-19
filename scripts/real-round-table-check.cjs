@@ -7,11 +7,12 @@ const fs = require('node:fs'); const os = require('node:os'); const path = requi
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-table'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-real-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project });
 git('init', '-q'); fs.writeFileSync(path.join(project, 'README.md'), '# Scratch\n'); git('add', '.'); git('commit', '-qm', 'base');
-const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') }; delete env.ELECTRON_RUN_AS_NODE; delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
+const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') }; delete env.ELECTRON_RUN_AS_NODE; delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
 const args = ['--user-data-dir=' + path.join(root, 'profile'), repo, '--production'];
 const log = []; const note = (step, data) => { log.push({ step, at: new Date().toISOString(), ...data }); console.log(step, JSON.stringify(data).slice(0, 300)); };
 const shot = async (page, name) => { await page.screenshot({ path: path.join(out, `${name}.png`) }).catch(() => {}); };
@@ -37,8 +38,8 @@ const taskColumn = async (page) => page.evaluate(() => { for (const section of d
     await page.getByRole('button', { name: 'Tasks', exact: true }).first().click(); await page.getByRole('button', { name: 'New task', exact: true }).click();
     await page.getByLabel('Task title').fill('Create hello.txt containing the word hello');
     await page.getByLabel('Task details').fill('Codex, as reviewer: read hello.txt after the change and report anything wrong as a FINDING line (at least one, even a small one).');
-    const options = await page.getByLabel('Task agent session').locator('option').allTextContents(); note('channels', { options });
-    const lead = options.findIndex((text) => /^CH\d/.test(text) && !/not running/.test(text)); await page.getByLabel('Task agent session').selectOption({ index: lead });
+    const options = await page.getByLabel('Task agent channel').locator('option').allTextContents(); note('channels', { options });
+    const lead = options.findIndex((text) => /^CH\d/.test(text) && !/not running/.test(text)); await page.getByLabel('Task agent channel').selectOption({ index: lead });
     await page.getByRole('button', { name: 'Save and send', exact: true }).click(); note('task-sent', { channel: options[lead] });
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     const until = Date.now() + 9 * 60000; let allowed = 0; let state = null;

@@ -44,7 +44,7 @@ export function SessionGrid() {
       resizeHandles={['se']}
       onLayoutChange={(next) => setTiles(next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })))}
     >
-      {sessions.map((session, index) => <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} dense={sessions.length > 2} /></ErrorBoundary></div>)}
+      {sessions.map((session, index) => <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>)}
     </GridLayout>}
     </div>
   );

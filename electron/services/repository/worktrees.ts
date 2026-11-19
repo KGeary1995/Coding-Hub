@@ -77,7 +77,7 @@ export class WorktreeService {
       let root = this.root; try { root = fs.realpathSync(root); } catch { /* No worktrees created in this storage yet. */ }
       const managedLocation = record && (path.dirname(record.directory) === root || (path.basename(record.directory) === record.id && path.basename(path.dirname(record.directory)) === 'worktrees'));
       if (!record || !managedLocation) throw new HubError('UNKNOWN_WORKTREE', 'This worktree is not managed by Trace.');
-      if (this.inUse(record.directory)) throw new HubError('WORKTREE_IN_USE', 'Unbind all session panels from this worktree before removing it.');
+      if (this.inUse(record.directory)) throw new HubError('WORKTREE_IN_USE', 'Unbind all channels from this worktree before removing it.');
       // Removed outside the app (terminal, agent, restore elsewhere): let Git forget it and drop the record.
       if (!fs.existsSync(record.directory)) {
         if (fs.existsSync(record.repository)) { try { await git(record.repository, ['worktree', 'prune']); } catch { /* The record is still stale. */ } }

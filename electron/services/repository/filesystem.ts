@@ -23,7 +23,7 @@ export function validateRelativePath(relative: string, allowRoot = false) {
 export async function scopedPath(root: string, relative: string, allowRoot = false) {
   validateRelativePath(relative, allowRoot);
   const rootNow = await realpath(root);
-  if (rootNow !== root) throw new HubError('PROJECT_MOVED', 'The project directory changed. Select it again.');
+  if (rootNow !== root) throw new HubError('PROJECT_MOVED', 'The project folder changed. Select it again.');
   let current = root;
   for (const part of relative ? relative.split(process.platform === 'win32' ? /[\\/]/ : /\//) : []) {
     current = path.join(current, part);
@@ -83,12 +83,12 @@ export class RepositoryFiles {
 
   async open(owner: number, payload: unknown): Promise<RepositoryContext> {
     const parsed = openRepositorySchema.safeParse(payload);
-    if (!parsed.success || !path.isAbsolute(parsed.data.directory)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local project directory.');
+    if (!parsed.success || !path.isAbsolute(parsed.data.directory)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local project folder.');
     const epoch = this.epochs.get(owner) ?? 0;
     try {
       const directory = await realpath(parsed.data.directory);
       if (!(await stat(directory)).isDirectory()) throw new Error('Not a directory');
-      if (directory.split(path.sep).some((part) => part.toLowerCase() === '.git')) throw new HubError('INVALID_DIRECTORY', 'Choose the project working directory rather than Git metadata.');
+      if (directory.split(path.sep).some((part) => part.toLowerCase() === '.git')) throw new HubError('INVALID_DIRECTORY', 'Choose the project working folder rather than Git metadata.');
       if ((this.epochs.get(owner) ?? 0) !== epoch) throw new HubError('STALE_REPOSITORY', 'The repository view closed before this request completed.');
       if ([...this.contexts.values()].filter((context) => context.owner === owner).length >= 8) throw new HubError('REPOSITORY_LIMIT', 'Close an existing repository view before opening another.');
       const context = { id: randomUUID(), directory, owner };
@@ -96,7 +96,7 @@ export class RepositoryFiles {
       return { id: context.id, directory };
     } catch (error) {
       if (error instanceof HubError) throw error;
-      throw new HubError('DIRECTORY_UNAVAILABLE', 'The project directory could not be opened. Check that it exists and is readable.');
+      throw new HubError('DIRECTORY_UNAVAILABLE', 'The project folder could not be opened. Check that it exists and is readable.');
     }
   }
 
@@ -140,7 +140,7 @@ export class RepositoryFiles {
       }
       entries.sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name));
       return { path: relative, entries, limited };
-    } catch (error) { if (error instanceof HubError) throw error; throw new HubError('DIRECTORY_UNAVAILABLE', 'This directory could not be read. Refresh if the project changed.'); }
+    } catch (error) { if (error instanceof HubError) throw error; throw new HubError('DIRECTORY_UNAVAILABLE', 'This folder could not be read. Refresh if the project changed.'); }
   }
 
   async read(owner: number, payload: unknown): Promise<FilePreview> {

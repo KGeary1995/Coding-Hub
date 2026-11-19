@@ -75,9 +75,9 @@ export class RulesService {
     catch { throw new HubError('RULES_STATE', 'Saved shared rules could not be read. The existing file was preserved.'); }
   }
   private directory(input: string) {
-    if (!path.isAbsolute(input)) throw new HubError('RULES_DIRECTORY', 'Select an absolute project directory.');
+    if (!path.isAbsolute(input)) throw new HubError('RULES_DIRECTORY', 'Select an absolute project folder.');
     try { const directory = realDirectory(input); if (!fs.statSync(directory).isDirectory()) throw new Error(); return directory; }
-    catch { throw new HubError('RULES_DIRECTORY', 'A selected rules project is missing or inaccessible. Remove it from the selection or restore its directory.'); }
+    catch { throw new HubError('RULES_DIRECTORY', 'A selected rules project is missing or inaccessible. Remove it from the selection or restore its folder.'); }
   }
   read(directories: string[]): SharedRules {
     const { source, state } = this.state(); const seen = new Set<string>();
@@ -99,12 +99,12 @@ export class RulesService {
       // computer); its removal must be applied first so both engines start from the same instructions.
       for (const name of ['CLAUDE.md', 'AGENTS.md']) {
         let text: string | null = null; try { text = this.readFile(path.join(directory, name)).text; } catch { continue; }
-        if (text?.includes(START) || text?.includes(END)) throw new HubError('RULES_NOT_APPLIED', 'Shared rules were cleared, but this project still has the old rules. Apply the change in Shared rules before starting a session.');
+        if (text?.includes(START) || text?.includes(END)) throw new HubError('RULES_NOT_APPLIED', 'Shared rules were cleared, but this project still has the old rules. Apply the change in Shared rules before starting a channel.');
       }
       return;
     }
     const target = this.read([directory]).targets[0];
-    if (!target.applied) throw new HubError('RULES_NOT_APPLIED', 'Apply the current Shared rules to this project before starting a session. Both engines must receive the same saved rules.');
+    if (!target.applied) throw new HubError('RULES_NOT_APPLIED', 'Apply the current Shared rules to this project before starting a channel. Both engines must receive the same saved rules.');
   }
   save(content: string, revision: string, targets: RulesTargetReference[]): SharedRules {
     const { source, state } = this.state(); if (source.fingerprint !== revision) throw new HubError('RULES_CHANGED', 'Shared rules changed since you opened the editor. Reload before saving.');
@@ -149,7 +149,7 @@ export class RulesService {
    * projects, since a share or drive can be briefly unreachable). Only the registry changes: no project file is touched.
    */
   forget(input: string) {
-    if (!path.isAbsolute(input)) throw new HubError('RULES_DIRECTORY', 'Select an absolute project directory.');
+    if (!path.isAbsolute(input)) throw new HubError('RULES_DIRECTORY', 'Select an absolute project folder.');
     const { source, state } = this.state(); const key = folderKey(input); const matches = state.directories.filter((directory) => folderKey(directory) === key);
     if (!matches.length) throw new HubError('RULES_UNKNOWN', 'That project is not registered for shared rules. Reload Shared rules to see the current list.');
     if ([input, ...matches].some((directory) => present(directory))) throw new HubError('RULES_PRESENT', 'That project folder still exists, so Trace keeps it. Only a project whose folder was deleted can be removed here.');

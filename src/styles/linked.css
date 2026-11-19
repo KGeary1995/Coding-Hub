@@ -1,0 +1,48 @@
+/* A linked computer's tab: its channels and its screen. The tiles are drawn by tile.css, the sign-in forms are shared cards. */
+.linked-chat { height: 100%; }
+/* The workspace's 8 px gutters, not a page's 24 (ui.css gives the workspace the same rule), and its 8 px between tiles
+   (LinkedGrid): a linked computer's tiles sit where this computer's do, so nothing shifts between the two tabs. */
+.app-shell[data-view="computer"] .main-shell { padding: 8px; overflow: hidden; }
+.linked-computer { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; }
+.linked-computer-head { display: flex; align-items: center; gap: 12px; min-height: 32px; }
+.linked-computer-head h1 { flex: none; display: inline-flex; align-items: center; gap: 8px; margin: 0; font: var(--tr-t-heading); letter-spacing: normal; }
+.linked-computer-head h1 svg { color: var(--tr-accent); }
+/* How many channels, or why there are none; the screen's state in its own bar. As typed: no capitals added. */
+.linked-computer-status { min-width: 0; color: var(--tr-fg-dim); font: var(--tr-t-small); }
+.linked-computer-status.off { color: var(--tr-warning); }
+[data-contrast="high"] .linked-computer-status:not(.off) { color: var(--tr-fg); }
+.linked-computer > .ui-banner > span, .linked-screen > .ui-banner > span { flex: 1; }
+/* Nothing to show (no channels, not reachable, no longer linked): the empty state fills the tab, in its middle. Not
+   reachable is a failure, so it is the shared empty state's danger form. */
+.linked-empty { flex: 1; min-height: 0; }
+.linked-grid { flex: 1; min-height: 0; overflow: auto; }
+/* Tiles fill their grid cell, which the person moves and resizes; the arrangement is kept on this computer only. */
+.linked-tile { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+/* Close asks first. The question stays on one line, and the tile's other buttons give it their room meanwhile (as a
+   tile on this computer does while it closes): in a narrow tile it wrapped to three lines and pushed the state out. */
+.linked-close-confirm { flex: none; display: inline-flex; align-items: center; gap: 4px; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-strong); white-space: nowrap; }
+.linked-tile .tr-tile-head:has(.linked-close-confirm) > .tr-detail-button { display: none; }
+/* The terminal has the other computer's columns and rows (the tile's own once that computer applies them); when they do not fit, it scrolls here. */
+.linked-viewport { overflow: auto; }
+.linked-viewport .terminal-surface { width: max-content; height: max-content; }
+/* A linked computer's screen (noVNC draws it scaled to fit; its canvas is the focus target for keys). */
+/* It scrolls in itself: the tab does not scroll (the workspace's rule), and a sign-in form can be taller than a small window. */
+.linked-screen { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.linked-screen-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 32px; }
+.linked-screen-view { position: relative; flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); }
+.linked-screen-view[hidden] { display: none; }
+.linked-screen-paste { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+/* Sign in and unlock: a card in the middle of the tab's width, above the screen. */
+.linked-screen-signin { align-self: center; display: grid; gap: 12px; justify-items: start; width: 100%; max-width: 440px; }
+.linked-screen-signin > p:not(.ui-banner) { margin: 0; color: var(--tr-fg-muted); font: 400 13px/20px var(--tr-font-ui); }
+.linked-screen-signin > .ui-banner { margin: 0; }
+.linked-screen-signin .ui-field { width: 100%; }
+/* A field with its hint under it (the hint is outside the label: LinkedScreen). */
+.linked-screen-field { display: grid; gap: 4px; width: 100%; }
+/* The Windows lock note's help mark sits at the banner's end. */
+.linked-screen > .ui-banner > .ui-help { align-self: center; }
+.linked-screen-actions { display: flex; align-items: center; gap: 8px; }
+/* A check box or a select with its words: Display and the modifier swap in the screen's bar, and "Save on this
+   computer (encrypted)" in the sign-in form. */
+.linked-screen-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--tr-fg-muted); font: 400 13px/16px var(--tr-font-ui); }
+.linked-update-confirm { display: inline-flex; align-items: center; gap: 8px; font: 400 12px/16px var(--tr-font-ui); }

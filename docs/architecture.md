@@ -30,7 +30,8 @@ shared/  typed contracts and pure logic used by both sides
 | `phone/` | Phone web app, built to `dist/phone` |
 | `shared/` | Types and pure logic shared by host and renderer (`ipc.ts`, `hub.ts`, `types.ts`, `chat.ts`, `schemas.ts`, `terminal-input.ts`, `help-content.ts`, …) |
 | `scripts/` | Build, packaging and smoke-test scripts. See [development.md](development.md) |
-| `docs/design/trace/` | The visual design hand-off (tokens, prototypes, decisions) |
+| `docs/design/midnight/` | The visual design specification (Midnight): tokens, shared parts, rules for changing a screen |
+| `docs/design/trace/` | The earlier design hand-off and prototypes (historical), and `DECISIONS.md` |
 
 ## Host process
 
@@ -111,11 +112,11 @@ shared/  typed contracts and pure logic used by both sides
    - It enforces `maxSessionTokens`. If telemetry can't start while a token limit is set, the run is stopped, not left unenforced.
 8. **On exit:** telemetry finalizes, and auto-memory writes a session-summary note (new git status lines, commits, the agent's last message).
 
-### Approval alerts ("HOLD")
+### Approval alerts ("Needs you")
 
 1. Claude Code's `Notification` hook with type `permission_prompt` or `elicitation_dialog`, or Codex's OSC 9 notification, calls `PtyManager.notifyAttention`.
-2. That sends an `attention` event, and the tile shows HOLD.
-3. HOLD clears on:
+2. That sends an `attention` event, and the tile shows Needs you.
+3. Needs you clears on:
    - a real keystroke in that channel typed after the alert (`clearAttention`, `src/state/workspace-store.ts`; terminal replies are filtered by `isPersonInput`)
    - input from a paired phone
    - for Claude, a `PostToolUse` or `Stop` hook to `<hook url>/resolved` (`notifyResolved`), whose body is never read
@@ -174,8 +175,8 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
   - React 18 + TypeScript, built by Vite 6 (`base: './'`, dev server on `127.0.0.1:5173`)
   - zustand 5 stores, `react-grid-layout` for the channel grid, `lucide-react` icons
   - xterm 6 with the fit and WebGL addons. WebGL is opt-in through the `terminalWebGL` preference.
-  - **Styling:** plain CSS with `--tr-*` custom properties (`src/tokens.css`, `styles.css`, `shell.css`, `tile.css`, `screens.css`, `views.css`, `workbench.css`). Tailwind's utility classes are effectively unused, but `src/styles.css` starts with `@tailwind base`, which supplies the base reset, so don't remove Tailwind.
-  - **Fonts:** IBM Plex Sans Condensed and Plex Mono, bundled. `src/main.tsx` waits for Plex Mono before rendering, because terminals measure their cells when created.
+  - **Styling:** plain CSS with `--tr-*` custom properties from `src/tokens.css`, one stylesheet per owner, imported by `src/main.tsx` in this order: `src/ui.css` (element rules and every class more than one area uses), `src/shell.css` (the window frame), `src/tile.css` (channels), then `src/styles/` `chat`, `linked`, `start`, `changes`, `usage`, `tasks`, `setup`, `settings`, `workbench`. Rules of equal specificity are decided by that order, so a few rules sit in a later file than their owner to keep an override working. The phone app imports `src/styles/chat.css` for its chat view. Tailwind's utility classes are effectively unused, but `src/ui.css` starts with `@tailwind base`, which supplies the base reset, so don't remove Tailwind.
+  - **Fonts:** Inter (interface), Plus Jakarta Sans (titles) and IBM Plex Mono (terminals, code), bundled. `src/main.tsx` waits for Plex Mono before rendering, because terminals measure their cells when created.
 - **Navigation:** `App.tsx` switches on `useWorkspaceStore().activeView` (`NavigationView` in `src/state/workspace-store.ts`):
   - `workspace` → `SessionGrid` (+ `WorkspaceExplorer`)
   - `history` → `SessionHistory`
@@ -185,7 +186,7 @@ Each run's hook URL carries a 32-byte secret, checked with `timingSafeEqual`.
   - The shell around every view is `shell/Topbar`, `shell/StatusBar` and `shell/Toasts`.
 - **A channel tile** (`components/SessionTile.tsx`, design sheet 08): header with state chip and the header action, a detail row (facts and Stop, Settings, Task, Duplicate, Maximize, Close) that appears over the top of the terminal while the header is pointed at or focused (and sits in the flow, always shown, while settings are open or a notice follows the header), then `TerminalViewport.tsx` or `chat/ChatView.tsx`, then `tile/ScopeStrip.tsx` as the tile's foot (context gauge, tokens, output trace).
 - **Window health:** `src/runtime/window-health.ts`, started once in `src/main.tsx`, reports long tasks, late timers and a terminal's lost WebGL context (`terminals.ts` signals it, `use-native-host.ts` reports it) through `reportWindowHealth`.
-- **Channel state** (`src/state/channel-state.ts`): idle, starting, working, waiting (HOLD), limit, finished or failed.
+- **Channel state** (`src/state/channel-state.ts`): idle, starting, working, waiting (Needs you), limit, finished or failed.
 - **State:** `src/state/` holds zustand stores and pure helpers:
   - `workspace-store` holds sessions, tiles and views, and `applyEvent(SessionEvent)`
   - `hub-store` holds usage, preferences and `hubCall`

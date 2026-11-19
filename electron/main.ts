@@ -192,7 +192,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   catch {
     // Without a usage watcher a session token limit would silently go unenforced.
     if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null) {
-      reportStorageError('Usage recording is unavailable, so the session token limit cannot be enforced. The session was stopped.');
+      reportStorageError('Usage recording is unavailable, so the session token limit cannot be enforced. The channel was stopped.');
       setImmediate(() => void manager.stop(owner, { sessionId: run.sessionId, runId: run.runId }).catch(() => hostHealth?.record('token-limit-stop-failed')));
     } else reportStorageError('Usage recording is unavailable for this run.');
   }
@@ -444,7 +444,7 @@ function createWindow() {
     height: 980,
     minWidth: 900,
     minHeight: 640,
-    backgroundColor: '#101214',
+    backgroundColor: '#060a14',
     title: 'Trace',
     autoHideMenuBar: true,
     webPreferences: {
@@ -620,16 +620,16 @@ else app.whenReady().then(() => {
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
-  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all sessions and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
+  const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all channels and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
     exportFile: async () => (await dialog.showSaveDialog(window!, { title: 'Export local backup', defaultPath: `Trace-${app.getVersion()}.hub-backup.gz`, filters: [{ name: 'Trace backup', extensions: ['gz'] }] })).filePath ?? null,
     importFile: async () => { const selected = await dialog.showOpenDialog(window!, { title: 'Import local backup', properties: ['openFile'], filters: [{ name: 'Trace backup', extensions: ['gz'] }] }); return selected.canceled ? null : selected.filePaths[0] ?? null; },
-    confirmRestore: async (record) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Activate restored copy on restart', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Review verified restore', message: `${record.files} files · ${record.bytes} bytes · version ${record.appVersion}`, detail: 'The backup was checked and copied into a new local restore directory. Current data and project files remain intact. Credentials are excluded, so named profiles may need login again. This computer’s identity, paired phones and linked computers are kept as they are now. After the restart, sync between computers compares rules and settings with your other computers and asks you to choose where both sides changed. Restart to activate the restored copy.' })).response === 0 && !updateRestart,
+    confirmRestore: async (record) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Activate restored copy on restart', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Review verified restore', message: `${record.files} files · ${record.bytes} bytes · version ${record.appVersion}`, detail: 'The backup was checked and copied into a new local restore folder. Current data and project files remain intact. Credentials are excluded, so named profiles may need login again. This computer’s identity, paired phones and linked computers are kept as they are now. After the restart, sync between computers compares rules and settings with your other computers and asks you to choose where both sides changed. Restart to activate the restored copy.' })).response === 0 && !updateRestart,
     // The host asks, never the window: deleting a backup cannot be undone.
     confirmDelete: async (record) => (await dialog.showMessageBox(window!, { type: 'warning', buttons: ['Delete backup', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Delete local backup', message: `${new Date(record.createdAt).toLocaleString()} · ${record.files} files`, detail: 'The backup file is removed from this computer. Exported copies are not affected.' })).response === 0,
   });
   const confirmWorkflow = async (title: string, detail: string) => (await dialog.showMessageBox(window!, { type: 'question', title, message: title, detail, buttons: ['Confirm reviewed action', 'Cancel'], defaultId: 1, cancelId: 1 })).response === 0 && !updateRestart && !backups?.busy;
-  const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || scriptUpdate || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop coding sessions and verification before changing repositories or applying templates.'); };
+  const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || scriptUpdate || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop running channels and verification before changing repositories or applying templates.'); };
   delivery = new Delivery(confirmWorkflow, workflowReady);
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
@@ -855,11 +855,11 @@ else app.whenReady().then(() => {
     hasSessions: () => busyJobs(),
     installationFailed: () => { updateRestart = false; },
     prepareRestart: async (remote) => {
-      const answer = remote ? { response: 0 } : await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All CLI sessions must be stopped.' });
+      const answer = remote ? { response: 0 } : await dialog.showMessageBox(window!, { type: 'question', buttons: ['Restart and install', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Install update', message: 'Save your workspace and restart Trace?', detail: 'Local settings, history, rules, and memory remain in ~/.coding-hub. All channels must be stopped.' });
       if (answer.response !== 0) return false;
       updateRestart = true;
       try {
-        if (busyJobs()) throw new HubError('ACTIVE_SESSIONS', 'Stop all CLI sessions before restarting.');
+        if (busyJobs()) throw new HubError('ACTIVE_SESSIONS', 'Stop all channels before restarting.');
         if (workspaceLoaded) { await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('UPDATE_SAVE_FAILED', 'The workspace could not be saved. Resolve the storage issue before updating.'); }
         else throw new HubError('UPDATE_SAVE_FAILED', 'Load the local workspace successfully before updating.');
         // The installer closes Trace about two seconds after it starts and then ends it by force, so nothing slow may be
@@ -872,7 +872,7 @@ else app.whenReady().then(() => {
     },
   });
   handle(IPC_CHANNELS.updates, (_owner, payload) => updates!.execute(payload));
-  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage directory.'); return hub.executeAsync(payload); });
+  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage folder.'); return hub.executeAsync(payload); });
   handle(IPC_CHANNELS.openRepository, (owner, payload) => repositoryFiles.open(owner, payload));
   handle(IPC_CHANNELS.closeRepository, (owner, payload) => { repositoryFiles.close(owner, payload); return null; });
   handle(IPC_CHANNELS.listDirectory, (owner, payload) => repositoryFiles.list(owner, payload));
@@ -945,7 +945,7 @@ else app.whenReady().then(() => {
     // login discovery, preventing a session from racing a credential replacement.
     if (payload && typeof payload === 'object' && 'config' in payload) {
       const config = (payload as { config?: { engine?: string; accountProfileId?: string } }).config;
-      if (config?.engine === 'claude' && config.accountProfileId && accounts.activeProfileId === config.accountProfileId) throw new HubError('PROFILE_BUSY', 'Finish or cancel this profile’s login before starting a coding session.');
+      if (config?.engine === 'claude' && config.accountProfileId && accounts.activeProfileId === config.accountProfileId) throw new HubError('PROFILE_BUSY', 'Finish or cancel this profile’s login before starting a channel.');
     }
     return manager.start(owner, payload);
   });

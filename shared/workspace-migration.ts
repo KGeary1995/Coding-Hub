@@ -32,12 +32,26 @@ export function migrateWorkspace(saved: LegacySavedWorkspace | SavedWorkspace): 
 
 /**
  * Tiles for channels in order, as a layout lays them out: columns wrap after four, rows stack, and the grid keeps two
- * rows (five to eight channels sit three or four across). The window's arrangeTiles calls this.
+ * rows (five to eight channels sit three or four across). A grid's second row with fewer channels than the first shares
+ * the whole width (three channels: two above, one wide below), so no part of the window stays empty; in columns every
+ * tile keeps one width. The window's arrangeTiles calls this.
  */
 export function arrangeChannels(ids: string[], mode: SavedWorkspace['layoutMode']): GridTile[] {
   const columns = mode === 'rows' ? 1 : mode === 'columns' ? Math.min(4, ids.length) : ids.length <= 2 ? ids.length : Math.ceil(ids.length / 2);
-  const width = 12 / columns;
-  return ids.map((sessionId, index) => ({ sessionId, x: (index % columns) * width, y: Math.floor(index / columns) * 12, w: width, h: 12, minW: 3, minH: 10 }));
+  // The channels of a grid's short last row (one fewer than the row above, so 12 always divides evenly).
+  const short = mode === 'grid' ? ids.length % columns : 0;
+  return ids.map((sessionId, index) => { const width = 12 / (index < ids.length - short ? columns : short); return { sessionId, x: (index % columns) * width, y: Math.floor(index / columns) * 12, w: width, h: 12, minW: 3, minH: 10 }; });
+}
+
+/**
+ * A grid as Trace arranged it up to 1.23, when a short second row kept the upper row's width (three channels: the
+ * bottom-right quarter empty), laid out by today's rule. Only tiles that still stand exactly as that rule put them (the
+ * person moved or resized none); any other layout is the person's and comes back as it is.
+ */
+export function widenShortRow(tiles: GridTile[], mode: SavedWorkspace['layoutMode']): GridTile[] {
+  const columns = Math.ceil(tiles.length / 2); const width = 12 / columns;
+  if (mode !== 'grid' || tiles.length < 3 || tiles.length % columns === 0) return tiles;
+  return tiles.every((tile, index) => tile.x === (index % columns) * width && tile.y === Math.floor(index / columns) * 12 && tile.w === width && tile.h === 12) ? arrangeChannels(tiles.map((tile) => tile.sessionId), mode) : tiles;
 }
 
 /** A chain without Trace 1.20's Gemini steps and flags. */

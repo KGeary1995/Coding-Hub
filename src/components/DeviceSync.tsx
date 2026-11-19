@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MonitorSmartphone, RefreshCw } from 'lucide-react';
+import { CircleAlert, MonitorSmartphone, RefreshCw } from 'lucide-react';
 import type { DeviceSyncStatus, SyncedComputer, SyncedDocument } from '../../shared/hub';
 import type { LinkedComputer } from '../../shared/remote';
 import { useLinkedStore } from '../state/linked-store';
@@ -32,30 +32,32 @@ export function DeviceSyncCard() {
     const load = () => void hubCall<DeviceSyncStatus>({ action: 'device-sync-status' }).then(setStatus).catch((e) => setError(e.message));
     load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
   }, []);
-  if (!status) return error ? <p role="alert" className="error-message">{error}</p> : null;
+  const head = (state: string, tone: string) => <div className="ui-card-head"><MonitorSmartphone aria-hidden="true" /><h3 id="device-sync-title">Sync between computers</h3>
+    <span className={`ui-badge dot storage-status ${tone}`}>{state}</span></div>;
+  // Before the first answer the card is already there, so the Sync section is never a heading over nothing.
+  if (!status) return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">{error ? <>{head('Unavailable', 'danger')}<p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p></> : <>{head('Checking', 'neutral')}<p className="ui-hint">Checking sync…</p></>}</article>;
   const outside = outsideSyncFolder(linked, status);
-  return <article className="storage-card device-sync" aria-labelledby="device-sync-title">
-    <header><h2 id="device-sync-title"><MonitorSmartphone size={16} aria-hidden="true" />Sync between computers</h2>
-      <span className={`storage-status ${status.enabled && status.connected ? 'saved' : ''}`}>{!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable'}</span></header>
-    <p>Settings, shared rules, project templates and usage history follow you through the Drive folder above. Running sessions, recorded output and the project list stay on each computer.</p>
+  return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">
+    {head(!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable', status.enabled && status.connected ? 'saved success' : status.enabled ? 'warning' : 'neutral')}
+    <p>Settings, shared rules, project templates and usage history follow you through the Drive folder above. Running channels, recorded output and the project list stay on each computer.</p>
     {status.enabled && <>
-      <dl>
+      <dl className="settings-facts">
         <dt>This computer</dt><dd>{status.machine.name}</dd>
         <dt>Other computers</dt><dd>{status.computers.length ? status.computers.map((item) => `${item.name} (${when(item.updatedAt)})`).join(', ') : 'None seen yet'}</dd>
         <dt>Last sync</dt><dd>{status.lastSync ? when(status.lastSync) : 'Not yet'}</dd>
       </dl>
-      {status.conflicts.map((conflict) => <div key={conflict.document} className="device-sync-conflict" role="group" aria-label={`${DOCUMENT_LABEL[conflict.document]} conflict`}>
+      {status.conflicts.map((conflict) => <div key={conflict.document} className="ui-banner warning device-sync-conflict" role="group" aria-label={`${DOCUMENT_LABEL[conflict.document]} conflict`}>
         <p><strong>{DOCUMENT_LABEL[conflict.document]} changed here and on {conflict.from}.</strong> Nothing was overwritten. Choose which version both computers keep.</p>
-        <div className="hub-toolbar">
+        <div className="ui-actions">
           <button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-resolve', document: conflict.document, keep: 'local' })}>Keep this computer’s</button>
           <button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-resolve', document: conflict.document, keep: 'remote' })}>Use {conflict.from}’s</button>
         </div>
       </div>)}
-      {outside.length > 0 && <p role="alert" className="error-message">{outside.map((item) => item.name).join(', ')} {outside.length === 1 ? 'is' : 'are'} on your tailnet but not in this sync folder. Check that sync is on there and that both computers use the same Google Drive folder.</p>}
-      {status.error && <p role="alert" className="error-message">{status.error}</p>}
-      <div className="hub-toolbar"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
+      {outside.length > 0 && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{outside.map((item) => item.name).join(', ')} {outside.length === 1 ? 'is' : 'are'} on your tailnet but not in this sync folder. Check that sync is on there and that both computers use the same Google Drive folder.</span></p>}
+      {status.error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{status.error}</span></p>}
+      <div className="ui-actions"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
     </>}
-    {!status.enabled && <p className="control-note">Turn on “Sync settings, rules, templates and usage between computers” above and save. Do the same on each computer, with the same Drive folder.</p>}
-    {error && <p role="alert" className="error-message">{error}</p>}
+    {!status.enabled && <p className="ui-hint">Turn on “Sync settings, rules, templates and usage between computers” above and save. Do the same on each computer, with the same Drive folder.</p>}
+    {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;
 }

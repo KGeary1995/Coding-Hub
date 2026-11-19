@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { RoundTableState } from '../../../shared/chat';
-import { ChainBar, type ChainSeat, Item, waitingLabel } from './ChatParts';
+import { ChainBar, type ChainSeat, foldChainBar, Item, waitingLabel } from './ChatParts';
 
 const table = (step: NonNullable<RoundTableState['chain']>['step'], extra: Partial<RoundTableState> = {}): RoundTableState => ({ kind: 'hierarchy', partner: { sessionId: 'r', runId: 'r', engine: 'codex' }, driver: 'claude', rounds: 2, round: 1, phase: 'answering', agreed: false, chain: { step, task: 'Task', plan: 'Plan', report: '', reviewRound: 1, finalRound: 0, verdict: null, note: '' }, ...extra });
 const seats: ChainSeat[] = [
@@ -18,8 +18,9 @@ describe('the hierarchy bar says which model is at work', () => {
   });
   it('lists all three seats with what each is doing and its tokens today, the planner in its own colour', () => {
     const html = bar(table('implementing'));
-    expect(html).toContain('seat-hex seat-planner'); expect(html).toMatch(/Fable 5\.2<\/strong>Planner · running · 12k tok today/); expect(html).toMatch(/class="working"><i class="seat-hex seat-claude"[^>]*><\/i><strong>Opus 5\.5<\/strong>Builder · working/);
-    expect(html).toMatch(/Codex<\/strong>Reviewer · running<\/li>/);
+    expect(html).toContain('seat-hex seat-planner'); expect(html).toMatch(/Fable 5\.2<\/strong><span>Planner · running<span class="seat-tokens"> · 12k tok today<\/span>/); expect(html).toMatch(/class="working" title="48k new tokens today"><i class="seat-hex seat-claude"[^>]*><\/i><strong>Opus 5\.5<\/strong><span>Builder · working/);
+    // A seat with no tokens yet shows none, and has no tooltip.
+    expect(html).toMatch(/<li class=""><i class="seat-hex seat-codex"[^>]*><\/i><strong>Codex<\/strong><span>Reviewer · running<\/span><\/li>/);
   });
   it('labels the planner’s messages with its model, in its own colour', () => {
     const html = renderToStaticMarkup(<Item item={{ kind: 'assistant', id: 'a', blocks: [{ type: 'text', text: 'The plan.' }], streaming: '' }} results={{}} agent="Fable 5.2" author="planner" role="Planner" answer={() => () => {}} view={() => {}} />);
@@ -110,4 +111,48 @@ describe('the hierarchy bar: tasks from Tasks waiting', () => {
     drops[1](); expect(requests).toEqual([{ action: 'table-next-drop', index: 1, head: task('C').slice(0, 200) }]);
   });
   it('offers no Drop it on a table that is not open (the host could not do it)', () => { expect(state(true)).not.toContain('>Drop it<'); });
+});
+
+describe('the hierarchy bar folds in a tile too short for it', () => {
+  it('folds when the whole bar would leave the conversation less than half the tile, and only in a tile', () => {
+    // A four-tile grid at 1100x800: the whole bar 137 px over a 90 px thread in a 352 px tile.
+    expect(foldChainBar(137, 137 + 90, 352)).toBe(true);
+    // At 900x700 (292 px tile), and folded already (33 px bar, 162 px thread): the measure is the whole bar's, so it stays folded.
+    expect(foldChainBar(139, 139 + 28, 292)).toBe(true); expect(foldChainBar(139, 33 + 134, 292)).toBe(true);
+    // Four columns at 1440x900: 185 px of bar in an 808 px tile leaves 450 px of conversation, so it stays whole.
+    expect(foldChainBar(185, 185 + 450, 808)).toBe(false);
+    // Exactly half is enough; a box with no height (not in a tile, or not shown) never folds.
+    expect(foldChainBar(100, 300, 400)).toBe(false); expect(foldChainBar(100, 299, 400)).toBe(true); expect(foldChainBar(500, 0, 0)).toBe(false);
+  });
+  it('is drawn whole until it is measured (and on the phone, where it is not in a tile)', () => {
+    const html = bar(table('implementing'));
+    expect(html).toMatch(/^<div class="table-bar chain-bar" role="group" aria-label="Round Table">/); expect(html).not.toContain('chain-fold'); expect(html).not.toContain('chain-summary');
+  });
+  /** The bar's element tree, as the tests above walk it: each button by its text or name, with its class. */
+  const parts = (state: RoundTableState, busy = true) => {
+    const element = ChainBar({ table: state, busy, plannerName: 'Fable 5.2', builderName: 'Opus 5.5', seats, onRequest: () => {}, detached: undefined }) as unknown as { props: { summary: JSX.Element; children: unknown } };
+    const found: Record<string, string> = {};
+    const walk = (node: unknown) => { if (!node || typeof node !== 'object') return; if (Array.isArray(node)) { node.forEach(walk); return; } const { type, props } = node as { type?: unknown; props?: { children?: unknown; className?: string; 'aria-label'?: string } }; if (type === 'button') found[props?.['aria-label'] ?? renderToStaticMarkup(node as JSX.Element).replace(/<[^>]*>/g, '')] = props?.className ?? ''; walk(props?.children); };
+    walk(element.props.children); return { found, summary: renderToStaticMarkup(element.props.summary) };
+  };
+  it('keeps the step’s buttons and Close on the folded line, and every control in the bar', () => {
+    const working = parts(table('implementing')); expect(working.found['Stop']).toContain('chain-act'); expect(working.found['Close the Round Table']).toContain('chain-act');
+    const review = parts(table('plan-review'), false); expect(review.found['Approve plan']).toContain('chain-act'); expect(review.found['Stop']).toBeUndefined();
+    const stopped = parts({ ...table('stopped'), chain: { ...table('stopped').chain!, stoppedAt: 'challenging' } }, false);
+    expect(stopped.found['Continue']).toContain('chain-act'); expect(stopped.found['Continue without the challenge']).toContain('chain-act');
+  });
+  it('sums up what is running and who sits at each level, in their colours', () => {
+    const { summary } = parts(table('implementing'));
+    expect(summary).toContain('aria-live="polite"'); expect(summary).toContain('title="Opus 5.5 building… · planner Fable 5.2, builder Opus 5.5, reviewer Codex"');
+    expect(summary).toMatch(/^<span class="chain-summary"[^>]*>Opus 5\.5 building…<span aria-hidden="true"> · <\/span><b class="seat-text-planner">Fable 5\.2<\/b><span aria-hidden="true"> › <\/span><b class="seat-text-claude">Opus 5\.5<\/b><span aria-hidden="true"> › <\/span><b class="seat-text-codex">Codex<\/b><\/span>$/);
+    expect(parts(table('plan-review'), false).summary).toContain('Fable 5.2&#x27;s plan is ready');
+  });
+  it('draws a waiting message as a span of its own in the bar, which the sheet keeps in view on the folded line', () => {
+    // chat.css shows `span.table-waiting` under a folded bar's line: Send now and Drop it are the person's to press.
+    const html = renderToStaticMarkup(<ChainBar table={table('idle', { waiting: 'Next task', waitingKept: true })} busy={false} plannerName="Fable 5.2" builderName="Opus 5.5" seats={seats} onRequest={() => {}} />);
+    expect(html).toMatch(/<span class="table-waiting" role="status">Kept from before Trace restarted: <q>Next task<\/q><button[^>]*>Send now<\/button><button[^>]*>Drop it<\/button>/);
+    // It is a child of the bar itself, which is what the sheet's rule selects.
+    const element = ChainBar({ table: table('needs-you', { waiting: 'Next task' }), busy: false, plannerName: 'Fable 5.2', builderName: 'Opus 5.5', seats, onRequest: () => {}, detached: undefined }) as unknown as { props: { children: unknown[] } };
+    expect(element.props.children.flat().some((child) => (child as { type?: string; props?: { className?: string } } | null)?.type === 'span' && (child as { props: { className: string } }).props.className === 'table-waiting')).toBe(true);
+  });
 });

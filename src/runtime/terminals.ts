@@ -187,7 +187,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);
   terminal.writeln('');
-  terminal.writeln('Choose a project, then start this session.');
+  terminal.writeln('Choose a project, then start this channel.');
   terminal.writeln('Your local CLI manages authentication and approvals.');
   terminal.writeln('');
   terminal.writeln('\x1b[2mNo process started. Usage appears after a reported CLI response.\x1b[0m');

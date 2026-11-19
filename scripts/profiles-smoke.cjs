@@ -6,6 +6,7 @@ const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { waitForPage } = require('./lib/wait.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-account-profiles-')));
   const bin = path.join(root, 'bin'); const project = path.join(root, 'project'); const legacy = path.join(root, 'legacy-claude');
@@ -18,7 +19,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { claude: 'fixture.cjs' } }));
     await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, 'claude.cmd'), '@echo off\r\n');
   } else await fs.writeFile(path.join(bin, 'claude'), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: legacy, ANTHROPIC_API_KEY: 'fixture-inherited-key', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-inherited-token' };
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: legacy, ANTHROPIC_API_KEY: 'fixture-inherited-key', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-inherited-token' };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
@@ -52,17 +53,17 @@ const { removeFolder } = require('./lib/cleanup.cjs');
       assert.equal(status.find((item) => item.provider === 'claude').state, 'authenticated');
       assert.equal(await fs.readFile(path.join(root, 'storage/claude-profiles', profile.id, 'fixture-authenticated'), 'utf8'), 'fixture-only');
     }
-    await page.getByRole('button', { name: 'Go to workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     await addChannel(page, 'Claude Code');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
     for (const [tileIndex, profileIndex] of [[0, 0], [2, 1]]) {
       const tile = page.locator('.session-tile').nth(tileIndex);
-      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
+      await (await tileControl(tile, `Engine settings for channel ${tileIndex + 1}`)).click();
       await tile.getByLabel('Claude account profile', { exact: true }).selectOption(profiles[profileIndex].id);
-      await (await tileControl(tile, `Engine settings for session ${tileIndex + 1}`)).click();
-      await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+      await (await tileControl(tile, `Engine settings for channel ${tileIndex + 1}`)).click();
+      await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     }
     await page.waitForFunction(() => document.querySelectorAll('.session-tile[data-status="running"]').length === 2);
     // READY can scroll out of a short tile in the four-tile grid; check the startup output each run received.
@@ -71,7 +72,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
       const tile = page.locator('.session-tile').nth(index); await tile.locator('.xterm-helper-textarea').focus();
       await page.keyboard.type('profile-session-' + index); await page.keyboard.press('Enter');
     }
-    await waitForPage(page, async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; }, undefined, 'Usage was not recorded for both profile sessions.');
+    await waitForPage(page, async () => { const usage = await window.codingHub.hub({ action: 'usage' }); return usage.ok && usage.value.length === 2; }, undefined, 'Usage was not recorded for both profile channels.');
     const history = await native(page, 'listHistory'); assert.equal(history.length, 2);
     assert.deepEqual(history.map((run) => run.config.accountProfileId).sort(), profiles.map((profile) => profile.id).sort());
     const reconnect = await page.evaluate((profileId) => window.codingHub.accounts({ action: 'login', provider: 'claude', profileId, cols: 80, rows: 24 }), profiles[0].id);
@@ -101,6 +102,6 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     assert.equal(await page.locator('.account-profile-chip').count(), 2);
     assert.equal((await native(page, 'accounts', { action: 'profile-list' })).length, 2);
     if (process.env.CODING_HUB_PROFILES_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_PROFILES_SCREENSHOT });
-    console.log('PASS: independent Claude logins, preserved default account, simultaneous profile sessions, per-profile usage, reconnect guard, private login output, and restored profile assignments. Fixture CLIs; real OAuth requires desktop provider login.');
+    console.log('PASS: independent Claude logins, preserved default account, simultaneous profile channels, per-profile usage, reconnect guard, private login output, and restored profile assignments. Fixture CLIs; real OAuth requires desktop provider login.');
   } finally { await app?.close().catch(() => {}); await removeFolder(root); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

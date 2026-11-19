@@ -56,12 +56,12 @@ const legacyGeminiConfigSchema = z.object({ engine: z.literal('gemini'), model: 
 const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, legacyGeminiConfigSchema, shellConfigSchema]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
-export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.'), config: channelConfigSchema, ...dimensions }).strict();
+export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.'), config: channelConfigSchema, ...dimensions }).strict();
 export const writeSessionSchema = runReferenceSchema.extend({ data: z.string().max(64 * 1024) }).strict();
 export const resizeSessionSchema = runReferenceSchema.extend(dimensions).strict();
 export const ackSessionSchema = runReferenceSchema.extend({ bytes: z.number().int().min(0).max(64 * 1024 * 1024) }).strict();
 
-const directory = z.string().max(4096).refine((value) => !value.includes('\0'), 'Invalid directory path.');
+const directory = z.string().max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.');
 const binding = z.discriminatedUnion('mode', [z.object({ mode: z.literal('workspace') }).strict(), z.object({ mode: z.literal('independent'), cwd: directory }).strict()]);
 const sessionFields = {
   id: identifier, title: z.string().min(1).max(160), binding,
@@ -83,7 +83,7 @@ function checkLayout(workspace: { sessions: { id: string; roundTable?: { partner
   /** A Round Table's partner runs inside its lead's tile, so it has none (1.16.0 and 1.16.1 saved one; hydrate drops it). */
   const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger].filter((id): id is string => Boolean(id) && id !== session.id && ids.has(id!)) : []));
   if (ids.size !== workspace.sessions.length || tileIds.size !== workspace.tiles.length || [...tileIds].some((id) => !ids.has(id)) || [...ids].some((id) => !seated.has(id) && !tileIds.has(id))) context.addIssue({ code: 'custom', message: 'Each channel must have exactly one grid tile.' });
-  if (workspace.focusedSessionId && !ids.has(workspace.focusedSessionId)) context.addIssue({ code: 'custom', message: 'The focused session does not exist.' });
+  if (workspace.focusedSessionId && !ids.has(workspace.focusedSessionId)) context.addIssue({ code: 'custom', message: 'The focused channel does not exist.' });
   for (const tile of workspace.tiles) if (tile.x + tile.w > 12 || tile.w < tile.minW || tile.h < tile.minH) context.addIssue({ code: 'custom', message: 'Invalid grid dimensions.' });
   workspace.tiles.forEach((tile, index) => {
     if (workspace.tiles.slice(index + 1).some((other) => tile.x < other.x + other.w && tile.x + tile.w > other.x && tile.y < other.y + other.h && tile.y + tile.h > other.y)) context.addIssue({ code: 'custom', message: 'Grid tiles must not overlap.' });

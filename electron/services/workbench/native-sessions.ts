@@ -93,7 +93,7 @@ export class NativeSessions {
     const request = z.discriminatedUnion('action', [z.object({ action: z.literal('native-list') }).strict(), z.object({ action: z.literal('native-resume'), key: z.string().max(200), directory: z.string().max(4096).optional() }).strict()]).parse(input);
     const items = await this.list(); if (request.action === 'native-list') return items;
     const conversation = items.find((item) => item.key === request.key); if (!conversation) throw new HubError('NATIVE_SESSION', 'The CLI conversation is no longer available. Refresh the list.');
-    const selected = request.directory ?? conversation.directory; if (!selected) throw new HubError('NATIVE_SESSION', 'Choose a project directory for this conversation.');
+    const selected = request.directory ?? conversation.directory; if (!selected) throw new HubError('NATIVE_SESSION', 'Choose a project folder for this conversation.');
     return { conversation, directory: directory(selected) };
   }
 }

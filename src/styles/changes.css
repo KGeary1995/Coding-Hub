@@ -1,0 +1,157 @@
+/* Changes and Files (Midnight): the repository page, the review card beside the delivery card, the file browser, the
+   tree, the diff, the workspace explorer and worktrees. Cards, rows, badges, banners and empty states are the shared
+   parts in ui.css; what is here is only layout, the tree, the code and diff wells and the delivery stepper. */
+.tr-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The page fills the window; its cards scroll inside. The heading is the shared page heading, with the folder as its line. */
+.app-shell .main-shell:has(> .tr-repo) { padding: 0; overflow: hidden; }
+.repository-panel.tr-repo { height: 100%; max-width: none; width: 100%; display: flex; flex-direction: column; padding: 24px; }
+.tr-repo > .ui-page-head { flex: none; }
+.tr-subhead-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); line-height: 20px; }
+.tr-subhead-select select { max-width: 240px; }
+/* A message fills the page as a card with the shared empty state in it (ui-card and ui-empty are in the markup). */
+.repository-empty { flex: 1; min-height: 180px; }
+.tr-repo .repository-message { min-height: 240px; }
+
+/* Changes: the review card (branch line above it) and the delivery card side by side; stacked in a narrow window. */
+.tr-changes-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
+/* No repository, so no delivery card: the message takes the whole width instead of leaving that column empty. */
+.tr-changes-grid:not(:has(> .tr-delivery)) { grid-template-columns: minmax(0, 1fr); }
+/* The two cards start on one line: the delivery card begins below the branch line (a 20 px badge and the 12 px gap). */
+.tr-changes-grid:has(.git-context) > .tr-delivery { margin-top: 32px; }
+.tr-changes-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.tr-changes-main > .ui-banner { flex: none; }
+.git-context { flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.git-context code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); color: var(--tr-fg-dim); background: none; }
+.git-context .ui-badge svg { width: 12px; height: 12px; }
+
+/* The browser card: a list at the left, the code or diff at the right on the terminal well. */
+.repository-workbench { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); padding: 0; overflow: hidden; }
+.repository-sidebar { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--tr-line); }
+.repository-sidebar > header { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 16px; border-bottom: 1px solid var(--tr-line-faint); }
+.repository-sidebar > header > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-sidebar > header small { color: var(--tr-fg-dim); }
+.repository-list-scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+.repository-sidebar > footer { flex: none; padding: 12px 16px; border-top: 1px solid var(--tr-line-faint); }
+.change-group { padding: 4px 0 8px; }
+.change-group h3 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; padding: 4px 4px 0; font: 600 12px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.change-entry { gap: 8px; }
+.change-entry strong { font: 500 12px/16px var(--tr-font-mono); }
+.change-letter { min-width: 20px; justify-content: center; padding: 0 4px; font-family: var(--tr-font-mono); }
+
+/* The tree: dense rows indented 16 px a level; the selected file is the shared selected row's form. */
+.file-tree { list-style: none; margin: 0; padding: 0; }
+.file-tree-entry { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 calc(8px + var(--depth, 0) * 16px); border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); text-align: left; font: var(--tr-t-control); }
+.file-tree-entry > svg, .tree-spacer { flex-shrink: 0; }
+.file-tree-entry > span:not(.tree-spacer) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-tree-entry small { margin-left: auto; font-size: 11px; color: var(--tr-fg-dim); }
+.file-tree-entry:hover { background: var(--tr-hover); color: var(--tr-fg); }
+.file-tree-entry.selected { background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); color: var(--tr-fg-strong); }
+.file-tree-entry:disabled { opacity: .45; }
+.folder-icon { color: var(--tr-fg-dim); }
+.tree-spacer { width: 12px; }
+.tree-message { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.tree-message.error-message { color: var(--tr-danger); }
+
+/* Code and diff: mono on the terminal well, under a heading on the card. */
+.file-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tr-well); }
+.file-preview > .ui-banner { flex: none; margin: 12px 16px 0; }
+.file-preview > .ui-banner + :not(.ui-banner) { margin-top: 12px; }
+.code-heading { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--tr-line-faint); }
+.code-heading h2 { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 500 13px/20px var(--tr-font-mono); }
+/* Nothing chosen yet: the heading is a label ("File preview"), not a path, so it is not mono. */
+.code-heading h2:not([title]) { font-family: var(--tr-font-ui); font-weight: 600; }
+.code-heading h2 svg { flex-shrink: 0; color: var(--tr-accent); }
+.code-heading .review-badge { margin-left: auto; }
+.diff-counts + .review-badge { margin-left: 0; }
+.code-metadata { flex: none; display: flex; gap: 16px; padding: 8px 16px; border-bottom: 1px solid var(--tr-line-faint); font: var(--tr-t-small); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.source-code, .diff-code { flex: 1; min-height: 0; overflow: auto; padding: 8px 0; background: var(--tr-term); font: var(--tr-t-term); tab-size: 4; }
+.source-line, .diff-line { display: flex; min-width: max-content; }
+.line-number { flex-shrink: 0; min-width: 48px; padding: 0 12px; text-align: right; font-size: 12px; color: var(--tr-fg-faint); user-select: none; }
+.source-line code, .diff-line code { white-space: pre; padding-right: 24px; font: inherit; color: var(--tr-fg-muted); }
+.source-line code { padding-left: 12px; }
+.source-line:hover { background: var(--tr-hover); }
+.diff-counts { display: flex; align-items: center; gap: 8px; margin-left: auto; font: 600 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
+.diff-counts span:first-child { color: var(--tr-add); }
+.diff-counts span:last-child { color: var(--tr-del); }
+.diff-line { padding-left: 4px; }
+.diff-prefix { flex-shrink: 0; width: 20px; color: var(--tr-fg-dim); user-select: none; }
+.diff-line.addition { background: var(--tr-add-bg); box-shadow: inset 2px 0 var(--tr-add); }
+.diff-line.addition code, .diff-line.addition .diff-prefix { color: var(--tr-add); }
+.diff-line.deletion { background: var(--tr-del-bg); box-shadow: inset 2px 0 var(--tr-del); }
+.diff-line.deletion code, .diff-line.deletion .diff-prefix { color: var(--tr-del); }
+.diff-line:is(.hunk, .meta) { background: var(--tr-panel); }
+.diff-line:is(.hunk, .meta, .notice) code { font-size: 12px; color: var(--tr-fg-dim); }
+.rename-detail { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--tr-line-faint); font: var(--tr-t-meta); color: var(--tr-fg-dim); }
+.rename-detail span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Delivery: a card holding a vertical stepper, numbered circles joined by a line. The head, an error, the last step's
+   output and the closing note stay put; only the steps scroll. A faint line above and below them (as in the review
+   card's list) shows where they pass out of sight, so a half-shown step reads as scrolled, not as cut off. */
+.delivery-panel.tr-delivery { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.tr-delivery > .ui-card-head { flex: none; margin: 0; }
+.tr-delivery > .ui-banner { flex: none; }
+.tr-delivery-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 0; border-block: 1px solid var(--tr-line-faint); }
+/* Nothing to show (the repository could not be read): no lines around an empty box. */
+.tr-delivery-scroll:empty { border: 0; }
+.tr-delivery-scroll > .tr-step-meta { display: flex; align-items: center; gap: 8px; }
+.tr-steps { list-style: none; margin: 0; padding: 0; }
+.tr-step { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding-bottom: 20px; }
+.tr-step:last-child { padding-bottom: 0; }
+.tr-step:not(:last-child)::before { content: ""; position: absolute; left: 12px; top: 32px; bottom: 8px; width: 1px; background: var(--tr-line); }
+.tr-step-dot { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--tr-line-control); border-radius: 50%; background: var(--tr-well); font: 600 12px/1 var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-muted); }
+.tr-step.done .tr-step-dot { border-color: color-mix(in srgb, var(--tr-success) 40%, transparent); background: color-mix(in srgb, var(--tr-success) 14%, transparent); color: var(--tr-success); }
+.tr-step-body { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* The title is as tall as its circle, and its line of facts sits 4 px under it, closer than the controls below. */
+.tr-step-head { display: flex; flex-direction: column; gap: 4px; }
+.tr-step-head > h3 { line-height: 24px; }
+.tr-step-meta { margin: 0; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.tr-step-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tr-delivery .delivery-form { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 0; }
+.tr-delivery .delivery-form > :is(input, textarea, select, .ui-field) { align-self: stretch; }
+/* A long label wraps in the narrow column instead of being cut. */
+.tr-delivery :is(.tr-step-actions, .delivery-form, .tr-delivery-result) > .button { max-width: 100%; padding: 8px 12px; white-space: normal; text-align: center; }
+.delivery-file-list { max-height: 200px; overflow-y: auto; }
+.delivery-file-list > label { cursor: pointer; }
+.delivery-file-list code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); color: var(--tr-fg); background: none; }
+.tr-step-note { flex: none; }
+.tr-delivery-result { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.tr-delivery-result pre { align-self: stretch; max-height: 160px; }
+@container shell (max-width: 1180px) { .tr-changes-grid { grid-template-columns: minmax(0, 1fr) 300px; } .repository-workbench { grid-template-columns: 220px minmax(0, 1fr); } }
+/* A narrow window: the delivery card goes under the review card and the page scrolls. Sharing the window's height
+   instead left the diff six lines at 940 × 700. */
+@container shell (max-width: 960px) {
+  .app-shell .main-shell:has(> .tr-changes) { overflow-y: auto; }
+  .repository-panel.tr-changes { flex: none; height: auto; min-height: 100%; }
+  .tr-changes-grid { flex: none; grid-template-columns: minmax(0, 1fr); }
+  .tr-changes-main { height: 480px; }
+  .tr-changes-grid:has(.git-context) > .tr-delivery { margin-top: 0; }
+  .tr-delivery-scroll { overflow-y: visible; }
+}
+
+/* The workspace explorer beside the tiles; over them in a narrow window. */
+.workspace-explorer { width: 260px; flex-shrink: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.workspace-explorer > .ui-card-head { flex: none; margin: 0; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--tr-line-faint); }
+.workspace-explorer .repository-list-scroll { min-height: 200px; }
+.workspace-explorer .repository-list-scroll > .control-note { padding: 8px; }
+.explorer-preview { flex: none; max-height: 260px; overflow: auto; margin: 0; padding: 12px 16px; border-top: 1px solid var(--tr-line-faint); background: var(--tr-term); font: var(--tr-t-meta); color: var(--tr-fg-muted); white-space: pre; }
+/* The file's name over its text, on the card, so the well holds only the file. */
+.explorer-preview-path { flex: none; margin: 0; padding: 8px 16px; border-top: 1px solid var(--tr-line-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explorer-preview-path code { font: var(--tr-t-meta); color: var(--tr-fg-dim); background: none; }
+.explorer-preview-path + .explorer-preview { border-top: 0; }
+/* No file chosen, a binary file or an error: words, not file text, so not mono and not on the terminal well. */
+.explorer-preview.hint { background: none; font: var(--tr-t-small); color: var(--tr-fg-faint); white-space: normal; }
+.explorer-preview.hint.error-message { color: var(--tr-danger); }
+@media (max-width: 1180px) { .workspace-explorer { position: absolute; z-index: 4; inset: 0 auto 0 0; box-shadow: var(--tr-shadow-overlay); } }
+
+/* Worktrees: the controls in a tile's settings (src/tile.css lays them out there) and the list in Settings. */
+.worktree-controls { display: grid; gap: 8px; }
+.worktree-manager { display: flex; flex-direction: column; gap: 12px; }
+.worktree-manager > .ui-card-head { margin: 0; }
+.worktree-row { flex-wrap: wrap; }
+/* Confirming: the question and its buttons take a line under the branch. */
+.worktree-row:has(> .control-note) > .ui-row-main { flex-basis: 100%; }
+.worktree-row > .control-note { flex: 1; max-width: none; }
+.worktree-row code { font: var(--tr-t-meta); }
+/* The closing note is a line of a form page: 72 characters at most (spec, section 6). */
+.worktree-manager > .control-note { max-width: 72ch; }

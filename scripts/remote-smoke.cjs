@@ -5,6 +5,7 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 /** Not Trace's own port (47821), so the test also runs while an installed Trace is open. */
 const PORT = 47831;
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
@@ -29,9 +30,9 @@ ${terminalFixture}
       await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
     } else await fs.writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
   }
-  // The computer counts as away (idle for 10 minutes), so the phone gets its size as soon as it asks; while the person
-  // uses the computer the desktop keeps its size, which linked-computers.test.ts covers.
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_DESKTOP_IDLE: '600', CODING_HUB_TEST_REMOTE_PORT: String(PORT) }; delete env.ELECTRON_RUN_AS_NODE;
+  // The computer counts as in use (no idle time): opening a channel on the phone still draws it at the phone's size at
+  // once, as Fit to phone does. A phone's automatic request, which the desktop wins, is covered by linked-computers.test.ts.
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_DESKTOP_IDLE: '0', CODING_HUB_TEST_REMOTE_PORT: String(PORT) }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -76,38 +77,58 @@ ${terminalFixture}
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.
     const tile = page.locator('.session-tile').nth(1);
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
-    await tile.getByRole('button', { name: 'Start session', exact: true }).click();
-    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'running' }).waitFor();
+    await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
+    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'Working' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();
+    // Opening a terminal channel takes it at the phone's size: the text is at the chosen size (13 px) from the start,
+    // never shrunk to the desktop's width, and the CLI is redrawn at the phone's columns.
+    const textSize = () => phone.locator('#output .xterm-rows').evaluate((element) => getComputedStyle(element).fontSize);
+    const fitButton = () => phone.locator('#fit-phone').textContent();
+    assert.equal(await textSize(), '13px', 'a channel opens with its text at the chosen size');
+    assert.equal(await fitButton(), 'Desktop size', 'a channel opens at the phone\'s size');
+    const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
+    const reported = () => phone.evaluate(() => Number([...document.getElementById('output').textContent.matchAll(/SIZE:(\d+)x/g)].at(-1)?.[1]));
+    for (let i = 0; i < 50 && (await reported()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const opened = await reported(); assert.ok(opened >= 20 && opened <= 60, `the CLI reports the phone's columns on opening (${opened})`);
+    assert.equal(await width(), opened, 'the computer draws the channel at the columns the CLI reports');
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-open.png') });
     // Tapping the terminal opens the message box; the terminal itself takes no typing (a phone keyboard garbles it).
     await phone.locator('#output').click(); await phone.waitForFunction(() => document.activeElement?.id === 'text');
     await phone.locator('#output .xterm-helper-textarea').evaluate((element) => element.focus()); await phone.keyboard.type('stray'); await phone.waitForTimeout(300);
     await phone.locator('#text').fill('need-approval'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#waiting').filter({ hasText: 'Approval requested: npm test' }).waitFor();
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
+    assert.equal(await page.locator('.tr-toast.waiting').count(), 0, 'A channel whose tile is on screen raises no desktop notice');
     // Needs you lists the approval with its exact request, on the computer and on the phone's channel list.
     await page.getByRole('button', { name: 'Needs you · 1', exact: true }).click();
     await page.getByRole('dialog', { name: 'Needs you' }).getByText('Approval requested: npm test').waitFor(); await page.keyboard.press('Escape');
     await app.evaluate(({ BrowserWindow }, url) => { const list = new BrowserWindow({ width: 390, height: 844, show: true, title: 'phone-list' }); void list.loadURL(url); }, `http://127.0.0.1:${PORT}/#needs-you-check`);
     let listPage; for (let i = 0; i < 50 && !listPage; i++) { listPage = app.windows().find((item) => item.url().endsWith('#needs-you-check')); if (!listPage) await new Promise((resolve) => setTimeout(resolve, 100)); }
     listPage.setDefaultTimeout(20000); await listPage.locator('#needs-you').filter({ hasText: 'CH2 needs approval' }).filter({ hasText: 'Approval requested: npm test' }).waitFor(); await listPage.close();
+    // On another page of the computer the channel's tile is not on screen, so its notice is drawn there.
+    await page.locator('.tr-tabs').getByRole('button', { name: 'Tasks', exact: true }).click(); await page.locator('.tr-toast.waiting').filter({ hasText: 'CH2 needs approval' }).waitFor();
     await phone.getByRole('button', { name: 'y', exact: true }).click(); await phone.getByRole('button', { name: 'Enter', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:y' }).waitFor();
-    await tile.locator('.session-attention').waitFor({ state: 'detached' });
     await phone.locator('#waiting').waitFor({ state: 'hidden' });
-    assert.equal(await page.locator('.tr-toast.waiting').count(), 0, 'Answering on the phone clears the desktop notice');
+    // Answering on the phone clears the desktop notice, and the request on the tile.
+    await page.locator('.tr-toast.waiting').waitFor({ state: 'detached' }); await page.locator('.tr-tabs').getByRole('button', { name: 'Workspace', exact: true }).click();
+    await tile.waitFor(); assert.equal(await tile.locator('.session-attention').count(), 0, 'Answering on the phone clears the request on the tile');
     // Restarting the channel on the computer starts the phone's view afresh, and typing reaches the new run.
     await (await tileControl(tile, 'Stop')).click();
     await (await tileControl(tile, 'Restart')).click();
     await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
+    // The restarted run is drawn at the phone's size again without a touch: its first size, the desktop's, is not the
+    // desktop taking the channel back.
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) <= 60, 'a channel restarted on the computer is drawn at the phone\'s size again');
+    assert.equal(await fitButton(), 'Desktop size'); assert.equal(await textSize(), '13px');
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-channel.png') });
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
     assert.equal(await phone.locator('#text').inputValue(), '', 'a delivered message leaves the field');
     // The phone shows the channel at its own size (the CLI redraws for it), so the text fills the phone.
-    const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     const phoneCols = await width(); assert.ok(phoneCols >= 20 && phoneCols <= 60, `the channel is drawn at the phone's width (${phoneCols} columns)`);
     // Typing at the desktop takes the channel back, and the phone does not take it again by itself (its screen changing
@@ -128,6 +149,22 @@ ${terminalFixture}
     await visibility('visible');
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) <= 60, 'unlocking the phone draws the channel at its size again');
+    // Desktop size gives the channel back and is remembered on this phone: the channel opens at the desktop's size next
+    // time, with its text shrunk to the screen's width, and touching it does not take it. Fit to phone takes it again.
+    await phone.getByRole('button', { name: 'Desktop size', exact: true }).click();
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'Desktop size gives the desktop its size back');
+    assert.equal(await fitButton(), 'Fit to phone');
+    assert.equal(await phone.evaluate(() => localStorage.getItem('trace-remote-fit')), 'desktop', 'the choice is remembered on this phone');
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
+    await phone.locator('#output').filter({ hasText: 'READY' }).waitFor(); await phone.locator('#output').click(); await phone.waitForTimeout(600);
+    assert.ok((await width()) > 60, 'after Desktop size, the channel opens at the desktop\'s size');
+    assert.equal(await fitButton(), 'Fit to phone'); assert.ok(parseFloat(await textSize()) < 13, 'the desktop\'s layout is shown with its text shrunk to fit');
+    await phone.getByRole('button', { name: 'Fit to phone', exact: true }).click();
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) <= 60, 'Fit to phone draws the channel at the phone\'s size');
+    assert.equal(await fitButton(), 'Desktop size'); assert.equal(await textSize(), '13px');
+    assert.equal(await phone.evaluate(() => localStorage.getItem('trace-remote-fit')), null, 'Fit to phone clears the remembered choice');
     // A message that cannot be delivered stays in the field instead of being lost.
     const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
@@ -229,7 +266,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.locator('.phone-card').filter({ hasText: 'Plan limits' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-usage.png') });
     await phone.locator('.tabbar').getByRole('button', { name: 'Tasks' }).click();
-    await phone.getByText('No tasks. Give a channel a task on the computer', { exact: false }).waitFor();
+    await phone.locator('.empty').filter({ has: phone.getByText('No tasks', { exact: true }) }).getByText('Give a channel a task on the computer', { exact: false }).waitFor();
     await phone.locator('.tabbar').getByRole('button', { name: 'History' }).click();
     await phone.locator('.screen-host').filter({ hasNotText: 'Loading' }).waitFor();
     assert.equal(await phone.locator('.screen-host .error').count(), 0, 'history loads without an error');
@@ -272,7 +309,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
-    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, channels drawn at the phone’s size and given back, guided Tailscale HTTPS setup, and revocation.');
+    console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, terminal channels opened at the phone’s size even while the computer is in use, Desktop size remembered on the phone, channels given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
     await app?.close().catch(() => {});
     await removeFolder(root);

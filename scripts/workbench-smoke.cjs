@@ -5,6 +5,7 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-workbench-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
@@ -16,7 +17,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
       await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), fixture); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
     } else await fs.writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
   }
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -25,10 +26,10 @@ const { removeFolder } = require('./lib/cleanup.cjs');
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); let page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     await page.getByRole('button', { name: 'Use channels without a project', exact: true }).click(); assert.equal(await page.locator('.tr-empty').count(), 0);
-    await (await tileControl(page, 'Engine settings for session 1')).click();
-    await page.locator('.session-tile').first().getByLabel('Working directory', { exact: true }).selectOption('independent');
+    await (await tileControl(page, 'Engine settings for channel 1')).click();
+    await page.locator('.session-tile').first().getByLabel('Working folder', { exact: true }).selectOption('independent');
     await page.locator('.session-tile').first().getByLabel('Repository path', { exact: true }).fill(project);
-    await (await tileControl(page, 'Engine settings for session 1')).click();
+    await (await tileControl(page, 'Engine settings for channel 1')).click();
     assert.equal(await page.locator('.tr-empty').count(), 0);
     await page.evaluate(() => localStorage.removeItem('coding-hub-setup-complete'));
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
@@ -48,7 +49,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await page.getByRole('button', { name: 'Prepare Codex coaching', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Preparing a report must not launch a provider CLI');
     await page.evaluate(() => { window.events = []; window.codingHub.onSessionEvent((event) => window.events.push(event)); });
-    const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+    const tile = page.locator('.session-tile').nth(2); await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     // READY can be in scrollback in a short software-rendered tile. Verify the
     // received startup event and the latest rendered size line independently.
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('READY')));
@@ -56,13 +57,13 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     assert.equal(await page.evaluate(() => window.events.filter((event) => event.type === 'data').some((event) => event.data.includes('ECHO:'))), false, 'Start must not auto-answer trust prompts or send coaching');
     await tile.getByRole('button', { name: 'Send coaching request', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('ECHO:Read COACHING_REPORT.md')));
-    // The channel tile: state chip, a scope trace drawn from real output, and a detail row that waits for the header.
-    assert.equal(await tile.getByRole('status', { name: 'Channel 3 run', exact: true }).textContent(), '●RUN');
+    // The channel tile: state badge, an output trace drawn from real output, and a detail row that waits for the header.
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 working', exact: true }).textContent(), 'Working');
     await page.waitForFunction(() => { const ys = [...document.querySelectorAll('.session-tile')[2].querySelector('.tr-scope-trace').getAttribute('d').matchAll(/ (-?[\d.]+)/g)].map((match) => Number(match[1])); return new Set(ys).size > 1; });
     await page.mouse.move(1, 1);
     const detail = tile.locator('.tr-tile-detail');
     await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '0');
-    // Shown, the row has its own height and stays clear of the header's state chip and action buttons.
+    // Shown, the row has its own height and stays clear of the header's state badge and action buttons.
     const detailShown = async () => {
       await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
       await page.waitForFunction(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.opacity === '1' && style.transform === 'none'; });
@@ -71,7 +72,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
       for (const other of others) assert.ok(other.right <= row.left || other.left >= row.right || other.bottom <= row.top || other.top >= row.bottom, 'The detail row lies over the header');
     };
     await detailShown();
-    assert.match(await detail.textContent(), /pid \d+ · cwd /);
+    assert.match(await detail.textContent(), /pid \d+ · folder /);
     await page.mouse.move(1, 1);
     // Enter on the tile itself moves into its terminal.
     await tile.focus(); await page.keyboard.press('Enter');
@@ -79,17 +80,27 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     // An approval request shows on the tile until the person answers in the terminal.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
-    assert.equal(await tile.getByRole('status', { name: 'Channel 3 hold', exact: true }).textContent(), '◆HOLD');
+    assert.equal(await tile.getByRole('status', { name: 'Channel 3 needs you', exact: true }).textContent(), 'Needs you');
     assert.equal(await tile.getAttribute('data-state'), 'waiting');
     const toast = page.locator('.tr-toast.waiting');
-    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
+    // Its tile is on screen and says so itself (the strip, the badge), so no notice is drawn; the status bar always says it.
     assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
+    assert.equal(await toast.count(), 0, 'A channel whose tile is on screen raises no notice');
+    // On another page its tile is not on screen: the notice is drawn there, and leaves again back on the workspace.
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
+    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
+    await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+    await tile.locator('.session-attention').waitFor(); await toast.waitFor({ state: 'detached' });
     // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
-    await (await tileControl(page, 'Isolate session 1')).click();
+    await (await tileControl(page, 'Isolate channel 1')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
+    // Hidden behind the isolated channel, CH3 has its notice.
+    assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
     await page.locator('.tr-sb-alert').click();
     await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile')?.textContent.includes('Approval requested'));
+    // Its tile is on screen again, so the notice has left.
+    await toast.waitFor({ state: 'detached' });
     await (await tileControl(page, 'Restore grid')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 3);
     await tile.getByRole('button', { name: 'Answer in terminal', exact: true }).click(); await page.keyboard.type('y'); await page.keyboard.press('Enter');
@@ -105,7 +116,8 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile') === document.querySelectorAll('.session-tile')[2]);
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('fail-launch'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
-    await page.getByRole('button', { name: 'Retry CH3', exact: true }).waitFor();
+    // The failed tile is on screen: Retry is in its header, and no notice is drawn.
+    await tile.getByRole('button', { name: 'Retry', exact: true }).waitFor(); assert.equal(await page.locator('.tr-toast.failed').count(), 0, 'A failed channel whose tile is on screen raises no notice');
     // With an error line under the header the row sits in the flow and stays shown, so it never covers the line or its button.
     await detailShown(); await page.mouse.move(1, 1);
     assert.equal(await page.evaluate(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.position + ' ' + style.opacity; }), 'static 1');
@@ -119,7 +131,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await app.close(); app = null;
     app = await _electron.launch({ executablePath: require('electron'), args, env }); page = await app.firstWindow(); await page.waitForSelector('.tr-empty, .session-tile');
     assert.equal(await page.locator('.tr-empty').count(), 0); assert.equal((await native(page, 'coaching', { action: 'list' })).length, 1);
-    console.log('PASS: coding tiles, curated coaching selection/review/consent, separate idle report session, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
+    console.log('PASS: coding tiles, curated coaching selection/review/consent, separate idle report channel, explicit request delivery, approval requests answered in the terminal, visible alternate-screen Codex failures, default-settings recovery, and persistent setup dismissal. Fixture CLIs; provider outcomes are not measured.');
   } catch (error) {
     // Print what each tile showed, so a CI failure includes the CLI's own output and the app's diagnostic.
     try { for (const window of app ? app.windows() : []) console.error('Visible state at failure:\n' + await window.evaluate(() => [...document.querySelectorAll('.session-tile')].map((tile, index) => `tile ${index}: error=${JSON.stringify(tile.querySelector('.session-error')?.textContent ?? null)} terminal=${JSON.stringify((tile.querySelector('.xterm-rows')?.textContent ?? '').slice(-600))}`).join('\n') + '\nevents=' + JSON.stringify((window.events ?? []).filter((event) => event.type !== 'data' || /Error|fixture/.test(event.data)).slice(-12)))); } catch { /* The window may be gone. */ }

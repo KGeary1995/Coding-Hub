@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { CircleAlert, LoaderCircle, MessagesSquare, RefreshCw } from 'lucide-react';
 import type { ChannelTranscript } from '../../../shared/remote';
 import { ToolCard } from './ChatParts';
 import { Markdown } from './Markdown';
@@ -20,8 +20,12 @@ export function TranscriptView({ agent, load, where }: { agent: string; load: ()
     <div className="transcript-bar"><span>Whole conversation{where ? ` on ${where}` : ''}, across restarts{transcript?.messages.length === 200 ? ' (latest 200 messages)' : ''}</span>
       <button className="tr-detail-button" disabled={loading} onClick={read}><RefreshCw size={12} className="tr-detail-icon" /><span className="tr-detail-label">{loading ? 'Reading' : 'Refresh'}</span></button></div>
     <div className="chat-thread" ref={scroller} role="log" aria-label={`${agent} conversation`}>
-      {error && <p className="chat-notice error" role="alert">{error}</p>}
-      {transcript === null && <p className="chat-empty">No saved conversation yet. It appears once {agent} has answered in this channel.</p>}
+      {/* Until the first read is back: a line saying so, not a blank thread. A failed read is an error state; Refresh tries again. */}
+      {transcript === undefined && !error && <div className="chat-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" /><strong>Reading the conversation…</strong></div>}
+      {error && transcript?.messages.length ? <p className="chat-notice error" role="alert">{error}</p> : null}
+      {error && !transcript?.messages.length && <div className="chat-empty error" role="alert"><CircleAlert aria-hidden="true" /><strong>The conversation could not be read</strong><p>{error}</p></div>}
+      {/* A transcript with nothing in it yet reads the same as none: the sentence, not a blank thread. */}
+      {!error && (transcript === null || transcript?.messages.length === 0) && <div className="chat-empty"><MessagesSquare aria-hidden="true" /><strong>No saved conversation yet</strong><p>It appears once {agent} has answered in this channel.</p></div>}
       {transcript?.messages.map((message, index) => message.role === 'user'
         ? <div key={index} className="chat-message user">{message.images > 0 && <p className="chat-notice">{message.images === 1 ? '1 image' : `${message.images} images`}</p>}{message.text && <p className="chat-user-text">{message.text}</p>}</div>
         : <div key={index} className="chat-message assistant">{message.blocks.map((block, part) => block.type === 'text' ? <Markdown key={part} text={block.text} />

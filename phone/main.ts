@@ -1,14 +1,15 @@
-import '@fontsource/chakra-petch/400.css';
-import '@fontsource/chakra-petch/600.css';
-import '@fontsource/chakra-petch/700.css';
-import '@fontsource/ibm-plex-sans-condensed/400.css';
-import '@fontsource/ibm-plex-sans-condensed/600.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/plus-jakarta-sans/700.css';
+import '@fontsource/plus-jakarta-sans/800.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@xterm/xterm/css/xterm.css';
 import '../src/tokens.css';
 import './phone.css';
 import { mountChat, receiveChat, receiveReplay } from './chat';
-import { mountScreen } from './screens';
+import { ENGINE_ICON, iconSvg, mountScreen } from './screens';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/terminal-theme';
@@ -16,15 +17,16 @@ import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { atPhoneSize, FIT_KEY, fitsOnOpen, takenBack } from './size';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
-/** In two rows, all in view without scrolling: the named keys, then the arrows and the usual answers. */
+/** In three rows, all in view without scrolling and each key at least 44 px wide: the named keys, the arrows, the usual answers. */
 const KEYS: { label: string; name?: string; data: string }[][] = [
   // Shift+Tab switches Claude Code's mode (plan, auto-accept); a phone keyboard has neither it nor a reliable Backspace here.
   [{ label: 'Enter', data: '\r' }, { label: 'Esc', data: '\x1b' }, { label: 'Tab', data: '\t' }, { label: '⇧Tab', name: 'Shift Tab', data: '\x1b[Z' },
     { label: 'Ctrl C', data: '\x03' }, { label: '⌫', name: 'Backspace', data: '\x7f' }],
-  [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' },
-    { label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
+  [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }],
+  [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
 const ENGINE = { claude: 'Claude Code', codex: 'Codex', shell: 'Terminal' } as const;
 
@@ -79,8 +81,8 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
   leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
-  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), screen);
-  if (tab === 'more') main.append(h('h2', { className: 'section-title' }, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Show its screen'));
+  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), directNotice(), screen);
+  if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Screen')));
   app.replaceChildren(header(), main, tabBar(tab));
   unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
   listen(null);
@@ -88,14 +90,19 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
 /** The chat shown, as it was when it was drawn: it is drawn again when that chat starts, stops or restarts. */
 let shownChat: string | null = null;
 
-const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : 'idle';
-const word = { waiting: 'needs you', running: 'running', idle: 'idle' } as const;
+const state = (channel: RemoteChannel) => channel.attention ? 'waiting' : channel.running ? 'running' : channel.failed ? 'failed' : 'idle';
+/** The state in the words the computer's tiles use (src/state/channel-state.ts); the phone knows four of the seven. */
+const word = { waiting: 'Needs you', running: 'Working', failed: 'Failed', idle: 'Idle' } as const;
+/** The state as a badge in its colour: working in the engine's, as on the computer's tiles. */
+const badge = (channel: RemoteChannel, className = '') => { const now = state(channel); return h('span', { className: `badge ${{ waiting: 'waiting', running: channel.engine, failed: 'danger', idle: 'neutral' }[now]} ${className}` }, word[now]); };
+/** An engine's avatar, as on the computer's tiles. The SVG is fixed markup, not data. */
+function avatar(engine: RemoteChannel['engine']) { const element = h('span', { className: `avatar ${engine}`, aria: { hidden: 'true' } }); element.innerHTML = iconSvg(ENGINE_ICON[engine]); return element; }
 
-/** Trace's mark: the reticle (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
+/** Trace's mark: the keycap (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
 function mark(big = false) {
   const element = h('span', { className: `mark ${big ? 'big' : ''}` });
   // The app icon's keycap (scripts/make-icon.cjs, its 32 px drawing), the same as the desktop top bar's.
-  element.innerHTML = '<svg width="20" height="20" viewBox="34 33 188 188" aria-hidden="true"><path transform="translate(0 16)" fill-rule="evenodd" fill="#b9700f" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 50H180A8 8 0 0 1 188 58V78A8 8 0 0 1 180 86H154A6 6 0 0 0 148 92V150A8 8 0 0 1 140 158H116A8 8 0 0 1 108 150V92A6 6 0 0 0 102 86H76A8 8 0 0 1 68 78V58A8 8 0 0 1 76 50Z"/><path fill-rule="evenodd" fill="#ffb547" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z"/></svg><span>TRACE</span>';
+  element.innerHTML = '<svg width="20" height="20" viewBox="34 33 188 188" aria-hidden="true"><path transform="translate(0 16)" fill-rule="evenodd" class="mark-lip" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 50H180A8 8 0 0 1 188 58V78A8 8 0 0 1 180 86H154A6 6 0 0 0 148 92V150A8 8 0 0 1 140 158H116A8 8 0 0 1 108 150V92A6 6 0 0 0 102 86H76A8 8 0 0 1 68 78V58A8 8 0 0 1 76 50Z"/><path class="mark-face" fill-rule="evenodd" d="M101 35H155c19.570 0 29.354 0 37.073 3.197a42 42 0 0 1 22.730 22.730c3.197 7.718 3.197 17.503 3.197 37.073V140.000c0 19.570 0 29.354 -3.197 37.073a42 42 0 0 1 -22.730 22.730c-7.718 3.197 -17.503 3.197 -37.073 3.197H101c-19.570 0 -29.354 0 -37.073 -3.197a42 42 0 0 1 -22.730 -22.730c-3.197 -7.718 -3.197 -17.503 -3.197 -37.073V98.000c0 -19.570 0 -29.354 3.197 -37.073a42 42 0 0 1 22.730 -22.730c7.718 -3.197 17.503 -3.197 37.073 -3.197ZM76 66H180A8 8 0 0 1 188 74V94A8 8 0 0 1 180 102H154A6 6 0 0 0 148 108V166A8 8 0 0 1 140 174H116A8 8 0 0 1 108 166V108A6 6 0 0 0 102 102H76A8 8 0 0 1 68 94V74A8 8 0 0 1 76 66Z"/></svg><span>Trace</span>';
   return element;
 }
 function header(back?: () => void, title?: Node, ...tools: Node[]) {
@@ -117,10 +124,11 @@ function showPair(error = '') {
   const message = h('p', { className: 'error', aria: { role: 'alert' } }, error);
   const form = h('form', { className: 'pair' },
     mark(true),
-    h('h1', {}, 'Pair this phone'),
-    h('p', { className: 'dim' }, 'Enter the code shown in Trace on your computer, under Settings → Phone access. Scanning its QR code fills it in.'),
-    h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
-    h('button', { className: 'primary', type: 'submit' }, 'Pair'), message);
+    h('div', { className: 'pair-card' },
+      h('h1', {}, 'Pair this phone'),
+      h('p', { className: 'dim' }, 'Enter the code from Settings → Phone access in Trace on your computer.'),
+      h('label', {}, 'Pairing code', codeInput), h('label', {}, 'Name for this phone', nameInput),
+      h('button', { className: 'primary', type: 'submit' }, 'Pair'), message));
   form.onsubmit = async (event) => {
     event.preventDefault(); message.textContent = '';
     try { await pair(codeInput.value.trim(), nameInput.value.trim()); history.replaceState(null, '', '/'); showList(); }
@@ -129,7 +137,7 @@ function showPair(error = '') {
   app.replaceChildren(form);
 }
 
-const linkText = () => !connected ? 'reconnecting…' : via ? `live · ${via}` : 'live';
+const linkText = () => !connected ? 'Reconnecting…' : via ? `Live · ${via}` : 'Live';
 function listen(sessionId: string | null) {
   stop?.();
   stop = follow(sessionId, onEvent, (value: boolean, target: Target, problem?: string) => {
@@ -137,7 +145,8 @@ function listen(sessionId: string | null) {
     for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = linkText(); }
     // While nothing is connected, the list says which computer this app is asking for and why it does not answer.
     const text = !value && problem ? problem : via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : '';
-    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !text; notice.textContent = text; }
+    const notice = document.getElementById('direct'); if (notice) { notice.hidden = !text; notice.querySelector('.banner-text')!.textContent = text; }
+    showEmpty();
     // On its own computer, the phone picks up keys to the others, so it can still reach them when this one is off.
     if (value && !target.id) void collectKeys().catch(() => {});
   }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
@@ -151,8 +160,10 @@ function channelControls(channel: RemoteChannel): Node[] {
     const button = event.currentTarget as HTMLButtonElement; button.disabled = true;
     try { await control(channel.sessionId, value); } catch (e) { alertText((e as Error).message); } finally { button.disabled = false; }
   };
+  // Restart and Stop are icons with their names, leaving the channel's name room beside them in the header. Fixed markup, not data.
+  const iconButton = (className: string, value: ChannelControl, label: string, paths: string) => { const button = h('button', { className: `small icon-only ${className}`, type: 'button', title: label, onclick: press(value), aria: { label: `${label} CH${channel.channel}` } }); button.innerHTML = iconSvg(paths); return button; };
   return channel.running
-    ? [h('button', { className: 'quiet', type: 'button', onclick: press('restart'), aria: { label: `Restart CH${channel.channel}` } }, 'Restart'), h('button', { className: 'quiet stop', type: 'button', onclick: press('stop'), aria: { label: `Stop CH${channel.channel}` } }, 'Stop')]
+    ? [iconButton('', 'restart', 'Restart', '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'), iconButton('stop', 'stop', 'Stop', '<rect width="14" height="14" x="5" y="5" rx="2"/>')]
     : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')];
 }
 /** Waits until `find` returns something from the channel list as the computer updates it; null after `ms`. */
@@ -194,18 +205,30 @@ function addMenu() {
   return h('div', { id: 'add-wrap', className: 'add-wrap', hidden: !me?.canRun }, menu, button);
 }
 
+/** No channels: the list keeps its place, with an empty state in it. The SVG is fixed markup, not data. */
+function emptyList() {
+  const element = h('div', { id: 'empty', className: 'empty', hidden: true }); element.innerHTML = iconSvg(ENGINE_ICON.shell);
+  element.append(h('strong', {}, 'No channels'), h('p', {}, 'Open a project in Trace on your computer.')); return element;
+}
+/** Why this app's computer does not answer, or that the phone went to another one, as api.ts and listen() word it. The SVG is fixed markup. */
+function directNotice() {
+  const element = h('p', { id: 'direct', className: 'banner warning', hidden: !via, aria: { role: 'status' } });
+  element.innerHTML = iconSvg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>');
+  element.append(h('span', { className: 'banner-text' })); return element;
+}
 function showList() {
   leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
-  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), h('p', { id: 'direct', className: 'ask-banner', hidden: !via, aria: { role: 'status' } }), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, h('p', { id: 'empty', className: 'dim', hidden: true }, 'No channels yet. Open a project in Trace on your computer.'), alertsPanel()), h('footer', {}, remove));
+  app.replaceChildren(header(undefined, undefined, h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen(), title: 'See and control this computer\'s screen' }, 'Screen')), h('main', { className: 'list' }, h('h1', {}, 'Channels'), h('section', { id: 'needs-you', className: 'needs-you', aria: { label: 'Needs you' } }), directNotice(), h('nav', { id: 'computer-switcher', className: 'switcher', hidden: true, aria: { label: 'Computer' } }), list, emptyList(), alertsPanel()), h('footer', {}, remove));
   app.append(addMenu(), h('p', { id: 'phone-alert', className: 'phone-alert', aria: { live: 'polite' } }), tabBar('channels'));
   renderList(); listen(null);
 }
 
 /** Keys a phone keyboard lacks, as X keysyms. */
-const SCREEN_KEYS: [string, number, string][] = [['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']];
+/** Two rows of four, so each key is at least 44 px wide on a phone. */
+const SCREEN_KEYS: [string, number, string][][] = [[['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter']], [['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]];
 let viewer: RFB | null = null;
 /**
  * The computer's own screen, carried over this remote: a Mac's through its screen-sharing server (macOS Screen Sharing),
@@ -227,7 +250,7 @@ async function showScreen() {
   // What the phone's keyboard inserts goes over as key presses; the field itself stays empty.
   typing.addEventListener('input', () => { if (typing.value) { send(unlockKeys(typing.value).filter((key) => key.keysym !== 0xff0d)); typing.value = ''; } });
   typing.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === 'Backspace') { event.preventDefault(); send([{ keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: true }, { keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: false }]); } });
-  const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, h('div', {}, ...SCREEN_KEYS.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label))));
+  const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, ...SCREEN_KEYS.map((row) => h('div', {}, ...row.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label)))));
   const back = () => { viewer?.disconnect(); viewer = null; showList(); };
   app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
   try {
@@ -256,7 +279,7 @@ function alertsPanel() {
       onclick: async () => { render(null, ''); try { if (on) await disableAlerts(); else await enableAlerts(); render(await alertsOn()); } catch (e) { render(on, (e as Error).message); } } }, on ? 'Turn off alerts' : 'Turn on alerts');
     panel.replaceChildren(h('h2', { id: 'alerts-title' }, 'Alerts'),
       h('p', { className: 'dim' }, on ? 'This phone is told when a channel needs you or stops with an error.' : 'Get a notification when a channel needs you or stops with an error, even with Trace closed.'),
-      !alertsSupported() ? h('p', { className: 'dim' }, ios ? 'On iPhone and iPad, add Trace to your Home Screen first (Share → Add to Home Screen), then open it from there.' : 'This browser cannot receive alerts.') : button,
+      !alertsSupported() ? h('p', { className: 'dim' }, ios ? 'On iPhone and iPad, alerts need Trace on the Home Screen (Share → Add to Home Screen).' : 'This browser cannot receive alerts.') : button,
       h('p', { className: 'error', aria: { role: 'alert' } }, note));
   };
   render(null); if (alertsSupported()) void alertsOn().then((on) => render(on)).catch(() => render(false)); else render(false);
@@ -293,10 +316,14 @@ function renderNeeds() {
   const flagged = phoneTasks.filter((task) => task.status === 'review' || (task.status === 'working' && task.outcome && task.outcome !== 'finished'));
   const why = (task: RemoteTask) => task.status === 'review' ? 'ready for review' : task.outcome === 'failed' ? 'channel failed' : task.outcome === 'stopped' ? 'channel stopped' : task.outcome === 'blocked' ? 'waiting for you' : task.outcome === 'unconfirmed' ? 'not confirmed done' : 'gone quiet';
   box.hidden = !asking.length && !flagged.length;
-  box.replaceChildren(h('h2', {}, `Needs you · ${asking.length + flagged.length}`), h('ul', {},
+  box.replaceChildren(h('h2', {}, 'Needs you ', h('span', { className: 'count waiting' }, String(asking.length + flagged.length))), h('ul', {},
     ...asking.map((channel) => h('li', {}, h('button', { type: 'button', className: 'need waiting', onclick: () => showChannel(channel.sessionId) }, h('strong', {}, `CH${channel.channel} needs approval`), h('span', {}, channel.attention ?? '')))),
     ...flagged.map((task) => h('li', {}, h('button', { type: 'button', className: `need ${task.outcome ?? 'review'}`, onclick: () => showTab('tasks') }, h('strong', {}, task.title), h('span', {}, `${task.channel ? `CH${task.channel} · ` : ''}${why(task)}`))))));
 }
+/** What a channel is, under its name: the engine (unless that is its name), a chat or a Round Table (two agents in one channel), and whose computer. */
+const meta = (channel: RemoteChannel, several: boolean) => [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, channel.table ? 'Round Table' : channel.chat ? 'Chat' : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · ');
+/** "No channels" only while the computer answers: while it does not, the notice above the list says why nothing is listed. */
+function showEmpty() { const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0 || !connected; }
 function renderList() {
   const list = document.getElementById('channel-list'); if (!list) return;
   renderNeeds(); readTasks();
@@ -305,13 +332,12 @@ function renderList() {
   const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;
   list.replaceChildren(...shown.map((channel) => h('li', {},
     h('button', { className: `channel ${state(channel)}`, dataset: tone(channel), onclick: () => showChannel(channel.sessionId) },
-      h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`),
-      h('span', { className: 'name' }, channel.title, account(channel), (channel.title !== ENGINE[channel.engine] || several) && h('small', {}, [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · '))),
-      // A Round Table is two agents in one channel, not a single chat.
-      h('span', { className: 'tag' }, channel.table ? `Round Table · ${word[state(channel)]}` : channel.chat ? `chat · ${word[state(channel)]}` : word[state(channel)]),
+      avatar(channel.engine),
+      h('span', { className: 'main' }, h('span', { className: 'line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('strong', {}, channel.title)), (meta(channel, several) || channel.account) && h('span', { className: 'line' }, meta(channel, several) && h('small', {}, meta(channel, several)), account(channel))),
+      badge(channel, 'tag'),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
-      channel.attention && h('span', { className: 'ask' }, channel.attention)))));
-  const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0;
+      channel.attention ? h('span', { className: 'ask' }, channel.attention) : !channel.running && channel.failed && h('span', { className: 'ask failed' }, channel.failed)))));
+  showEmpty();
   const add = document.getElementById('add-wrap'); if (add) add.hidden = !me?.canRun;
 }
 
@@ -323,23 +349,28 @@ function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
  * when the phone leaves the channel or disconnects, or the person types at the desktop. A− / A+ change the text size
  * (remembered on the phone), which changes how much fits.
  *
- * The phone holds that size only while it is in use: it is given back when the phone is locked or the app is in the
- * background, and once the desktop has taken it back the phone asks again only when the person uses the phone (opens
- * the channel, touches it, types or changes the text size), not when it merely reconnects or its screen changes.
+ * Opening a terminal channel takes it at the phone's size at once, even while the computer is in use, as "Fit to
+ * phone" does (phone/size.ts): every request carries `force`. The phone holds that size only while it is in use: it
+ * is given back when the phone is locked or the app is in the background, and once the desktop has taken it back the
+ * phone asks again only when the person uses the phone (opens the channel, touches it, types or changes the text
+ * size), not when it merely reconnects, wakes or its screen changes. "Desktop size" is remembered on the phone: the
+ * next channel opens at the desktop's size, and the phone asks for nothing until "Fit to phone".
  */
 const SIZE_KEY = 'trace-remote-font';
 let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) || 13));
+let chosenSize = localStorage.getItem(FIT_KEY);
 let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
 /** Whether the phone wants the channel at its size, and the size it last asked for. */
 let holding = false; let asked: { cols: number; rows: number } | null = null; let askedBefore: { cols: number; rows: number } | null = null;
 /**
- * Whether the channel is drawn at the phone's size right now. While the person uses the computer it keeps the
- * desktop's size (the desktop wins), and the phone shows that layout with its text shrunk to fit the screen's width.
+ * Whether the computer has drawn the channel at the phone's size. At the desktop's size the phone shows that layout
+ * with its text shrunk to fit the screen's width. `shownAtPhone`: what the button shows, and so what pressing it does.
  */
-let granted = false; let forceNext = false;
-/** The person is using the phone: the channel is drawn at the phone's size again. */
-function useChannel() { if (holding && sentSize) return; holding = true; sentSize = ''; requestSize(); }
-function requestSize() {
+let granted = false; let askAgain = false; let shownAtPhone = false;
+/** The person is using the phone: the channel is drawn at the phone's size again, unless they chose "Desktop size". */
+function useChannel() { if (!fitsOnOpen(chosenSize) || (holding && sentSize)) return; holding = true; sentSize = ''; requestSize(); }
+/** `wait` gathers a burst of screen changes into one request; a channel's fresh screen asks at once. */
+function requestSize(wait = 200) {
   if (!holding || document.visibilityState !== 'visible') return;
   if (sizeTimer) clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => {
@@ -349,41 +380,43 @@ function requestSize() {
     if (!current || !run || !terminal || !dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
     // What fits at the chosen text size, even while the text is shrunk to show the desktop's layout.
     const scale = (terminal.options.fontSize ?? textSize) / textSize;
-    const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const force = forceNext; forceNext = false;
+    const cols = Math.max(20, Math.min(300, Math.floor(dims.cols * scale))); const rows = Math.max(6, Math.min(200, Math.floor(dims.rows * scale))); const again = askAgain; askAgain = false;
     const key = `${current}:${run}:${cols}x${rows}`;
-    if (key === sentSize && !force) return; sentSize = key; askedBefore = asked; asked = { cols, rows };
+    if (key === sentSize && !again) return; sentSize = key; askedBefore = asked; asked = { cols, rows };
     const channel = current; const asking = run;
-    void sizeChannel(channel, asking, cols, rows, force).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
-  }, 200);
+    // Always with force: the phone asks only while the person holds it, and an unforced request waits for the computer to go unused.
+    void sizeChannel(channel, asking, cols, rows, true).then((held) => { if (current === channel && run === asking) { granted = held; fitText(); } }).catch(() => { sentSize = ''; });
+  }, wait);
 }
 /** Gives the channel being left back to the desktop's size. */
 function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
-  if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
+  if (terminal) { terminal.options.fontSize = textSize; if (fitsOnOpen(chosenSize)) holding = true; fitText(); requestSize(); }
 }
 /** At the phone's size, the chosen text size; at the desktop's size, small enough that its width fits the screen. */
 function fitText() {
   if (!terminal || !fit) return;
-  document.getElementById('fit-phone')?.replaceChildren(granted ? 'Desktop size' : 'Fit to phone');
+  shownAtPhone = atPhoneSize(granted, holding);
+  document.getElementById('fit-phone')?.replaceChildren(shownAtPhone ? 'Desktop size' : 'Fit to phone');
   // Back at the chosen text size, ask again: the size asked for while the text was shrunk can be a row or column short.
-  if (granted) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
+  if (shownAtPhone) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
   const dims = fit.proposeDimensions(); if (!dims || !Number.isFinite(dims.cols) || dims.cols <= 0) return;
   const fits = (terminal.options.fontSize ?? textSize) * dims.cols / terminal.cols;
   // Below 6 px the text cannot be read; the screen then pans sideways instead.
   const size = Math.max(6, Math.min(textSize, Math.floor(fits * 2) / 2));
   if (terminal.options.fontSize !== size) terminal.options.fontSize = size;
 }
-/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. */
+/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. The choice is kept on the phone for the next channel. */
 function toggleFit() {
   if (!current) return;
-  if (granted) { void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
-  holding = true; forceNext = true; sentSize = ''; requestSize();
+  if (shownAtPhone) { chosenSize = 'desktop'; localStorage.setItem(FIT_KEY, chosenSize); void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
+  chosenSize = null; localStorage.removeItem(FIT_KEY); holding = true; askAgain = true; sentSize = ''; fitText(); requestSize();
 }
 
 function showChannel(sessionId: string) {
   if (current !== sessionId) leaveChannel();
-  current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
+  current = sessionId; run = null; holding = fitsOnOpen(chosenSize); granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
@@ -400,7 +433,7 @@ function showChannel(sessionId: string) {
     return;
   }
   const title = h('span', { className: 'title', id: 'channel-title' });
-  const waiting = h('p', { id: 'waiting', className: 'ask-banner', hidden: true, aria: { role: 'status' } });
+  const waiting = h('p', { id: 'waiting', className: 'banner waiting', hidden: true, aria: { role: 'status' } });
   const coach = h('div', { id: 'coach', className: 'coach', hidden: true, aria: { role: 'status', label: 'Prompt coaching' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
@@ -422,7 +455,7 @@ function showChannel(sessionId: string) {
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
   const tools = h('div', { className: 'tools', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
     channel && channel.engine !== 'shell' ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
-    h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'While you use the computer, the channel keeps its desktop size. Fit to phone redraws it at this screen\'s size until you type in it on the computer.' }, 'Fit to phone'),
+    h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'Fit to phone draws the channel at this screen\'s size until you type in it on the computer. Desktop size shows the computer\'s size, and this phone opens the next channel that way too.' }, 'Fit to phone'),
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
@@ -438,7 +471,7 @@ function showChannel(sessionId: string) {
   terminal.options.disableStdin = true; terminal.textarea?.setAttribute('inputmode', 'none'); terminal.textarea?.setAttribute('tabindex', '-1');
   output.addEventListener('click', (event) => { if (terminal && !tapScreen(output, terminal, event)) text.focus(); });
   selectByHold(output, terminal, selected); scrollBySwipe(output, terminal);
-  renderChannel(); listen(sessionId);
+  fitText(); renderChannel(); listen(sessionId);
 }
 
 /**
@@ -606,14 +639,15 @@ function renderCoach(channel: RemoteChannel) {
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
   const title = document.getElementById('channel-title');
-  title?.replaceChildren(h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), ` ${channel.title} `, account(channel), h('small', { className: `state-${state(channel)}` }, word[state(channel)]));
+  // Two lines, so the name keeps its room beside the channel's buttons: CH2 and the name, then the state and the account.
+  title?.replaceChildren(h('span', { className: 'title-line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('span', { className: 'title-name' }, channel.title)), h('span', { className: 'title-line' }, badge(channel, `state-${state(channel)}`), account(channel)));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   renderCoach(channel);
   // A chat has no screen to size or reset: its view follows the conversation itself.
   if (channel.chat) return;
-  // A restarted channel is a new process: its screen starts afresh, as on the desktop.
-  if (channel.runId && channel.runId !== run) { run = channel.runId; inOrder((screen) => screen.reset()); requestSize(); }
+  // A restarted channel is a new process: its screen starts afresh, as on the desktop, at the desktop's size until the phone's is granted.
+  if (channel.runId && channel.runId !== run) { run = channel.runId; granted = false; inOrder((screen) => screen.reset()); requestSize(); }
   if (channel.cols && channel.rows) resizeTo(channel.cols, channel.rows);
 }
 
@@ -664,29 +698,29 @@ function onEvent(event: StreamEvent) {
   if (event.data.sessionId !== current || !terminal) return;
   if (event.type === 'resize') {
     const channel = channels.find((item) => item.sessionId === event.data.sessionId); if (channel?.runId === event.data.runId) Object.assign(channel, { cols: event.data.cols, rows: event.data.rows });
-    // The computer applied the phone's size (it went idle, or "Fit to phone"), or took it back (the person is there).
+    // The computer applied the phone's size, or took it back (the person typed there).
     // The size the phone asked for before its latest can still arrive after it: that is the phone's too, not the desktop's.
     const mine = (size: typeof asked) => Boolean(size && event.data.cols === size.cols && event.data.rows === size.rows);
-    if (event.data.runId === run) granted = mine(asked) || mine(askedBefore);
+    const had = granted; if (event.data.runId === run) granted = mine(asked) || mine(askedBefore);
     if (event.data.runId === run) resizeTo(event.data.cols, event.data.rows);
     // The desktop took the channel back (the person typed there): the phone leaves it at that size until it is used.
-    if (event.data.runId === run && holding && asked && sentSize && !mine(asked) && !mine(askedBefore)) { holding = false; sentSize = ''; }
+    if (event.data.runId === run && takenBack(had, holding, Boolean(asked && sentSize), mine(asked) || mine(askedBefore))) { holding = false; sentSize = ''; }
     return;
   }
   if (event.type === 'replay') {
     run = event.data.runId; inOrder((screen) => screen.reset()); resizeTo(event.data.cols, event.data.rows);
     // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
-    terminal.write(event.data.data); sentSize = ''; requestSize(); return;
+    terminal.write(event.data.data); sentSize = ''; requestSize(0); return;
   }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 
 // Rotating the phone, or the keyboard opening or closing, changes how much fits.
-window.addEventListener('resize', requestSize); window.visualViewport?.addEventListener('resize', requestSize);
-// A locked phone, or one showing another app, gives the channel back; coming back to it takes it again.
+window.addEventListener('resize', () => requestSize()); window.visualViewport?.addEventListener('resize', () => requestSize());
+// A locked phone, or one showing another app, gives the channel back; coming back to it takes it again, if it held it.
 document.addEventListener('visibilitychange', () => {
   if (!current) return;
-  if (document.visibilityState === 'visible') { holding = true; sentSize = ''; requestSize(); }
+  if (document.visibilityState === 'visible') { sentSize = ''; requestSize(); }
   else { void releaseChannel(current).catch(() => {}); sentSize = ''; }
 });
 /** Back at the front, or back online: a stream that died while the phone slept is replaced (after a moment for what was held up to arrive). */

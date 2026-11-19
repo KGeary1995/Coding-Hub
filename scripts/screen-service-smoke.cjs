@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 // The Windows screen service end to end: Trace started with --screen-service captures this computer's real screen,
 // and a second Trace, linked to it, shows it with Screen. Input goes to a log file instead of being pressed
 // (CODING_HUB_TEST_SCREEN_INPUT_LOG), so the test does not take over the mouse. Windows only, like the service.
@@ -23,7 +24,7 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
   // The viewer: linked to the PC, whose address is the service itself here (Tailscale would pass /api/screen to it).
   await fs.writeFile(path.join(viewerRoot, 'linked-computers.json'), JSON.stringify([{ id: PC, name: 'Test-PC', url: `http://127.0.0.1:${PORT}/`, token: TOKEN, linkedAt: new Date().toISOString() }]));
   const log = path.join(root, 'input.log'); const crash = path.join(root, 'crash');
-  const base = { ...process.env }; delete base.ELECTRON_RUN_AS_NODE;
+  const base = { ...process.env, ...NO_DRIVE }; delete base.ELECTRON_RUN_AS_NODE;
   // The administrator kind (started by its scheduled task) gives way when the setting does not ask for it: it quits at once.
   const wrongKind = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'wrong-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC', '--elevated'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT) }, stdio: 'ignore' });
   const quit = await new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 20000); wrongKind.once('exit', () => { clearTimeout(timer); resolve(true); }); });

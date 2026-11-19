@@ -158,8 +158,11 @@ describe('diagnostic helper regressions',()=>{
   const report=redactDiagnostic('C:\\Users\\Bob\\AppData\\Roaming\\npm\\claude.cmd','C:\\Users\\Bob','C:\\Users') as string;expect(report).not.toContain('Bob');
  });
  it('does not send a generic CLI exit to the project picker',()=>{
-  expect(recoveryAdvice('CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project directory.',1,true).view).toBe('accounts');
+  expect(recoveryAdvice('CLI exited with code 1. No terminal error was reported. Try the CLI directly in PowerShell from this project folder.',1,true).view).toBe('accounts');
+  expect(recoveryAdvice('The working folder does not exist or is not accessible.',null,true).view).toBe('projects');
   expect(recoveryAdvice('The working directory does not exist or is not accessible.',null,true).view).toBe('projects');
+  // A CLI's own output names its "cwd" (a start banner, the fixture's READY line): that is no folder problem either.
+  expect(recoveryAdvice('CLI exited with code 1.\nREADY CWD:C:\\x\ncwd: C:\\x',1,true).title).toBe('Investigate CLI exit 1');
  });
  it('hides a folder however the report spells it, and only as a whole folder name',()=>{
   expect(redactDiagnostic('D:\\clients\\acme-corp','C:\\Users\\kg','D:\\clients\\acme-corp\\')).toBe('<project>');
@@ -175,7 +178,7 @@ describe('diagnostic helper regressions',()=>{
   const exit=(tail:string)=>recoveryAdvice(`CLI exited with code 1.\n${tail}`,1,true).title;
   for(const tail of ['The author field is missing in package.json','listening on port 14290','bash: jq: No such file or directory','Updated AGENTS.md then crashed: out of memory'])expect(exit(tail),tail).toBe('Investigate CLI exit 1');
   expect(exit('Error: 401 Unauthorized')).toContain('account');expect(exit('API Error: 429 rate limit')).toContain('account');expect(exit('Not logged in. Please run /login')).toContain('account');
-  expect(recoveryAdvice('Apply the current Shared rules to this project before starting a session.',null,true).view).toBe('rules');
+  expect(recoveryAdvice('Apply the current Shared rules to this project before starting a channel.',null,true).view).toBe('rules');
   expect(exit('error: unknown option --foo')).toContain('configuration');
   expect(exit('OAuth token has expired')).toContain('account');expect(exit('Your token expired')).toContain('account');
  });

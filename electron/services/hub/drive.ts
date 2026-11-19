@@ -37,7 +37,7 @@ export class DriveMirror {
     if (problem) throw new HubError('DRIVE_OFFLINE', `${problem} Local handoffs remain available.`);
     const root = path.join(await fs.promises.realpath(this.preferences().driveDirectory), 'AI-Coding-Hub-Memory');
     await fs.promises.mkdir(root, { recursive: true, mode: 0o700 });
-    if (await fs.promises.realpath(root) === await fs.promises.realpath(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a shared folder outside the local memory directory.');
+    if (await fs.promises.realpath(root) === await fs.promises.realpath(this.local.root)) throw new HubError('DRIVE_PATH', 'Choose a shared folder outside the local memory folder.');
     // Made once per folder: its constructor checks the folder synchronously.
     let mirror = this.mirrors.get(root); if (!mirror) this.mirrors.set(root, mirror = new MemoryService(root));
     return mirror;

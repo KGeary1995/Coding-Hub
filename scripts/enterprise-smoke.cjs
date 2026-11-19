@@ -7,6 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { openView, addChannel } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-enterprise-')));
   const bin = path.join(root, 'bin'), project = path.join(root, 'project');
@@ -22,7 +23,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
   await fs.writeFile(path.join(project, 'package.json'), JSON.stringify({ scripts: { check: 'node -e "console.log(12345)"' } }));
   execFileSync('git', ['init', '-b', 'main'], { cwd: project, stdio: 'pipe' });
   await fs.mkdir(path.join(project, 'src')); await fs.writeFile(path.join(project, 'src/app.txt'), 'edit');
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -93,7 +94,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await openView(page, 'Session history');
     await page.getByRole('button', { name: 'View native CLI conversations', exact: true }).click();
     await page.getByLabel('Search native conversations', { exact: true }).fill(conversation.id);
-    await page.getByRole('button', { name: 'Resume in new tile', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
+    await page.getByRole('button', { name: 'Resume in new channel', exact: true }).click(); await page.locator('.session-tile').nth(2).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(), 0, 'Resume preparation must remain idle');
     for (const name of ['Tasks', 'Verification profiles', 'AI coaching', 'Settings']) {
       await openView(page, name); await page.waitForTimeout(150);

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { arrangeTiles, createSession, savedWorkspace, tableDirectory, useWorkspaceStore } from './workspace-store';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { arrangeTiles, createSession, fitTiles, savedWorkspace, tableDirectory, useWorkspaceStore } from './workspace-store';
 import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
 import type { CLIEngineConfig, CodexCLIEngineConfig } from '../../shared/types';
 import { workspace120 } from '../../shared/workspace-120.fixture';
@@ -76,6 +76,89 @@ describe('multi-session workspace transitions', () => {
     // Every arrangement is a workspace the host accepts.
     const workspace = { version: 1, rootDirectory: null, sessions: sessions.map(({ id, title, config, binding, createdAt }) => ({ id, title, config, binding, createdAt })), layoutMode: 'grid', focusedSessionId: null };
     for (const mode of ['grid', 'columns', 'rows'] as const) expect(savedWorkspaceSchema.safeParse({ ...workspace, layoutMode: mode, tiles: arrangeTiles(sessions, mode) }).success).toBe(true);
+  });
+
+  describe('the grid arrangement as channels come and go', () => {
+    const places = () => useWorkspaceStore.getState().tiles.map(({ x, y, w }) => [x, y, w]);
+    const WIDE_THIRD = [[0, 0, 6], [6, 0, 6], [0, 12, 12]]; const TWO_BY_TWO = [[0, 0, 6], [6, 0, 6], [0, 12, 6], [6, 12, 6]];
+    it('gives the third channel the whole second row, two by two with a fourth, and the wide third again when one closes', () => {
+      useWorkspaceStore.getState().addSession('shell');
+      expect(useWorkspaceStore.getState().layoutMode).toBe('grid'); expect(places()).toEqual(WIDE_THIRD);
+      useWorkspaceStore.getState().addSession('shell'); expect(places()).toEqual(TWO_BY_TWO);
+      // Whichever of the four closes, the three left are two above and one wide below, in channel order.
+      for (const index of [3, 0]) {
+        const sessions = useWorkspaceStore.getState().sessions;
+        useWorkspaceStore.getState().removeSession(sessions[index].id); expect(places()).toEqual(WIDE_THIRD);
+        expect(useWorkspaceStore.getState().tiles.map((tile) => tile.sessionId)).toEqual(sessions.filter((_, at) => at !== index).map((session) => session.id));
+        useWorkspaceStore.getState().addSession('codex'); expect(places()).toEqual(TWO_BY_TWO);
+      }
+    });
+    it('does the same for a duplicate, a restored run and the grid button', () => {
+      const [first] = useWorkspaceStore.getState().sessions;
+      useWorkspaceStore.getState().addSession('claude', first.id); expect(places()).toEqual(WIDE_THIRD);
+      useWorkspaceStore.getState().arrange('columns'); expect(places()).toEqual([[0, 0, 4], [4, 0, 4], [8, 0, 4]]);
+      useWorkspaceStore.getState().arrange('grid'); expect(places()).toEqual(WIDE_THIRD);
+      const run = { runId: 'history', sessionId: first.id, engine: 'codex' as const, config: { engine: 'codex' as const, model: '', reasoningEffort: null }, cwd: '/recorded', startedAt: first.createdAt, endedAt: null, status: 'interrupted' as const, exitCode: null, logFile: '', recordedBytes: 0, logTruncated: false };
+      useWorkspaceStore.getState().removeSession(useWorkspaceStore.getState().sessions[2].id); expect(places()).toEqual([[0, 0, 6], [6, 0, 6]]);
+      expect(useWorkspaceStore.getState().restoreRun(run)).toBe(true); expect(places()).toEqual(WIDE_THIRD);
+    });
+    it('leaves a layout the person dragged or resized alone when it is saved and opened again', () => {
+      useWorkspaceStore.getState().addSession('shell');
+      const [a, b, c] = useWorkspaceStore.getState().sessions.map((session) => session.id);
+      // The person narrowed the third tile and moved the second under the first: what the grid reports after a drag.
+      const dragged = [{ sessionId: a, x: 0, y: 0, w: 7, h: 10, minW: 3, minH: 10 }, { sessionId: b, x: 0, y: 10, w: 7, h: 14, minW: 3, minH: 10 }, { sessionId: c, x: 7, y: 0, w: 5, h: 24, minW: 3, minH: 10 }];
+      useWorkspaceStore.getState().setTiles(dragged);
+      const saved = savedWorkspace(); expect(saved.tiles).toEqual(dragged); expect(saved.layoutMode).toBe('grid');
+      useWorkspaceStore.getState().hydrate(saved, { databasePath: '/local/storage.db', logsDirectory: '/local/logs', maxLogBytes: 5242880, maxCompletedRuns: 100, retentionDays: 30 });
+      expect(useWorkspaceStore.getState().tiles).toEqual(dragged);
+    });
+    describe('a three-channel grid saved by an older version, its third tile at half width', () => {
+      const info = { databasePath: '/local/storage.db', logsDirectory: '/local/logs', maxLogBytes: 5242880, maxCompletedRuns: 100, retentionDays: 30 };
+      const OLDER = [[0, 0, 6], [6, 0, 6], [0, 12, 6]];
+      const older = () => { useWorkspaceStore.getState().addSession('shell'); return { ...savedWorkspace(), tiles: useWorkspaceStore.getState().tiles.map((tile, index) => index === 2 ? { ...tile, w: 6 } : tile) }; };
+      // The window's storage, where it remembers that it has opened a workspace under today's rule.
+      beforeEach(() => { const kept = new Map<string, string>(); vi.stubGlobal('localStorage', { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => { kept.set(key, value); } }); });
+      afterEach(() => { vi.unstubAllGlobals(); });
+      it('is laid out by today’s rule the first time a workspace is opened, so the empty quarter is gone without a click', () => {
+        useWorkspaceStore.getState().hydrate(older(), info); expect(places()).toEqual(WIDE_THIRD);
+      });
+      it('is opened as saved after that: a third tile at half width is then the person’s own', () => {
+        const saved = older(); useWorkspaceStore.getState().hydrate(null, info);
+        useWorkspaceStore.getState().hydrate(saved, info); expect(places()).toEqual(OLDER);
+      });
+      it('is opened as saved the first time too when the person had moved or resized a tile', () => {
+        const saved = older(); const dragged = saved.tiles.map((tile, index) => index === 2 ? { ...tile, w: 8 } : tile);
+        useWorkspaceStore.getState().hydrate({ ...saved, tiles: dragged }, info); expect(useWorkspaceStore.getState().tiles).toEqual(dragged);
+      });
+    });
+    it('opens a three-channel grid saved by an older version as it was saved where the window cannot remember having done so', () => {
+      useWorkspaceStore.getState().addSession('shell');
+      const older = useWorkspaceStore.getState().tiles.map((tile, index) => index === 2 ? { ...tile, w: 6 } : tile);
+      useWorkspaceStore.getState().hydrate({ ...savedWorkspace(), tiles: older }, { databasePath: '/local/storage.db', logsDirectory: '/local/logs', maxLogBytes: 5242880, maxCompletedRuns: 100, retentionDays: 30 });
+      expect(places()).toEqual([[0, 0, 6], [6, 0, 6], [0, 12, 6]]);
+      // The grid button, or a channel added or closed, lays it out by the rule.
+      useWorkspaceStore.getState().arrange('grid'); expect(places()).toEqual(WIDE_THIRD);
+    });
+  });
+
+  describe('a tile that goes without its channel closing (a seat taken at a Round Table)', () => {
+    const tile = (sessionId: string, x: number, y: number, w: number, h = 12) => ({ sessionId, x, y, w, h, minW: 3, minH: 10 });
+    const four = () => { const sessions = [createSession('claude'), createSession('codex'), createSession('shell'), createSession('codex')]; return { sessions, lead: { ...sessions[0], roundTable: { partner: sessions[3].id, driver: 'claude' as const, rounds: 2 } } }; };
+    it('lays the rest out again while the tiles stand as Trace arranged them, so the third takes the spare width', () => {
+      const { sessions, lead } = four(); const seated = [lead, ...sessions.slice(1)];
+      expect(fitTiles(seated, arrangeTiles(sessions, 'grid'), 'grid').map(({ sessionId, x, y, w }) => [sessionId, x, y, w])).toEqual([[sessions[0].id, 0, 0, 6], [sessions[1].id, 6, 0, 6], [sessions[2].id, 0, 12, 12]]);
+      // In columns too: three columns, not three quarters and a gap.
+      expect(fitTiles(seated, arrangeTiles(sessions, 'columns'), 'columns').map(({ x, w }) => [x, w])).toEqual([[0, 4], [4, 4], [8, 4]]);
+    });
+    it('drops only that tile from a layout the person dragged or resized, and keeps tiles that already match', () => {
+      const { sessions, lead } = four(); const seated = [lead, ...sessions.slice(1)]; const [a, b, c, d] = sessions.map((session) => session.id);
+      const dragged = [tile(a, 0, 0, 8), tile(b, 8, 0, 4, 24), tile(c, 0, 12, 4), tile(d, 4, 12, 4)];
+      expect(fitTiles(seated, dragged, 'grid')).toEqual(dragged.slice(0, 3));
+      // Two tiles swapped by dragging are the person's too, though every size is Trace's.
+      const swapped = [tile(a, 6, 0, 6), tile(b, 0, 0, 6), tile(c, 0, 12, 6), tile(d, 6, 12, 6)];
+      expect(fitTiles(seated, swapped, 'grid')).toEqual(swapped.slice(0, 3));
+      const kept = dragged.slice(0, 3); expect(fitTiles(seated, kept, 'grid')).toBe(kept);
+    });
   });
 
   it('duplicates independent repository bindings and configs without sharing mutable state', () => {

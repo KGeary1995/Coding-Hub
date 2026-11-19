@@ -57,7 +57,7 @@ function publicArgs(args: unknown): string[] { if (!Array.isArray(args)) return 
 export class ConfigService {
   private handles = new Map<string, Source>();
   constructor(readonly home = homedir(), readonly claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(home, '.claude'), readonly codexHome = process.env.CODEX_HOME ?? path.join(home, '.codex')) {}
-  private directory(directory: string | null) { if (directory !== null && (!path.isAbsolute(directory) || !fs.statSync(directory).isDirectory())) throw new HubError('PROJECT_PATH', 'Select an accessible absolute project directory.'); return directory === null ? null : fs.realpathSync(directory); }
+  private directory(directory: string | null) { if (directory !== null && (!path.isAbsolute(directory) || !fs.statSync(directory).isDirectory())) throw new HubError('PROJECT_PATH', 'Select an accessible absolute project folder.'); return directory === null ? null : fs.realpathSync(directory); }
   private file(engine: CLIEngine, scope: 'user' | 'project', directory: string | null) {
     if (scope === 'project' && !directory) throw new HubError('PROJECT_REQUIRED', 'Select a project first.');
     const claudeUser = process.env.CLAUDE_CONFIG_DIR && this.home === homedir() ? this.claudeHome : this.home;

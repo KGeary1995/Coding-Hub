@@ -11,11 +11,12 @@ const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
 const { tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); const rejectOnce = process.argv.includes('--reject-once'); const reviseAndModels = process.argv.includes('--revise-and-models'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-chain-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project, stdio: 'pipe' });
 git('init', '-q'); fs.writeFileSync(path.join(project, 'README.md'), '# Scratch\n'); git('add', '.'); git('commit', '-qm', 'base');
-const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') }; delete env.ELECTRON_RUN_AS_NODE; delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
+const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') }; delete env.ELECTRON_RUN_AS_NODE; delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
 const args = ['--user-data-dir=' + path.join(root, 'profile'), repo, '--production'];
 const log = []; const note = (step, data) => { log.push({ step, at: new Date().toISOString(), ...data }); console.log(step, JSON.stringify(data).slice(0, 400)); };
 const shot = async (page, name) => { await page.screenshot({ path: path.join(out, `${name}.png`) }).catch(() => {}); };
@@ -43,6 +44,8 @@ async function until(page, test, minutes, label) {
       // The planner's model, changed on the bar, is used once the table starts again.
       // Models change while the channel is stopped (a running seat keeps its model).
       const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' }); await (await tileControl(tile, 'Stop')).click(); await page.waitForTimeout(3000);
+      // In a tile too short for the whole bar, Models is behind the bar's disclosure.
+      const fold = page.locator('.chain-bar .chain-fold-toggle'); if (await fold.isVisible()) await fold.click();
       await page.locator('.chain-models summary').click(); const field = page.getByLabel('Planner model'); await field.waitFor(); await page.waitForFunction(() => !document.querySelector('[aria-label="Planner model"]')?.disabled, null, { timeout: 30000 }).catch(() => {});
       await field.fill('claude-sonnet-5-5'); await field.press('Tab'); note('model-set', { label: await page.locator('.chain-models').innerText() });
       // A stopped channel offers Restart in its detail row.

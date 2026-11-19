@@ -1,0 +1,371 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shared parts ("Midnight", docs/design/midnight/README.md, section 3): element rules and every part that more than one
+   area uses. A part is drawn once, here; a screen composes parts and never restyles one. New parts take the ui- prefix;
+   the classes that existed before keep their names. Loaded first after tokens.css and the third-party CSS, so each area's
+   file may build on these. No colour value appears here: colours come from tokens.css. */
+
+/* ---------- Base elements ---------- */
+:root { color-scheme: dark; font-family: var(--tr-font-ui); font-synthesis: none; font-size: 14px; color: var(--tr-fg);
+  /* A chevron pointing right, 16 px square, for clip-path on a box filled with currentColor. */
+  --ui-chevron: polygon(40.8% 21.7%, 69.1% 50%, 40.8% 78.3%, 34.2% 71.7%, 55.9% 50%, 34.2% 28.3%);
+  /* The same stroke as two diagonal bands, for the one control that takes no pseudo-element (select). */
+  --ui-chevron-down: linear-gradient(45deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px)), linear-gradient(135deg, transparent calc(50% - 1.1px), var(--tr-fg-dim) calc(50% - .7px), var(--tr-fg-dim) calc(50% + .7px), transparent calc(50% + 1.1px)); }
+* { box-sizing: border-box; }
+/* After Tailwind's reset, which sets the line height back to the page's. */
+body { margin: 0; min-width: calc(860px / var(--display-scale, 1)); font: var(--tr-t-body); }
+h1 { margin: 0; font: var(--tr-t-title); letter-spacing: -.01em; color: var(--tr-fg-strong); }
+h2 { margin: 0; font: var(--tr-t-heading); color: var(--tr-fg-strong); }
+h3 { margin: 0; font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+h4, h5, h6 { margin: 0; font: 600 13px/20px var(--tr-font-ui); color: var(--tr-fg); }
+strong, b { font-weight: 600; }
+small { font: var(--tr-t-small); }
+a { color: var(--tr-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, samp { font-family: var(--tr-font-mono); font-size: 12px; }
+hr { border-color: var(--tr-line); }
+::selection { background: color-mix(in srgb, var(--tr-accent) 36%, transparent); color: var(--tr-fg-strong); }
+:focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
+.tnum { font-variant-numeric: tabular-nums; }
+.muted { color: var(--tr-fg-dim); font-size: 13px; }
+.eyebrow { font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* With .ui-hint too: an error under a field is a hint in the danger colour, whichever rule comes later. */
+/* The long selector outranks the dim text of a card paragraph or a row's small line, where an error read as a hint. */
+.error-message, .ui-hint.error-message, :is(.hub-panel, .storage-card, .ui-row) .error-message:not(.hub-feedback) { color: var(--tr-danger); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tr-spacer { flex: 1; }
+/* The small legend square in an engine's colour. */
+.tr-engine-square { width: 8px; height: 8px; display: inline-block; border-radius: 2px; }
+.tr-engine-square.claude { background: var(--tr-ch-claude); }
+.tr-engine-square.codex { background: var(--tr-ch-codex); }
+
+/* Scrollbars: 10 px, a rounded thumb drawn 6 px wide, no track. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--tr-r-chip); background: var(--tr-line); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--tr-line-strong); }
+[data-contrast="high"] ::-webkit-scrollbar-thumb { background-color: var(--tr-line-strong); }
+[data-contrast="high"] ::-webkit-scrollbar-thumb:hover { background-color: var(--tr-fg-dim); }
+
+/* ---------- Buttons ---------- */
+button { font: inherit; cursor: pointer; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button, input, select, textarea, summary, [role="tab"], .ui-row { transition: background-color var(--tr-d-fast) var(--tr-ease), border-color var(--tr-d-fast) var(--tr-ease), color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease), outline-color var(--tr-d-fast) var(--tr-ease); }
+button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .45; }
+.button, .quiet-button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: var(--tr-r-control); white-space: nowrap; text-decoration: none; }
+:is(.button, .quiet-button, .icon-button) svg { flex: none; width: 16px; height: 16px; }
+/* A button with no variant is the secondary form. One primary per card or page region. */
+.button { min-height: 32px; padding: 0 12px; border: 1px solid var(--tr-line-control); background: var(--tr-hover); color: var(--tr-fg); font: 600 13px/16px var(--tr-font-ui); }
+.button:hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
+.button.primary { border-color: var(--tr-accent-solid); background: var(--tr-accent-solid); color: var(--tr-on-accent); }
+.button.primary:hover:not(:disabled) { border-color: var(--tr-accent-solid-hover); background: var(--tr-accent-solid-hover); color: var(--tr-on-accent); }
+/* Destructive: tinted until the confirming step, which is the only solid red. */
+.button.danger { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.button.danger:hover:not(:disabled) { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
+.button.danger.solid, .button.danger.solid:hover:not(:disabled) { background: var(--tr-danger); color: var(--tr-on-light); }
+.quiet-button { min-height: 28px; padding: 0 8px; border: 0; background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); gap: 6px; }
+.quiet-button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
+.icon-button { width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--tr-fg-dim); }
+.icon-button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
+:is(.button, .quiet-button).small { min-height: 24px; padding: 0 8px; border-radius: var(--tr-r-small); font: 600 12px/16px var(--tr-font-ui); gap: 6px; }
+.icon-button.small { width: 24px; height: 24px; border-radius: var(--tr-r-small); }
+.button.large { min-height: 40px; padding: 0 16px; font-size: 14px; }
+/* The detail button: the small quiet button with an icon in a tile's detail row, a linked computer's bar and a
+   conversation's bar. Stop is the danger form. tile.css tunes it in a tile. */
+.tr-detail-button { flex: none; height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); white-space: nowrap; }
+.tr-detail-button svg { flex: none; width: 14px; height: 14px; }
+.tr-detail-button.icon { width: 24px; padding: 0; justify-content: center; }
+.tr-detail-button:hover:not(:disabled), .tr-detail-button:is(.selected, [aria-pressed="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.tr-detail-button.stop { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.tr-detail-button.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-danger) 24%, transparent); color: var(--tr-danger); }
+/* Narrow tiles: a button with an icon keeps only the icon (its label stays its name); one without (Close, Keep) keeps its words. */
+@container (max-width: 560px) {
+  .tr-detail-button:has(.tr-detail-icon) { width: 24px; padding: 0; justify-content: center; }
+  .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Here, not in styles/chat.css: the phone app loads that file and never had this rule. */
+/* An approval's Allow is the waiting colour, so it reads as the answer to that card. */
+.chat-permission .button.primary { border-color: var(--tr-st-waiting); background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
+.chat-permission .button.primary:hover:not(:disabled) { border-color: var(--tr-st-waiting); background: color-mix(in srgb, var(--tr-st-waiting) 86%, var(--tr-fg-strong)); color: var(--tr-on-waiting); }
+/* The question a risky action asks in place (ConfirmStep): closing a running channel, removing a task, deleting an experiment or a saved example. */
+.confirm-step { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.confirm-step-question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-control); color: var(--tr-fg-strong); }
+
+/* ---------- Fields ---------- */
+/* Text fields, selects and text areas are wells. Left alone: check boxes and radios (drawn below), range, file and colour
+   inputs, and xterm's hidden text area, which a minimum height would move. */
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"])), select, textarea:where(:not(.xterm-helper-textarea)) { min-width: 0; min-height: 32px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background-color: var(--tr-well); color: var(--tr-fg); font: 400 13px/16px var(--tr-font-ui); }
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"])):hover:not(:disabled, :focus), select:hover:not(:disabled, :focus), textarea:where(:not(.xterm-helper-textarea)):hover:not(:disabled, :focus) { border-color: var(--tr-line-strong); }
+/* Focus: an accent border and a 3 px soft ring. The ring is the outline, so a screen that sets `outline: none` loses both. */
+input:where(:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="button"], [type="submit"], [type="reset"], [type="image"])):focus, select:focus, textarea:where(:not(.xterm-helper-textarea)):focus { border-color: var(--tr-accent); outline: 3px solid var(--tr-accent-soft); outline-offset: 0; }
+input::placeholder, textarea::placeholder { color: var(--tr-fg-faint); opacity: 1; }
+/* A number field has no native stepper, which the browser drew over the value's end on hover and focus. It is still
+   typed in, and the arrow keys still step it. */
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+:is(input, select, textarea)[aria-invalid="true"] { border-color: var(--tr-danger); }
+textarea:where(:not(.xterm-helper-textarea)) { min-height: 64px; padding: 8px 12px; line-height: 20px; resize: vertical; }
+/* The browser's grip goes; dragging the corner still resizes. */
+textarea::-webkit-resizer { display: none; }
+/* A select draws its own chevron. !important, because a screen's `background:` or `padding:` shorthand would erase the
+   arrow of a control that no longer has a native one, or put the chosen value under it. */
+select:where(:not([multiple], [size])) { appearance: none; padding-right: 32px !important; background-image: var(--ui-chevron-down) !important; background-position: right 17px center, right 12px center !important; background-size: 5px 5px !important; background-repeat: no-repeat !important; }
+select option, select optgroup { background: var(--tr-surface); color: var(--tr-fg); }
+input[type="range"], progress { accent-color: var(--tr-accent); }
+input[type="file"] { font: var(--tr-t-control); color: var(--tr-fg-dim); }
+input[type="file"]::file-selector-button { height: 28px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-hover); color: var(--tr-fg); font: 600 13px/16px var(--tr-font-ui); cursor: pointer; }
+/* Check boxes and radios are drawn. :root lifts these above a screen's `.form input` rule, which would pad and border the box. */
+:root input:is([type="checkbox"], [type="radio"]) { appearance: none; flex: none; display: inline-grid; place-content: center; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 4px; background: var(--tr-well); vertical-align: -3px; cursor: pointer; }
+:root input[type="radio"] { border-radius: 50%; }
+:root input:is([type="checkbox"], [type="radio"]):hover:not(:disabled) { border-color: var(--tr-line-strong); }
+:root input:is([type="checkbox"], [type="radio"]):is(:checked, :indeterminate) { border-color: var(--tr-accent-solid); background: var(--tr-accent-solid); }
+:root input:is([type="checkbox"], [type="radio"]):disabled { cursor: not-allowed; }
+input[type="checkbox"]:checked::before { content: ""; width: 5px; height: 9px; margin-top: -2px; border: solid var(--tr-on-accent); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+input[type="checkbox"]:indeterminate::before { content: ""; width: 8px; height: 2px; background: var(--tr-on-accent); }
+input[type="radio"]:checked::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tr-on-accent); }
+/* A field: its label above, the control, one line of hint below. A bare label text inside takes the label's type. */
+.ui-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* A bare label on a page takes the control type (the workspace's labels are the tile's). Zero specificity, so any rule
+   for a label wins. */
+:where(.app-shell:not([data-view="workspace"]) .main-shell) :where(label) { font: 400 13px/18px var(--tr-font-ui); color: var(--tr-fg-muted); }
+.ui-hint { margin: 0; font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.control-note { grid-column: 1 / -1; margin: 0; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+/* A check box or radio with its words beside it. */
+.ui-check, .update-checkbox { display: flex; align-items: center; gap: 8px; font: 400 13px/16px var(--tr-font-ui); color: var(--tr-fg); cursor: pointer; }
+.input-with-button { display: flex; gap: 8px; }
+.input-with-button input { flex: 1; }
+/* Here, not in tile.css: the drawn check box above overrides the width, so it loads first. */
+.engine-controls input, .engine-controls select, .binding-control input, .binding-control select { width: 100%; }
+/* Here, not in styles/workbench.css: the field rules above would otherwise frame the input inside the search box. */
+.help-search input, .help-search input:hover, .help-search input:focus { flex: 1; border: 0; background: transparent; outline: none; }
+/* Disclosure: a 16 px chevron that turns. A summary that starts with its own icon keeps that instead. */
+summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; border-radius: var(--tr-r-small); font: var(--tr-t-control); color: var(--tr-fg-muted); }
+summary:hover { color: var(--tr-fg-strong); }
+summary::-webkit-details-marker { display: none; }
+summary:where(:not(:has(> svg:first-child, > .engine-glyph:first-child)))::before { content: ""; flex: none; width: 16px; height: 16px; background: currentColor; clip-path: var(--ui-chevron); transition: transform var(--tr-d-fast) var(--tr-ease); }
+details[open] > summary:where(:not(:has(> svg:first-child, > .engine-glyph:first-child)))::before { transform: rotate(90deg); }
+/* Segments: a well; the chosen one is raised. */
+.tr-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); }
+.tr-seg > button { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: var(--tr-r-small); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
+.tr-seg > button:hover:not(:disabled) { background: var(--tr-hover); color: var(--tr-fg); }
+.tr-seg > button:is(.active, [aria-pressed="true"], [aria-checked="true"]) { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
+/* Tabs: the chosen one is an accent pill, its border and words the accent itself. On these navy surfaces the tinted
+   fill is all but a secondary button's (--tr-hover) and the tint's own line (--tr-accent-line) dimmer than a button's
+   border, so with strong words a chosen tab beside a button (the project switcher in the top bar) read as a second one. */
+[role="tablist"] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+[role="tab"] { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-dim); font: 500 13px/16px var(--tr-font-ui); white-space: nowrap; }
+[role="tab"] svg { flex: none; width: 16px; height: 16px; }
+[role="tab"]:hover { background: var(--tr-hover); color: var(--tr-fg); }
+[role="tab"][aria-selected="true"] { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); font-weight: 600; }
+/* Key hint */
+kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg-dim); font: 400 11px/1 var(--tr-font-mono); white-space: nowrap; vertical-align: middle; }
+/* Help: a round ? whose title holds the explanation. Leave the button empty and give it an aria-label. */
+.ui-help { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 50%; background: none; color: var(--tr-fg-dim); font: 600 11px/1 var(--tr-font-ui); cursor: help; }
+.ui-help:empty::before { content: "?"; }
+.ui-help:hover { border-color: var(--tr-line-strong); background: var(--tr-hover); color: var(--tr-fg-strong); }
+/* A hint or a sub-heading that ends in the help button: the two on one line, the button level with the words. */
+.ui-help-line { display: flex; align-items: center; gap: 8px; }
+
+/* ---------- Pages ---------- */
+/* The window: views scroll inside .main-shell, which gives every page its 24 px at the sides. */
+.main-shell { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 0 24px; }
+.app-shell[data-view="workspace"] .main-shell { padding: 8px; overflow: hidden; }
+/* Needs you: everything waiting for the person, opened from the status bar. */
+/* The list opens above the toasts (z-index 70), which sit over the same corner. The cell stretches to the bar's height. */
+.needs-you { position: relative; flex: 0 0 auto; display: flex; }
+.more-tools-page { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+/* A page: 24 px above, 32 px below. Reading and form pages stop at 1200 px, left-aligned; a data page adds .wide. */
+.ui-page, .feature-panel, .history-panel { width: 100%; max-width: 1200px; padding: 24px 0 32px; }
+.ui-page.wide { max-width: none; }
+/* Page heading: an icon tile, the title, one line of description, actions at the right. */
+.ui-page-head { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 20px; }
+.ui-page-head > div:not(.ui-page-actions) { flex: 1; min-width: 0; }
+.ui-page-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--tr-r-tile); background: var(--tr-accent-soft); color: var(--tr-accent); }
+.ui-page-icon svg { width: 18px; height: 18px; }
+.ui-page-head p { margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.ui-page-actions { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A plain heading over a group of cards on a long form page. It takes focus when "On this page" jumps to it
+   (tabindex -1), so it keeps a little room above it and shows the ring only to the keyboard. */
+.ui-section-title { margin: 0; font: var(--tr-t-section); color: var(--tr-fg-strong); scroll-margin-top: 24px; }
+.ui-section-title:focus:not(:focus-visible) { outline: none; }
+/* Cards in a page: a 12-column grid 16 px apart (a child spans all 12 unless it says .span-N), or a plain stack. */
+.ui-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+.ui-grid > * { grid-column: span 12; min-width: 0; }
+.ui-grid > .span-3 { grid-column: span 3; } .ui-grid > .span-4 { grid-column: span 4; } .ui-grid > .span-6 { grid-column: span 6; } .ui-grid > .span-8 { grid-column: span 8; }
+@container shell (max-width: 1024px) { .ui-grid > :is(.span-3, .span-4) { grid-column: span 6; } .ui-grid > .span-8 { grid-column: span 12; } }
+.ui-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ui-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* ---------- Cards ---------- */
+.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article { padding: 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-card); }
+.ui-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 12px; }
+.ui-card-head > svg { flex: none; width: 16px; height: 16px; color: var(--tr-accent); }
+/* A card's title is an h2, or an h3 where the page has section headings above its cards (Settings): the same look. */
+.ui-card-head :is(h2, h3) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-heading); }
+.ui-card-actions { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* A caption: one small dim line beside a card's title, at the right of its head or after a value (what the card
+   counts, where its numbers come from, when a limit resets). It shortens with an ellipsis. */
+.ui-caption { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+/* The cards the pages had before. */
+.storage-card { margin-top: 16px; }
+.server-card header, .hub-preview header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.server-card header > div, .hub-preview header > div { flex: 1; min-width: 0; }
+.storage-card dl { display: grid; grid-template-columns: 125px 1fr; gap: 8px 16px; margin: 16px 0; font-size: 13px; }
+.storage-card dt { color: var(--tr-fg-dim); }
+.storage-card dd { margin: 0; overflow-wrap: anywhere; }
+/* A card's paragraph is dim. A hint, a control note, a banner or a notice in a card is not this paragraph: left out
+   here (inside :where(), so the rule weighs what it did), each keeps its own form. A warning written as a paragraph
+   read dim otherwise. */
+.storage-card p:where(:not(.ui-hint, .control-note, .ui-banner, .hub-feedback)) { color: var(--tr-fg-dim); }
+.storage-status { color: var(--tr-fg-dim); font-size: 12px; }
+.storage-status.error { color: var(--tr-danger); }
+.help-article { padding: 24px; }
+/* Here, not in styles/workbench.css: `.help-comparison` below builds on it, so it loads first. */
+.help-comparison { margin: 16px 0; }
+
+/* ---------- Lists and rows ---------- */
+.ui-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+/* A row is a well inside its card. */
+.ui-row { width: 100%; min-width: 0; min-height: 40px; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); color: var(--tr-fg); font: var(--tr-t-control); text-align: left; text-decoration: none; }
+.ui-row:hover { background: var(--tr-hover); text-decoration: none; }
+.ui-row:is(.selected, [aria-selected="true"], [aria-current="true"], [aria-current="page"]) { border-color: var(--tr-line); background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); color: var(--tr-fg-strong); }
+/* A selected row is lighter than any other surface, so a check box in it takes the stronger line. */
+.ui-row:is(.selected, [aria-selected="true"], [aria-current="true"], [aria-current="page"]) input:is([type="checkbox"], [type="radio"]):not(:checked, :indeterminate) { border-color: var(--tr-line-strong); }
+/* The row's words: a title over one line of detail, taking the spare width and shortening first. */
+.ui-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ui-row-main > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-row strong { font-weight: 600; color: var(--tr-fg-strong); }
+.ui-row small { color: var(--tr-fg-dim); }
+/* Badge: a 20 px pill, tinted with its tone. Count: the round number at the end of a row. Avatar: an engine's or a
+   person's mark. The tone is one custom property, so the tint, the line and the text always belong together; the text is
+   the tone lightened a little, which keeps it at 4.5:1 on a hovered or selected row too. */
+.ui-badge { --tone: var(--tr-fg-dim); flex: none; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-chip); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); font: var(--tr-t-micro); white-space: nowrap; }
+.ui-badge.dot::before, .ui-badge > .dot { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); }
+.ui-count { --tone: var(--tr-accent); flex: none; display: inline-grid; place-items: center; min-width: 24px; height: 20px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-chip); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); font: var(--tr-t-micro); font-variant-numeric: tabular-nums; }
+.ui-avatar { --tone: var(--tr-accent); flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); font: 700 12px/1 var(--tr-font-ui); }
+.ui-avatar svg { width: 16px; height: 16px; }
+.ui-avatar.small { width: 20px; height: 20px; border-radius: var(--tr-r-small); font-size: 11px; }
+.ui-avatar.small svg { width: 12px; height: 12px; }
+.ui-avatar.large { width: 40px; height: 40px; border-radius: var(--tr-r-tile); font-size: 15px; }
+.ui-avatar.large svg { width: 20px; height: 20px; }
+/* Meter: a 6 px track with its fill in the state's colour. Use <progress class="ui-meter"> or a child <i> with a width. */
+.ui-meter, progress { --tone: var(--tr-accent); appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: var(--tr-r-chip); background: var(--tr-well); box-shadow: inset 0 0 0 1px var(--tr-line-faint); overflow: hidden; }
+.ui-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--tone); }
+progress::-webkit-progress-bar { background: none; }
+progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: var(--tone); }
+/* Banner: an inline notice with an icon. A sentence that protects the person stays as one of these. */
+.ui-banner { --tone: var(--tr-accent); display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
+/* The icon's box is as tall as the first line, so it sits level with the words. */
+.ui-banner > svg { flex: none; width: 16px; height: 20px; color: var(--tone); }
+.ui-banner > :not(svg) { min-width: 0; }
+/* Tones, after the parts so that they win over a part's own default. */
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).neutral { --tone: var(--tr-fg-dim); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).accent, .ui-banner.info { --tone: var(--tr-accent); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter, .ui-banner).success { --tone: var(--tr-success); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter, .ui-banner).warning { --tone: var(--tr-warning); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter, .ui-banner).danger { --tone: var(--tr-danger); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).waiting { --tone: var(--tr-st-waiting); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).limit { --tone: var(--tr-st-limit); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).claude { --tone: var(--tr-ch-claude); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).codex { --tone: var(--tr-ch-codex); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).shell { --tone: var(--tr-ch-shell); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).planner { --tone: var(--tr-ch-planner); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).you { --tone: var(--tr-you); }
+/* Stat: <span> label, <strong> value, <small> sub-line. */
+.ui-stat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ui-stat > span { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.ui-stat > strong { font: var(--tr-t-metric); letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--tr-fg-strong); }
+.ui-stat > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-dim); }
+/* Table: numbers are right-aligned and tabular (.num). */
+.ui-table, .usage-table, .help-comparison { width: 100%; border-collapse: collapse; font: 400 13px/16px var(--tr-font-ui); color: var(--tr-fg); }
+:is(.ui-table, .usage-table, .help-comparison) th { height: 32px; padding: 0 12px; border-bottom: 1px solid var(--tr-line); text-align: left; font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); white-space: nowrap; }
+:is(.ui-table, .usage-table, .help-comparison) td { height: 40px; padding: 4px 12px; border-top: 1px solid var(--tr-line-faint); }
+:is(.ui-table, .usage-table) tbody tr:hover { background: var(--tr-hover); }
+:is(.ui-table, .usage-table) :is(th, td).num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table { white-space: nowrap; }
+/* Empty state: centred in its card, never a dashed box. */
+.ui-empty, .hub-empty, .history-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px 16px; text-align: center; color: var(--tr-fg-dim); }
+:is(.ui-empty, .hub-empty, .history-empty) > svg { flex: none; width: 44px; height: 44px; padding: 12px; border-radius: 50%; background: var(--tr-accent-soft); color: var(--tr-accent); }
+/* Its title is the heading one level under its card's title (h3 under h2, h4 under h3), or a strong: the same look. */
+:is(.ui-empty, .hub-empty, .history-empty) :is(h2, h3, h4, strong) { margin: 0; font: var(--tr-t-heading); color: var(--tr-fg-strong); }
+:is(.ui-empty, .hub-empty, .history-empty) p { max-width: 440px; margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+:is(.ui-empty, .hub-empty, .history-empty) > .button { margin-top: 8px; }
+/* An empty state that reports a failure takes the danger tone, so it reads as an error, not as "nothing here". */
+.ui-empty.danger > svg { background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
+.ui-empty.danger p { color: var(--tr-fg); }
+.hub-empty { min-height: 240px; }
+.history-empty { min-height: 320px; margin: 24px 0; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-card); }
+
+/* ---------- The forms and panels the pages had before ---------- */
+/* Native integrations share the workspace's typography, surfaces, and spacing. */
+.hub-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
+.hub-toolbar > .muted { flex: 1; align-self: center; }
+.hub-toolbar label, .hub-form label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.hub-form label.update-checkbox { flex-direction: row; align-items: center; gap: 8px; font: 400 13px/16px var(--tr-font-ui); color: var(--tr-fg); }
+/* Every paragraph keeps the 72 characters, but for the page heading's one line; hints, control notes, banners and
+   notices keep their own type and colour, as in a card. */
+.hub-panel p { max-width: 72ch; }
+.hub-panel .ui-page-head p { max-width: none; }
+.hub-panel p:where(:not(.ui-hint, .control-note, .ui-banner, .hub-feedback)) { font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+/* A hint written as a paragraph takes no margin from a rule for its card's or its section's paragraphs; two in a row
+   stand 4 px apart. */
+.hub-panel p.ui-hint { margin: 0; }
+.hub-panel p.ui-hint + p.ui-hint { margin-top: 4px; }
+.hub-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+/* The column's gap already spaces the head from what follows. */
+.hub-panel .hub-form > .ui-card-head { margin-bottom: 0; }
+.hub-form > .button { align-self: start; }
+/* "How this works", closed until asked for: it holds what would otherwise be a paragraph of instructions in a card. */
+.ui-how { margin-top: 12px; }
+.ui-how > summary { width: fit-content; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.ui-how > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding-left: 24px; }
+.hub-feedback, .hub-warning, .persistence-alert { margin: 12px 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
+.hub-feedback { --tone: var(--tr-accent); }
+.hub-feedback.success { --tone: var(--tr-success); }
+.hub-feedback.error-message { --tone: var(--tr-danger); }
+.hub-warning, .persistence-alert { --tone: var(--tr-warning); }
+/* A notice that starts with an icon (Saved., Pinned.) keeps the icon level with its words. */
+.hub-feedback:has(> svg) { display: flex; align-items: center; gap: 8px; }
+.hub-list { max-height: 580px; overflow: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); background: var(--tr-well); }
+.extension-row { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 0; border-bottom: 1px solid var(--tr-line-faint); background: none; color: var(--tr-fg-muted); text-align: left; }
+.extension-row strong { flex: 1; overflow-wrap: anywhere; font-size: 13px; color: var(--tr-fg-strong); }
+.extension-row > .muted { width: 100%; }
+.extension-row:hover { background: var(--tr-hover); }
+.extension-row.selected { background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); }
+/* Output and file contents: wells. */
+.hub-preview pre, .check-output { max-height: 600px; overflow: auto; padding: 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.check-output { max-height: 300px; }
+.search-results code, .workflow-record > code { display: block; overflow-wrap: anywhere; color: var(--tr-fg-muted); }
+/* Here, not in styles/setup.css: `.hub-panel p` (ui.css) overrides it, so it loads first. */
+.engine-diagnostic p { margin: 0; line-height: 20px; }
+.diagnostic-step { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); }
+.diagnostic-step.failed { border-color: var(--tr-danger); }
+.diagnostic-step.passed { box-shadow: inset 3px 0 0 var(--tr-success); }
+.backup-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--tr-line-faint); }
+.backup-row > span { margin-right: auto; font-size: 13px; }
+/* A delete question stays where its Delete button was, after the row's text. */
+.backup-row > .confirm-step { margin-right: 0; }
+.workflow-record { margin: 16px 0; padding-top: 12px; border-top: 1px solid var(--tr-line-faint); }
+.workflow-record[open] > summary { margin-bottom: 12px; }
+.workflow-record .hub-form { margin: 16px 0 0; }
+
+/* ---------- Density and contrast (Settings > Display) ---------- */
+[data-density="compact"] :is(.ui-page, .feature-panel, .history-panel) { padding-top: 16px; }
+[data-density="compact"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection) { padding: 12px; }
+[data-density="compact"] .ui-row { min-height: 32px; padding: 4px 12px; }
+[data-contrast="high"] :is(.muted, .control-note, .eyebrow, .ui-hint) { color: var(--tr-fg); }
+[data-contrast="high"] :is(input, select, textarea) { border-color: var(--tr-fg-dim); }
+[data-contrast="high"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article, .history-empty) { border-color: var(--tr-fg-dim); }
+[data-contrast="high"] :is(.ui-row, .hub-list, .diagnostic-step, .check-output) { border-color: var(--tr-line-strong); }
+/* Apart from the list above: inside :is() its element name would outweigh an area's own rule for a row. */
+[data-contrast="high"] .hub-preview pre { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.quiet-button, .icon-button) { color: var(--tr-fg-strong); }
+[data-contrast="high"] .tr-detail-button:not(.stop) { color: var(--tr-fg); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* ---------- Workspace grid ---------- */
+.session-grid .react-grid-item { transition: none; }
+.react-grid-item.react-grid-placeholder { border: 1px dashed var(--tr-accent); border-radius: var(--tr-r-tile); background: var(--tr-accent); opacity: .12; }
+.react-resizable-handle::after { border-color: var(--tr-fg-off) !important; }

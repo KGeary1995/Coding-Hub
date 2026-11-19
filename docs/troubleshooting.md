@@ -91,17 +91,17 @@ $fs = [IO.File]::Open("$HOME\.coding-hub\logs\<run-id>.log", 'Open', 'Read', 'Re
 
 A real failure shows the notice "Session output could not be saved. Live terminal output remains available." Logs are capped at 5 MiB per run (`maxLogBytes`), and `runs.logTruncated` is set when the cap is hit.
 
-### A Claude channel stays on HOLD ("needs approval") after you answered
+### A Claude channel stays on Needs you ("needs approval") after you answered
 
-**Before 1.11.3:** HOLD was set by Claude Code's `Notification` hook (`permission_prompt`) and cleared only by a keystroke typed after the alert arrived (`clearAttention` in `src/state/workspace-store.ts`). If you answered before the alert reached Trace, it stayed. Typing any key in that channel clears it.
+**Before 1.11.3:** Needs you (then shown as HOLD) was set by Claude Code's `Notification` hook (`permission_prompt`) and cleared only by a keystroke typed after the alert arrived (`clearAttention` in `src/state/workspace-store.ts`). If you answered before the alert reached Trace, it stayed. Typing any key in that channel clears it.
 
-**From 1.11.3:** Claude launches also send `PostToolUse` and `Stop` hooks to `<hook url>/resolved` (`claudeAttentionSettings` in `electron/services/cli/attention.ts`), so HOLD clears when the tool finishes or the turn ends.
+**From 1.11.3:** Claude launches also send `PostToolUse` and `Stop` hooks to `<hook url>/resolved` (`claudeAttentionSettings` in `electron/services/cli/attention.ts`), so Needs you clears when the tool finishes or the turn ends.
 
 ### `ctx` shows "—" on Claude channels
 
 Before 1.11.3, Trace recorded no context for Claude, because Claude Code's transcript has no window size. From 1.11.3 the tile shows the tokens in context, for example `ctx 241K`, with no percentage. Codex reports its window, so Codex tiles show a percentage and can enter the limit state. Don't add a guessed Claude window: default-model sessions have been seen above 240K tokens, so a 200K guess would put tiles into the limit state for no reason.
 
-### A channel shows "FAULT: The terminal process could not start"
+### A channel shows Failed with "The terminal process could not start"
 
 The message names the cause. From source, run `npm run rebuild:native`, because node-pty must match Electron's ABI. Also check that the CLI starts in a normal terminal.
 

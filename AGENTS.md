@@ -26,7 +26,7 @@ Trace has no model API client and never touches credentials: the CLIs own sign-i
 | Package, sign, publish | [docs/windows-releases.md](docs/windows-releases.md) (covers Mac too) |
 | Something is broken | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | What a feature does for users, data locations | [docs/reference.md](docs/reference.md) |
-| Visual design and tokens | [docs/design/trace/README.md](docs/design/trace/README.md) |
+| Visual design and tokens | [docs/design/midnight/README.md](docs/design/midnight/README.md) |
 | All docs, and which are historical | [docs/README.md](docs/README.md) |
 
 ## Commands

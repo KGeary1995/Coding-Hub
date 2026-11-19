@@ -4,7 +4,11 @@ import { useWorkspaceStore, type NavigationView } from '../../state/workspace-st
 import { useHubStore } from '../../state/hub-store';
 import { SETUP_VIEWS } from '../shell/Topbar';
 
-/** One status line per setup area: live where the app already knows it, otherwise what the area holds. */
+/**
+ * A status for the areas whose state the app already knows; the others show only their name (docs/design/midnight,
+ * section 6). The renderer holds no state for rules, servers or skills, and reading it would run the CLIs, so the status
+ * is a dot on the area's icon (its words in the tooltip and read out with the name): every row keeps one height.
+ */
 function useSetupStatus() {
   const [accounts, setAccounts] = useState<AccountConnection[] | null>(null);
   const [version, setVersion] = useState<string | null>(null);
@@ -18,34 +22,29 @@ function useSetupStatus() {
   }, [onAccounts]);
   useEffect(() => { void window.codingHub?.updates({ action: 'status' }).then((result) => { if (result.ok) setVersion(result.value.version); }).catch(() => {}); }, []);
   const connected = accounts?.filter((item) => item.state === 'authenticated').length ?? 0;
-  const status: Partial<Record<NavigationView, { text: string; tone?: 'ok' | 'warn' }>> = {
+  const status: Partial<Record<NavigationView, { text: string; tone: 'success' | 'warning' | 'neutral' }>> = {
     // GitHub is optional (project cloning only): it alone not being signed in is no warning.
-    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'ok' : 'warn' } : { text: 'checking local CLIs…' },
-    memory: { text: automaticMemory ? 'automatic for every project' : 'automatic memory off', tone: automaticMemory ? 'ok' : undefined },
-    rules: { text: 'CLAUDE.md + AGENTS.md' },
-    connectors: { text: 'claude + codex' },
-    skills: { text: 'installed and configured' },
-    settings: { text: 'backups, updates, storage' },
-    workflow: { text: 'search, recovery, templates' },
+    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking', tone: 'neutral' },
+    memory: automaticMemory ? { text: 'On for every project', tone: 'success' } : { text: 'Off', tone: 'neutral' },
   };
   return { status, version };
 }
 
-/** Agent setup: one place for accounts, memory, rules, MCP servers, skills and settings (docs/design/trace, sheet 07). */
+/** Agent setup: one place for accounts, memory, rules, MCP servers, skills and settings (docs/design/midnight, section 6). */
 export function AgentSetup({ children }: { children: ReactNode }) {
   const { activeView, setView, storageInfo } = useWorkspaceStore();
   const { status, version } = useSetupStatus();
   const dataPath = storageInfo?.databasePath.replace(/[\\/][^\\/]+$/, '');
   return <div className="tr-setup">
     <nav className="tr-setup-nav" aria-label="Agent setup">
-      <h1>Agent setup</h1>
-      <ul>{SETUP_VIEWS.map(({ view, label }) => { const line = status[view]; return <li key={view}>
-        <button className={activeView === view ? 'active' : ''} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>
-          <span className="tr-setup-name">{label}</span>
-          {line && <span className={`tr-setup-status ${line.tone ?? ''}`}>{line.text}{line.tone === 'ok' ? ' ✓' : line.tone === 'warn' ? ' ▲' : ''}</span>}
+      <h2>Agent setup</h2>
+      <ul className="ui-list">{SETUP_VIEWS.map(({ view, label, icon: Icon }) => { const line = status[view]; return <li key={view}>
+        <button className={`ui-row ${activeView === view ? 'active' : ''}`} aria-current={activeView === view ? 'page' : undefined} title={line?.text} onClick={() => setView(view)}>
+          <span className="tr-setup-mark"><Icon className="tr-setup-icon" size={16} aria-hidden="true" />{line && <span className={`tr-setup-dot ${line.tone}`} aria-hidden="true" />}</span>
+          <span className="ui-row-main"><strong className="tr-setup-name">{label}</strong>{line && <span className="tr-setup-status">{line.text}</span>}</span>
         </button>
       </li>; })}</ul>
-      <footer>{version && <span>Trace {version} · Electron {navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1] ?? '—'}</span>}{dataPath && <span title={dataPath}>{dataPath}</span>}</footer>
+      <footer>{version && <span>Trace {version} · Electron {navigator.userAgent.match(/Electron\/([\d.]+)/)?.[1] ?? '—'}</span>}{dataPath && <code title={dataPath}>{dataPath}</code>}</footer>
     </nav>
     <div className="tr-setup-content">{children}</div>
   </div>;

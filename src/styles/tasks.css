@@ -1,0 +1,41 @@
+/* Tasks: the board's four quiet columns (a panel step below the cards on them), each task a card, and the form.
+   The page fills the window and the board takes what is left, so the columns end together and each is a whole drop target. */
+.task-panel { flex: 1 0 auto; display: flex; flex-direction: column; }
+.task-panel > .ui-banner { margin-bottom: 16px; }
+.task-howto { max-width: 760px; margin: -8px 0 16px; }
+.task-howto[open] > summary { margin-bottom: 8px; }
+.task-howto :is(ol, p) { margin: 0; font: var(--tr-t-control); line-height: 20px; color: var(--tr-fg-muted); }
+/* The steps are numbered (the base sheet takes list marks away) and the closing line sits under their text. */
+.task-howto ol { padding-left: 40px; list-style: decimal; }
+.task-howto > p { padding-left: 40px; }
+.task-howto li + li, .task-howto ol + p { margin-top: 8px; }
+.task-howto strong { color: var(--tr-fg-strong); }
+.task-form { max-width: 760px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.task-form .ui-card-head { margin-bottom: 0; }
+.task-form-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
+.task-form details[open] > summary { margin-bottom: 12px; }
+.task-form details > .ui-field + .ui-field { margin-top: 12px; }
+.task-board { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.task-board > .task-column { min-height: 160px; display: flex; flex-direction: column; gap: 12px; background: var(--tr-panel); box-shadow: none; }
+.task-column .ui-card-head { margin-bottom: 0; }
+.task-column-hint { margin: -8px 0 0; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.task-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; cursor: grab; }
+.task-card.warned { border-color: var(--tr-danger); }
+.task-title { font: var(--tr-t-heading); color: var(--tr-fg-strong); overflow-wrap: anywhere; }
+.task-badges { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.task-badges .ui-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.task-card p { margin: 0; font: var(--tr-t-small); overflow-wrap: anywhere; }
+/* Not a warning or a failed outcome (.error-message): those keep the danger colour. */
+.task-card p:not(.error-message) { color: var(--tr-fg-muted); }
+.task-card small { font: var(--tr-t-small); color: var(--tr-fg-dim); overflow-wrap: anywhere; }
+.task-card ul { margin: 4px 0 0; padding-left: 16px; }
+.task-card code { font: var(--tr-t-meta); color: var(--tr-fg); overflow-wrap: anywhere; }
+.task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--tr-line-faint); }
+/* "Remove this task and its notes?" is read whole: in a narrow card the question takes its own line above Remove and Keep. */
+.task-actions .confirm-step { flex: 1 1 100%; flex-wrap: wrap; }
+.task-actions .confirm-step-question { flex: 1 1 100%; white-space: normal; }
+@container shell (max-width: 1180px) { .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* A task's details, folded under its card. */
+.task-everything dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; font: var(--tr-t-small); }
+.task-everything dt { color: var(--tr-fg-dim); }
+.task-everything dd { margin: 0; overflow-wrap: anywhere; }

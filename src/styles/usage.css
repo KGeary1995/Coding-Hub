@@ -1,0 +1,102 @@
+/* Usage and Session history: only what the shared parts (ui.css) do not draw: the chart, the engine split, plan-limit rows,
+   the sessions table's cells, and Session history's two panes. */
+
+/* Usage: totals in a row, the chart beside the engine split, then the sessions. */
+.tr-usage .ui-page-actions { flex-wrap: wrap; justify-content: flex-end; }
+.tr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 16px; }
+/* A sub-line such as "▲ 20% vs prior 14 d" wraps in a narrow card rather than losing its end. */
+.tr-kpis .ui-stat > small { white-space: normal; }
+.tr-chart-hint { margin-top: 8px; }
+/* A window with no tokens: the plot keeps its well and holds the empty state alone, centred, with no axis behind it. */
+.tr-chart-empty { position: absolute; inset: 0; }
+.tr-chart-readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; margin-bottom: 12px; font: var(--tr-t-small); color: var(--tr-fg-muted); font-variant-numeric: tabular-nums; }
+.tr-chart-readout strong { font: var(--tr-t-heading); color: var(--tr-fg-strong); }
+/* The plot is a well (--tr-term); the axis box sits inside its padding, 20 px above the bottom for the day numbers. */
+.tr-chart-plot { position: relative; height: 240px; display: flex; padding: 16px 16px 12px 48px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); }
+.tr-chart-axis { position: absolute; left: 12px; right: 16px; top: 16px; bottom: 32px; pointer-events: none; }
+.tr-chart-axis span { position: absolute; left: 0; width: 100%; transform: translateY(50%); border-bottom: 1px solid var(--tr-line-faint); font: 400 11px/14px var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-faint); }
+.tr-chart-axis span:last-child { border-bottom-color: var(--tr-line); }
+/* A column is at most 96 px wide, so one day (Today) is a bar in the middle and not a slab across the plot. */
+.tr-chart-bars { position: relative; flex: 1; display: flex; justify-content: space-around; gap: 8px; padding-bottom: 20px; }
+.tr-chart-col { position: relative; flex: 1; min-width: 0; max-width: 96px; display: flex; flex-direction: column; justify-content: flex-end; border: 0; border-radius: var(--tr-r-small) var(--tr-r-small) 0 0; padding: 0; background: none; opacity: .72; }
+/* The day in the readout: a faint band, so that with no tokens it does not read as a bar of its own. */
+.tr-chart-col.hot { opacity: 1; background: color-mix(in srgb, var(--tr-hover) 50%, transparent); }
+.tr-chart-stack { width: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--tr-r-small) var(--tr-r-small) 0 0; }
+.tr-chart-stack i { display: block; min-height: 1px; }
+.tr-chart-stack i + i { border-top: 1px solid var(--tr-term); }
+.tr-chart-stack i.claude { background: var(--tr-ch-claude); }
+.tr-chart-stack i.codex { background: var(--tr-ch-codex); }
+.tr-chart-x { position: absolute; left: 0; right: 0; bottom: -20px; text-align: center; font: 400 11px/14px var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-faint); }
+.tr-usage-side { display: flex; flex-direction: column; gap: 12px; }
+.tr-usage-side .ui-card-head { margin-bottom: 0; }
+.tr-usage-side h3 { margin-top: 8px; font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.tr-usage-side .ui-hint { margin-top: auto; }
+.tr-split { height: 8px; display: flex; overflow: hidden; border-radius: var(--tr-r-chip); background: var(--tr-well); }
+.tr-split i { display: block; min-width: 0; }
+.tr-split > i.claude { background: var(--tr-ch-claude); }
+.tr-split > i.codex { background: var(--tr-ch-codex); }
+.tr-split i + i { border-left: 2px solid var(--tr-well); }
+/* Each figure is a row (a well inside the card): the rows take the card down to its hint, level with the chart's, so the
+   card beside the taller chart holds no gap. */
+.tr-side-row > span:first-child { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; }
+.tr-side-row .tnum { color: var(--tr-fg-muted); }
+.tr-usage-table-wrap { overflow-x: auto; }
+.tr-usage-sessions td { white-space: nowrap; }
+.tr-cell-channel { display: inline-flex; align-items: center; gap: 8px; }
+.tr-cell-date, .tr-cell-machine, .tr-cell-mono .dim { color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.tr-cell-session { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.tr-cell-mono { font: var(--tr-t-meta); color: var(--tr-fg-muted); }
+.tr-peak { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.tr-peak .ui-meter { width: 80px; }
+
+/* Plan limits on Usage: one meter per limit, green with room, amber near it, red at it. */
+.tr-plan-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px 32px; }
+.tr-plan-accounts:empty { display: none; }
+/* "Checking…" before the first answer: a caption (ui.css) with its spinner. */
+.tr-plan-checking { display: flex; align-items: center; gap: 8px; }
+.tr-plan-checking > svg { width: 16px; height: 16px; }
+.tr-plan-account > .ui-banner { margin: 0; }
+/* One grid per account, shared by its rows, so every meter is the same length and the percentages line up whatever the
+   reset words are. */
+.tr-plan-account { display: grid; grid-template-columns: 112px minmax(0, 1fr) 40px auto; column-gap: 12px; align-content: start; }
+.tr-plan-account > :is(h3, p) { grid-column: 1 / -1; }
+.tr-plan-account h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 600 13px/20px var(--tr-font-ui); }
+.tr-plan-window { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 28px; font: var(--tr-t-control); color: var(--tr-fg-muted); }
+.tr-plan-window > .tnum { text-align: right; color: var(--tr-fg-strong); }
+
+/* Session history: the page fills the window and its two panes scroll inside it, so a long output never pushes the list
+   or itself off screen. Below 520 px of height the page scrolls as a whole instead. */
+.history-panel { flex: 1 0 0; min-height: 520px; display: flex; flex-direction: column; }
+/* An error or a notice above the panes keeps the cards' distance from them. */
+:is(.history-panel, .native-history) > .ui-banner { margin-bottom: 16px; }
+.history-none { flex: 1; }
+.history-workbench { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; }
+.history-runs, .history-record { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.history-list { flex: 1; min-height: 0; overflow-y: auto; }
+.history-run { flex: none; align-items: flex-start; }
+.history-run-title { display: flex; align-items: center; gap: 8px; }
+.history-run-title .ui-badge { margin-left: auto; }
+.history-path { font: var(--tr-t-meta); color: var(--tr-fg-muted); }
+.history-model { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.history-record .ui-card-head > .ui-badge { margin-left: auto; }
+.history-cwd { display: block; margin-bottom: 8px; font: var(--tr-t-meta); color: var(--tr-fg-dim); overflow-wrap: anywhere; }
+.history-metadata { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; font: var(--tr-t-small); color: var(--tr-fg-muted); }
+.history-metadata > .button { margin-left: auto; }
+.history-record > .ui-banner { margin-bottom: 12px; }
+.history-restore p { margin: 0 0 8px; }
+.history-record > pre { flex: 1; min-height: 120px; margin: 0; padding: 12px 16px; overflow: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); color: var(--tr-fg); font: var(--tr-t-term); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Higher contrast: the wells inside a card take the stronger line, as rows do. */
+[data-contrast="high"] :is(.history-record > pre, .tr-chart-plot) { border-color: var(--tr-line-strong); }
+@container shell (max-width: 860px) { .history-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: 240px minmax(0, 1fr); } }
+/* CLI conversation history (NativeHistory): the search field with its icon, and each conversation's lines. */
+.native-history-search { position: relative; margin-bottom: 16px; }
+.native-history-search > .ui-hint { margin-top: 8px; }
+.native-history-search > svg { position: absolute; left: 12px; top: 8px; width: 16px; height: 16px; color: var(--tr-fg-faint); pointer-events: none; }
+.native-history-search input { width: 100%; max-width: 480px; padding-left: 40px; }
+.native-history-date { font: var(--tr-t-small); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
+.native-history-path { display: block; font: var(--tr-t-meta); color: var(--tr-fg-muted); overflow-wrap: anywhere; }
+.native-history-meta { margin: 4px 0 12px; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.native-history-prefs { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--tr-line-faint); }
+.native-history-prefs[open] > summary { margin-bottom: 12px; }
+/* The name field takes the spare width, so a conversation's name is read whole. */
+.native-history-prefs form > input { flex: 1 1 240px; max-width: 480px; }

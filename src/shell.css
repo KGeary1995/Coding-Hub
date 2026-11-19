@@ -1,125 +1,268 @@
-/* Trace shell: top bar, status bar and menus (docs/design/trace/README.md, "Navigation structure"). */
-/* `shell` sizes the narrow-window rules by the space the app really has, so they also apply at 110–125% display scale. */
-.app-shell { container: shell / inline-size; display: flex; flex-direction: column; height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; background: var(--tr-bg); }
-.main-shell { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; background: var(--tr-bg); }
-.app-shell[data-view="workspace"] .main-shell { padding: 8px; overflow: hidden; display: flex; flex-direction: column; }
-.workspace-canvas { gap: 8px; }
-.tr-spacer { flex: 1; }
-.tnum { font-variant-numeric: tabular-nums; }
+/* The window frame ("Midnight", docs/design/midnight/README.md, section 4): App, the top bar, its menus, the command menu,
+   the status bar, Needs you, notices and a view that failed to draw. It composes the shared parts in ui.css (button,
+   icon button, segments, key hint, count, avatar); only what belongs to the frame alone is drawn here. */
 
-/* Top bar */
-.tr-topbar { height: var(--tr-topbar-h); flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; background: var(--tr-surface); border-bottom: 1px solid var(--tr-line); font: var(--tr-t-control); color: var(--tr-fg-muted); }
-.tr-wordmark { display: flex; align-items: center; gap: 8px; margin-right: 10px; color: var(--tr-fg-strong); text-decoration: none; font: 600 16px/1 var(--tr-font-mono); letter-spacing: .02em; }
-.tr-tabs { display: flex; gap: 2px; }
-.tr-tabs > button, .tr-menu-button, .tr-icon { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: inherit; white-space: nowrap; }
-.tr-tabs > button:hover, .tr-menu-button:hover, .tr-icon:hover { background: var(--tr-hover); color: var(--tr-fg-strong); }
-.tr-tabs > button.active, .tr-menu-button.active { background: var(--tr-raised); color: var(--tr-fg-strong); font-weight: 600; }
-.tr-icon { padding: 0 8px; }
-.tr-project.tr-menu-button, .tr-project .tr-menu-button { border: 1px solid var(--tr-line-control); padding: 0 10px; max-width: 100%; min-width: 0; color: var(--tr-fg); }
-.tr-topbar > .tr-project { max-width: 220px; }
-.tr-project-name, .tr-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tr-menu-label { max-width: 160px; }
-.tr-narrow-icon { display: none; }
-/* Controls keep their size; if the bar still runs out of room, the project name and then the tabs give way,
-   so the menus and + Channel stay reachable (every tab view is also in the command menu and on G shortcuts). */
+/* ---------- Window ---------- */
+/* `shell` sizes the narrow-window rules by the space the app really has, so they also apply at 110–125% display scale. */
+.app-shell { container: shell / inline-size; display: flex; flex-direction: column; height: calc(100dvh / var(--display-scale, 1)); min-height: 0; overflow: hidden; background: var(--tr-window); }
+.skip-link { position: fixed; top: -80px; left: 20px; z-index: 1000; padding: 12px; border-radius: var(--tr-r-control); background: var(--tr-raised); color: var(--tr-fg-strong); }
+.skip-link:focus { top: 12px; }
+.workspace-page { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.workspace-canvas { flex: 1; min-height: 0; display: flex; gap: 8px; position: relative; }
+.persistence-alert { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.persistence-alert .quiet-button { flex: none; }
+/* A tile or view that failed to draw (ErrorBoundary): said in place, so the rest of the window keeps working. */
+.view-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; height: 100%; padding: 16px; overflow: auto; border: 1px solid color-mix(in srgb, var(--tr-danger) 40%, transparent); border-radius: var(--tr-r-tile); background: var(--tr-surface); color: var(--tr-fg-muted); font: 400 13px/20px var(--tr-font-ui); }
+.view-failed strong { font: var(--tr-t-heading); color: var(--tr-danger); }
+
+/* ---------- Top bar ---------- */
+.tr-topbar { height: var(--tr-topbar-h); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-panel); }
+/* Controls keep their size. When the bar runs out of room (linked computers add tabs), the command field gives way
+   first, then the project name; only after both do the tabs, which then scroll sideways instead of being cut off. */
 .tr-topbar > * { flex: none; }
 .tr-topbar > .tr-spacer { flex: 1 1 0; min-width: 0; }
-.tr-topbar > .tr-project { flex: 0 1 auto; min-width: 64px; }
-.tr-topbar > .tr-tabs { flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.tr-caret { font-size: 10px; color: var(--tr-fg-dim); }
-.tr-divider { width: 1px; height: 18px; background: var(--tr-line-control); margin: 0 6px; }
-.tr-segmented { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); margin-right: 4px; }
-.tr-segmented > button { width: 26px; height: 22px; display: grid; place-items: center; border: 0; border-radius: var(--tr-r-chip); background: none; color: var(--tr-fg-dim); }
-.tr-segmented > button:hover { color: var(--tr-fg-strong); background: var(--tr-hover); }
-.tr-segmented > button.active { background: var(--tr-control-on); color: var(--tr-fg-strong); }
-.tr-topbar .command-trigger { margin: 0 4px; width: 300px; min-width: 0; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px; background: var(--tr-bg); border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); color: var(--tr-fg-dim); font: var(--tr-t-control); }
-.tr-topbar .command-trigger:hover { border-color: var(--tr-line-strong); color: var(--tr-fg); }
-/* The icon stands in for the label once narrow windows hide it. */
-.tr-topbar .command-trigger-icon { display: none; flex: none; }
-.tr-topbar .command-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-topbar .command-trigger kbd { flex: none; white-space: nowrap; margin: 0; border: 0; background: none; padding: 0; font: var(--tr-t-meta); color: var(--tr-fg-faint); }
-.tr-menu { position: relative; }
-.tr-menu-list { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 4px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); box-shadow: var(--tr-shadow-overlay); }
-.tr-topbar > .tr-menu:nth-last-child(-n + 2) .tr-menu-list { left: auto; right: 0; }
-.tr-menu-list [role="menuitem"] { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg); font: var(--tr-t-control); text-align: left; }
-.tr-menu-list [role="menuitem"]:hover, .tr-menu-list [role="menuitem"]:focus-visible { background: var(--tr-raised); color: var(--tr-fg-strong); outline: none; box-shadow: inset 2px 0 var(--tr-fg-strong); }
-.tr-menu-list [role="menuitem"].current { color: var(--tr-fg-strong); font-weight: 600; }
-.tr-menu-list small { font: var(--tr-t-meta); color: var(--tr-fg-dim); }
-.tr-new-channel .tr-menu-button { background: var(--tr-fg); color: var(--tr-on-light); font-weight: 600; }
-.tr-new-channel .tr-menu-button:hover { background: var(--tr-fg-strong); color: var(--tr-on-light); }
-.tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-on-light); }
+.tr-topbar > .tr-project { flex: 0 1000 auto; min-width: 64px; max-width: 244px; }
+/* The padding leaves room for a tab's focus ring inside the box that scrolls. */
+.tr-topbar > .tr-tabs { flex: 0 1 auto; min-width: 0; margin: -4px; padding: 4px; overflow-x: auto; scrollbar-width: none; }
+.tr-wordmark { display: flex; align-items: center; gap: 8px; margin-right: 4px; border-radius: var(--tr-r-small); color: var(--tr-fg-strong); font: 700 15px/20px var(--tr-font-display); }
+.tr-wordmark:hover { text-decoration: none; }
+/* The keycap: Claude amber on a darker lip, as in the app icon. */
+.tr-keycap { flex: none; }
+.tr-keycap-face { fill: var(--tr-ch-claude); }
+.tr-keycap-lip { fill: color-mix(in srgb, var(--tr-ch-claude) 70%, var(--tr-on-light)); }
+/* Views: the tabs and the two view menus (Insight, Agent setup) take the shared tab's form. The one in view is the
+   accent pill (ui.css says why its border and words are the accent itself); its weight stays, so the bar does not
+   shift when the view changes. */
+.tr-tabs { display: flex; gap: 4px; }
+.tr-tabs > button, .tr-menu-button:not(.button) { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg-muted); font: var(--tr-t-control); white-space: nowrap; }
+:is(.tr-tabs > button, .tr-menu-button) > svg { flex: none; }
+.tr-tabs > button:hover, .tr-menu-button:not(.button):is(:hover, [aria-expanded="true"]) { background: var(--tr-hover); color: var(--tr-fg-strong); }
+.tr-tabs > button.active, .tr-menu-button:not(.button).active { border-color: var(--tr-accent); background: var(--tr-accent-soft); color: var(--tr-accent); }
+/* Linked computers get tabs after the main views; a count marks channels there that need the person. */
+/* An offline computer's name stays readable (it is still a tab to open); its dimmed screen icon says it is offline. */
+.tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-faint); }
+.tr-tabs > button.tr-computer-tab.offline svg { color: var(--tr-fg-off); }
+.tr-divider { width: 1px; height: 16px; margin: 0 4px; background: var(--tr-line); }
+/* The project switcher and + Channel are shared buttons (secondary, primary) that open a menu. */
+.tr-menu { position: relative; display: flex; min-width: 0; }
+.tr-menu > .button { min-width: 0; max-width: 100%; }
+/* A secondary button with a folder mark; the chosen tab beside it is the accent's colour. */
+.tr-project-icon { color: var(--tr-fg-dim); }
+.tr-project-name, .tr-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tr-menu-label { max-width: 160px; }
+/* The caret is typed as a character, which a smoke test reads; it is drawn as the shared chevron and turns when open. */
+.tr-caret { flex: none; width: 16px; height: 16px; margin: 0 -4px; overflow: hidden; text-indent: 16px; background: currentColor; clip-path: var(--ui-chevron); opacity: .7; transform: rotate(90deg); transition: transform var(--tr-d-fast) var(--tr-ease); }
+[aria-expanded="true"] > .tr-caret { transform: rotate(-90deg); }
+/* Layout segments: the shared segments, holding an icon each. */
+.tr-seg.tr-segmented > button { width: 28px; padding: 0; justify-content: center; }
+/* The command field looks like a text field; it opens the command menu. It takes up to 320 px and is the first thing in
+   the bar to give way, down to its icon; its words and key hint show only while it has room for them (`command`). */
+.command-trigger { container: command / inline-size; flex: 0 1000000 320px; min-width: 34px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); color: var(--tr-fg-faint); font: 400 13px/16px var(--tr-font-ui); text-align: left; }
+.command-trigger:hover { border-color: var(--tr-line-strong); color: var(--tr-fg-muted); }
+.command-trigger-icon { flex: none; }
+.command-trigger > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-trigger kbd { flex: none; }
 
-/* Status bar */
-.app-statusbar.tr-statusbar { height: var(--tr-statusbar-h); min-height: 0; flex: none; display: flex; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; margin: 0; background: var(--tr-surface); border-top: 1px solid var(--tr-line); font: var(--tr-t-meta); color: var(--tr-fg-dim); }
-.tr-sb-cell { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-right: 1px solid var(--tr-line); background: none; color: inherit; font: inherit; white-space: nowrap; }
-/* A long project name or alert list shrinks instead of pushing the cells after it off screen. */
-/* The project and save status give way first, so alerts keep their room. */
-.tr-sb-project, .tr-sb-alert, .tr-statusbar .storage-status { flex: 0 1 auto; min-width: 0; }
-.tr-sb-project, .tr-statusbar .storage-status { flex-shrink: 8; }
-.tr-sb-project { max-width: 240px; }
-/* With many channels their cells give way next, cutting their token counts and then state words but keeping CHn, so
-   Needs you and the alerts stay on screen. */
-.tr-sb-channel { flex: 0 2 auto; min-width: 64px; overflow: hidden; }
-/* The engine square is the only item in a cell that could shrink, so it would vanish first. */
-.tr-sb-channel .tr-engine-square { flex: none; }
-/* Above the legacy `.app-statusbar span { display: flex }`, which would defeat the ellipsis. */
-.tr-statusbar .tr-sb-text { display: block; }
-.tr-statusbar .tr-sb-text, .tr-statusbar .storage-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tr-statusbar .storage-status { display: block; line-height: calc(var(--tr-statusbar-h) - 1px); }
-.tr-statusbar .tr-spacer { min-width: 0; }
-.tr-spacer + .tr-sb-cell, .tr-statusbar .tr-spacer ~ .tr-sb-cell { border-right: 0; border-left: 1px solid var(--tr-line); }
+/* ---------- Menus ---------- */
+/* An overlay card; rows 36 px tall, 4 px inside it. The view being shown is the raised row with the accent edge. */
+.tr-menu-list { position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; min-width: 220px; padding: 4px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-card); box-shadow: var(--tr-shadow-overlay); }
+.tr-topbar > .tr-menu:nth-last-child(-n + 2) .tr-menu-list { left: auto; right: 0; }
+.tr-menu-list [role="menuitem"] { width: 100%; height: 36px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: var(--tr-r-control); background: none; color: var(--tr-fg); font: var(--tr-t-control); text-align: left; white-space: nowrap; }
+.tr-menu-list [role="menuitem"] > svg { flex: none; color: var(--tr-fg-dim); }
+.tr-menu-list [role="menuitem"] > span:not(.ui-avatar) { flex: 1; }
+.tr-menu-list [role="menuitem"]:is(:hover, :focus-visible) { background: var(--tr-hover); color: var(--tr-fg-strong); outline-offset: -2px; }
+.tr-menu-list [role="menuitem"].current { background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); color: var(--tr-fg-strong); }
+.tr-menu-list [role="menuitem"].current > svg { color: var(--tr-accent); }
+.tr-menu-list small { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+
+/* ---------- Command menu ---------- */
+/* A solid scrim, never blur (it is costly over terminals), and an overlay card 64 px from the top. */
+.command-backdrop { position: fixed; inset: 0; z-index: 100; padding: 64px 16px 16px; background: var(--tr-scrim); }
+.command-menu { width: min(640px, 100%); max-height: min(100%, 600px); margin: 0 auto; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-card); box-shadow: var(--tr-shadow-overlay); }
+.tr-command-input { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--tr-line); color: var(--tr-fg-dim); }
+.tr-command-input svg { flex: none; }
+/* The field has no frame of its own: the card around it is the frame. */
+.tr-command-input input, .tr-command-input input:focus { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; outline: none; background: none; color: var(--tr-fg-strong); font: 400 15px/20px var(--tr-font-ui); }
+.tr-command-count { font: var(--tr-t-small); color: var(--tr-fg-faint); white-space: nowrap; }
+.tr-command-scopes { flex: none; display: flex; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); }
+.tr-command-results { flex: 1; min-height: 0; overflow-y: auto; padding: 4px; }
+.tr-command-group { padding: 8px 12px 4px; font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-faint); }
+.tr-command-row { height: 36px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: var(--tr-r-control); color: var(--tr-fg); cursor: pointer; }
+.tr-command-row[aria-selected="true"] { background: var(--tr-raised); color: var(--tr-fg-strong); }
+.tr-command-glyph { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg-dim); font: 600 12px/1 var(--tr-font-mono); }
+.tr-command-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-control); }
+.tr-command-label mark { background: none; color: var(--tr-accent); font-weight: 600; }
+.tr-command-meta { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.tr-command-meta.file { font: var(--tr-t-meta); }
+.tr-command-meta.waiting { color: var(--tr-st-waiting); }
+.tr-command-meta.failed { color: var(--tr-st-failed); }
+.tr-command-meta.limit { color: var(--tr-st-limit); }
+.tr-command-row kbd { flex: none; }
+.tr-command-empty { margin: 0; padding: 12px; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.tr-command-footer { height: 36px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-top: 1px solid var(--tr-line); font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.tr-command-footer span { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ---------- Status bar ---------- */
+/* One line of items 16 px apart, with no borders between them. */
+.app-statusbar.tr-statusbar { height: var(--tr-statusbar-h); flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); color: var(--tr-fg-dim); font: var(--tr-t-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tr-sb-cell { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; border-radius: var(--tr-r-small); background: none; color: inherit; font: inherit; white-space: nowrap; }
+/* A button's hover fill reaches 6 px past its words without moving them. */
+button.tr-sb-cell { margin: 0 -6px; padding: 0 6px; }
 button.tr-sb-cell:hover { background: var(--tr-hover); color: var(--tr-fg); }
-.tr-sb-channel { color: var(--tr-fg-muted); }
-.tr-engine-square { width: 8px; height: 8px; display: inline-block; }
-.tr-sb-project { color: var(--tr-fg); }
+.tr-sb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tr-fg-off); }
+.tr-sb-dot.claude { background: var(--tr-ch-claude); }
+.tr-sb-dot.codex { background: var(--tr-ch-codex); }
+.tr-sb-dot.shell { background: var(--tr-ch-shell); }
+.tr-sb-dot.online { background: var(--tr-success); }
+/* A channel's state colour by class: the state, or the engine while it works. The command menu's glyphs use it too. */
+.tr-state.idle { color: var(--tr-st-idle); }
+.tr-state.starting { color: var(--tr-st-starting); }
+.tr-state.waiting { color: var(--tr-st-waiting); }
+.tr-state.finished { color: var(--tr-st-finished); }
+.tr-state.failed { color: var(--tr-st-failed); }
+.tr-state.limit { color: var(--tr-st-limit); }
+.tr-state.claude { color: var(--tr-ch-claude); }
+.tr-state.codex { color: var(--tr-ch-codex); }
+.tr-state.shell { color: var(--tr-ch-shell); }
+.tr-sb-channel, .tr-sb-plan, .tr-sb-project { color: var(--tr-fg-muted); }
+.tr-sb-channel { font-weight: 500; }
+.tr-sb-state { display: inline-flex; }
+.tr-sb-tokens { font-weight: 400; color: var(--tr-fg-faint); }
+/* Only a very long project name or list of alerts is shortened, with an ellipsis. */
+.tr-statusbar .tr-sb-text { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.tr-sb-window small, .tr-sb-quiet, .tr-sb-host, .tr-statusbar .storage-status { color: var(--tr-fg-faint); }
+/* A plan limit or today's budget turns amber as it fills, then red. */
+:is(.tr-sb-window, .tr-sb-today).warning { color: var(--tr-st-limit); }
+:is(.tr-sb-window, .tr-sb-today).critical { color: var(--tr-danger); font-weight: 600; }
+.needs-you-cell { color: var(--tr-st-waiting); font-weight: 600; }
+/* Read out, not drawn: the count pill stands where " · " is typed. */
+.needs-you-sep { width: 0; margin-right: -6px; overflow: hidden; }
 .tr-sb-alert.waiting { color: var(--tr-st-waiting); }
 .tr-sb-alert.failed { color: var(--tr-st-failed); }
 .tr-sb-alert.limit { color: var(--tr-st-limit); }
-.tr-sb-quiet { color: var(--tr-fg-faint); }
-.tr-sb-host i { width: 6px; height: 6px; border-radius: 50%; background: var(--tr-fg-off); }
-.tr-sb-host i.online { background: var(--tr-add); }
-.tr-statusbar .storage-status { color: var(--tr-fg-faint); text-transform: none; }
-.tr-statusbar .storage-status.error { color: var(--tr-st-failed); }
+.tr-statusbar .storage-status { font: inherit; }
+.tr-statusbar .storage-status.error { color: var(--tr-danger); }
 
-/* Narrow windows (or a higher display scale): the command field, menu labels and wordmark collapse in steps. */
-@container shell (max-width: 1440px) { .tr-topbar .command-trigger { width: 200px; } .tr-topbar .command-trigger kbd { display: none; } }
-@container shell (max-width: 1366px) { .tr-statusbar .tr-sb-host { display: none; } }
+/* What gives way when the bar is short, in this order: the host, the saved state, each channel's tokens today, the
+   lesser plan limit, the project, the state words (their glyphs stay) with the plans' names, and last today's total.
+   Nothing is cut mid-word. Two means:
+   1. An item that leaves whole (tr-sb-drop) shrinks before the rest, each by a flex-shrink a million times that of
+      the next in the order. As soon as its box is narrower than its words they wrap to a second line, which the box
+      clips. The 16 px before the item are inside it, so nothing is left of it; and these items stand beside the spacer
+      in the order they leave, so no gap shows where one was.
+   2. A part inside an item cannot shrink before other items, so it is given the width the bar must have for it, added
+      up from what the bar holds: 110 px a channel with its state word (--sb-channels, set by StatusBar), 56 for its
+      tokens, 104 a plan and 84 for its second limit, 162 for today's total, 120 for the project, and what :has() finds
+      of Needs you and alerts. clamp() turns "the bar is at least that wide" into 1px or 0px, which the part multiplies
+      into its width or none. The sums are of typical words: where they fall short, an item of means 1 leaves instead. */
+.tr-sb-drop { flex: 0 1 auto; min-width: 0; margin-left: -16px; flex-wrap: wrap; align-content: flex-start; overflow: clip; }
+/* The space before the words is an item of its own, so the words are never first on their line, which could not wrap. */
+.tr-sb-drop::before { content: ""; flex: none; width: 16px; height: 100%; margin-right: -6px; }
+.tr-sb-host { flex-shrink: 1e24; }
+.tr-statusbar .storage-status { flex-shrink: 1e18; }
+.tr-sb-project { flex-shrink: 1e12; }
+.tr-sb-today { flex-shrink: 1e6; }
+.tr-sb-host > span { display: inline-flex; align-items: center; gap: 6px; }
+/* The last resort, after all of those: a list of alerts is shortened with an ellipsis. */
+.tr-sb-alert { flex: 0 1 auto; min-width: 96px; }
+.tr-statusbar { --sb-plans: 0; --sb-needs: 0px; --sb-alert: 68px;
+  --sb-need: calc(24px + 162px + var(--sb-channels) * 110px + var(--sb-plans) * 104px + var(--sb-needs) + var(--sb-alert));
+  --sb-words: clamp(0px, (100cqw - var(--sb-need)) * 99, 1px);
+  --sb-detail: clamp(0px, (100cqw - var(--sb-need) - 120px - var(--sb-plans) * 84px) * 99, 1px);
+  --sb-tokens: clamp(0px, (100cqw - var(--sb-need) - 120px - var(--sb-plans) * 84px - var(--sb-channels) * 56px) * 99, 1px); }
+.tr-statusbar:has(.tr-sb-plan) { --sb-plans: 1; }
+.tr-statusbar:has(.tr-sb-plan ~ .tr-sb-plan) { --sb-plans: 2; }
+.tr-statusbar:has(.needs-you) { --sb-needs: 108px; }
+.tr-statusbar:has(.tr-sb-alert) { --sb-alert: 148px; }
+/* The state glyphs come from one font, so they are one size. */
+.tr-sb-glyph, .tr-sb-alert > [aria-hidden], .tr-toast header > [aria-hidden] { font-family: var(--tr-font-mono); }
+:is(.tr-sb-word, .tr-sb-glyph, .tr-sb-tokens, .tr-sb-plan-name, .tr-sb-window, .tr-sb-window small) { overflow: hidden; }
+.tr-sb-word, .tr-sb-plan-name { max-width: calc(var(--sb-words) * 999); }
+.tr-sb-glyph { max-width: calc((1px - var(--sb-words)) * 99); }
+/* The gap beside a part closes with it. */
+.tr-sb-plan-name { margin-right: calc((var(--sb-words) - 1px) * 6); }
+.tr-sb-tokens { max-width: calc(var(--sb-tokens) * 999); margin-left: calc((var(--sb-tokens) - 1px) * 6); }
+/* With both limits shown, each stands 12 px from its neighbour; alone, the fullest keeps only its number. */
+.tr-sb-window { display: inline-flex; gap: calc(var(--sb-detail) * 4); margin-left: calc(var(--sb-detail) * 6); }
+.tr-sb-window:not(.worst), .tr-sb-window small { max-width: calc(var(--sb-detail) * 999); }
+.tr-sb-window:not(.worst) { margin-left: calc(var(--sb-detail) * 12 - 6px); }
+/* What left earlier does not come back when a later step frees room: the host and the saved state stay away while
+   the plan limits are collapsed, the project while the state words are. */
+.tr-sb-host, .tr-statusbar .storage-status { max-width: calc(var(--sb-detail) * 9999); }
+.tr-sb-project { max-width: calc(var(--sb-words) * 9999); }
+/* Seven or eight channels in a narrow window: the plan limits go too (Usage shows them). */
+@container shell (max-width: 980px) { .tr-statusbar:has(> .tr-sb-channel:nth-child(7)) .tr-sb-plan { display: none; } }
+
+/* ---------- Needs you ---------- */
+/* An overlay card over the status bar: everything waiting for the person, each with its next step. */
+.needs-you-list { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-card); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); white-space: normal; }
+.needs-you-list ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* A row is a well; its left edge takes the colour of what it waits for. */
+.needs-you-list li { --tone: var(--tr-line-control); display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--tr-r-control); background: var(--tr-well); box-shadow: inset 3px 0 0 var(--tone); }
+.needs-you-list li > div { flex: 1; min-width: 0; }
+.needs-you-list strong { color: var(--tr-fg-strong); }
+.needs-you-list small { color: var(--tr-fg-faint); }
+.needs-you-list p { margin: 0; overflow-wrap: anywhere; color: var(--tr-fg-dim); }
+.needs-you-list .needs-you-approval { --tone: var(--tr-st-waiting); }
+.needs-you-list :is(.needs-you-failed, .needs-you-task-stopped) { --tone: var(--tr-st-failed); }
+
+/* ---------- Notices ---------- */
+/* Channels that need the person or failed, drawn only while their tile is not on screen (tileShows in Toasts.tsx), and
+   what a restart or loading changed. They stay until handled or dismissed.
+   A card with the overlay shadow and a 3 px left edge in the state's colour. */
+.tr-toasts { --toasts-w: min(400px, calc(100% - 24px)); position: fixed; right: 12px; bottom: calc(var(--tr-statusbar-h) + 12px); z-index: 70; display: flex; flex-direction: column; gap: 8px; width: var(--toasts-w); }
+/* They step aside while the Needs you list is open: it holds the same things, over the same corner. */
+.tr-statusbar:has(.needs-you-list) ~ .tr-toasts { visibility: hidden; }
+/* Where that corner holds a chat's message row, or the tile the person types in, they stand at the top instead
+   (Toasts sets this), so a notice never lies over a message box, its Send or the prompt in use. They start 12 px under
+   the first row of tiles' header and detail row (8 px is the workspace's padding), so those rows' buttons stay in
+   reach: Restore, Stop, Answer. Where a conversation is in that row, they start 12 px under its bars instead:
+   --tr-toasts-under is the lowest of those edges, a share of the window's height that Toasts measures. */
+.tr-toasts.raised { top: max(calc(var(--tr-topbar-h) + 8px + var(--tr-tile-head-h) + var(--tr-tile-detail-h) + 12px), calc(var(--tr-toasts-under, 0%) + 12px)); bottom: auto; }
+/* A stack that would reach the next message row down that side, or the next chat that starts under it, ends 12 px
+   above it and scrolls in itself: --tr-toasts-room is that edge, measured from the stack's top. The padding holds the
+   notices' shadow inside the box that scrolls. Its scrollbar stands in the 12 px beside the notices: 8 px wide after
+   4 px of padding, kept whether or not it is needed, and the box that much wider, since a scrollbar takes its width out
+   of the content. So the notices are as wide as in a stack that is not cut short, and stand where they do there (a
+   10 px scrollbar inside 12 px of padding made them 10 px narrower). With less room than a notice's title and first line
+   (72 px; Toasts decides), they step aside as for the Needs you list, so none lies over the message being written. */
+.tr-toasts.short { box-sizing: content-box; right: 0; width: calc(var(--toasts-w) + 8px); padding: 0 4px 12px 16px; max-height: calc(var(--tr-toasts-room) - 12px); overflow-y: auto; scrollbar-gutter: stable; }
+.tr-toasts.short::-webkit-scrollbar { width: 8px; }
+.tr-toasts.short::-webkit-scrollbar-thumb { border-width: 1px; }
+.tr-toasts.away { visibility: hidden; }
+.tr-toast { --tone: var(--tr-accent); position: relative; flex: none; padding: 12px 12px 12px 16px; overflow: hidden; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); box-shadow: var(--tr-shadow-toast); animation: tr-toast-in var(--tr-d-base) var(--tr-ease); }
+.tr-toast::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone); }
+.tr-toast.waiting { --tone: var(--tr-st-waiting); }
+.tr-toast.failed { --tone: var(--tr-st-failed); }
+.tr-toast header { display: flex; align-items: center; gap: 8px; color: var(--tone); font: var(--tr-t-heading); }
+.tr-toast header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-strong); }
+/* Three lines at most; the whole text is the paragraph's tooltip. */
+.tr-toast p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; margin: 4px 0 0; overflow: hidden; overflow-wrap: anywhere; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-muted); }
+/* Actions at the right, the main one last. Answer is the waiting colour, as on the channel's tile. */
+.tr-toast footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.tr-toast-action.waiting, .tr-toast-action.waiting:hover:not(:disabled) { border-color: var(--tr-st-waiting); background: var(--tr-st-waiting); color: var(--tr-on-waiting); }
+.tr-toast-action.waiting:hover:not(:disabled) { background: color-mix(in srgb, var(--tr-st-waiting) 86%, var(--tr-fg-strong)); }
+.tr-toast-action kbd { height: auto; padding: 0; border: 0; background: none; color: inherit; opacity: .7; }
+@keyframes tr-toast-in { from { opacity: 0; transform: translateY(12px); } }
+@media (prefers-reduced-motion: reduce) { .tr-toast { animation: none; } }
+
+/* ---------- Narrow windows and higher contrast ---------- */
+/* A narrow window (or a higher display scale): the command field, the menus' labels and the wordmark give way in steps. */
+@container command (max-width: 264px) { .command-trigger kbd { display: none; } }
+@container command (max-width: 200px) { .command-trigger > span { display: none; } }
 @container shell (max-width: 1180px) {
-  .tr-topbar .command-trigger { width: auto; } .tr-topbar .command-trigger > span { display: none; } .tr-topbar .command-trigger-icon { display: block; }
-  .tr-tabs > button, .tr-menu-button { padding: 0 9px; }
-  .tr-topbar > .tr-project { max-width: 150px; }
-  .tr-menu-label { max-width: 110px; }
-  .tr-narrow-icon { display: block; } .tr-wide-label { display: none; }
+  .command-trigger { flex: none; width: 32px; min-width: 0; padding: 0; justify-content: center; color: var(--tr-fg-dim); } .command-trigger > span, .command-trigger kbd { display: none; }
+  .tr-wide-label { display: none; }
+  .tr-tabs > button, .tr-menu-button:not(.button) { padding: 0 8px; }
+  .tr-topbar > .tr-project { max-width: 176px; }
+  .tr-menu-label { max-width: 112px; }
 }
-@container shell (max-width: 1024px) { .tr-wordmark-text, .tr-divider { display: none; } .tr-wordmark { margin-right: 4px; } .tr-tabs > button, .tr-menu-button { padding: 0 7px; } }
-
-/* Linked computers get tabs after the main views; a dot of colour marks channels there that need the person. */
-.tr-tabs > button.tr-computer-tab { gap: 6px; }
-/* An offline computer's name stays readable (it is still a tab to open); its dimmed screen icon says it is offline. */
-.tr-tabs > button.tr-computer-tab.offline { color: var(--tr-fg-faint); } .tr-tabs > button.tr-computer-tab.offline svg { color: var(--tr-fg-off); }
-.tr-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--tr-r-panel); background: var(--tr-st-waiting); color: var(--tr-on-waiting); font: 600 11px/16px var(--tr-font-mono); text-align: center; }
-
-/* Subscription limits in the status bar: amber nearing a limit, red nearly out. */
-.tr-sb-limits { gap: 6px; }
-.tr-sb-limits.warning .tnum { color: var(--tr-st-limit); }
-.tr-sb-limits.critical .tnum { color: var(--tr-st-failed); font-weight: 600; }
-
-/* Flight Deck Lite: uppercase, tracked navigation; the active view in Codex cyan; + Channel outlined in Claude amber. */
-.tr-wordmark-reticle { flex: none; color: var(--tr-ch-codex); }
-.tr-wordmark-text { text-transform: uppercase; letter-spacing: .18em; }
-.tr-tabs > button, .tr-menu-button { text-transform: uppercase; letter-spacing: .06em; font-size: 13px; padding: 0 11px; }
-.tr-tabs > button.active { background: var(--tr-ch-codex); color: var(--tr-on-light); }
-.tr-topbar .tr-new-channel > .tr-menu-button, .tr-topbar .tr-new-channel.tr-menu-button { border: 1px solid var(--tr-ch-claude); background: color-mix(in srgb, var(--tr-ch-claude) 10%, transparent); color: var(--tr-ch-claude); font-weight: 700; }
-.tr-topbar .tr-new-channel > .tr-menu-button:hover, .tr-topbar .tr-new-channel.tr-menu-button:hover { background: color-mix(in srgb, var(--tr-ch-claude) 20%, transparent); color: var(--tr-ch-claude); }
-.app-statusbar.tr-statusbar { text-transform: uppercase; letter-spacing: .06em; }
-.tr-topbar .tr-new-channel .tr-menu-button .tr-caret { color: var(--tr-ch-claude); }
-/* Needs you: everything waiting for the person, opened from the status bar. */
-/* The list opens above the toasts (z-index 70), which sit over the same corner. The cell stretches to the bar's height. */
-.needs-you { position: relative; flex: 0 0 auto; display: flex; }
-.needs-you-cell { color: var(--tr-st-waiting); }
-.needs-you-list { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 80; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 6px; background: var(--tr-surface); border: 1px solid var(--tr-line-strong); color: var(--tr-fg); }
-.needs-you-list ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.needs-you-list li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 6px; border-left: 2px solid var(--tr-line); }
-.needs-you-list li p { margin: 2px 0 0; color: var(--tr-fg-muted); overflow-wrap: anywhere; }
-.needs-you-list .needs-you-approval { border-left-color: var(--tr-st-waiting); } .needs-you-list .needs-you-failed, .needs-you-list .needs-you-task-stopped { border-left-color: var(--tr-st-failed); }
-.needs-you-list { text-transform: none; letter-spacing: normal; font: 400 13px/18px var(--tr-font-ui); white-space: normal; }
+@container shell (max-width: 1024px) { .tr-wordmark-text, .tr-divider { display: none; } .tr-topbar { gap: 4px; } }
+/* The narrowest window (or 1100 px at 125%): the project's name needs the room of its folder mark. */
+@container shell (max-width: 890px) { .tr-project-icon { display: none; } }
+/* A linked computer's tab needs the room of those labels sooner. */
+@container shell (max-width: 1440px) { .tr-topbar:has(.tr-computer-tab) .tr-wide-label { display: none; } }
+/* Higher contrast (Settings > Display): the bars' edges and their quietest words come up. */
+[data-contrast="high"] :is(.tr-topbar, .tr-statusbar, .tr-toast) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.tr-statusbar, .tr-sb-tokens, .tr-sb-window small, .tr-sb-quiet, .tr-sb-host, .tr-statusbar .storage-status, .command-trigger) { color: var(--tr-fg); }
+[data-contrast="high"] :is(.tr-tabs > button, .tr-menu-button:not(.button)) { color: var(--tr-fg-strong); }

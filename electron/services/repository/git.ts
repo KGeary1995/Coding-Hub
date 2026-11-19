@@ -62,7 +62,7 @@ export class RepositoryGit {
       const top = (await git(context.directory, ['rev-parse', '--show-toplevel'])).toString('utf8').replace(/\r?\n$/, '');
       root = await realpath(top);
     } catch (error) {
-      if (error instanceof HubError && error.code === 'GIT_FAILED') throw new HubError('NOT_A_REPOSITORY', 'This directory is not an accessible Git working tree. File browsing is still available.');
+      if (error instanceof HubError && error.code === 'GIT_FAILED') throw new HubError('NOT_A_REPOSITORY', 'This folder is not an accessible Git working tree. File browsing is still available.');
       throw error;
     }
     const output = await git(root, ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=dirty']);

@@ -9,6 +9,7 @@ const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 if (process.platform !== 'win32') { console.log('SKIP: paste smoke runs on Windows only (the system clipboard is set through Windows Forms).'); process.exit(0); }
 
 const RECORDER = `const fs = require('node:fs'); const log = (line) => fs.appendFileSync(process.env.PASTE_SMOKE_LOG, line + '\\n'); const args = process.argv.slice(2);
@@ -38,14 +39,14 @@ const hex = (text) => Buffer.from(text).toString('hex');
     await fs.writeFile(path.join(packageRoot, 'fixture.cjs'), RECORDER); await fs.writeFile(path.join(bin, engine + '.cmd'), '@echo off\r\n');
   }
   const setClipboard = (mode) => execFileSync('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script, mode]);
-  const env = { ...process.env, PASTE_SMOKE_LOG: log, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, ...NO_DRIVE, PASTE_SMOKE_LOG: log, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const received = async () => (await fs.readFile(log, 'utf8')).split('\n').filter(Boolean);
   const after = async (mark, prefix, wait = 1500) => { await sleep(wait); return (await received()).slice(mark).filter((line) => line.startsWith(prefix)); };
   const useFolder = async (tile) => {
-    const name = await tile.getByRole('button', { name: /^Engine settings for session \d+$/ }).getAttribute('aria-label');
+    const name = await tile.getByRole('button', { name: /^Engine settings for channel \d+$/ }).getAttribute('aria-label');
     await (await tileControl(tile, name)).click();
-    await tile.getByLabel('Working directory', { exact: true }).selectOption('independent'); await tile.getByLabel('Repository path', { exact: true }).fill(project);
+    await tile.getByLabel('Working folder', { exact: true }).selectOption('independent'); await tile.getByLabel('Repository path', { exact: true }).fill(project);
     await (await tileControl(tile, name)).click();
   };
   let app;
@@ -55,7 +56,7 @@ const hex = (text) => Buffer.from(text).toString('hex');
     await page.getByRole('button', { name: 'Use channels without a project', exact: true }).click();
 
     const tile = page.locator('.session-tile').first(); await useFolder(tile);
-    await tile.getByRole('button', { name: 'Start session', exact: true }).click();
+    await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.session-tile .xterm-rows')?.textContent?.includes('PASTE SMOKE READY'), null, { timeout: 30000 });
     await tile.locator('.xterm').click(); await sleep(300);
 
@@ -80,7 +81,7 @@ const hex = (text) => Buffer.from(text).toString('hex');
     await page.waitForFunction((count) => document.querySelectorAll('.session-tile').length === count + 1, tiles, { timeout: 15000 });
     // It tried to start without a folder, so it offers Retry (not Start) once it has one.
     const chatTile = page.locator('.session-tile').last(); await useFolder(chatTile);
-    await chatTile.getByRole('button', { name: /^(Start session|Retry)$/ }).first().click();
+    await chatTile.getByRole('button', { name: /^(Start channel|Retry)$/ }).first().click();
     const box = chatTile.locator('textarea'); await page.waitForFunction(() => { const area = [...document.querySelectorAll('.session-tile')].at(-1)?.querySelector('textarea'); return area && !area.disabled; }, null, { timeout: 30000 });
     setClipboard('image'); await box.click(); await page.keyboard.press('Control+V');
     await page.waitForFunction(() => [...document.querySelectorAll('.session-tile')].at(-1)?.querySelectorAll('.chat-attachments li').length === 1, null, { timeout: 10000 });

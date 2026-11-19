@@ -2,21 +2,24 @@ import type { Session } from '../../shared/types';
 import { freshInput, localDay, newTokens, type UsageRecord } from '../../shared/hub';
 import { channelsOf, hiddenSeats, leadOf } from './workspace-store';
 
-/** What a session is doing, as the Trace design shows it (docs/design/trace/README.md). */
+/** What a session is doing, as the Midnight design shows it (docs/design/midnight/README.md, section 5). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
 
-/** Each state is shown four ways (glyph, word, trace, colour) so colour is never the only signal. */
-export const CHANNEL_STATES: Record<ChannelState, { glyph: string; word: string; color: string; solid: boolean }> = {
-  idle: { glyph: '○', word: 'IDLE', color: 'var(--tr-st-idle)', solid: false },
-  starting: { glyph: '◌', word: 'ARMING', color: 'var(--tr-st-starting)', solid: false },
-  working: { glyph: '●', word: 'RUN', color: 'engine', solid: false },
-  waiting: { glyph: '◆', word: 'HOLD', color: 'var(--tr-st-waiting)', solid: true },
-  finished: { glyph: '✓', word: 'STOP', color: 'var(--tr-st-finished)', solid: false },
-  failed: { glyph: '✕', word: 'FAULT', color: 'var(--tr-st-failed)', solid: true },
-  limit: { glyph: '▲', word: 'CLIP', color: 'var(--tr-st-limit)', solid: false },
+/**
+ * Each state has a plain word and a colour (the tile's badge), and a glyph for places with no room for the word (the
+ * status bar, the command menu, notices), so colour is never the only signal.
+ */
+export const CHANNEL_STATES: Record<ChannelState, { glyph: string; word: string; color: string }> = {
+  idle: { glyph: '○', word: 'Idle', color: 'var(--tr-st-idle)' },
+  starting: { glyph: '◌', word: 'Starting', color: 'var(--tr-st-starting)' },
+  working: { glyph: '●', word: 'Working', color: 'engine' },
+  waiting: { glyph: '◆', word: 'Needs you', color: 'var(--tr-st-waiting)' },
+  finished: { glyph: '✓', word: 'Finished', color: 'var(--tr-st-finished)' },
+  failed: { glyph: '✕', word: 'Failed', color: 'var(--tr-st-failed)' },
+  limit: { glyph: '▲', word: 'Near limit', color: 'var(--tr-st-limit)' },
 };
 
-/** Share of the context window or session budget in use (0–1+). Claude does not report its window size. */
+/** Share of the context window or the channel's budget in use (0–1+). Claude does not report its window size. */
 export function limitRatio(session: Session, usage: UsageRecord | undefined) {
   if (!usage) return 0;
   const context = usage.context && usage.context.limit > 0 ? usage.context.used / usage.context.limit : 0;

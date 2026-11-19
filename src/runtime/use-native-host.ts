@@ -92,7 +92,7 @@ export function useNativeHost() {
       if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }
-      catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the session and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
+      catch { useWorkspaceStore.getState().setSessionError(event.sessionId, 'The terminal display failed. Stop the channel and restart the app with software terminal rendering in Settings. Recorded output remains available in Session history.'); }
     });
     const unsubscribeErrors = host.onStorageError((logError) => useWorkspaceStore.setState({ logError }));
     const unsubscribeLinked = host.onLinkedEvent(routeLinkedEvent); void refreshLinked();
@@ -157,10 +157,10 @@ export async function startSession(id: string) {
     const updated = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
     if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);
   }
-  if (!window.codingHub) { state.setSessionError(id, 'Live sessions require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
+  if (!window.codingHub) { state.setSessionError(id, 'Live channels require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
   // A Round Table's lead starts in its table's folder (its hidden seats keep theirs), so the table can be seated again.
   const cwd = tableDirectory(state.sessions, session) ?? (session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory);
-  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository directory first.', true); return; }
+  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository folder first.', true); return; }
   state.markStarting(id);
   try {
     const result = await window.codingHub.startSession({ sessionId: id, cwd, config: session.config, ...terminalDimensions(id) });
@@ -173,7 +173,7 @@ export async function startSession(id: string) {
       }
       focusTerminal(id);
     }
-  } catch { useWorkspaceStore.getState().setSessionError(id, 'The native session could not be started.', true); }
+  } catch { useWorkspaceStore.getState().setSessionError(id, 'The channel could not be started.', true); }
   // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
   // A hierarchy table's planner too: its hidden seats start together.
   const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
@@ -229,7 +229,7 @@ async function stopRun(id: string): Promise<boolean> {
     const result = await window.codingHub.stopSession({ sessionId: id, runId: session.runId });
     if (!result.ok) useWorkspaceStore.getState().setSessionError(id, result.error.message);
     return result.ok;
-  } catch { useWorkspaceStore.getState().setSessionError(id, 'The session could not be stopped.'); return false; }
+  } catch { useWorkspaceStore.getState().setSessionError(id, 'The channel could not be stopped.'); return false; }
 }
 
 /**

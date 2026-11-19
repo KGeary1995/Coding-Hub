@@ -36,7 +36,7 @@ export class WorkspaceStorage {
   private saved: ReturnType<typeof migrateWorkspace> | null = null;
 
   constructor(root: string, private onError: (message: string) => void = () => {}, limits: Partial<Pick<StorageInfo, 'maxLogBytes' | 'maxCompletedRuns' | 'retentionDays'>> = {}) {
-    if (!path.isAbsolute(root)) throw new HubError('STORAGE_PATH', 'The local storage directory must be absolute.');
+    if (!path.isAbsolute(root)) throw new HubError('STORAGE_PATH', 'The local storage folder must be absolute.');
     this.info = { databasePath: path.join(root, 'storage.db'), logsDirectory: path.join(root, 'logs'), maxLogBytes: 5 * 1024 * 1024, maxCompletedRuns: 100, retentionDays: 30, ...limits };
     mkdirSync(this.info.logsDirectory, { recursive: true, mode: 0o700 });
     closeSync(openSync(this.info.databasePath, 'a', 0o600));

@@ -204,7 +204,7 @@ export function useAutomaticKey(directory: string, memoryRoot: string, server: s
     updateConfig(file, inspected.hash, (data) => { const target = data[slot][SERVER]; if (stale) target.command = executable; target.args = [stale ? server : target.args[0], memoryRoot, key]; });
     changed.push(file);
   }
-  if (!found) throw new HubError('MEMORY_NOT_INSTALLED', 'This project has no coding-hub-memory entry that Trace installed. Sessions started in Trace already use automatic memory.');
+  if (!found) throw new HubError('MEMORY_NOT_INSTALLED', 'This project has no coding-hub-memory entry that Trace installed. Channels started in Trace already use automatic memory.');
   return changed;
 }
 
@@ -305,10 +305,10 @@ export class AutoMemory {
     // A project entry with another key would read and write a different set of notes than the context above.
     if (configured?.key && (configured.key !== key || configured.root !== this.options.memory.root)) {
       context += `\n\nNote: this project's ${path.basename(configured.file)} starts ${SERVER} with ${configured.key !== key ? `the key ${configured.key}` : 'another notes folder'}, so read_memory and write_handoff use those notes, not the ${key} notes above.`;
-      this.notice(`key:${configured.file}`, `${configured.file} configures ${SERVER} with ${configured.key !== key ? `the memory key ${configured.key}, but Trace's notes for this folder use ${key}` : 'a notes folder other than Trace’s'}. Sessions there read and write other notes. Open Memory and choose Use automatic key, or remove the entry.`);
+      this.notice(`key:${configured.file}`, `${configured.file} configures ${SERVER} with ${configured.key !== key ? `the memory key ${configured.key}, but Trace's notes for this folder use ${key}` : 'a notes folder other than Trace’s'}. Channels there read and write other notes. Open Memory and choose Use automatic key, or remove the entry.`);
     }
     // An entry Trace did not write keeps Trace from adding its own (two servers with one name would clash): say so.
-    if (configured && !configured.key) this.notice(`foreign:${configured.file}`, `${configured.file} has a ${SERVER} entry that Trace did not install, so Trace's automatic memory tools are off for sessions in this folder. Remove that entry to turn them back on.`);
+    if (configured && !configured.key) this.notice(`foreign:${configured.file}`, `${configured.file} has a ${SERVER} entry that Trace did not install, so Trace's automatic memory tools are off for channels in this folder. Remove that entry to turn them back on.`);
     const extra: string[] = [];
     if (run.engine === 'claude') {
       if (info.supportsAppendSystemPrompt) extra.push('--append-system-prompt', context);

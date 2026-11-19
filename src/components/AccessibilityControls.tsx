@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { focusTerminal } from '../runtime/terminals';
+import { CircleAlert, Keyboard } from 'lucide-react';
+import { jumpToChannel } from './shell/StatusBar';
 import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { CHANNEL_KEYS, channelKey } from './channel-key';
 interface DisplaySettings { scale: number; density: 'comfortable' | 'compact'; contrast: boolean }
@@ -14,10 +15,8 @@ export function useAccessibility() {
       if (channel !== null) {
         const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[channel];
         if (session) {
-          event.preventDefault(); event.stopPropagation(); state.setView('workspace');
-          // Only the isolated tile's terminal is mounted; isolate the requested one instead.
-          if (state.focusedSessionId && state.focusedSessionId !== session.id) state.toggleFocus(session.id);
-          requestAnimationFrame(() => focusTerminal(session.id));
+          // As Answer on a notice does (its key hint is this shortcut): the workspace, the channel isolated if another is, its grid scrolled to the tile.
+          event.preventDefault(); event.stopPropagation(); jumpToChannel(session.id);
         }
       }
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.setState({ workflowTab: 'search' }); useWorkspaceStore.getState().setView('workflow'); }
@@ -29,5 +28,8 @@ export function useAccessibility() {
 export function AccessibilityControls() {
   const [value, setValue] = useState(load); const [error, setError] = useState('');
   function update(next: DisplaySettings) { setValue(next); apply(next); try { localStorage.setItem('coding-hub-display', JSON.stringify(next)); setError(''); } catch { setError('Display settings apply now but could not be saved.'); } }
-  return <article className="storage-card"><h2>Display and keyboard</h2><div className="hub-toolbar"><label>Interface scale<select aria-label="Interface scale" value={value.scale} onChange={(e) => update({ ...value, scale: Number(e.target.value) })}>{[80, 90, 100, 110, 125].map((scale) => <option key={scale} value={scale}>{scale}%</option>)}</select></label><label>Information density<select aria-label="Information density" value={value.density} onChange={(e) => update({ ...value, density: e.target.value as DisplaySettings['density'] })}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label className="update-checkbox"><input type="checkbox" checked={value.contrast} onChange={(e) => update({ ...value, contrast: e.target.checked })} />Higher contrast</label></div><p><kbd>{CHANNEL_KEYS}</kbd> focuses a channel. <kbd>F1</kbd> opens help. <kbd>Ctrl/Cmd+Shift+F</kbd> searches local context. <kbd>Ctrl/Cmd+Shift+P</kbd> opens commands. <kbd>Tab</kbd> follows keyboard focus; inside a terminal it passes to the CLI.</p><p className="control-note">Display settings stay in this Electron profile. Terminal font size is configured separately below. On small windows, lower scale or use compact density.</p>{error && <p role="alert" className="error-message">{error}</p>}</article>;
+  return <article className="storage-card ui-card settings-card"><div className="ui-card-head"><Keyboard aria-hidden="true" /><h3>Display and keyboard</h3><button type="button" className="ui-help" aria-label="Help: display on a small window" title="On small windows, lower the scale or use compact density." /></div>
+    <div className="settings-fields"><label className="ui-field">Interface scale<select aria-label="Interface scale" value={value.scale} onChange={(e) => update({ ...value, scale: Number(e.target.value) })}>{[80, 90, 100, 110, 125].map((scale) => <option key={scale} value={scale}>{scale}%</option>)}</select></label><label className="ui-field">Information density<select aria-label="Information density" value={value.density} onChange={(e) => update({ ...value, density: e.target.value as DisplaySettings['density'] })}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label><label className="ui-check"><input type="checkbox" checked={value.contrast} onChange={(e) => update({ ...value, contrast: e.target.checked })} />Higher contrast</label></div>
+    <p className="ui-hint">These apply at once and stay in this Electron profile. Terminal font size is below.</p>{error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
+    <dl className="settings-facts settings-keys" aria-label="Keyboard shortcuts"><dt><kbd>{CHANNEL_KEYS}</kbd></dt><dd>Focuses a channel</dd><dt><kbd>F1</kbd></dt><dd>Opens help</dd><dt><kbd>Ctrl/Cmd+Shift+F</kbd></dt><dd>Searches local context</dd><dt><kbd>Ctrl/Cmd+Shift+P</kbd></dt><dd>Opens commands</dd><dt><kbd>Tab</kbd></dt><dd>Follows keyboard focus; inside a terminal it passes to the CLI</dd></dl></article>;
 }

@@ -1,44 +1,64 @@
-/* Trace design tokens: "Flight Deck Lite" (Mission Control with a little of Flight Deck; docs/design/trace).
-   Dark slate, a faint cyan grid, square frames with corner brackets on what matters, Claude amber and Codex cyan.
-   Dark is the only theme so far; a light theme can override these variables. */
+/* Trace design tokens: "Midnight" (docs/design/midnight/README.md, which is the source of truth for every value here).
+   Deep navy in three layers (background, card, well), a blue accent for the interface, Claude amber and Codex cyan for
+   the engines, and state colours. Dark is the only theme. Colours are defined here and in no other stylesheet. */
 :root {
-  /* surfaces */
-  --tr-bg: #0a0e12;            /* app background, under the grid */
-  --tr-term: #080b0e;          /* terminal, diff, chart wells — text sits on this, solid only */
-  --tr-panel: #0b1217;         /* side panels (file list, delivery, setup nav) */
-  --tr-surface: #0d151b;       /* top bar, status bar, tile headers, menus */
-  --tr-hover: #13212a;         /* hover fill */
-  --tr-raised: #182a35;        /* active tab, selected row */
-  --tr-control-on: #1d3340;    /* selected segment */
+  /* surfaces: the background, a card on it, a well inside the card */
+  --tr-bg: #060a14;            /* window background */
+  --tr-panel: #0a1120;         /* top bar, status bar, side navigation, side panels */
+  --tr-surface: #0d1628;       /* cards, menus, tile headers */
+  --tr-surface-2: #0b1322;     /* the lower end of a card's gradient */
+  --tr-well: #080e1b;          /* rows, fields and code blocks inside a card */
+  --tr-term: #050912;          /* terminal, diff and chart wells: text sits on this, solid only */
+  --tr-hover: #14213b;         /* hover fill */
+  --tr-raised: #182a4a;        /* selected row, active item */
+  --tr-control-on: #1b3260;    /* pressed segment */
+  --tr-card: linear-gradient(180deg, var(--tr-surface), var(--tr-surface-2));  /* a card's fill */
+  /* The window: one soft light from the top over the background. No grid. */
+  --tr-window: radial-gradient(1200px 480px at 50% -220px, rgba(46,110,255,.10), transparent 70%) no-repeat, var(--tr-bg);
 
   /* lines */
-  --tr-line-faint: #15252e;    /* row dividers, graticule */
-  --tr-line: #1d3340;          /* dividers */
-  --tr-line-control: #2a4a5a;  /* control borders */
-  --tr-line-strong: #3d6274;   /* overlay borders, limit rail, focused tile */
-  --tr-tile-border: #1d3340;
+  --tr-line-faint: #131e36;    /* row dividers */
+  --tr-line: #2c4474;          /* card borders, dividers: 2.1:1 on the window, toward the reference's card edges */
+  --tr-line-control: #4e6ba9;  /* control borders: 3:1 against every surface up to --tr-hover */
+  --tr-line-strong: #6584c8;   /* overlay borders, hovered control: 3:1 against --tr-raised */
+  --tr-tile-border: #314c80;   /* channel tile frame: 2.3:1 on the window */
 
   /* text */
-  --tr-fg-strong: #f0f6fa;
-  --tr-fg: #dce7ee;
-  --tr-fg-muted: #c4d3dc;
-  --tr-fg-dim: #9fb4c0;
-  --tr-fg-faint: #8aa0ad;      /* ≥11px mono labels only; ≥4.5:1 on surface and hover */
-  --tr-fg-off: #3a5263;        /* idle trace, drag handle, ctx bar fill */
-  --tr-on-light: #0a0e12;      /* text on solid chips / primary buttons */
+  --tr-fg-strong: #f4f7ff;     /* titles, values */
+  --tr-fg: #dbe4f5;            /* body */
+  --tr-fg-muted: #b9c6de;      /* secondary body */
+  --tr-fg-dim: #94a5c4;        /* labels, descriptions */
+  --tr-fg-faint: #8192b4;      /* hints, placeholders: 4.5:1 on card, hover and a selected row */
+  --tr-fg-off: #3a4d73;        /* marks that are not text: idle trace, drag handle */
+  --tr-on-light: #06101f;      /* text on a light or engine-coloured fill */
+  --tr-on-accent: #ffffff;     /* text on --tr-accent-solid */
+
+  /* accent: the interface's own colour (active, primary, focus). Codex cyan never means "active". */
+  --tr-accent: #4c9aff;        /* accent text, icons, active borders, focus ring */
+  --tr-accent-solid: #2a6fe8;  /* primary button fill, under white text */
+  --tr-accent-solid-hover: #235fd0;
+  --tr-accent-soft: rgba(76,154,255,.14);  /* tinted fill: active tab, icon tile */
+  --tr-accent-line: rgba(76,154,255,.45);  /* tinted border */
+
+  /* states */
+  --tr-success: #3ddc97;       /* finished, connected, passed */
+  --tr-warning: #f7b84b;       /* needs attention, near a limit */
+  --tr-danger: #ff6b6b;        /* failed, destructive */
+  --tr-st-waiting: #ff6ad5;    /* a channel needs the person */
+  --tr-st-limit: #ff9548;      /* context or budget at 80% or more */
+  /* A channel's state: "working" uses the engine colour. */
+  --tr-st-idle: var(--tr-fg-dim);
+  --tr-st-starting: var(--tr-fg);
+  --tr-st-finished: var(--tr-success);
+  --tr-st-failed: var(--tr-danger);
+  --tr-on-waiting: var(--tr-on-light);
 
   /* engines (channel colours) and the person, in a Round Table */
   --tr-ch-claude: #ffb547;
   --tr-ch-codex: #5fe1ff;
-  --tr-ch-shell: #a9c6bd;      /* Terminal channels: a plain shell, kept quieter than the agents */
-  --tr-you: #d0c4ff;
+  --tr-ch-shell: #9fc3b8;      /* Terminal channels: a plain shell, kept quieter than the agents */
   --tr-ch-planner: #c6f26b;    /* a hierarchy Round Table's planner (a second Claude seat), told apart from the builder's amber */
-
-  /* Flight Deck intensity (35 of 100): how strong the grid, corner brackets and glows are. */
-  --tr-grid: rgba(95,225,255,.04);
-  --tr-bracket-alpha: .55;
-  --tr-glow-waiting: 0 0 19px rgba(255,95,207,.14);
-  --tr-glow-dot: 0 0 5px currentColor;
+  --tr-you: #b9a7ff;
 
   /* accounts: whose Claude account a channel runs on (a profile, or the default sign-in), clear of the engine and state colours */
   --tr-account-0: oklch(0.74 0.14 300);
@@ -46,74 +66,71 @@
   --tr-account-2: oklch(0.74 0.12 255);
   --tr-account-3: oklch(0.78 0.12 10);
 
-  /* states — "working" uses the engine colour */
-  --tr-st-idle: #9fb4c0;
-  --tr-st-starting: #dce7ee;
-  --tr-st-waiting: #ff5fcf;
-  --tr-st-finished: #dce7ee;
-  --tr-st-failed: #ff6b6b;
-  --tr-st-limit: #ff8a3d;
-  --tr-on-waiting: #1a0715;
-
-  /* diff / success */
+  /* diff: added and removed lines, on --tr-term */
   --tr-add: #7fe89c;
   --tr-del: #ff8c8c;
   --tr-add-bg: rgba(127,232,156,.12);
   --tr-del-bg: rgba(255,140,140,.14);
   --tr-stop-fg: #ffa3a3;
 
-  /* type: Chakra Petch for the interface (wide, technical), IBM Plex Mono for terminals and every number */
-  --tr-font-ui: "Chakra Petch", "IBM Plex Sans Condensed", system-ui, sans-serif;
+  /* type: Inter for the interface, Plus Jakarta Sans for titles and headline numbers, IBM Plex Mono for terminals,
+     diffs, paths, commands, IDs and key hints. Numbers in the interface are Inter with tabular figures, not mono. */
+  --tr-font-ui: "Inter", system-ui, sans-serif;
+  --tr-font-display: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
   --tr-font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --tr-t-display: 600 40px/44px var(--tr-font-ui);
-  --tr-t-title: 600 28px/32px var(--tr-font-ui);
-  --tr-t-heading: 600 20px/24px var(--tr-font-ui);
-  --tr-t-body: 400 16px/24px var(--tr-font-ui);
-  --tr-t-control: 400 15px/20px var(--tr-font-ui);
-  --tr-t-metric: 500 34px/38px var(--tr-font-mono);
-  --tr-t-term: 400 13px/20px var(--tr-font-mono);
-  --tr-t-meta: 400 12px/16px var(--tr-font-mono);
-  --tr-t-micro: 600 11px/14px var(--tr-font-mono);
+  /* The only sizes: 11, 12, 13, 14, 15, 18, 22, 28, 32. Titles of 22 px and more take letter-spacing: -0.01em. */
+  --tr-t-display: 800 32px/38px var(--tr-font-display);  /* start screen heading */
+  --tr-t-title: 700 22px/28px var(--tr-font-display);    /* page title */
+  --tr-t-section: 600 18px/24px var(--tr-font-ui);       /* dialog title, section title */
+  --tr-t-heading: 600 15px/20px var(--tr-font-ui);       /* card title */
+  --tr-t-body: 400 14px/20px var(--tr-font-ui);          /* body */
+  --tr-t-control: 500 13px/16px var(--tr-font-ui);       /* controls, dense rows */
+  --tr-t-small: 400 12px/16px var(--tr-font-ui);         /* hints, meta */
+  --tr-t-micro: 600 11px/14px var(--tr-font-ui);         /* badges */
+  --tr-t-metric: 700 28px/32px var(--tr-font-display);   /* a headline number */
+  --tr-t-term: 400 13px/20px var(--tr-font-mono);        /* terminal */
+  --tr-t-meta: 400 12px/16px var(--tr-font-mono);        /* paths, IDs */
 
-  /* spacing (4/8 grid) */
-  --tr-s-1: 4px; --tr-s-2: 8px; --tr-s-3: 12px; --tr-s-4: 16px;
-  --tr-s-6: 24px; --tr-s-8: 32px; --tr-s-12: 48px; --tr-s-16: 64px;
+  /* spacing: --tr-s-N is N x 4 px. Padding, gap and margin use only these (2 and 6 inside controls 28 px tall or less). */
+  --tr-s-1: 4px; --tr-s-2: 8px; --tr-s-3: 12px; --tr-s-4: 16px; --tr-s-5: 20px;
+  --tr-s-6: 24px; --tr-s-8: 32px; --tr-s-10: 40px; --tr-s-12: 48px; --tr-s-16: 64px;
 
-  /* radii: square, as on an instrument panel */
-  --tr-r-chip: 0; --tr-r-control: 0; --tr-r-panel: 0; --tr-r-overlay: 2px;
+  /* radii */
+  --tr-r-small: 6px;           /* controls 24 px tall or less, key hints */
+  --tr-r-control: 8px;
+  --tr-r-inset: 8px;           /* rows in a card */
+  --tr-r-tile: 10px;
+  --tr-r-panel: 12px;          /* cards */
+  --tr-r-overlay: 14px;
+  --tr-r-chip: 999px;          /* badges */
 
-  /* elevation — tone + line; only overlays cast shadow */
-  --tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6);
-  --tr-shadow-toast: 0 12px 32px rgba(0,0,0,.5);
-  --tr-scrim: rgba(4,7,7,.78);  /* solid scrim, never blur */
+  /* depth: a card has a lit top edge, a selected tile glows, only overlays cast a real shadow */
+  --tr-shadow-card: inset 0 1px 0 rgba(120,160,255,.06), 0 1px 2px rgba(0,0,0,.4);
+  --tr-glow-accent: 0 0 0 1px rgba(76,154,255,.12), 0 0 28px rgba(46,110,255,.14);
+  --tr-glow-waiting: 0 0 0 1px rgba(255,106,213,.12), 0 0 28px rgba(255,106,213,.14);  /* a channel that needs the person */
+  --tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6), 0 0 0 1px rgba(76,154,255,.16);
+  --tr-shadow-toast: var(--tr-shadow-overlay);
+  --tr-scrim: rgba(3,6,14,.72);  /* solid scrim, never blur: blur is costly over terminals */
 
-  /* motion */
+  /* motion: hover and focus changes take --tr-d-fast */
   --tr-d-instant: 80ms; --tr-d-fast: 160ms; --tr-d-base: 240ms; --tr-d-slow: 400ms;
   --tr-ease: cubic-bezier(.2,.7,.2,1);
   --tr-ease-exit: cubic-bezier(.4,0,1,1);
 
   /* layout */
-  --tr-topbar-h: 40px;
-  --tr-statusbar-h: 32px;
-  --tr-tile-head-h: 30px;
-  --tr-strip-h: 40px;          /* 30px in 4-tile grid */
+  --tr-topbar-h: 44px;
+  --tr-statusbar-h: 28px;
+  --tr-tile-head-h: 34px;
   --tr-tile-detail-h: 30px;
-  --tr-focus: 2px solid var(--tr-fg-strong);
+  --tr-focus: 2px solid var(--tr-accent);
 }
 
 /* Higher contrast (Settings > Display): tokens, not single rules, since later stylesheets draw the borders from them.
-   Control outlines go from 2.0:1 to 9:1, tile frames to 3:1, and the dimmest marks (idle trace, drag handle, offline
-   computer) to readable text. */
+   Control outlines go from 3.4:1 to 7.3:1 on a card, tile frames from 2.3:1 to 5.4:1 on the window, and the dimmest
+   marks (idle trace, drag handle, offline computer) to readable text. */
 :root[data-contrast="high"] { --tr-line-control: var(--tr-fg-dim); --tr-tile-border: var(--tr-line-strong); --tr-fg-off: var(--tr-fg-faint); }
-[data-contrast="high"] ::-webkit-scrollbar-thumb, [data-contrast="high"] ::-webkit-scrollbar-thumb:hover { background: var(--tr-line-strong); }
 
-/* The faint grid behind everything; panels and tiles are solid over it, so text never sits on the lines. */
-body { background-color: var(--tr-bg); background-image: linear-gradient(var(--tr-grid) 1px, transparent 1px), linear-gradient(90deg, var(--tr-grid) 1px, transparent 1px); background-size: 32px 32px; color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
-/* Corner brackets: drawn on a tile's ::after, in --bracket (defaults to the line colour). */
-.session-tile.tr-tile.selected::after, .session-tile.tr-tile.state-waiting::after, .session-tile.tr-tile.state-failed::after { content: ""; position: absolute; inset: -1px; z-index: 21; pointer-events: none; --c: color-mix(in srgb, var(--bracket, var(--tr-line-strong)) calc(var(--tr-bracket-alpha) * 100%), transparent);
-  background: linear-gradient(var(--c), var(--c)) left top / 14px 2px, linear-gradient(var(--c), var(--c)) left top / 2px 14px, linear-gradient(var(--c), var(--c)) right top / 14px 2px, linear-gradient(var(--c), var(--c)) right top / 2px 14px,
-    linear-gradient(var(--c), var(--c)) left bottom / 14px 2px, linear-gradient(var(--c), var(--c)) left bottom / 2px 14px, linear-gradient(var(--c), var(--c)) right bottom / 14px 2px, linear-gradient(var(--c), var(--c)) right bottom / 2px 14px;
-  background-repeat: no-repeat; }
+body { background: var(--tr-window); color: var(--tr-fg); font: var(--tr-t-body); -webkit-font-smoothing: antialiased; }
 :focus-visible { outline: var(--tr-focus); outline-offset: 2px; }
 .tnum { font-variant-numeric: tabular-nums; }
 

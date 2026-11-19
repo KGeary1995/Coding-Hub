@@ -21,6 +21,9 @@ describe('channel state', () => {
     expect(channelState(session(), usage({ context: { used: 160, limit: 200 } }))).toBe('limit');
     expect(Object.keys(CHANNEL_STATES)).toHaveLength(7);
   });
+  it('names each state in plain words, in sentence case', () => {
+    expect(Object.values(CHANNEL_STATES).map((state) => state.word)).toEqual(['Idle', 'Starting', 'Working', 'Needs you', 'Finished', 'Failed', 'Near limit']);
+  });
   it('treats a stopped run as finished, and waits over a near limit', () => {
     expect(channelState(session({ status: 'exited', exitCode: 143, error: null }))).toBe('finished');
     expect(channelState(session({ attention: { message: '', at: '' } }), usage({ context: { used: 190, limit: 200 } }))).toBe('waiting');

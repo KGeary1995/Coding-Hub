@@ -38,6 +38,21 @@ export function isWithinDirectory(directory: string, candidate: string): boolean
  * Windows' own sudo setting: 0 or missing is off, 1 opens a new window, 2 runs without input, 3 runs inline. Read with
  * reg.exe off the main process, each time, so turning sudo on applies to the next Terminal channel.
  */
+/** How much of a run's raw output is kept for its exit diagnostic. */
+const OUTPUT_TAIL = 8192;
+/**
+ * A run's last output as the text of its exit diagnostic, at most 2,000 characters. The Windows console repaints by
+ * moving the cursor, not with newlines, so those moves become line breaks to keep repainted lines apart. Both cuts (the
+ * raw tail kept per run, and the 2,000 characters) can fall inside a line or an escape sequence; the text then starts
+ * at the next whole line, so a diagnostic never opens with the end of one ("5x30" of "SIZE:85x30").
+ */
+export function exitTail(output: string): string {
+  const text = stripVTControlCharacters(output.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
+  const kept = text.slice(-2000), at = kept.indexOf('\n');
+  const cut = output.length >= OUTPUT_TAIL || text.length > 2000;
+  return cut && at >= 0 && kept.slice(at + 1).trim() ? kept.slice(at + 1).trim() : kept;
+}
+
 export function windowsSudoMode(): Promise<number> {
   return new Promise((resolve) => execFile('reg.exe', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo', '/v', 'Enabled'], { encoding: 'utf8', timeout: 3000, windowsHide: true }, (error, output) => {
     // No key: sudo was never turned on.
@@ -170,8 +185,8 @@ export class PtyManager {
    */
   writeRemote(reference: RunReference, data: string) {
     const run = this.runs.get(reference.sessionId);
-    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
-    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.');
+    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This channel is stopping.');
     if (run.chat) throw new HubError('CHAT_REMOTE', 'This is a chat channel: send messages and answers through the chat, not as typing.');
     try { run.pty.write(data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
@@ -181,7 +196,7 @@ export class PtyManager {
   /** A paired phone drawing a channel at its own size; the desktop takes its size back (see RemoteServer phone sizes). */
   resizeRemote(reference: RunReference, cols: number, rows: number) {
     const run = this.runs.get(reference.sessionId);
-    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+    if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.');
     if (run.stopping) return;
     this.flush(run);
     this.resizePty(run, Math.min(500, Math.max(2, cols)), Math.min(300, Math.max(1, rows)));
@@ -215,7 +230,7 @@ export class PtyManager {
     if (!parsed.success) throw new HubError('INVALID_REQUEST', parsed.error.issues.map((issue) => issue.message).join(' '));
     const request = parsed.data;
     if (this.closing) throw new HubError('HOST_CLOSING', 'The application is shutting down.');
-    if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This session is already starting or running.');
+    if (this.runs.has(request.sessionId) || this.pending.has(request.sessionId)) throw new HubError('ALREADY_RUNNING', 'This channel is already starting or running.');
     if (this.runs.size + this.pending.size >= MAX_CHANNELS) throw new HubError('SESSION_LIMIT', `At most ${MAX_CHANNELS} CLI processes can run simultaneously.`);
     const profileId = request.config.engine === 'claude' ? request.config.accountProfileId : undefined;
     const resumeId = isAgentConfig(request.config) ? request.config.resumeId : undefined;
@@ -225,12 +240,12 @@ export class PtyManager {
     let prepared: AgentRunningSession | null = null;
     this.pending.set(request.sessionId, reservation);
     try {
-      if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working directory.');
+      if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working folder.');
       let cwd: string;
       try {
         cwd = await realpath(request.cwd);
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
-      } catch { throw new HubError('INVALID_DIRECTORY', 'The working directory does not exist or is not accessible.'); }
+      } catch { throw new HubError('INVALID_DIRECTORY', 'The working folder does not exist or is not accessible.'); }
       const baseEnvironment = await this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
       // A chat run: Claude Code or Codex in structured mode.
@@ -239,7 +254,7 @@ export class PtyManager {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
         const program = shellProgram(baseEnvironment, process.platform, existsSync, () => sudo);
-        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
         session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
         ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       } else {
@@ -255,7 +270,7 @@ export class PtyManager {
         const codexChat = chat && request.config.engine === 'codex';
         const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : buildLaunch(request.config, engine.info);
         if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
-        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'The session launch was cancelled.');
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
         const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
         prepared = agent; this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
@@ -274,7 +289,7 @@ export class PtyManager {
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
       else pty.onData((data) => {
         if (run.finished) return;
-        run.outputTail = (run.outputTail + data).slice(-8192);
+        run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
         if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
@@ -323,7 +338,7 @@ export class PtyManager {
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
-    child.onStderr((data) => { run.outputTail = (run.outputTail + data).slice(-8192); });
+    child.onStderr((data) => { run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL); });
     stream.start();
   }
 
@@ -337,7 +352,7 @@ export class PtyManager {
   chatRemote(payload: unknown) {
     this.chatRequest(payload, true, (reference) => {
       const run = this.runs.get(reference.sessionId);
-      if (!run || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+      if (!run || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.');
       return run;
     });
   }
@@ -348,7 +363,7 @@ export class PtyManager {
     if (!parsed.success) throw new HubError('INVALID_CHAT', 'Invalid chat request.');
     const run = find(parsed.data); const owner = run.owner;
     if (!run.chat || run.finished) throw new HubError('NOT_CHAT', 'This channel is not a running chat.');
-    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This channel is stopping.');
     const request = parsed.data;
     if (request.action === 'send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
@@ -447,7 +462,7 @@ export class PtyManager {
 
   private ownedRun(owner: number, reference: { sessionId: string; runId: string }): ManagedRun {
     const run = this.runs.get(reference.sessionId);
-    if (!run || run.owner !== owner || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.');
+    if (!run || run.owner !== owner || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.');
     return run;
   }
 
@@ -455,7 +470,7 @@ export class PtyManager {
     const parsed = writeSessionSchema.safeParse(payload);
     if (!parsed.success) throw new HubError('INVALID_INPUT', 'Invalid terminal input.');
     const run = this.ownedRun(owner, parsed.data);
-    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This session is stopping.');
+    if (run.stopping) throw new HubError('SESSION_STOPPING', 'This channel is stopping.');
     // A chat run's stdin is its JSON protocol: raw keystrokes (a Ctrl+C byte) would corrupt the next message.
     if (run.chat) throw new HubError('CHAT_INPUT', 'This is a chat channel: send messages and interruptions through the chat.');
     try { run.pty.write(parsed.data.data); }
@@ -475,7 +490,7 @@ export class PtyManager {
 
   async stop(owner: number, payload: unknown) {
     const parsed = runReferenceSchema.safeParse(payload);
-    if (!parsed.success) throw new HubError('INVALID_REFERENCE', 'Invalid session reference.');
+    if (!parsed.success) throw new HubError('INVALID_REFERENCE', 'Invalid channel reference.');
     // Repeated stops after exit are safe; an existing newer run still rejects the old reference.
     if (!this.runs.has(parsed.data.sessionId)) return;
     const run = this.ownedRun(owner, parsed.data);
@@ -489,12 +504,11 @@ export class PtyManager {
     if (run.chat) { try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ } try { this.chains.ended(run.session.runId); } catch { /* The table is gone with it. */ } }
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
-    // The Windows console repaints by moving the cursor, not with newlines; keep repainted lines apart.
-    const tail = stripVTControlCharacters(run.outputTail.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(-2000);
+    const tail = exitTail(run.outputTail);
     // On POSIX a signalled exit reports code 0 plus the signal (OOM kill, crash); that is still a failure.
     const failed = (exitCode !== 0 || Boolean(signal)) && !run.stopping;
     if (failed && exitCode === 0 && signal) exitCode = 128 + signal;
-    const diagnostic = failed ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project directory.'}` : undefined;
+    const diagnostic = failed ? `CLI exited with code ${exitCode}.${tail ? '\n' + tail : ' No terminal error was reported. Try the CLI directly in PowerShell from this project folder.'}` : undefined;
     this.send(run.owner, { type: 'exit', ...(diagnostic ? { diagnostic } : {}), sessionId: run.session.sessionId, runId: run.session.runId, exitCode, signal });
     run.resolveExit();
   }

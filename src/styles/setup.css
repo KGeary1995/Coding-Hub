@@ -1,0 +1,153 @@
+/* Agent setup: accounts, engine health, shared memory, rules, MCP servers, skills and device sync. Built from the shared
+   parts (src/ui.css); what is here is only the layout special to these pages. */
+
+/* Agent setup (docs/design/midnight, section 6): a 240 px list of the areas at the left, the area's page beside it. */
+.app-shell .main-shell:has(> .tr-setup) { padding: 0; overflow: hidden; }
+.tr-setup { height: 100%; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+.tr-setup-nav { min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 20px 12px 12px; border-right: 1px solid var(--tr-line); background: var(--tr-panel); overflow-y: auto; }
+.tr-setup-nav h2 { margin: 0 12px; }
+.tr-setup-nav .ui-list { gap: 4px; }
+/* An area is a row with no well until it is pointed at or chosen, so the list reads as navigation, not as content. */
+.tr-setup-nav .ui-row { --ring: var(--tr-panel); border-color: transparent; background: none; }
+.tr-setup-nav .ui-row:hover { --ring: var(--tr-hover); background: var(--tr-hover); }
+.tr-setup-nav .ui-row[aria-current="page"] { --ring: var(--tr-raised); border-color: var(--tr-line); background: var(--tr-raised); }
+.tr-setup-mark { position: relative; flex: none; display: flex; }
+.tr-setup-icon { flex: none; color: var(--tr-fg-dim); }
+.tr-setup-nav .ui-row[aria-current="page"] .tr-setup-icon { color: var(--tr-accent); }
+/* An area's known state: a dot on its icon, ringed in the row's fill, so a status adds no line and every row is one height.
+   Its words are the row's tooltip and are read out after the name. */
+.tr-setup-dot { --tone: var(--tr-fg-dim); position: absolute; top: -2px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 2px var(--ring); }
+.tr-setup-dot.success { --tone: var(--tr-success); }
+.tr-setup-dot.warning { --tone: var(--tr-warning); }
+.tr-setup-nav .ui-row-main > .tr-setup-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tr-setup-nav footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 0; border-top: 1px solid var(--tr-line-faint); font: var(--tr-t-small); color: var(--tr-fg-faint); }
+.tr-setup-nav footer > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-setup-nav footer code { font: var(--tr-t-meta); }
+.tr-setup-content { min-width: 0; min-height: 0; overflow-y: auto; padding: 0 24px; }
+[data-contrast="high"] .tr-setup-nav footer { color: var(--tr-fg-dim); }
+[data-contrast="high"] .tr-setup-nav .ui-row[aria-current="page"] { border-color: var(--tr-line-strong); }
+
+/* An error among dim lines keeps the danger colour: `.ui-row small` (ui.css) and these pages' own dim lines outrank `.error-message`. */
+:is(.engine-diagnostic, .rules-target, .memory-connection) .error-message { color: var(--tr-danger); }
+
+/* Accounts: one row per CLI (avatar, name and detail, state, actions), its details and install line under the words. */
+.accounts-panel > .ui-card + .ui-card, .accounts-panel > .ui-banner { margin-top: 16px; }
+.account-card { flex-wrap: wrap; }
+.account-actions { flex: none; display: flex; gap: 8px; }
+.account-details, .account-install { flex-basis: 100%; min-width: 0; margin-left: 40px; }
+.account-details summary { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.account-install p { margin: 0; font: var(--tr-t-small); }
+.account-path, .account-command { display: block; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); color: var(--tr-fg-muted); font: var(--tr-t-meta); overflow-wrap: anywhere; white-space: pre-wrap; }
+.hub-panel p.account-hint { margin-top: 12px; }
+/* The note under the cards ends at their right edge; its words keep a line of reading. */
+.account-note > span { max-width: 72ch; }
+.profile-create, .profile-connect { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.profile-create .ui-field, .profile-connect .ui-field { min-width: 240px; }
+/* The profile's state and its Connect button sit on the field's line, not the label's. */
+.profile-connect-state { min-height: 32px; display: flex; align-items: center; gap: 12px; }
+.account-terminal { height: 310px; margin-top: 12px; padding: 8px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-term); }
+.account-terminal .xterm { height: 100%; }
+.account-login.login-idle .account-terminal { height: 112px; }
+@container shell (max-width: 1180px) { .account-actions { flex-basis: 100%; margin-left: 40px; } }
+
+/* Local engines (Settings): a card; each CLI is a row whose details open under it, over what follows. */
+.engine-health { margin-top: 16px; }
+.engine-health-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.engine-health-item { position: relative; min-width: 0; }
+.engine-health-item[open] > summary { background: var(--tr-hover); }
+.engine-health-item summary > svg { flex: none; color: var(--tr-fg-dim); }
+.engine-health-item summary > .engine-ok { color: var(--tr-success); }
+.engine-health-item summary > .engine-missing { color: var(--tr-warning); }
+.engine-detection { font-variant-numeric: tabular-nums; }
+.engine-diagnostic { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; width: 100%; min-width: 320px; display: grid; gap: 8px; padding: 16px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg-dim); font-size: 13px; }
+.engine-diagnostic code { display: block; word-break: break-all; color: var(--tr-fg); }
+.engine-capabilities { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 0; }
+.engine-capabilities dd { margin: 0; color: var(--tr-fg-muted); }
+.engine-health > .ui-banner { margin-top: 12px; }
+
+/* MCP servers and Skills: the project field takes the spare width; each server is a card, each extension a row. */
+.hub-project { flex: 1; min-width: 232px; }
+.form-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* A new server's fields are as wide as a line of reading, not as the page. */
+.config-panel .hub-form > :is(label, .form-columns) { max-width: 560px; }
+.server-command { display: block; margin: 4px 0 8px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); color: var(--tr-fg); font: var(--tr-t-meta); overflow-wrap: anywhere; }
+.server-card .ui-banner { align-items: center; margin-top: 12px; }
+.server-card .ui-banner > span { flex: 1; }
+.source-path { display: block; margin-top: 12px; color: var(--tr-fg-dim); font: var(--tr-t-meta); overflow-wrap: anywhere; }
+.hub-preview .source-path { margin: 0 0 8px; }
+/* The note on what saving does sits under the project field as its hint. */
+.config-panel > .hub-toolbar { margin-bottom: 4px; }
+.hub-panel p.config-note { margin-bottom: 16px; }
+/* An extension: its engine's avatar, the name and its state on one line, the kind and scope under the name. */
+.config-panel .extension-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 4px 8px; }
+.config-panel .extension-row > .muted { grid-column: 2 / -1; font-size: 12px; }
+.hub-inspector { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; min-height: 400px; }
+@container shell (max-width: 1180px) { .hub-inspector { grid-template-columns: 248px minmax(0, 1fr); } }
+
+/* Shared memory: the Drive folder, the decisions and open items, then the handoff form beside the notes. */
+.memory-connection { display: flex; align-items: center; gap: 16px; }
+.memory-connection > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.memory-connection code { color: var(--tr-fg-muted); font: var(--tr-t-meta); overflow-wrap: anywhere; }
+.memory-connection small { color: var(--tr-fg-dim); }
+/* Project and sync: the folder and key, what they mean, any problem with the project's own memory entries, Drive, install. */
+.memory-project { display: flex; flex-direction: column; gap: 12px; }
+.memory-project > .ui-card-head { margin-bottom: 0; }
+.memory-project > .memory-fields { margin: 0; }
+.memory-fields .project-key { width: 280px; }
+.memory-key-notes { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.memory-key-notes > .button { margin-top: 4px; }
+.memory-entry-banner { align-items: center; }
+.memory-entry-banner > span { flex: 1; }
+/* The Drive folder is a well inside the card, not a card of its own. */
+.memory-project .memory-connection { padding: 12px; border-color: var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); box-shadow: none; }
+.memory-install { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.hub-panel .memory-review { margin: 16px 0 0; }
+.memory-items-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.memory-items { min-width: 0; }
+.memory-items .ui-empty { padding: 12px 16px; }
+.memory-items > .hub-toolbar, .memory-items > .hub-feedback { margin-bottom: 0; }
+.memory-items form label { flex: 1; }
+.memory-conflict { margin-top: 16px; }
+.memory-panel > .memory-columns { margin-top: 16px; }
+.memory-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 16px; }
+.memory-columns .hub-form { margin-bottom: 0; }
+/* Handoffs: the search, then the notes as rows (they keep .extension-row, which the smoke test selects, over ui-row). */
+.memory-history { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.memory-search { margin-bottom: 12px; }
+.memory-notes { max-height: 360px; overflow-y: auto; }
+.memory-notes .extension-row { padding: 8px 12px; border: 1px solid var(--tr-line-faint); background: var(--tr-well); }
+.memory-notes .extension-row:hover { background: var(--tr-hover); }
+.memory-notes .extension-row.selected { border-color: var(--tr-line); background: var(--tr-raised); }
+[data-contrast="high"] .memory-notes .extension-row { border-color: var(--tr-line-strong); }
+/* A handoff opened under the list: its title, who and when, the note, then each action and what a revision does on its own line. */
+.memory-history .hub-preview { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.memory-history .hub-preview pre { align-self: stretch; }
+@container shell (max-width: 1180px) { .memory-columns { grid-template-columns: 1fr; } }
+@container shell (max-width: 900px) { .memory-items-grid { grid-template-columns: 1fr; } }
+
+/* Model pricing (Settings). */
+.pricing-editor .usage-table-wrap { margin: 0 0 12px; overflow: auto; border: 1px solid var(--tr-line); border-radius: var(--tr-r-control); }
+.pricing-editor input { width: 96px; }
+.pricing-editor td:first-child input { width: 200px; }
+
+/* Shared rules: the editor beside the projects it applies to. */
+.rules-confirm, .rules-synced { align-items: center; margin-bottom: 16px; }
+.rules-confirm > span { flex: 1; }
+.rules-columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; }
+.rules-columns > div { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rules-columns .hub-form { margin-bottom: 0; }
+/* One head here holds a 24 px button; all three are that tall, so the titles of the cards side by side line up. */
+.rules-columns .ui-card-head { min-height: 24px; }
+.rules-editor { min-height: 350px; font: var(--tr-t-term); resize: vertical; }
+.rules-targets .rules-target { flex-direction: row; align-items: flex-start; gap: 8px; font: var(--tr-t-control); color: var(--tr-fg); }
+.rules-target > span { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.rules-target code { overflow-wrap: anywhere; color: var(--tr-fg); }
+.rules-target small { color: var(--tr-fg-dim); }
+@container shell (max-width: 1180px) { .rules-columns { grid-template-columns: 1fr; } }
+
+/* Sync between computers (Settings). */
+.device-sync-conflict { flex-direction: column; gap: 8px; }
+.device-sync-conflict p { margin: 0; color: var(--tr-fg); }
+
+/* Higher contrast: the wells these pages draw themselves take the stronger line that shared rows take. */
+[data-contrast="high"] :is(.account-path, .account-command, .account-terminal, .server-command, .memory-project .memory-connection) { border-color: var(--tr-line-strong); }

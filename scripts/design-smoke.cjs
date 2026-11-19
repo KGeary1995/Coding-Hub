@@ -6,9 +6,10 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'hub-design-')));
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') };
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage') };
   delete env.ELECTRON_RUN_AS_NODE;
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -21,6 +22,8 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     for (let i = 0; i < 2; i++) {
       await addChannel(page, 'Claude Code');
+      // Three channels in the grid: two above, and the third across the whole second row (no empty quarter).
+      if (i === 0) await page.waitForFunction(() => { const [a, b, c] = [...document.querySelectorAll('.session-tile')].map((tile) => tile.getBoundingClientRect()); return c && Math.abs(a.top - b.top) < 2 && c.top >= a.bottom && Math.abs(c.left - a.left) < 2 && Math.abs(c.right - b.right) < 2; });
     }
     for (const [width, height, scale] of [[1440, 960, 100], [1100, 800, 100], [900, 700, 100], [1100, 800, 125]]) {
       await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width, height]);
@@ -68,7 +71,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    console.log('PASS: four-session workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
+    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
   } finally {
     await app?.close().catch(() => {});
     await removeFolder(root);

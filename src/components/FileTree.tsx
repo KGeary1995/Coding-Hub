@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Link2, LoaderCircle } from 'lucide-react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { CircleAlert, ChevronDown, ChevronRight, File, Folder, FolderOpen, Link2, LoaderCircle } from 'lucide-react';
 import type { DirectoryEntry, DirectoryListing, RepositoryContext } from '../../shared/types';
 
 interface TreeProps { repository: RepositoryContext; selected: string | null; onSelect: (path: string) => void; revision: number }
@@ -16,12 +16,12 @@ function DirectoryContents({ relative, depth, ...props }: TreeProps & { relative
     void window.codingHub!.listDirectory({ repositoryId: props.repository.id, path: relative }).then((result) => {
       if (cancelled) return;
       if (result.ok) setListing(result.value); else setError(result.error.message);
-    }).catch(() => { if (!cancelled) setError('This directory could not be loaded.'); });
+    }).catch(() => { if (!cancelled) setError('This folder could not be loaded.'); });
     return () => { cancelled = true; };
   }, [props.repository.id, props.revision, relative]);
-  if (error) return <p className="tree-message error-message" role="alert">{error}</p>;
-  if (!listing) return <div className="tree-message"><LoaderCircle size={12} className="spin" />Loading directory…</div>;
-  return <ul role={depth === 0 ? 'tree' : 'group'} aria-label={depth === 0 ? 'Project files' : undefined} className="file-tree">{listing.entries.map((entry) => <TreeEntry key={entry.path} {...props} entry={entry} depth={depth} />)}{!listing.entries.length && <li className="tree-message">Empty directory</li>}{listing.limited && <li className="tree-message">Showing the first 500 entries in this directory.</li>}</ul>;
+  if (error) return <p className="tree-message error-message" role="alert"><CircleAlert size={12} />{error}</p>;
+  if (!listing) return <div className="tree-message"><LoaderCircle size={12} className="spin" />Loading folder…</div>;
+  return <ul role={depth === 0 ? 'tree' : 'group'} aria-label={depth === 0 ? 'Project files' : undefined} className="file-tree">{listing.entries.map((entry) => <TreeEntry key={entry.path} {...props} entry={entry} depth={depth} />)}{!listing.entries.length && <li className="tree-message">Empty folder</li>}{listing.limited && <li className="tree-message">Showing the first 500 entries in this folder.</li>}</ul>;
 }
 
 function TreeEntry({ entry, depth, ...props }: TreeProps & { entry: DirectoryEntry; depth: number }) {
@@ -29,7 +29,8 @@ function TreeEntry({ entry, depth, ...props }: TreeProps & { entry: DirectoryEnt
   const folder = entry.kind === 'directory';
   const available = folder || entry.kind === 'file';
   const Icon = folder ? expanded ? FolderOpen : Folder : entry.kind === 'symlink' ? Link2 : File;
-  return <li role="none"><button role="treeitem" className={`file-tree-entry ${props.selected === entry.path ? 'selected' : ''}`} style={{ paddingLeft: 10 + Math.min(depth, 16) * 15 }}
+  // The depth only: the indent per level is in styles/changes.css.
+  return <li role="none"><button role="treeitem" className={`file-tree-entry ${props.selected === entry.path ? 'selected' : ''}`} style={{ '--depth': Math.min(depth, 16) } as CSSProperties}
     aria-label={`${folder ? 'Folder' : 'File'} ${entry.path}`} aria-expanded={folder ? expanded : undefined} aria-selected={!folder ? props.selected === entry.path : undefined}
     disabled={!available} title={available ? entry.path : 'Symbolic links and special files are not opened.'}
     onClick={() => folder ? setExpanded((value) => !value) : props.onSelect(entry.path)}>

@@ -684,7 +684,7 @@ describe('phone permissions and chat channels', () => {
       write: () => {},
       control: async (sessionId, control) => { controls.push({ sessionId, control }); },
       add: async (engine, chat) => { adds.push({ engine, chat }); },
-      chat: (request) => { if (request.runId !== RUN) throw new HubError('STALE_SESSION', 'This process has ended or the session reference is stale.'); chats.push(request); },
+      chat: (request) => { if (request.runId !== RUN) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.'); chats.push(request); },
     };
     const server = new RemoteServer(root, host, 0, '', async () => 'sent'); cleanup.push(() => server.stop()); await server.setEnabled(true);
     return { root, server, controls, adds, chats };
