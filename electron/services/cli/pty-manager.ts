@@ -14,6 +14,7 @@ import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema,
 import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
 import { discoverEngine, freshHostEnvironment } from './discovery';
 import { AUTH_TIMED_OUT } from './auth-status';
+import { geminiConversations } from './gemini-conversations';
 import { cleanMessage, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
 import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
@@ -93,7 +94,7 @@ interface ManagedRun {
   /** Codex reports approval requests as OSC 9 notifications in its output. */
   osc?: OscNotifications;
   /** Gemini CLI reports working, waiting (with the question) and done over OSC 7501; `since` is when the run started. */
-  gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number };
+  gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number; known: Set<string> };
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -139,7 +140,9 @@ export class PtyManager {
       /** A resumed chat's earlier messages, from the CLI's transcript; null when it cannot be read. */
       chatHistory?: (config: CLIEngineConfig) => Extract<ChatEvent, { type: 'history' }> | null;
       /** The Gemini CLI conversation a run in `cwd` started at `since` (ms) wrote to, when agy did not print it. */
-      geminiConversation?: (cwd: string, since: number) => string | null } = {},
+      geminiConversation?: (cwd: string, since: number, known: ReadonlySet<string>) => string | null;
+      /** The IDs of the conversations agy already had when a run started: none of them is that run's (tests replace it). */
+      geminiKnown?: () => string[] } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -288,7 +291,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now() } } : {}) };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
       this.runs.set(request.sessionId, run); prepared = null;
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
       else pty.onData((data) => {
@@ -515,12 +518,16 @@ export class PtyManager {
     else if (last === 'working' || last === 'blocked') this.notifyResolved(run.session.runId, true);
   }
 
+  private geminiKnown() { try { return new Set((this.dependencies.geminiKnown?.() ?? geminiConversations(undefined, 500).map((conversation) => conversation.id)).map((id) => id.toLowerCase())); } catch { return new Set<string>(); } }
+
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
     // Gemini CLI prints the conversation to resume as it quits; stopped by Trace it prints none, so agy's list says.
     if (run.gemini && !run.chat) {
       const printed = [...run.outputTail.matchAll(/agy --conversation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)].at(-1)?.[1];
-      let conversationId = printed ?? null; if (!conversationId) try { conversationId = this.dependencies.geminiConversation?.(run.session.cwd, run.gemini.since) ?? null; } catch { /* Not resumable. */ }
+      let conversationId = printed ?? null; if (!conversationId) try { conversationId = this.dependencies.geminiConversation?.(run.session.cwd, run.gemini.since, run.gemini.known) ?? null; } catch { /* Not resumable. */ }
+      // One agy already had when this run started (the person's own, or another channel's) is not what this run wrote.
+      if (!printed && conversationId && run.gemini.known.has(conversationId.toLowerCase())) conversationId = null;
       if (conversationId) this.send(run.owner, { type: 'conversation', sessionId: run.session.sessionId, runId: run.session.runId, conversationId: conversationId.toLowerCase() });
     }
     run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();

@@ -640,4 +640,16 @@ describe('tasks from Tasks waiting at a table can be dropped, and go back to Tas
     chains.ended(PLANNER); expect(discards(events)).toEqual([]); expect(events.at(-1)!.event).toMatchObject({ type: 'table', table: null }); expect(events.at(-1)!.event).not.toHaveProperty('closed');
     expect(saved.nextTasks).toEqual([task('B')]);
   });
+  it('a message sent while a seat still ran a turn from before the table starts when that turn ends', async () => {
+    const { chains, sent, runs, last } = setup(); (runs[PLANNER] as { busy?: boolean }).busy = true;
+    chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []);
+    expect(sent).toEqual([]); expect(last()).toMatchObject({ waiting: 'Add a footer.' });
+    chains.observe({ sessionId: 'planner', runId: PLANNER, event: { type: 'done', isError: false, error: null } });
+    expect(sent.at(-1)).toMatchObject({ runId: PLANNER }); expect(sent.at(-1)!.text).toContain('Add a footer.'); expect(last().chain!.step).toBe('planning');
+  });
+  it('passes on the end of a long report, where the files changed and checks run are', async () => {
+    const { chains, sent, reply } = setup(); chains.open(1, BUILDER, REVIEWER, PLANNER); chains.send(BUILDER, 'Add a footer.', []);
+    await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true); await reply(BUILDER, `${'x'.repeat(13_000)}\nFiles changed: page.html. Checks: tests pass.`);
+    expect(sent.at(-1)!.runId).toBe(REVIEWER); expect(sent.at(-1)!.text).toContain('[… earlier part shortened by Trace]\nxxx'); expect(sent.at(-1)!.text).toContain('Files changed: page.html. Checks: tests pass.');
+  });
 });

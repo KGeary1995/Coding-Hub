@@ -40,11 +40,12 @@ export function geminiConversations(home = geminiHome(), limit = 500): GeminiCon
 const sameFolder = (a: string, b: string) => process.platform === 'win32' || process.platform === 'darwin' ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b);
 
 /**
- * The conversation a run in `cwd` that started at `since` wrote to: the only one in that folder changed since then.
+ * The conversation a run in `cwd` that started at `since` wrote to: the only one in that folder changed since then,
+ * leaving out those agy already had when the run started (`known`: another channel's, or the person's own terminal's).
  * Two (another Gemini channel in the same folder) cannot be told apart, so neither is chosen.
  */
-export function geminiConversationSince(cwd: string, since: number, home = geminiHome()): string | null {
-  const found = geminiConversations(home, 50).filter((conversation) => conversation.directory && sameFolder(conversation.directory, cwd) && conversation.modified >= since - 1000);
+export function geminiConversationSince(cwd: string, since: number, known: ReadonlySet<string> = new Set(), home = geminiHome()): string | null {
+  const found = geminiConversations(home, 50).filter((conversation) => !known.has(conversation.id) && conversation.directory && sameFolder(conversation.directory, cwd) && conversation.modified >= since - 1000);
   return found.length === 1 ? found[0].id : null;
 }
 

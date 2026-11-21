@@ -23,6 +23,7 @@ Snapshots from earlier versions. They are useful for the reasoning behind decisi
 
 | Doc | From |
 |---|---|
+| [audit-2026-11-21.md](audit-2026-11-21.md) | Audit of 1.25.0: the console window on Windows (Gemini CLI's updater), what was fixed, what was left and what was not verified |
 | [audit-2026-11-17.md](audit-2026-11-17.md) | Read-only code audit of 1.22.0: the 1 to 3 second freezes, and what to fix first |
 | [audit-2026-11-17-findings.md](audit-2026-11-17-findings.md) | Every finding of that audit, with the independent check made of each |
 | [audit-2026-11-17-fixes.md](audit-2026-11-17-fixes.md) | What was fixed after that audit, the choices made, what was left and what was not verified |

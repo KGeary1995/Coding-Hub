@@ -1,15 +1,13 @@
 import { late, type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
-import { allowAtFull, checkWaiting, isEdit, KEEP_IMAGES, type TableHost } from './round-table';
+import { allowAtFull, checkWaiting, cut, isEdit, KEEP_IMAGES, type TableHost } from './round-table';
 import { BLOCKED_LINE, SIGNAL_INSTRUCTION, taskSignal } from '../../../shared/task-signal';
 
 /** Review rounds (Codex reviews, Opus fixes) before the planner's final review. */
 export const REVIEW_ROUNDS = 2;
 /** Times the planner can send work back to the fix step (CHANGES NEEDED) before the table stops and asks the person. */
 export const FINAL_ROUNDS = 2;
-/** The longest earlier output passed into a prompt; more is cut, and the agent is told so. */
-const RELAY_LIMIT = 12_000;
 const MAX_IMAGES = 10;
 /**
  * The task's images go with the saved chain only within what a saved workspace accepts (savedChainSchema: MAX_IMAGES, and
@@ -59,7 +57,6 @@ const MAX_TASK = 410_000;
 const MAX_MESSAGE = 200_000;
 /** A plan or report as saved with the table (chainFields allows 200,000 characters): a seat's whole answer can be longer, which would leave the workspace unsaveable. */
 const keep = (text: string) => text.length > 200_000 ? text.slice(0, 200_000) : text;
-const cut = (text: string) => text.length > RELAY_LIMIT ? `${text.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]` : text;
 /** A reply's last non-empty line, without Markdown emphasis, quote marks or list dashes around it. */
 function lastLine(answer: string) {
   const lines = answer.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean);
@@ -439,7 +436,8 @@ export class ReviewChains {
     if (event.type === 'permission' && seat.role !== 'builder' && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
     // The end of a turn from before this table opened: the seat is free now, and no step moves on it.
-    if (seat.stale) { seat.busy = false; seat.stale = false; seat.text = ''; this.publish(chain); return null; }
+    // What was queued while it was busy starts now if the table is free.
+    if (seat.stale) { seat.busy = false; seat.stale = false; seat.text = ''; this.publish(chain); if (!this.busy(chain) && (chain.step === 'idle' || chain.step === 'done')) this.startWaiting(chain); return null; }
     seat.busy = false; seat.answer = seat.text.trim(); seat.text = '';
     this.finished(chain, seat, event);
     return null;
@@ -508,9 +506,7 @@ export class ReviewChains {
         chain.verdict = 'approved'; chain.step = 'done'; chain.note = ''; chain.held = null; this.publish(chain);
         // This task is done (Tasks moves it on). Next: a message the person wrote meanwhile, then the tasks from Tasks in
         // order, one per approval. A message kept from before a restart still waits for Send now.
-        if (chain.queued && !chain.kept) { const { text, images } = chain.queued; chain.queued = null; this.send(chain.builder.runId, text, images); }
-        else if (!chain.queued && chain.nextTasks.length) this.send(chain.builder.runId, chain.nextTasks.shift()!, []);
-        return;
+        this.startWaiting(chain); return;
       }
       // A follow-up too long to plan again with the task (held says why) stops the table at the final review, its verdict
       // and note kept: once the person drops the message, Continue runs the final review again.
@@ -524,6 +520,11 @@ export class ReviewChains {
       chain.finalRound++; chain.reviewRound = REVIEW_ROUNDS - 1; this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return;
     }
     this.publish(chain);
+  }
+  /** What waits for a free table starts: the person's message, else the first task from Tasks. A message kept from before a restart still waits for Send now. */
+  private startWaiting(chain: Chain) {
+    if (chain.queued && !chain.kept) { const { text, images } = chain.queued; chain.queued = null; this.send(chain.builder.runId, text, images); }
+    else if (!chain.queued && chain.nextTasks.length) this.send(chain.builder.runId, chain.nextTasks.shift()!, []);
   }
   /** After a review: the builder fixes what is open (a duplicate in a record from 1.20 is not), or the planner reviews the whole. */
   private afterReview(chain: Chain) {

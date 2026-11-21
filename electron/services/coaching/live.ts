@@ -6,7 +6,7 @@ import { coachable, coachingWeek, LIVE_PROMPT_LIMIT, LIVE_TIPS, promptAdvice, ty
 import { z } from 'zod';
 import type { CLIEngineConfig } from '../../../shared/types';
 import type { AgentRunningSession } from '../../../shared/ipc';
-import type { Executable } from '../cli/discovery';
+import { advertisesFlag, probeCLI, type Executable } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
 
 type Json = Record<string, any>;
@@ -59,15 +59,26 @@ export function runReview(executable: Executable, env: Record<string, string>, i
   });
 }
 
+/** Whether each Codex (its file and launch arguments) knows `--ignore-user-config`, asked once per process. */
+const ignoresUserConfig = new Map<string, Promise<boolean>>();
+/** Without the user's config.toml Codex starts none of their MCP servers (uvx, node helpers, Trace's own), and answers just as well, twice as fast. An older Codex that lacks the flag would fail on it, so it is passed only when `exec --help` lists it. */
+export function codexIgnoresUserConfig(executable: Executable, env: Record<string, string>, probe = probeCLI): Promise<boolean> {
+  const key = [executable.file, ...executable.prefixArgs].join('\0'); let known = ignoresUserConfig.get(key);
+  if (!known) {
+    known = probe(executable, ['exec', '--help'], env).then((result) => { if (result.exitCode !== 0) ignoresUserConfig.delete(key); return result.exitCode === 0 && advertisesFlag(result.stdout + '\n' + result.stderr, '--ignore-user-config'); }, () => { ignoresUserConfig.delete(key); return false; });
+    ignoresUserConfig.set(key, known);
+  }
+  return known;
+}
 /**
  * Codex reviews one prompt: `codex exec` in a read-only sandbox with low reasoning, answering
  * in the same shape (its final message, checked against the schema, is written to a file). The input goes on stdin.
  */
-export function runCodexReview(executable: Executable, env: Record<string, string>, input: string, cwd: string): Promise<LiveReview> {
-  const schema = path.join(cwd, 'review-schema.json'); const output = path.join(cwd, `${randomUUID()}.json`);
+export async function runCodexReview(executable: Executable, env: Record<string, string>, input: string, cwd: string, probe = probeCLI): Promise<LiveReview> {
+  const ignoreConfig = await codexIgnoresUserConfig(executable, env, probe); const schema = path.join(cwd, 'review-schema.json'); const output = path.join(cwd, `${randomUUID()}.json`);
   fs.writeFileSync(schema, SCHEMA, { mode: 0o600 });
   return new Promise((resolve, reject) => {
-    const child = spawn(executable.file, [...executable.prefixArgs, 'exec', '--skip-git-repo-check', '-s', 'read-only', '-c', 'model_reasoning_effort="low"', '--output-schema', schema, '-o', output, '-'], { cwd, env: { ...env, ...executable.extraEnv }, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    const child = spawn(executable.file, [...executable.prefixArgs, 'exec', ...(ignoreConfig ? ['--ignore-user-config'] : []), '--skip-git-repo-check', '-s', 'read-only', '-c', 'model_reasoning_effort="low"', '--output-schema', schema, '-o', output, '-'], { cwd, env: { ...env, ...executable.extraEnv }, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
     let settled = false;
     const finish = (error: HubError | null, review?: LiveReview) => { if (settled) return; settled = true; clearTimeout(timer); try { fs.rmSync(output, { force: true }); } catch { /* Removed with the folder. */ } if (error) { child.kill(); reject(error); } else resolve(review!); };
     const timer = setTimeout(() => finish(new HubError('COACHING_REVIEW', 'Codex took too long to review this prompt. Try again.')), 120000);

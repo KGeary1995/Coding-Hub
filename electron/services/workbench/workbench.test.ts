@@ -215,6 +215,14 @@ describe('verification and experiment evidence', () => {
     expect(await verification.execute({ action: 'verification-run', id: profile.id })).toBeNull(); expect(verification.data().results).toHaveLength(0); approved = true;
     const result = await verification.execute({ action: 'verification-run', id: profile.id }) as any; expect(result.passed).toBe(true); expect(result.steps[0].output).toContain('verified'); expect(verification.data().results).toHaveLength(1);
   });
+  it('ends a step when a process it left running holds the output open, so verification is not stuck busy', async () => {
+    const root = fixture(); const service = new Verification(root, async () => true);
+    // The step starts a background process that shares its output pipes and outlives it by 8 s (so run in a folder that is not cleaned up).
+    const code = 'import subprocess,sys; subprocess.Popen([sys.executable,"-c","import time; time.sleep(8)"],stdout=sys.stdout,stderr=sys.stderr); print("done")';
+    const profile = await service.execute({ action: 'verification-save', name: 'Leaves a job', directory: os.tmpdir(), steps: [{ label: 'Check', tool: 'python', args: ['-c', code] }], timeoutSeconds: 30 }) as any;
+    const started = Date.now(); const result = await service.execute({ action: 'verification-run', id: profile.id }) as any;
+    expect(result.passed).toBe(true); expect(result.steps[0].output).toContain('done'); expect(Date.now() - started).toBeLessThan(6500); expect(service.running).toBe(false);
+  }, 20000);
   it('does not leave verification stuck when a saved project directory disappears', async () => {
     const root = fixture(); const project = path.join(root, 'project'); fs.mkdirSync(project); const service = new Verification(root, async () => true);
     const profile = await service.execute({ action: 'verification-save', name: 'Missing folder', directory: project, steps: [{ label: 'Check', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 5 }) as any;

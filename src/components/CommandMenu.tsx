@@ -10,6 +10,7 @@ import { COMMAND_SCOPES, matchRange, parseQuery, searchesFiles, type CommandScop
 import { CHANNEL_STATES, channelState, usageFor } from '../state/channel-state';
 import { VIEW_KEYS } from '../runtime/view-shortcuts';
 import { jumpToChannel } from './shell/StatusBar';
+import { channelKeyHint } from './channel-key';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
@@ -110,7 +111,7 @@ export function CommandMenu() {
     sessions.forEach((session, index) => {
       const state = channelState(session, usageFor(session, usage)); const meta = CHANNEL_STATES[state];
       all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${channelNameNow(session)}`, glyph: meta.glyph, tone: state === 'working' ? session.config.engine : state,
-        meta: state === 'waiting' ? `${meta.word} · ${session.attention?.message ?? 'approval'}` : meta.word, metaClass: state, shortcut: index < MAX_CHANNELS ? `Alt ${index + 1}` : undefined, run: () => jumpToChannel(session.id) });
+        meta: state === 'waiting' ? `${meta.word} · ${session.attention?.message ?? 'approval'}` : meta.word, metaClass: state, shortcut: index < MAX_CHANNELS ? channelKeyHint(index + 1) : undefined, run: () => jumpToChannel(session.id) });
     });
     for (const hit of hits) {
       const memory = hit.kind !== 'file';

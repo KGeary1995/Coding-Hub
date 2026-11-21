@@ -5,7 +5,7 @@ import path from 'node:path';
 import { coachable, promptTips, type LiveTip } from '../../../shared/coaching';
 import type { AgentRunningSession } from '../../../shared/ipc';
 import type { CLIEngineConfig } from '../../../shared/types';
-import { conversationTurn, LiveCoach, REVIEW_ARGS, reviewInput } from './live';
+import { conversationTurn, LiveCoach, REVIEW_ARGS, reviewInput, runCodexReview } from './live';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -113,5 +113,26 @@ describe('live coaching', () => {
   it('asks Claude Haiku with no tools and no MCP servers, keeping its session so its usage is counted', () => {
     expect(REVIEW_ARGS).toEqual(expect.arrayContaining(['-p', '--model', 'haiku', '--strict-mcp-config', '--json-schema'])); expect(REVIEW_ARGS).not.toContain('--no-session-persistence');
     expect(REVIEW_ARGS[REVIEW_ARGS.indexOf('--tools') + 1]).toBe('');
+  });
+  describe('Codex review without the user config', () => {
+    // A fake codex: logs its arguments, and answers by writing the file named after -o.
+    const fake = () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-codex-')); roots.push(root); const script = path.join(root, 'codex.cjs'); const log = path.join(root, 'args.json');
+      fs.writeFileSync(script, `const fs = require('fs'); const a = process.argv.slice(2); fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(a)); fs.writeFileSync(a[a.indexOf('-o') + 1], JSON.stringify({ advice: 'ok', rewrite: 'ok' })); process.stdin.resume();`);
+      return { root, executable: { file: process.execPath, prefixArgs: [script], extraEnv: {}, displayPath: script }, args: (): string[] => JSON.parse(fs.readFileSync(log, 'utf8')) };
+    };
+    const help = (text: string) => vi.fn(async (_executable?: unknown, _args?: string[]) => ({ stdout: text, stderr: '', exitCode: 0, timedOut: false }));
+    it('passes --ignore-user-config only when `codex exec --help` lists it, and reads the help once per Codex', async () => {
+      const { root, executable, args } = fake(); const probe = help('Options:\n      --ignore-user-config  Do not load config.toml\n');
+      await runCodexReview(executable, {}, 'input', root, probe); expect(args().slice(0, 2)).toEqual(['exec', '--ignore-user-config']);
+      await runCodexReview(executable, {}, 'input', root, probe); expect(probe).toHaveBeenCalledTimes(1); expect(probe.mock.calls[0][1]).toEqual(['exec', '--help']);
+      const old = fake(); const oldProbe = help('Options:\n  -s, --sandbox <MODE>\n');
+      await runCodexReview(old.executable, {}, 'input', old.root, oldProbe); expect(old.args()).not.toContain('--ignore-user-config'); expect(old.args()).toContain('--skip-git-repo-check');
+    });
+    it('leaves the flag out, and asks again next time, when the help could not be read', async () => {
+      const { root, executable, args } = fake(); const probe = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: null, timedOut: true }));
+      await runCodexReview(executable, {}, 'input', root, probe); expect(args()).not.toContain('--ignore-user-config');
+      await runCodexReview(executable, {}, 'input', root, probe); expect(probe).toHaveBeenCalledTimes(2);
+    });
   });
 });

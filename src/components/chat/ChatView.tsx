@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
-import type { ChatImage } from '../../../shared/chat';
+import { isTracePrompt, type ChatImage } from '../../../shared/chat';
 import { MAX_CHANNELS, MAX_MODEL_LENGTH } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
 import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/chat-store';
@@ -64,7 +64,7 @@ export function ChatView({ session }: { session: Session }) {
     const own = chat.items.map((item) => ({ item, from: 'lead' as const }));
     if (!table) return own;
     // In a hierarchy Trace's prompts to the builder stay out too: the person's own messages show, at their order.
-    return [...own.filter(({ item }) => !hierarchy || item.kind !== 'user' || !item.text.startsWith('[')), ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? plannerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : [])]
+    return [...own.filter(({ item }) => !hierarchy || item.kind !== 'user' || !isTracePrompt(item.text)), ...partnerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? plannerThread.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : [])]
       .sort((a, b) => (a.item.order ?? 0) - (b.item.order ?? 0));
   }, [chat.items, partnerThread.items, plannerThread.items, table, showPartner, partnerSession, hierarchy]);
 

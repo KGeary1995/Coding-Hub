@@ -21,6 +21,8 @@ export interface TableHost {
 const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex' };
 /** The longest answer passed to the other agent; more is cut, and the agent is told so. */
 const RELAY_LIMIT = 12_000;
+/** Keeps the END of a long answer (a seat's closing report: files changed, checks run, is what the next seat needs), with a marker where the start was left out. */
+export const cut = (text: string) => text.length > RELAY_LIMIT ? `[… earlier part shortened by Trace]\n${text.slice(-RELAY_LIMIT)}` : text;
 /** Messages kept per chat run, so a newcomer gets the recent ones word for word. */
 const RECENT = 8;
 /** Images in one message (chatRequestSchema). */
@@ -262,14 +264,17 @@ export class RoundTables {
       table.round = table.rounds;
       this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text: `${NAME[seat.engine]} ended its turn early, so the Round Table discussion ends here${event.error ? `: ${event.error}` : '.'}` } });
     }
-    this.settle(table, seat);
+    this.settle(table, seat, event.isError);
     return null;
   }
 
-  private settle(table: Table, seat: Seat) {
+  /** `failed`: the seat's turn ended in an error. */
+  private settle(table: Table, seat: Seat, failed = false) {
     if (table.lead.busy || table.partner.busy) { this.publish(table); return; }
     if (table.phase === 'joining' && table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); return; }
     if (table.phase === 'joining') {
+      // Stop, or a failed summary, leaves the newcomer unbriefed (a later message briefs it) instead of starting it anyway.
+      if (table.halted || failed) { table.phase = 'idle'; this.publish(table); return; }
       const summary = seat.answer || '(no summary)';
       const recent = table.recent.slice(-RECENT).join('\n\n');
       table.partner.briefed = true; table.partner.busy = true; table.phase = 'answering'; table.round = table.rounds;
@@ -299,8 +304,7 @@ export class RoundTables {
     // Both answers are read before either seat starts its next turn (which clears its answer).
     const given = new Map([[table.lead, table.lead.answer], [table.partner, table.partner.answer]]);
     for (const each of [table.lead, table.partner]) {
-      const other = this.other(table, each); let answer = given.get(other) || '(no answer)';
-      if (answer.length > RELAY_LIMIT) answer = `${answer.slice(0, RELAY_LIMIT)}\n[… shortened by Trace]`;
+      const other = this.other(table, each); let answer = cut(given.get(other) || '(no answer)');
       if (AGREES.test(answer)) answer = 'AGREE (nothing to add)';
       const intro = each.briefed ? '' : `${this.brief(table, each)}\n\n`; each.briefed = true;
       each.busy = true; each.answer = null; each.text = '';

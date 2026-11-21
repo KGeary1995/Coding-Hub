@@ -23,6 +23,8 @@ describe('updating a Mac that cannot update itself', () => {
     expect(script).toContain('https://github.com/KGeary1995/trace-releases/releases/download/v$V/Trace-$V-macOS-$ARCH.dmg');
     expect(script).toContain(`SHA='${INTEL}'`); expect(script).toContain(`SHA='${ARM}'`);
     expect(script).toContain('openssl dgst -sha512 -binary "$DMG" | base64)" = "$SHA"');
+    // main.ts lets jobs start again 15 minutes after the script starts: a slower download must end well before that.
+    expect(script).toContain('curl -fsSL --max-time 780 -o "$DMG"');
     expect(script).toContain('http://127.0.0.1:47821/api/hello'); expect(script).toContain('restore "the new app did not answer');
     // The download, checksum, mounting and version check all come before Trace is quit.
     expect(script.indexOf('openssl dgst')).toBeLessThan(script.indexOf('hdiutil attach'));

@@ -80,7 +80,7 @@ function tabBar(active: Tab) {
 }
 /** Usage, Tasks, History or More: a screen of this computer's state (phone/screens.tsx) above the tabs. */
 function showTab(tab: Exclude<Tab, 'channels'>) {
-  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  leaveScreen(); leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
   const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), directNotice(), screen);
@@ -118,7 +118,7 @@ function header(back?: () => void, title?: Node, ...tools: Node[]) {
 function decoded(value: string) { try { return decodeURIComponent(value); } catch { return ''; } }
 
 function showPair(error = '') {
-  stop?.(); stop = null; disposeTerminal(); current = null;
+  leaveScreen(); stop?.(); stop = null; disposeTerminal(); current = null;
   const code = location.hash.startsWith(PAIRING_PREFIX) ? decoded(location.hash.slice(PAIRING_PREFIX.length)) : '';
   const agent = navigator.userAgent; const name = /iPhone/.test(agent) ? 'iPhone' : /iPad/.test(agent) ? 'iPad' : /Android/.test(agent) ? 'Android phone' : 'Phone';
   const codeInput = h('input', { id: 'code', value: code, autocomplete: 'one-time-code', autocapitalize: 'characters', spellcheck: false, required: true });
@@ -219,7 +219,7 @@ function directNotice() {
   element.append(h('span', { className: 'banner-text' })); return element;
 }
 function showList() {
-  leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  leaveScreen(); leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
@@ -232,6 +232,8 @@ function showList() {
 /** Two rows of four, so each key is at least 44 px wide on a phone. */
 const SCREEN_KEYS: [string, number, string][][] = [[['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter']], [['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]];
 let viewer: RFB | null = null;
+/** Ends the screen session when the phone leaves the Screen view by any path (Back, a tab, a notification), so it does not run unseen. */
+function leaveScreen() { viewer?.disconnect(); viewer = null; }
 /**
  * The computer's own screen, carried over this remote: a Mac's through its screen-sharing server (macOS Screen Sharing),
  * which asks for its user name and password (they go to it, not to Trace); a Windows computer's through Trace's screen
@@ -241,7 +243,7 @@ let viewer: RFB | null = null;
  */
 async function showScreen() {
   closeChat(); closeScreen();
-  leaveChannel(); disposeTerminal(); current = null; run = null; viewer?.disconnect(); viewer = null;
+  leaveChannel(); disposeTerminal(); current = null; run = null; leaveScreen();
   const status = h('p', { className: 'dim', aria: { live: 'polite' } }, 'Connecting…');
   const user = h('input', { autocomplete: 'username', autocapitalize: 'none', placeholder: 'Mac user name', aria: { label: 'User name' } });
   const password = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Password', aria: { label: 'Password' } });
@@ -253,7 +255,7 @@ async function showScreen() {
   typing.addEventListener('input', () => { if (typing.value) { send(unlockKeys(typing.value).filter((key) => key.keysym !== 0xff0d)); typing.value = ''; } });
   typing.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === 'Backspace') { event.preventDefault(); send([{ keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: true }, { keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: false }]); } });
   const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, ...SCREEN_KEYS.map((row) => h('div', {}, ...row.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label)))));
-  const back = () => { viewer?.disconnect(); viewer = null; showList(); };
+  const back = () => { leaveScreen(); showList(); };
   app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
   try {
     const { ticket } = await (await api('/api/phone-screen-ticket', { method: 'POST' })).json() as { ticket: string };
@@ -417,6 +419,7 @@ function toggleFit() {
 }
 
 function showChannel(sessionId: string) {
+  leaveScreen();
   if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; holding = fitsOnOpen(chosenSize); granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
@@ -456,7 +459,7 @@ function showChannel(sessionId: string) {
   const keys = h('div', { className: 'keys', aria: { role: 'group', label: 'Keys' } }, ...KEYS.map((row) => h('div', {}, ...row.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)))));
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
   const tools = h('div', { className: 'tools', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
-    channel && channel.engine !== 'shell' ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
+    channel && (channel.engine === 'claude' || channel.engine === 'codex') ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
     h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'Fit to phone draws the channel at this screen\'s size until you type in it on the computer. Desktop size shows the computer\'s size, and this phone opens the next channel that way too.' }, 'Fit to phone'),
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.

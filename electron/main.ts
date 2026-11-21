@@ -167,7 +167,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
-}, geminiConversation: (cwd, since) => geminiConversationSince(cwd, since), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
+}, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
   beforeLaunch: (cwd, config) => autoMemory && config.engine !== 'gemini' ? autoMemory.ready(cwd, config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
@@ -843,6 +843,8 @@ else app.whenReady().then(() => {
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
     if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    // Jobs that run or rewrite local data wait out a Mac script update, as channel starts do (it restarts Trace once it is done).
+    if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);

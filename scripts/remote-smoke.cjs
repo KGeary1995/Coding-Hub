@@ -304,7 +304,9 @@ else if (args.startsWith('serve --bg --https=443')) {
     // Removing the phone on the computer locks it out at once.
     await openView(page, 'Settings');
     await card.getByRole('button', { name: 'Remove Phone', exact: true }).click();
-    await phone.getByRole('button', { name: 'Back to channels' }).click();
+    // The removal ends the phone's open stream, so the app may show the pairing page by itself while Back is being
+    // clicked: the button is then gone, and the click must not wait 20 s for it (about one run in ten failed that way).
+    await phone.getByRole('button', { name: 'Back to channels' }).click({ timeout: 3000 }).catch(() => {});
     await phone.getByRole('heading', { name: 'Pair this phone', exact: true }).waitFor();
     await card.getByRole('checkbox', { name: 'Allow paired phones to read and type into channels', exact: true }).uncheck();
     await card.locator('.storage-status').filter({ hasText: 'Off' }).waitFor();

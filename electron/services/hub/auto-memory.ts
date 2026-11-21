@@ -136,7 +136,8 @@ export function lastAssistantMessage(engine: ChatEngine, file: string): string |
 
 /** Runs at every launch and session end, unasked, so the repository's own config must not run programs here either. */
 async function git(cwd: string, args: string[]): Promise<string[]> {
-  const safe = await readOnlyGitOptions(cwd);
+  // A configuration that cannot be read safely: Git is not run, and the summary goes without its file list.
+  let safe: string[]; try { safe = await readOnlyGitOptions(cwd); } catch { return []; }
   return new Promise((resolve) => execFile('git', ['--no-optional-locks', ...safe, '-C', cwd, ...args], { timeout: 8000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map((line) => line.trimEnd()).filter(Boolean))));
 }
 /** `--ignore-submodules=dirty` wins over any submodule setting, so a submodule's own config never runs here (see readOnlyGitOptions). */

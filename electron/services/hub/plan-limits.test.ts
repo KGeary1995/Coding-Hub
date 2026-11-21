@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { CLAUDE_USAGE_ARGS, inBatches, readClaudeLimits, readCodexLimits, readGeminiLimits } from './plan-limits';
+import { CLAUDE_USAGE_ARGS, inBatches, PlanLimitsService, readClaudeLimits, readCodexLimits, readGeminiLimits } from './plan-limits';
 
 /** Node itself stands in for a CLI: `--` keeps the CLI's arguments (`-p /usage`, `app-server`) away from Node. */
 const fake = (script: string) => ({ file: process.execPath, prefixArgs: ['-e', script, '--'], extraEnv: {}, displayPath: 'node' });
@@ -61,5 +62,33 @@ describe('Gemini CLI plan limits', () => {
   });
   it('says the check failed when agy does not report its limits', async () => {
     expect(await readGeminiLimits(agy, {}, probe('1.5.12', 'Please sign in', 1).probe as never)).toMatchObject({ windows: [], failed: true, error: 'Gemini CLI did not report usage limits. Check that it is signed in.' });
+  });
+});
+
+describe('the plan limits service', () => {
+  /** A folder whose only program is a `claude`: the checks search only the PATH they are given, so no real CLI runs. */
+  const claudeOnPath = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-limits-')); fs.writeFileSync(path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude'), 'MZ', { mode: 0o755 }); return dir; };
+  const profile = (id: string, name: string) => ({ id, name, createdAt: '2026-11-21T00:00:00.000Z' });
+  afterEach(() => { vi.useRealTimers(); });
+  it('reads again five minutes after the last read began, not after it ended', async () => {
+    const dir = claudeOnPath(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(1_000_000); let reads = 0;
+    const service = new PlanLimitsService(() => [], (base) => { reads++; vi.setSystemTime(1_020_000); return base; }, () => ({ PATH: dir }));
+    await service.refresh(); expect(reads).toBe(1);
+    // Asked exactly five minutes after the start, as the window does.
+    vi.setSystemTime(1_000_000 + 5 * 60_000); await service.refresh(); expect(reads).toBe(2);
+    vi.setSystemTime(1_000_000 + 5 * 60_000 + 1000); await service.refresh(); expect(reads).toBe(2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it('shows an account whose check cannot run as failed, and still reports the others', async () => {
+    const dir = claudeOnPath();
+    const service = new PlanLimitsService(() => [profile('p1', 'Work')], (base, id) => { if (!id) throw new Error('no profile'); return base; }, () => ({ PATH: dir }), 1);
+    const limits = await service.refresh(true);
+    expect(limits.map((item) => [item.account, item.failed])).toEqual([['Default', true], ['Work', true]]);
+    expect(limits.find((item) => item.account === 'Default')).toMatchObject({ error: 'Trace could not check Claude Code\'s usage limits.' });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it('does not wait for the input Claude Code would otherwise wait 3 seconds for', async () => {
+    const waiting = fake(`process.stdin.on('end', () => console.log(JSON.stringify({ result: 'Current session: 5% used' }))); process.stdin.resume();`);
+    expect(await readClaudeLimits(waiting, env, 'Default')).toMatchObject({ windows: [{ label: 'Session', usedPercent: 5 }], failed: false });
   });
 });

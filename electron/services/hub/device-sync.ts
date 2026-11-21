@@ -70,7 +70,9 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 function readJson<T>(file: string, schema: z.ZodType<T>): T | null {
   let stat: fs.Stats; try { stat = fs.lstatSync(file); } catch { return null; }
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 4 * 1024 * 1024) throw new HubError('SYNC_FILE', `${path.basename(file)} in the sync folder is not a regular file under 4 MiB.`);
-  const parsed = schema.safeParse(JSON.parse(fs.readFileSync(file, 'utf8')));
+  // A truncated file is no valid JSON: the same error as one that fails the schema, not a generic one.
+  let value: unknown; try { value = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { value = undefined; }
+  const parsed = schema.safeParse(value);
   if (!parsed.success) throw new HubError('SYNC_FILE', `${path.basename(file)} in the sync folder could not be read. It was left as it is.`);
   return parsed.data;
 }
@@ -209,7 +211,8 @@ export class DeviceSync {
    */
   private addressBook(folder: string) {
     const own = path.join(folder, 'computers', this.machine.id + '.json'); const url = this.advertise();
-    const current = readJson(own, addressDocument);
+    // This computer's own unreadable record is rewritten, as if it were not there.
+    let current: z.infer<typeof addressDocument> | null = null; try { current = readJson(own, addressDocument); } catch { /* Rewritten below. */ }
     if (!current || current.value.url !== url || current.machine.name !== this.machine.name) writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: { url } });
     this.addresses.clear();
     for (const name of fs.readdirSync(path.join(folder, 'computers'))) {

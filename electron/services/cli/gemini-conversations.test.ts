@@ -49,11 +49,14 @@ describe('Gemini CLI conversations', () => {
   it('finds the conversation a run wrote to: the only one in its folder changed since it started', () => {
     const since = Date.parse('2026-11-19T05:00:00Z');
     const root = home([{ id: A, folder: project, at: '2026-11-19 05:10:00+00:00' }, { id: B, folder: other, at: '2026-11-19 05:20:00+00:00' }, { id: C, folder: project, at: '2026-11-19 04:00:00+00:00' }]);
-    expect(geminiConversationSince(project, since, root)).toBe(A);
-    expect(geminiConversationSince(path.join(os.tmpdir(), 'elsewhere'), since, root)).toBeNull();
+    expect(geminiConversationSince(project, since, new Set(), root)).toBe(A);
+    expect(geminiConversationSince(path.join(os.tmpdir(), 'elsewhere'), since, new Set(), root)).toBeNull();
     // Two Gemini channels in one folder cannot be told apart, so neither is chosen.
     const two = home([{ id: A, folder: project, at: '2026-11-19 05:10:00+00:00' }, { id: C, folder: project, at: '2026-11-19 05:11:00+00:00' }]);
-    expect(geminiConversationSince(project, since, two)).toBeNull();
+    expect(geminiConversationSince(project, since, new Set(), two)).toBeNull();
+    // One agy already had when the run started (the person's own terminal, say) is not the run's, so the other is.
+    expect(geminiConversationSince(project, since, new Set([A]), two)).toBe(C);
+    expect(geminiConversationSince(project, since, new Set([A, C]), two)).toBeNull();
   });
   it('resumes only a conversation agy still has, by a real ID', () => {
     const root = home([{ id: A, folder: project, at: '2026-11-19 05:10:00+00:00' }]);

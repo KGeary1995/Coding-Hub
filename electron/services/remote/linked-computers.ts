@@ -19,6 +19,9 @@ export interface RelaySink { output(sessionId: string, runId: string, data: stri
 const FILE = 'linked-computers.json';
 /** Computers the person unlinked: never linked again without a code. */
 const DECLINED = 'linked-computers-declined.json';
+/** Phones removed here whose key a linked computer has not yet been told to forget (it was off): per link id, the phones' ids (relayKey), never a token. */
+const REVOKED = 'linked-revocations.json';
+const revokedSchema = z.record(z.uuid(), z.array(z.string().max(100)).max(100));
 const linkSchema = z.object({ id: z.uuid(), name: z.string().min(1).max(100), url: z.string().max(500), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), linkedAt: z.iso.datetime() }).strict();
 type Link = z.infer<typeof linkSchema>;
 /** The most computers one Trace links. */
@@ -162,7 +165,7 @@ export class LinkedComputers implements RemoteRelay {
       await this.handBack(url, body.token);
       throw new HubError('LINK_PHONE_CODE', 'That is a phone pairing code. On the other computer, use Settings → Other computers → Show link code.');
     }
-    if (body.computer?.id && body.computer.id !== id) throw new HubError('LINK_MISMATCH', 'That address answered as a different computer. Sync now on both computers and try again.');
+    if (body.computer?.id && body.computer.id !== id) { await this.handBack(url, body.token); throw new HubError('LINK_MISMATCH', 'That address answered as a different computer. Sync now on both computers and try again.'); }
     await this.keepNew({ id, name: computer.name, url, token: body.token, linkedAt: new Date().toISOString() });
     this.declined(id, false); this.removed.delete(id);
     return this.status();
@@ -184,6 +187,17 @@ export class LinkedComputers implements RemoteRelay {
     save(this.root, FILE, [...others, link]);
     const existing = this.connections.get(link.id); if (existing) { this.disconnect(existing); this.connections.delete(link.id); }
     this.connect(link); this.notify();
+  }
+  /** The revocations still owed to a computer; `change` adds or removes one, and no key left drops the entry (best effort: a list that cannot be saved is retried from memory next time). */
+  private owed(id: string, change?: { add?: string; done?: string; all?: true }): string[] {
+    let all: z.infer<typeof revokedSchema> = {}; try { all = load(this.root, REVOKED, revokedSchema, {}); } catch { /* Unreadable: none owed. */ }
+    const keys = change?.all ? [] : (all[id] ?? []).filter((key) => key !== change?.done); if (change?.add && !keys.includes(change.add)) keys.push(change.add);
+    if (change) { if (keys.length) all[id] = keys.slice(-100); else delete all[id]; try { save(this.root, REVOKED, all); } catch { /* Sent again when it cannot be saved. */ } }
+    return keys;
+  }
+  /** Sends a computer the revocations it is owed; each is cleared on its 200 answer, so one that fails is sent again at the next connection. */
+  private sendRevocations(link: Link) {
+    return Promise.allSettled(this.owed(link.id).map(async (relayKey) => { await this.request(link, 'api/phone-key/revoke', { method: 'POST', body: JSON.stringify({ relayKey }), signal: AbortSignal.timeout(5000) }); this.owed(link.id, { done: relayKey }); }));
   }
   private declined(id?: string, add?: boolean): Set<string> {
     const ids = new Set(load(this.root, DECLINED, z.array(z.uuid()).max(100), []));
@@ -238,7 +252,7 @@ export class LinkedComputers implements RemoteRelay {
   async unlink(id: string): Promise<LinkedComputer[]> {
     const links = this.current(); const link = links.find((item) => item.id === id); if (!link) return this.status();
     const connection = this.connections.get(id); if (connection) { this.disconnect(connection); this.connections.delete(id); }
-    save(this.root, FILE, links.filter((item) => item.id !== id)); this.declined(id, true);
+    save(this.root, FILE, links.filter((item) => item.id !== id)); this.declined(id, true); this.owed(id, { all: true });
     // Best effort: the other computer forgets this one's key too. If it is off, remove it there later.
     try { await this.request(link, 'api/unpair', { method: 'POST', body: '{}', signal: AbortSignal.timeout(5000) }); } catch { /* Unreachable. */ }
     this.notify(); this.sink.changed();
@@ -306,17 +320,18 @@ export class LinkedComputers implements RemoteRelay {
   }
   /** One of this computer's phones was removed: every linked computer forgets the key it gave that phone through this one. */
   async revokePhone(relayKey: string) {
-    // Best effort and in parallel; a computer that is off, or on a Trace without this request, keeps the key until
-    // this computer is unlinked there.
-    await Promise.allSettled(this.links().map((link) => this.request(link, 'api/phone-key/revoke', { method: 'POST', body: JSON.stringify({ relayKey }), signal: AbortSignal.timeout(5000) })));
+    // In parallel. One that is off is told when its link next connects (`owed`); a Trace without this request keeps the key until unlinked there.
+    await Promise.allSettled(this.links().map((link) => { this.owed(link.id, { add: relayKey }); return this.sendRevocations(link); }));
   }
   /** A phone of this computer shows a linked computer's channel at its size, or (null) leaves it. */
-  async size(sessionId: string, runId: string, size: { cols: number; rows: number } | null) {
+  async size(sessionId: string, runId: string, size: { cols: number; rows: number } | null, force?: boolean): Promise<{ held?: boolean } | void> {
     const connection = [...this.connections.values()].find((item) => item.channels.some((channel) => channel.sessionId === sessionId));
     if (!connection) throw new HubError('LINK_CHANNEL', 'That channel’s computer is not connected.');
     // The other computer sees the phone and this window as one device: a phone leaving puts back the tile's size, if shown.
     const fit = size ? null : connection.fits.get(sessionId);
-    await this.request(connection.link, 'api/size', size || fit ? { method: 'POST', body: JSON.stringify({ sessionId, ...(fit ?? { runId, ...size }) }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+    const response = await this.request(connection.link, 'api/size', size || fit ? { method: 'POST', body: JSON.stringify({ sessionId, ...(fit ?? { runId, ...size }), ...(force && size ? { force } : {}) }) } : { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+    // A Trace before `held` answers without it: the phone then takes the size as held, as it always did.
+    const held = (await response.json().catch(() => ({})) as { held?: unknown }).held; return typeof held === 'boolean' ? { held } : {};
   }
   /**
    * A tile in this computer's window showing a linked computer's channel asks for that CLI at the tile's size, or
@@ -412,6 +427,7 @@ export class LinkedComputers implements RemoteRelay {
         try {
           const response = await this.request(link, 'api/stream?all=1', { signal: connection.controller.signal });
           connection.connected = true; connection.error = null; if (!oversized) delay = 2000; oversized = false; this.notify();
+          void this.sendRevocations(link);
           // The other computer gave the tiles' sizes back when the last stream closed: ask for them again.
           for (const [sessionId, fit] of connection.fits) void this.request(link, 'api/size', { method: 'POST', body: JSON.stringify({ sessionId, ...fit }) }).catch(() => {});
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
@@ -457,7 +473,7 @@ export class LinkedComputers implements RemoteRelay {
     const { link } = connection; this.disconnect(connection); this.connections.delete(link.id);
     // A list that cannot be saved now keeps the dead key: the next start finds it removed again.
     try { save(this.root, FILE, this.current().filter((item) => item.id !== link.id)); } catch { /* Kept for now. */ }
-    this.declined(link.id, true);
+    this.declined(link.id, true); this.owed(link.id, { all: true });
     this.removed.set(link.id, { name: link.name, url: link.url });
     this.notify(); this.sink.changed();
   }

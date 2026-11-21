@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelKey } from './channel-key';
+import { channelKey, channelKeyHint } from './channel-key';
 
 const key = (code: string, mods: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => ({ altKey: false, ctrlKey: false, metaKey: false, code, ...mods });
 
@@ -16,5 +16,12 @@ describe('the channel shortcut', () => {
     expect(channelKey(key('Digit5', { altKey: true }), true)).toBeNull();
     expect(channelKey(key('Digit3', { metaKey: true }), true)).toBe(2);
     expect(channelKey(key('Digit3', { metaKey: true, altKey: true }), true)).toBeNull();
+  });
+});
+
+describe('the channel key hint', () => {
+  it('names Cmd on a Mac and Alt elsewhere', () => {
+    expect(channelKeyHint(3, false)).toBe('Alt 3');
+    expect(channelKeyHint(3, true)).toBe('Cmd 3');
   });
 });

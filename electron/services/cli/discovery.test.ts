@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { adoptLoginShellPath, checkAuthentication, CLEAR_RUN_AS_NODE, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment, loginShellPath, mergePath, npmEntryForShim, RegistryPath, windowsRegistryPath, withoutAgentSession } from './discovery';
+import { adoptLoginShellPath, checkAuthentication, CLEAR_RUN_AS_NODE, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment, loginShellPath, mergePath, nodeScriptCommand, npmEntryForShim, probeCLI, probeDirectory, RegistryPath, windowsRegistryPath, withoutAgentSession } from './discovery';
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -36,6 +37,13 @@ describe('Windows npm CLI shim resolution', () => {
   it('runs JavaScript entries with an installed console Node.js instead of Electron when one is on PATH', async () => {
     const { shim, packageRoot } = await fixture({ codex: 'cli.cjs' });
     expect(await npmEntryForShim(shim, 'codex', 'arm', '/nodejs/node.exe')).toEqual({ file: '/nodejs/node.exe', prefixArgs: [path.join(packageRoot, 'cli.cjs')], extraEnv: {}, displayPath: shim });
+  });
+  it('runs a package manager entry with the console node.exe on PATH on Windows, and with Trace as Node otherwise (Trace.exe has no console, so the cmd.exe npm starts would open a window)', async () => {
+    const { root } = await fixture('cli.cjs'); const node = path.join(root, 'node.exe'); await writeFile(node, 'node fixture');
+    const env = { Path: [path.join(root, 'missing'), root].join(path.delimiter), KEEP: '1' };
+    expect(nodeScriptCommand('npm-cli.js', env, 'win32')).toEqual({ file: node, args: ['npm-cli.js'], env });
+    expect(nodeScriptCommand('npm-cli.js', { Path: path.join(root, 'missing') }, 'win32')).toEqual({ file: process.execPath, args: [CLEAR_RUN_AS_NODE, 'npm-cli.js'], env: { Path: path.join(root, 'missing'), ELECTRON_RUN_AS_NODE: '1' } });
+    expect(nodeScriptCommand('npm-cli.js', env, 'linux')).toEqual({ file: process.execPath, args: [CLEAR_RUN_AS_NODE, 'npm-cli.js'], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } });
   });
   it('supports string bin declarations', async () => {
     const { shim } = await fixture('cli.cjs');
@@ -166,6 +174,26 @@ describe('Gemini CLI on PATH', () => {
     await writeFile(native, 'MZ', { mode: 0o755 });
     expect((await findExecutable('gemini', { PATH: [scripts, bin].join(path.delimiter) })).file).toBe(native);
     await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+  });
+});
+
+describe('Background questions to a CLI', () => {
+  it('tell agy not to start its updater, which opened a console window on Windows', async () => {
+    const node = { file: process.execPath, prefixArgs: ['-e', 'process.stdout.write(String(process.env.AGY_CLI_DISABLE_AUTO_UPDATE))'], extraEnv: {}, displayPath: process.execPath };
+    const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    // agy reads only "true".
+    expect(await probeCLI(node, [], { ...env, AGY_CLI_DISABLE_AUTO_UPDATE: '' })).toMatchObject({ stdout: 'true', exitCode: 0 });
+  });
+  it('run in an empty folder of Trace’s own, so agy does not open (and watch) the folder Trace started in', async () => {
+    const node = { file: process.execPath, prefixArgs: ['-e', 'process.stdout.write(process.cwd())'], extraEnv: {}, displayPath: process.execPath };
+    const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    const result = await probeCLI(node, [], env);
+    expect(path.basename(result.stdout)).toBe('trace-cli-probe'); expect(readdirSync(probeDirectory())).toEqual([]);
+  });
+  it('close their input, so Claude Code does not wait 3 seconds for it', async () => {
+    const node = { file: process.execPath, prefixArgs: ['-e', "process.stdin.on('end', () => process.stdout.write('ended')); process.stdin.resume()"], extraEnv: {}, displayPath: process.execPath };
+    const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    expect(await probeCLI(node, [], env)).toMatchObject({ stdout: 'ended', exitCode: 0 });
   });
 });
 

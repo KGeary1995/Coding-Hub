@@ -62,6 +62,14 @@ describe('the Windows screen service', () => {
     await expect(openTraceScreen('Obsidian-Halo', url, COMPUTER)).rejects.toThrow(/no longer accepts/);
   });
 
+  it('ends an open session when the computer is removed in Trace, at the next check', async () => {
+    const { url, root, screen, viewers } = await service();
+    const open = await openTraceScreen('Obsidian-Halo', url, COMPUTER); cleanup.push(() => { open.socket.destroy(); });
+    await until(() => viewers.length > 0, 'the viewer'); screen.recheck(); expect(screen.watching).toBe('MacBook-Air-2.local');
+    fs.writeFileSync(path.join(root, 'remote-devices.json'), JSON.stringify([device('Phone', PHONE, 'phone')]));
+    screen.recheck(); expect(screen.watching).toBeNull(); await until(() => open.socket.destroyed || open.socket.readableEnded, 'the viewer to be disconnected');
+  });
+
   it('has one viewer at a time, and stops capturing when it leaves', async () => {
     const { url, viewers, counts } = await service();
     const first = await openTraceScreen('Obsidian-Halo', url, COMPUTER);

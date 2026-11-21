@@ -4,8 +4,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import { HubError } from '../cli/engine-adapter';
 import type { CheckName, CheckResult, ProjectAudit } from '../../../shared/project-checks';
-import { CLEAR_RUN_AS_NODE, hostEnvironment } from '../cli/discovery';
-import { stopTree } from './process-tree';
+import { hostEnvironment, nodeScriptCommand } from '../cli/discovery';
+import { onChildEnd, stopTree } from './process-tree';
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('inspect'), directory: z.string().max(4096) }).strict(), z.object({ action: z.literal('run'), directory: z.string().max(4096), script: z.enum(['test', 'typecheck', 'lint']) }).strict()]);
 export class ProjectChecks {
   private child: ChildProcess | null = null;
@@ -53,14 +53,15 @@ export class ProjectChecks {
     if (this.running) throw new HubError('CHECK_BUSY', 'A project check is already running.');
     const npm = this.npmCLI();
     return new Promise((resolve, reject) => {
-      // CLEAR_RUN_AS_NODE: npm runs as Node, but an Electron app its script starts must not inherit that.
-      const child = spawn(process.execPath, [CLEAR_RUN_AS_NODE, npm, 'run', request.script], { cwd: report.directory, env: { ...hostEnvironment(), ELECTRON_RUN_AS_NODE: '1' }, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); this.child = child;
+      // nodeScriptCommand: a console node.exe on Windows (no new console window), else Trace as Node without leaking ELECTRON_RUN_AS_NODE to the script.
+      const program = nodeScriptCommand(npm, hostEnvironment());
+      const child = spawn(program.file, [...program.args, 'run', request.script], { cwd: report.directory, env: program.env, detached: process.platform !== 'win32', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); this.child = child;
       let output = ''; let truncated = false; let timedOut = false;
       const append = (value: Buffer) => { const text = value.toString(); if (output.length + text.length > 512000) truncated = true; output = (output + text).slice(0, 512000); };
       child.stdout?.on('data', append); child.stderr?.on('data', append);
       const timer = setTimeout(() => { timedOut = true; this.stop(); }, 60_000);
       child.on('error', () => { clearTimeout(timer); if (this.child === child) this.child = null; reject(new HubError('CHECK_FAILED', 'The project check could not start.')); });
-      child.on('close', (exitCode) => { clearTimeout(timer); if (this.child === child) this.child = null; resolve({ script: request.script, exitCode, output, truncated, timedOut }); });
+      onChildEnd(child, (exitCode) => { clearTimeout(timer); if (this.child === child) this.child = null; resolve({ script: request.script, exitCode, output, truncated, timedOut }); });
     });
   }
   /** The whole tree, with taskkill from System32 rather than whichever one PATH finds first (stopTree). */
