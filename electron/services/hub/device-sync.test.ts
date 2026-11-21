@@ -217,6 +217,16 @@ describe('device sync', () => {
     fs.rmSync(path.join(drive, SYNC_FOLDER, 'computers'), { recursive: true });
     expect(a.sync.sync().error).toBeNull(); expect(fs.readdirSync(path.join(drive, SYNC_FOLDER, 'computers'))).toHaveLength(1);
   });
+  it('rewrites this computer’s own record in the sync folder when it was cut short, instead of failing on every sync', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); a.sync.sync();
+    const own = path.join(drive, SYNC_FOLDER, 'computers', a.sync.machine.id + '.json'); fs.writeFileSync(own, '{"version": 1, "mach');
+    expect(a.sync.sync().error).toBeNull(); expect(JSON.parse(fs.readFileSync(own, 'utf8')).machine.id).toBe(a.sync.machine.id);
+  });
+  it('says a settings file cut short in the sync folder could not be read and was left as it is', () => {
+    const drive = temporary(); const a = computer(drive, 'desk'); a.sync.sync();
+    const file = path.join(drive, SYNC_FOLDER, 'settings.json'); fs.writeFileSync(file, '{"half": ');
+    expect(a.sync.sync().error).toMatch(/settings\.json in the sync folder could not be read\. It was left as it is\./); expect(fs.readFileSync(file, 'utf8')).toBe('{"half": ');
+  });
   it('refuses a sub-folder that became a link after the sync folder was prepared', () => {
     const drive = temporary(); const a = computer(drive, 'desk'); a.sync.sync(); const outside = temporary();
     const usage = path.join(drive, SYNC_FOLDER, 'usage'); fs.rmSync(usage, { recursive: true });

@@ -73,7 +73,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     return () => { observer.disconnect(); clearTimeout(timer); void workbench({ action: 'linked-fit', id: computer.id, sessionId: channel.sessionId, runId }).catch(() => {}); };
   }, [computer.id, channel.sessionId, channel.runId]);
   // Typing needs the current run; a channel that has not drawn anything yet still takes input.
-  useEffect(() => { const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel); if (channel.runId && !entry.runId) entry.runId = channel.runId; }, [channel.runId]);
+  useEffect(() => { if (channel.chat) return; const entry = linkedTerminal(computer.id, channel.sessionId, channel.engine, channel); if (channel.runId && !entry.runId) entry.runId = channel.runId; }, [channel.runId]);
   const control = async (action: ChannelControl) => {
     setBusy(action); setError('');
     try { await workbench({ action: 'linked-control', id: computer.id, sessionId: channel.sessionId, control: action }); }

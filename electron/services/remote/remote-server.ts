@@ -94,8 +94,8 @@ export interface RemoteRelay {
   phoneKey(computerId: string, name: string, relayKey: string): Promise<{ id: string; name: string; url: string; token: string }>;
   /** Asks every linked computer to forget the keys it gave one of this computer's phones (`relayKey`), now removed. */
   revokePhone?(relayKey: string): Promise<void>;
-  /** Draws a linked computer's channel at a phone's size, or (null) gives it back. */
-  size(sessionId: string, runId: string, size: { cols: number; rows: number } | null): Promise<void>;
+  /** Draws a linked computer's channel at a phone's size, or (null) gives it back. `held` is that computer's answer; an older Trace gives none. */
+  size(sessionId: string, runId: string, size: { cols: number; rows: number } | null, force?: boolean): Promise<{ held?: boolean } | void>;
   /** A linked computer's channel's conversation, for a phone of this computer. */
   relayTranscript?(sessionId: string): Promise<ChannelTranscript>;
   /** A chat request from a phone of this computer for a chat on a linked computer. */
@@ -602,12 +602,14 @@ export class RemoteServer {
    * takes: its request arrived after it went (locked, out of signal), so nothing else would give the channel back.
    */
   private releaseOrphans(now = Date.now()) {
-    const follows = (device: string, sessionId: string) => [...this.streams].some((stream) => stream.device === device && (stream.all || stream.sessionId === sessionId));
+    const follows = (device: string, sessionId: string) => this.follows(device, sessionId);
     for (const [sessionId, want] of [...this.wants]) if (now - want.at > ORPHAN_MS && !follows(want.device, sessionId)) this.wants.delete(sessionId);
     for (const [sessionId, hold] of [...this.phoneSizes]) if (now - hold.at > ORPHAN_MS && !follows(hold.device, sessionId)) this.release(sessionId, hold.device);
     // A linked computer's channel: there the hold is this computer's, whose stream stays open, so only this one can give it back.
     for (const [sessionId, hold] of [...this.relaySizes]) if (now - hold.at > ORPHAN_MS && !follows(hold.device, sessionId)) void this.relayRelease(sessionId, hold.device).catch(() => {});
   }
+  /** Whether a live stream of that device still follows the channel (a phone that reconnected has a newer one). */
+  private follows(device: string, sessionId: string) { return [...this.streams].some((stream) => stream.device === device && (stream.all || stream.sessionId === sessionId)); }
   /** One of this computer's phones left a linked computer's channel: gives it back there only if that phone sized it. */
   private async relayRelease(sessionId: string, device: string) {
     if (!this.relay || this.relaySizes.get(sessionId)?.device !== device) return;
@@ -827,7 +829,8 @@ export class RemoteServer {
       request.on('close', () => {
         this.streams.delete(stream);
         // A phone that goes away (closed, asleep, out of signal) gives the channel back to the desktop's size.
-        if (sessionId && !all) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone') void this.relayRelease(sessionId, device.id).catch(() => {}); }
+        // Unless a newer stream of the same device follows it: a late-noticed dead connection must not take the size from the live one.
+        if (sessionId && !all && !this.follows(device.id, sessionId)) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone') void this.relayRelease(sessionId, device.id).catch(() => {}); }
         // A linked computer that closed (or lost the connection) gives back every channel it showed at its size.
         if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
@@ -936,7 +939,7 @@ export class RemoteServer {
           const { sessionId, runId, cols, rows, force } = parsed.data;
           // `held`: whether the channel is now drawn at the phone's size (false while the desktop is in use).
           if (this.local(sessionId)) return this.send(response, 200, { ok: true, held: this.phoneSize(device.id, sessionId, runId, cols, rows, force) });
-          else if (kind === 'phone' && this.relay) { await this.relay.size(sessionId, runId, { cols, rows }); this.relaySizes.set(sessionId, { device: device.id, at: Date.now() }); }
+          else if (kind === 'phone' && this.relay) { const answer = await this.relay.size(sessionId, runId, { cols, rows }, force); this.relaySizes.set(sessionId, { device: device.id, at: Date.now() }); return this.send(response, 200, typeof answer?.held === 'boolean' ? { ok: true, held: answer.held } : { ok: true }); }
           else return this.send(response, 400, { error: 'Unknown channel.' });
         }
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be resized.' }); }

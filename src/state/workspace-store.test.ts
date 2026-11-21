@@ -229,6 +229,14 @@ describe('directory changes after a run', () => {
     useWorkspaceStore.getState().updateBinding(session.id, { mode: 'independent', cwd: '/new/repo' });
     expect(useWorkspaceStore.getState().sessions[0].runningCwd).toBeNull();
   });
+  it('clears a failed launch, status included, once the folder is fixed', () => {
+    const failed = () => { const state = useWorkspaceStore.getState(); state.markStarting(state.sessions[0].id); useWorkspaceStore.getState().setSessionError(state.sessions[0].id, 'Folder missing', true); expect(useWorkspaceStore.getState().sessions[0]).toMatchObject({ status: 'error', error: 'Folder missing' }); };
+    failed(); useWorkspaceStore.getState().updateBinding(useWorkspaceStore.getState().sessions[0].id, { mode: 'independent', cwd: '/fixed' });
+    expect(useWorkspaceStore.getState().sessions[0]).toMatchObject({ status: 'idle', error: null });
+    useWorkspaceStore.getState().updateBinding(useWorkspaceStore.getState().sessions[0].id, { mode: 'workspace' }); failed();
+    useWorkspaceStore.getState().setRootDirectory('/root');
+    expect(useWorkspaceStore.getState().sessions[0]).toMatchObject({ status: 'idle', error: null });
+  });
 });
 
 it('adds a Terminal channel that saves and restores like the agents', () => {

@@ -3,6 +3,9 @@ import { MAC } from './platform';
 /** The channel shortcut as the person presses it on this computer: Option types characters on a Mac, so it uses Cmd there. */
 export const CHANNEL_KEYS = MAC ? 'Cmd+1–8' : 'Alt+1–8';
 
+/** One channel's key for a hint ("Alt 3", "Cmd 3" on a Mac). */
+export const channelKeyHint = (channel: number, mac = MAC) => `${mac ? 'Cmd' : 'Alt'} ${channel}`;
+
 /**
  * The channel (0 for the first) a key press focuses, or null. Alt+1–8 on Windows and Linux; Cmd+1–8 on a Mac, where
  * Option+digit types characters (# on a UK keyboard, [ ] | { on a German one) that must reach the terminal or field.

@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
-import { execFile, execFileSync } from 'node:child_process';
-import { constants } from 'node:fs';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { constants, mkdirSync, statSync } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -167,12 +167,23 @@ export async function npmEntryForShim(shim: string, engine: CLIEngine, architect
 }
 
 /** The first regular `node.exe` on PATH (Windows only; elsewhere npm shims are runnable scripts). */
-async function findNode(directories: string[]): Promise<string | null> {
+export function findNodeSync(directories: string[]): string | null {
   for (const directory of directories) {
     const candidate = path.join(directory.replace(/^"|"$/g, ''), 'node.exe');
-    try { if ((await stat(candidate)).isFile()) return candidate; } catch { /* Keep looking. */ }
+    try { if (statSync(candidate).isFile()) return candidate; } catch { /* Keep looking. */ }
   }
   return null;
+}
+export async function findNode(directories: string[]): Promise<string | null> { return findNodeSync(directories); }
+
+/**
+ * How to run a package manager's JavaScript entry. Trace.exe has no console to hand down, so the cmd.exe npm starts for a
+ * script would open a visible one: on Windows a console `node.exe` from PATH runs it instead, and Trace itself as Node is the fallback.
+ */
+export function nodeScriptCommand(entry: string, env: Record<string, string>, platform: NodeJS.Platform = process.platform): { file: string; args: string[]; env: Record<string, string> } {
+  const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const node = platform === 'win32' ? findNodeSync((env[key] ?? '').split(path.delimiter).filter(Boolean)) : null;
+  return node ? { file: node, args: [entry], env } : { file: process.execPath, args: [CLEAR_RUN_AS_NODE, entry], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
 /** The program each engine is: Gemini CLI installs as `agy`. */
@@ -211,11 +222,28 @@ export async function findExecutable(engine: CLIEngine, environment?: Record<str
   throw new HubError('CLI_NOT_FOUND', `${ENGINE_NAME[engine]} was not found on PATH. Install the official CLI and restart Trace from a terminal where it runs.`);
 }
 
+/**
+ * Set for every background question to a CLI. Any run of agy checks for its own update, at most every 15 minutes: it
+ * starts a detached `agy --bg-updater`, and that one's `agy --version` opened a console window on Windows each time
+ * (agy 1.5.14, 2026-11-21: a window flashed with the usage check, over a full-screen game). agy reads only the value
+ * `true` ("1" changes nothing). A channel's own agy is started without it and still updates itself.
+ */
+export const PROBE_ENVIRONMENT = { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' };
+
+/** An empty folder of Trace's own for background questions: agy opens its working folder as a workspace and watches its files, so it must not be the folder Trace started in. */
+export function probeDirectory(): string {
+  const directory = path.join(os.tmpdir(), 'trace-cli-probe');
+  try { mkdirSync(directory, { recursive: true }); return directory; } catch { return os.tmpdir(); }
+}
+/** A question has no input to give: closing stdin ends the wait `claude -p` makes for it (3 seconds). */
+export function closeInput(child: ChildProcess) { child.stdin?.on('error', () => {}); child.stdin?.end(); }
+
 export function probeCLI(executable: Executable, args: string[], env: Record<string, string>): Promise<ProbeResult> {
   return new Promise((resolve) => {
-    execFile(executable.file, [...executable.prefixArgs, ...args], { env: { ...env, ...executable.extraEnv }, timeout: 8000, maxBuffer: 128 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+    const child = execFile(executable.file, [...executable.prefixArgs, ...args], { cwd: probeDirectory(), env: { ...env, ...executable.extraEnv, ...PROBE_ENVIRONMENT }, timeout: 8000, maxBuffer: 128 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       resolve({ stdout, stderr, exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0, timedOut: Boolean(error?.killed) });
     });
+    closeInput(child);
   });
 }
 function probe(executable: Executable, flag: string, env: Record<string, string>): Promise<string> {

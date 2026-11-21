@@ -2,13 +2,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { HubError } from '../cli/engine-adapter';
+import { hostEnvironment } from '../cli/discovery';
 
 /** A hooks folder that holds nothing. An empty `core.hooksPath=` is not one: Git reads it as the drive root (`/post-checkout`). */
 export const noHooksPath = () => process.platform === 'win32' ? 'NUL' : '/dev/null';
 /** fsmonitor and hooks off: enough for commands that never read file contents (`rev-parse`), without a lookup first. */
 export const noHookGitOptions = () => ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${noHooksPath()}`];
-/** What a Git command printed; nothing when it failed (no repository, no match, no such blob). */
-const gitText = (args: string[]) => new Promise<string>((resolve) => execFile('git', args, { timeout: 8000, maxBuffer: 256 * 1024, windowsHide: true }, (_error, stdout) => resolve(String(stdout ?? ''))));
+/**
+ * What a Git command printed; nothing when it exited non-zero (no repository, no match, no such blob). Fails closed when
+ * the listing itself could not be read in full (too long, timed out, no Git): a filter missing from it would not be blanked.
+ */
+const gitText = (args: string[]) => new Promise<string>((resolve, reject) => execFile('git', args, { timeout: 8000, maxBuffer: 256 * 1024, windowsHide: true, env: hostEnvironment() }, (error, stdout) => {
+  const failure = error as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+  if (failure && (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || failure.code === 'ENOENT' || failure.killed)) reject(new HubError('GIT_UNSAFE_CONFIG', 'This repository’s Git configuration could not be read safely, so Trace did not run Git on it. Check that Git is installed, and that the repository’s .git/config is not unusually large.'));
+  else resolve(String(stdout ?? ''));
+}));
 const IGNORE = '^submodule\\..*\\.ignore$';
 /** `-c` splits at the first `=`: a name holding one (or a line break) cannot be overridden, so Trace does not read at all. */
 function setting(key: string, value: string) {
@@ -30,7 +38,10 @@ function setting(key: string, value: string) {
 export async function readOnlyGitOptions(cwd: string): Promise<string[]> {
   const options = noHookGitOptions();
   // A blob lookup loads the index, which starts the repository's fsmonitor: `options` keep it off.
-  const [listed, top, indexed, committed] = await Promise.all([gitText(['-C', cwd, 'config', '--show-scope', '--name-only', '--get-regexp', `^filter\\.|${IGNORE}`]), gitText(['-C', cwd, 'rev-parse', '--show-toplevel']), ...[':.gitmodules', 'HEAD:.gitmodules'].map((blob) => gitText([...options, '-C', cwd, 'config', '--blob', blob, '--name-only', '--get-regexp', IGNORE]))]);
+  // allSettled: a failed read must not leave the other Git processes running behind the rejection.
+  const reads = await Promise.allSettled([gitText(['-C', cwd, 'config', '--show-scope', '--name-only', '--get-regexp', `^filter\\.|${IGNORE}`]), gitText(['-C', cwd, 'rev-parse', '--show-toplevel']), ...[':.gitmodules', 'HEAD:.gitmodules'].map((blob) => gitText([...options, '-C', cwd, 'config', '--blob', blob, '--name-only', '--get-regexp', IGNORE]))]);
+  const failed = reads.find((read): read is PromiseRejectedResult => read.status === 'rejected'); if (failed) throw failed.reason;
+  const [listed, top, indexed, committed] = reads.map((read) => (read as PromiseFulfilledResult<string>).value);
   const modules = top.trim() ? path.join(top.trim(), '.gitmodules') : ''; const present = modules ? await fs.promises.stat(modules).then((stat) => stat.isFile(), () => false) : false;
   const working = present ? await gitText(['config', '--file', modules, '--name-only', '--get-regexp', IGNORE]) : '';
   const drivers = new Set<string>(); const submodules = new Set<string>();

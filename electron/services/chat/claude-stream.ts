@@ -7,6 +7,8 @@ import { Lines, readLines } from './lines';
 /** The flags that run Claude Code in structured mode, answering its permission prompts here (see ClaudeStream). */
 export const CHAT_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio'];
 
+/** How long a held `done` waits, once the last background subagent has ended, for the result that would end the turn. */
+const HELD_DONE_MS = 15000;
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 /** Claude's suggestion to accept edits from now on: what offers "Allow edits". */
 const acceptsEdits = (item: unknown) => (item as { mode?: unknown } | null)?.mode === 'acceptEdits';
@@ -46,9 +48,11 @@ export class ClaudeStream implements ChatStream {
    * back, but only if nothing was sent after it (a later change, already accepted or not, stands).
    */
   private modeRequests = new Map<string, { previous: PermissionLevel; seq: number }>(); private modeSeq = 0;
+  /** Claude repeats its init with every turn, carrying the mode then in force: after Trace changed the mode, that is no longer the person's own. */
+  private modeChanged = false;
   constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private level: PermissionLevel = 'ask', private readonly launchLevel: PermissionLevel = level) {}
   private mode() { return this.level === 'ask' ? this.ownMode : CLAUDE_MODE[this.level]; }
-  private setMode(mode: string, previous: PermissionLevel = this.level) { const id = randomUUID(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
+  private setMode(mode: string, previous: PermissionLevel = this.level) { this.modeChanged = true; const id = randomUUID(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
 
   /** A Round Table reviewer's plan mode wins over the channel's permissions until it drives again. */
   setReadOnly(readOnly: boolean) {
@@ -64,6 +68,7 @@ export class ClaudeStream implements ChatStream {
   /** Says hello; Claude then sends approval requests here instead of refusing them. */
   start() { this.control({ subtype: 'initialize', hooks: null }); }
   send(message: string, images: ChatImage[]) {
+    this.stopped = false;
     const content = [...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } })), ...(message ? [{ type: 'text', text: message }] : [])];
     this.line({ type: 'user', message: { role: 'user', content } });
   }
@@ -77,9 +82,10 @@ export class ClaudeStream implements ChatStream {
     this.emit({ type: 'permission-done', requestId });
     return true;
   }
-  interrupt() { this.control({ subtype: 'interrupt' }); }
+  /** Stop while a turn's end is held for a background subagent ends the turn now: Claude may send no further result. */
+  interrupt() { this.stopped = true; this.control({ subtype: 'interrupt' }); this.release(true); }
   /** Requests still waiting when the run ends are closed in the window. */
-  close() { for (const requestId of this.pending.keys()) this.emit({ type: 'permission-done', requestId }); this.pending.clear(); }
+  close() { this.release(false); for (const requestId of this.pending.keys()) this.emit({ type: 'permission-done', requestId }); this.pending.clear(); }
 
   /** Output from Claude: complete lines are parsed, a partial line waits for the rest. */
   push(data: string) { readLines(this.lines, data, 'Claude Code', this.emit, (message) => this.read(message)); }
@@ -89,6 +95,8 @@ export class ClaudeStream implements ChatStream {
 
   private read(message: Record<string, unknown>) {
     const type = message.type;
+    // A subagent's messages carry its Agent call's id (the main agent's carry null): not the agent's own words. The Agent call and its result are the main agent's.
+    if ((type === 'assistant' || type === 'user' || type === 'stream_event') && text(message.parent_tool_use_id)) return;
     if (type === 'control_response') {
       const response = message.response as { subtype?: string; request_id?: unknown; error?: unknown } | undefined; const id = text(response?.request_id);
       const sent = this.modeRequests.get(id); if (!sent) return; this.modeRequests.delete(id);
@@ -100,7 +108,15 @@ export class ClaudeStream implements ChatStream {
       return;
     }
     // Started with the person's own settings (no mode flag): that mode is what Ask returns to.
-    if (type === 'system' && message.subtype === 'init') { this.model = text(message.model); if (this.launchLevel === 'ask' && text(message.permissionMode) && text(message.permissionMode) !== 'plan') this.ownMode = text(message.permissionMode); this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
+    if (type === 'system' && message.subtype === 'init') { this.model = text(message.model); if (this.launchLevel === 'ask' && !this.modeChanged && text(message.permissionMode) && text(message.permissionMode) !== 'plan') this.ownMode = text(message.permissionMode); this.emit({ type: 'ready', conversationId: text(message.session_id), model: text(message.model) || null }); return; }
+    if (type === 'system' && message.subtype === 'background_tasks_changed') {
+      // Only subagents hold a turn open: a background shell command may run for ever.
+      this.agents = (Array.isArray(message.tasks) ? message.tasks as { task_type?: unknown }[] : []).filter((task) => task?.task_type === 'local_agent').length;
+      if (this.agents > 0) { clearTimeout(this.timer ?? undefined); this.timer = null; }
+      // The result that ended the turn may never be followed by another: emit the held done after a grace period.
+      else if (this.held && !this.timer) { this.timer = setTimeout(() => this.release(true), HELD_DONE_MS); this.timer.unref?.(); }
+      return;
+    }
     if (type === 'system' && message.subtype === 'permission_denied') { this.emit({ type: 'notice', text: text(message.message) || `${text(message.tool_name)} was not allowed.` }); return; }
     if (type === 'system' && message.subtype === 'api_retry') { this.emit({ type: 'notice', text: 'Claude’s API was busy; retrying.' }); return; }
     if (type === 'stream_event') {
@@ -158,8 +174,22 @@ export class ClaudeStream implements ChatStream {
       const own = usage[this.model] ?? (Object.keys(usage).length === 1 ? Object.values(usage)[0] : undefined);
       if (own && typeof own.contextWindow === 'number' && own.contextWindow > 0) this.emit({ type: 'context-window', size: own.contextWindow });
       const isError = message.is_error === true || (typeof message.subtype === 'string' && message.subtype.startsWith('error'));
+      // A Stop or an error ends the turn at once. Otherwise a result while a background subagent runs is held until a later
+      // one, and a result of a turn Claude started itself (a subagent's notification) ends no turn of Trace's.
+      if (!isError && !this.stopped) {
+        if (this.agents > 0) { this.held = true; return; }
+        if ((message.origin as { kind?: unknown } | undefined)?.kind === 'task-notification' && !this.held) return;
+      }
+      this.stopped = false; this.release(false);
       this.emit({ type: 'done', isError, error: isError ? (text(message.result) || (Array.isArray(message.errors) ? (message.errors as unknown[]).map(text).join(' ') : '') || 'The reply ended with an error.') : null });
     }
   }
+  /** Drops the held `done` and its timer; with `emit`, sends it first. */
+  private release(emit: boolean) {
+    clearTimeout(this.timer ?? undefined); this.timer = null;
+    const held = this.held; this.held = false; if (emit && held) this.emit({ type: 'done', isError: false, error: null });
+  }
+  /** Background subagents running now, whether a `done` is held for them, the wait for a result after they end, and whether Stop was pressed since the last send. */
+  private agents = 0; private held = false; private timer: ReturnType<typeof setTimeout> | null = null; private stopped = false;
   private streaming: string | null = null;
 }

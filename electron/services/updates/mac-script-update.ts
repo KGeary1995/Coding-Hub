@@ -65,7 +65,7 @@ DMG="$WORK/Trace-$V.dmg"; STAGE="$WORK/stage"; APP='${app}'; OLD="$WORK/Trace-pr
 trap 'rm -rf "$DMG" "$STAGE"' EXIT
 answers() { for i in $(seq 1 120); do code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:${port}/api/hello); [ "$code" != "000" ] && return 0; sleep 1; done; return 1; }
 restore() { echo "$1; restoring the previous version"; pkill -x Trace; sleep 2; rm -rf "$APP"; mv "$OLD" "$APP"; open -a "$APP"; exit 1; }
-curl -fsSL -o "$DMG" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace-$V-macOS-$ARCH.dmg" || { echo "download failed; Trace left as it was"; exit 1; }
+curl -fsSL --max-time 780 -o "$DMG" "${DOWNLOADS_URL.replace('/latest', '')}/download/v$V/Trace-$V-macOS-$ARCH.dmg" || { echo "download failed; Trace left as it was"; exit 1; }
 [ "$(openssl dgst -sha512 -binary "$DMG" | base64)" = "$SHA" ] || { echo "download does not match the feed's checksum; Trace left as it was"; exit 1; }
 MNT=$(hdiutil attach -nobrowse -noautoopen -readonly "$DMG" | awk -F'\\t' '/\\/Volumes\\//{print $NF}')
 [ -d "$MNT/Trace.app" ] || { echo "disk image did not mount; Trace left as it was"; exit 1; }

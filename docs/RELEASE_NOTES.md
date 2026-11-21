@@ -1,5 +1,35 @@
 ## What's new
 
+1.25.1 stops the console window that flashed on Windows, and fixes what an audit of 1.25.0 found (update every computer and reload the phone app):
+
+- **No console window from the usage check.** Since 1.25.0, with Gemini CLI installed, a console window flashed on Windows about every 20 minutes, over a full-screen game too. Trace's check of Gemini's plan limits made Gemini CLI start its own updater, and that updater opened the window. Trace's background questions to Gemini CLI no longer start its updater. Gemini CLI still updates itself when you use it in a channel, so starting a Gemini channel can still show the window once; that part is Gemini CLI's own.
+- **No console window from a check's npm step.** A project check or a verification step that runs npm, pnpm or yarn kept a console window open on Windows for as long as it ran. It now runs with your installed Node.js.
+- **A chat set back to Ask asks again.** A Claude chat channel started at **Ask**, raised to **Full access** and set back to **Ask** went on working without asking, while the window showed Ask.
+- **A crafted repository cannot run its own program when Trace only reads it.** Trace switches off a repository's own Git filter programs before it reads the repository. A repository with a very long Git configuration (or a Git too slow to answer) slipped past that. Trace now refuses to run Git on it and says so.
+- **Round Table.**
+  - What a subagent wrote is no longer shown as the agent's own words or passed to the next seat.
+  - A seat that started a subagent in the background is finished only when the subagent is, so its unfinished work no longer goes to the reviewer. **Stop** ends it at once.
+  - A message or task sent while a seat's earlier turn was still ending now starts.
+  - **Stop** while the lead writes its summary for a joining partner no longer starts the partner.
+  - A long answer passed to the next seat keeps its end (the closing report), not its beginning.
+  - At a hierarchy table, your own message starting with "[" shows in the thread.
+- **Phone and other computers.**
+  - **Remove** on a linked computer ends the screen session it has open on this Windows computer, within a few seconds.
+  - A phone removed while one of your other computers was off loses its key there as soon as that computer is back.
+  - A phone that reconnected keeps the channel at its size when its old connection is finally dropped, and a channel on another computer opens at the phone's size as a local one does.
+  - On the phone, leaving **Screen** through an alert ends the screen session, and **Conversation** is no longer offered for Gemini channels, which have none.
+  - A link code refused as "a different computer" no longer leaves an unused key on the other computer.
+- **Plan limits** are read every five minutes as intended (it was every ten), each Claude account's check is three seconds quicker, and one account that cannot be checked no longer hides the others.
+- **Checks.** A verification run or project check whose tool leaves a process running now ends; before, it stayed "running" and blocked updates and backups until Trace restarted.
+- **Smaller fixes.**
+  - A file dropped on a Windows Terminal channel is quoted so PowerShell takes its name as written.
+  - A channel no longer stays **Failed** with no reason after you choose its folder.
+  - On a Mac the hints for a channel's key say Cmd, and a Mac being updated from another computer starts no verification run or backup meanwhile.
+  - A Gemini channel stopped before it wrote anything can no longer resume another Gemini conversation.
+  - A damaged sync file is rewritten or named, where sync used to fail on it every time.
+  - **Ask AI** through Codex no longer starts your Codex MCP servers.
+- **Not tried yet:** anything on a Mac, a real phone or another computer, and the installed app (the console window was checked by running Gemini CLI as Trace does). The full list is in `docs/audit-2026-11-21.md`.
+
 1.25.0 adds Gemini CLI as a third engine, and makes the middle Start button and tables in terminals work properly (update every computer and reload the phone app):
 
 - **Gemini CLI channels.** **+ Channel → Gemini CLI**, on this computer, on another computer's tab and on the phone, runs Google's Gemini CLI (`agy`) in a terminal. Install it and sign in to it first; **Local engines** shows its version and whether it is signed in. Choose its model in the channel's settings, from the models your account can use (each name includes its effort, Low to XHigh), or leave it on Gemini CLI's default.

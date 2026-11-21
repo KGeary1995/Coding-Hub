@@ -52,7 +52,8 @@ export interface ScreenServiceHost {
  */
 export class ScreenService {
   private server: http.Server | null = null;
-  private viewer: { name: string; socket: Duplex; session: RfbSession | null; capture: ScreenCaptureSession | null } | null = null;
+  /** `keyHash`: the linked computer's key (null for a phone Trace let in), looked up again by `recheck`. */
+  private viewer: { name: string; keyHash: string | null; socket: Duplex; session: RfbSession | null; capture: ScreenCaptureSession | null } | null = null;
   constructor(private root: string, private name: () => string, private host: ScreenServiceHost, private openTimeout = OPEN_TIMEOUT) {}
 
   async listen(port: number) {
@@ -75,6 +76,13 @@ export class ScreenService {
     this.host.viewing(null, () => {});
   }
 
+  /** Called every few seconds: a linked computer removed from the list since it connected loses its session (the key is checked at the upgrade only). */
+  recheck() {
+    const hash = this.viewer?.keyHash; if (!hash) return;
+    let devices: z.infer<typeof devicesSchema> = []; try { devices = load(this.root, 'remote-devices.json', devicesSchema, []); } catch { /* Unreadable: nobody stays. */ }
+    if (!devices.some((item) => item.kind === 'computer' && same(item.tokenHash, hash))) this.disconnect();
+  }
+
   private refuse(socket: Duplex, status: number, error: string) {
     const body = JSON.stringify({ error });
     socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
@@ -95,7 +103,7 @@ export class ScreenService {
     const name = viaTrace ? viewerName(request.headers['x-trace-viewer']) : device!.name;
     if (!shareEnabled(this.root)) return this.refuse(socket, 403, `Screen sharing is off on ${this.name()}. There, in Trace, turn on Settings → Other computers → Share this screen.`);
     this.disconnect();
-    const viewer: NonNullable<ScreenService['viewer']> = { name, socket, session: null, capture: null }; this.viewer = viewer;
+    const viewer: NonNullable<ScreenService['viewer']> = { name, keyHash: device ? device.tokenHash : null, socket, session: null, capture: null }; this.viewer = viewer;
     const left = () => { if (this.viewer === viewer) this.disconnect(); }; socket.on('close', left); socket.on('end', left);
     // A capture that never starts (the hidden capture window hung, say) must not leave the viewer waiting with no reason.
     // ?display=N: one display (1 and up, from the left) rather than all of them side by side.

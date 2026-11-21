@@ -80,14 +80,14 @@ function selectedRows(terminal: Terminal): CopiedRow[] | null {
 }
 
 /** Dropping files types their paths, as in Terminal.app; dropped images also join the strip. */
-function attachDrop(id: string, element: HTMLElement) {
+function attachDrop(id: string, element: HTMLElement, shell: boolean) {
   element.addEventListener('dragover', (event) => { if (event.dataTransfer?.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
   element.addEventListener('drop', (event) => {
     const files = [...(event.dataTransfer?.files ?? [])]; if (!files.length) return;
     event.preventDefault();
     const paths = files.map((file) => window.codingHub?.pathForFile(file) ?? '').filter(Boolean);
     if (!paths.length || !terminals.get(id)?.run) return;
-    void writeTerminal(id, paths.map((file) => quotePath(file, WINDOWS)).join(' ') + ' ');
+    void writeTerminal(id, paths.map((file) => quotePath(file, WINDOWS, shell)).join(' ') + ' ');
     for (const file of files) if (file.type.startsWith('image/') && file.size <= 20 * 1024 * 1024) void readImageFile(file).then((url) => addPastedImage(id, { label: file.name, thumbnail: url, full: url })).catch(() => undefined);
     terminals.get(id)?.terminal.focus();
   });
@@ -184,7 +184,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     void writeTerminal(session.id, WINDOWS ? '\x1bv' : '\x16');
     if (WINDOWS) void showClipboardImage(session.id);
   }, true);
-  attachDrop(session.id, element);
+  attachDrop(session.id, element, session.config.engine === 'shell');
   attachCopy(terminal, element, () => { const config = useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.config; return Boolean(config && isAgentConfig(config)); });
   terminal.onResize(({ cols, rows }) => sendSize(session.id, entry, cols, rows));
   terminal.writeln(`\x1b[38;2;${{ claude: '241;211;93', codex: '92;208;234', gemini: '140;156;255', shell: '195;210;204' }[session.config.engine]}m${session.title}\x1b[0m  ·  local interactive terminal`);

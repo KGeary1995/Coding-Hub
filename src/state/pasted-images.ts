@@ -51,8 +51,13 @@ export function clearPastedImages(sessionId: string) {
   usePastedImages.setState({ images: nextImages, counts: nextCounts });
 }
 
-/** A dropped file's path as typed at a shell prompt, quoted when it holds spaces or shell characters. */
-export function quotePath(file: string, windows: boolean): string {
+/**
+ * A dropped file's path as typed at a shell prompt, quoted when it holds spaces or shell characters. A Windows shell channel
+ * is PowerShell, which expands `$x`, `$(…)` and backticks inside double quotes (and reads `,` or a leading `@` as operators),
+ * so there the path goes in single quotes; the CLI engines take it as prompt text and keep double quotes.
+ */
+export function quotePath(file: string, windows: boolean, shell = false): string {
+  if (windows && shell) return /^[\w.:\\/-]+$/.test(file) ? file : `'${file.replace(/'/g, "''")}'`;
   if (/^[\w@%+=:,./\\-]+$/.test(file)) return file;
   return windows ? `"${file.replace(/"/g, '')}"` : `'${file.replace(/'/g, `'\\''`)}'`;
 }

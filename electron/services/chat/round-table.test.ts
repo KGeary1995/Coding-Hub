@@ -24,8 +24,9 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
   const tables = new RoundTables(host);
   const say = (runId: string, text: string) => { const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; tables.observe({ sessionId: runs[runId].sessionId, runId, event }); };
   const done = (runId: string) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } });
+  const observe = (runId: string, error: string | null) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: error !== null, error } });
   const last = () => events.filter((envelope) => envelope.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>;
-  return { tables, sent, modes, answers, interrupted, say, done, last, runs, events };
+  return { tables, sent, modes, answers, interrupted, say, done, observe, last, runs, events };
 }
 
 describe('Round Table', () => {
@@ -225,6 +226,23 @@ describe('Round Table', () => {
     expect(sent).toHaveLength(1);
     done(CODEX);
     expect(sent[1]).toMatchObject({ runId: CODEX, text: expect.stringContaining('Goal: phone chat.') }); expect(last().table!.phase).toBe('answering');
+  });
+  it('does not start the newcomer when Stop or an error ends the lead’s joining summary', () => {
+    for (const how of ['stop', 'error'] as const) {
+      const { tables, sent, say, observe, last } = setup();
+      tables.observe({ sessionId: 'lead', runId: CLAUDE, event: { type: 'user', text: 'Build it', images: 0 } }); say(CLAUDE, 'Started.');
+      tables.open(1, CLAUDE, CODEX, 'claude', 2); expect(last().table!.phase).toBe('joining');
+      if (how === 'stop') tables.stop(CLAUDE);
+      say(CLAUDE, 'Summary.'); observe(CLAUDE, how === 'error' ? 'Usage limit reached.' : null);
+      expect(sent).toHaveLength(1); expect(last().table).toMatchObject({ phase: 'idle' });
+    }
+  });
+  it('relays the end of a long answer, not its start', () => {
+    const { tables, sent, say, done } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 1); tables.send(CLAUDE, 'Go', []);
+    say(CLAUDE, `${'x'.repeat(13_000)}\nFiles changed: a.ts. Checks: tests pass.`); done(CLAUDE); say(CODEX, 'Ok.'); done(CODEX);
+    const relayed = sent.find((item) => item.runId === CODEX && item.text.includes('Claude Code answered:'))!.text;
+    expect(relayed).toContain('[… earlier part shortened by Trace]\n'); expect(relayed).toContain('Files changed: a.ts. Checks: tests pass.'); expect(relayed).not.toContain('x'.repeat(12_001));
   });
   it('marks a table the person closed, so every window forgets it and stops its partner', () => {
     const { tables, last } = setup();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatEvent } from '../../../shared/chat';
 import { ClaudeStream } from './claude-stream';
 import { Lines, readLines } from './lines';
@@ -32,6 +32,15 @@ describe('Claude chat protocol', () => {
     const refused = written[0].request_id;
     stream.push(JSON.stringify({ type: 'control_response', response: { subtype: 'error', request_id: refused, error: 'not launched with it' } }) + '\n');
     expect(events.at(-1)).toEqual({ type: 'notice', text: 'Claude did not change its permissions: not launched with it.' });
+  });
+  it('keeps the person’s own mode for Ask when a later turn’s init reports the mode Trace set', () => {
+    const written: Record<string, unknown>[] = []; const stream = new ClaudeStream((line) => written.push(JSON.parse(line)), () => {});
+    const modes = () => written.map((line) => (line.request as { mode?: string } | undefined)?.mode).filter(Boolean);
+    const init = (permissionMode: string) => stream.push(JSON.stringify({ type: 'system', subtype: 'init', permissionMode, session_id: 's' }) + '\n');
+    init('default'); stream.setPermissions('full');
+    init('bypassPermissions');
+    stream.setPermissions('ask');
+    expect(modes()).toEqual(['bypassPermissions', 'default']);
   });
   it('puts the level back and tells the window when Claude refuses a change', () => {
     const events: ChatEvent[] = []; const written: Record<string, unknown>[] = [];
@@ -94,5 +103,75 @@ describe('Claude chat protocol', () => {
     stream.push(JSON.stringify({ type: 'system', subtype: 'init', permissionMode: 'acceptEdits', session_id: 's' }) + '\n');
     stream.setPermissions('ask');
     expect(written.at(-1)).toMatchObject({ request: { subtype: 'set_permission_mode', mode: 'default' } });
+  });
+  describe('a turn with background subagents', () => {
+    const setup = () => { const events: ChatEvent[] = []; const stream = new ClaudeStream(() => {}, (event) => events.push(event)); const push = (message: Record<string, unknown>) => stream.push(JSON.stringify(message) + '\n'); const dones = () => events.filter((event) => event.type === 'done').length; return { events, stream, push, dones }; };
+    const tasks = (...types: string[]) => ({ type: 'system', subtype: 'background_tasks_changed', tasks: types.map((task_type, i) => ({ task_id: `t${i}`, task_type })) });
+    const say = (text: string) => ({ type: 'assistant', parent_tool_use_id: null, message: { id: text, content: [{ type: 'text', text }] } });
+    const result = (extra: Record<string, unknown> = {}) => ({ type: 'result', subtype: 'success', is_error: false, ...extra });
+    const notification = { origin: { kind: 'task-notification', producer: 'session-task' } };
+    it('gives one done, after DONE, for the order Claude sends in a chat run', () => {
+      vi.useFakeTimers();
+      try {
+        const { events, push, dones } = setup();
+        push(tasks('local_agent')); push(say('STARTED')); push(result({ result: 'STARTED' }));
+        expect(dones()).toBe(0);
+        push(tasks()); push(say('DONE')); push(result({ result: 'DONE', ...notification }));
+        expect(dones()).toBe(1); expect(events.at(-1)).toEqual({ type: 'done', isError: false, error: null });
+        expect(events.findIndex((event) => event.type === 'done')).toBeGreaterThan(events.findIndex((event) => event.type === 'assistant' && event.blocks[0]?.type === 'text' && event.blocks[0].text === 'DONE'));
+        vi.advanceTimersByTime(60000); expect(dones()).toBe(1);
+      } finally { vi.useRealTimers(); }
+    });
+    it('ends a plain turn at its result, and ignores a background shell command', () => {
+      const { push, dones } = setup(); push(result()); expect(dones()).toBe(1);
+      push(tasks('local_bash')); push(result()); expect(dones()).toBe(2);
+    });
+    it('ends no turn with a notification result when none is held', () => {
+      const { push, dones } = setup(); push(result(notification)); expect(dones()).toBe(0);
+    });
+    it('does not hold an error result or a result after Stop, and clears the hold', () => {
+      const { push, dones, stream } = setup();
+      push(tasks('local_agent')); push({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'boom' }); expect(dones()).toBe(1);
+      stream.send('next', []); push(result()); expect(dones()).toBe(1); // Stop ends the held turn at once (Claude kills the subagent and sends no further result); a result that did come is not held either.
+      stream.interrupt(); expect(dones()).toBe(2); push(result()); expect(dones()).toBe(3);
+      push(tasks()); push(result(notification)); expect(dones()).toBe(3);
+    });
+    it('sends the held done after 15 seconds when no result follows, and not after close', () => {
+      vi.useFakeTimers();
+      try {
+        const { push, dones, stream } = setup(); push(tasks('local_agent')); push(result()); push(tasks());
+        vi.advanceTimersByTime(14999); expect(dones()).toBe(0); vi.advanceTimersByTime(1); expect(dones()).toBe(1);
+        push(tasks('local_agent')); push(result()); push(tasks()); stream.close(); vi.advanceTimersByTime(60000); expect(dones()).toBe(1); expect(vi.getTimerCount()).toBe(0);
+      } finally { vi.useRealTimers(); }
+    });
+    it('holds until the last of two subagents is gone', () => {
+      const { push, dones } = setup();
+      push(tasks('local_agent', 'local_agent')); push(result()); push(tasks('local_agent')); push(result(notification)); expect(dones()).toBe(0);
+      push(tasks()); push(result(notification)); expect(dones()).toBe(1);
+    });
+  });
+  it('does not show a subagent\'s messages as the agent\'s own: only those with no parent tool call', () => {
+    const events: ChatEvent[] = []; const stream = new ClaudeStream(() => {}, (event) => events.push(event));
+    const assistant = (parent: string | null, id: string, content: unknown[]) => JSON.stringify({ type: 'assistant', parent_tool_use_id: parent, message: { id, content } }) + '\n';
+    stream.push(assistant(null, 'm1', [{ type: 'tool_use', id: 'toolu_1', name: 'Agent', input: {} }]));
+    stream.push(assistant('toolu_1', 'm2', [{ type: 'thinking', thinking: 'hm' }])); stream.push(assistant('toolu_1', 'm3', [{ type: 'text', text: 'PINEAPPLE' }]));
+    stream.push(JSON.stringify({ type: 'stream_event', parent_tool_use_id: 'toolu_1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'PINE' } } }) + '\n');
+    stream.push(JSON.stringify({ type: 'user', parent_tool_use_id: 'toolu_1', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'sub result' }] } }) + '\n');
+    stream.push(JSON.stringify({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'agent result' }] } }) + '\n');
+    stream.push(JSON.stringify({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'DO' } } }) + '\n');
+    stream.push(assistant(null, 'm4', [{ type: 'text', text: 'DONE' }]));
+    expect(events).toEqual([
+      { type: 'assistant', messageId: 'm1', blocks: [{ type: 'tool', id: 'toolu_1', name: 'Agent', input: {} }] },
+      { type: 'tool-result', toolUseId: 'toolu_1', text: 'agent result', isError: false, image: false },
+      { type: 'delta', messageId: 'streaming', text: 'DO' },
+      { type: 'assistant', messageId: 'm4', blocks: [{ type: 'text', text: 'DONE' }] },
+    ]);
+  });
+  it('ends a held turn at once when Stop is pressed while its background subagent still runs', () => {
+    const events: ChatEvent[] = []; const stream = new ClaudeStream(() => {}, (event) => events.push(event));
+    const line = (value: unknown) => stream.push(JSON.stringify(value) + '\n');
+    stream.send('go', []); line({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_type: 'local_agent' }] }); line({ type: 'result', subtype: 'success', result: 'STARTED' });
+    expect(events.filter((event) => event.type === 'done')).toHaveLength(0);
+    stream.interrupt(); expect(events.filter((event) => event.type === 'done')).toHaveLength(1); stream.close();
   });
 });

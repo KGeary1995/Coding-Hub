@@ -8,6 +8,7 @@ import { CHANNEL_STATES, channelAlerts } from '../../state/channel-state';
 import { startSession } from '../../runtime/use-native-host';
 import { channelTile, jumpToChannel } from './StatusBar';
 import { RestartNotice } from './RestartNotice';
+import { channelKeyHint } from '../channel-key';
 
 /** A tile on the notices' side of the window: where its header rows (and a conversation's bars) end, and a chat's composer. */
 export interface TileUnder { top: number; bottom: number; rowsEnd: number; composer?: { top: number; bottom: number }; focused: boolean }
@@ -189,7 +190,7 @@ export function Toasts() {
         {/* Actions sit at the right, the main one last. */}
         <footer>
           {alert.state === 'waiting'
-            ? <button className="tr-toast-action button small waiting" aria-label={`Answer ${channel} in its terminal`} onClick={() => jumpToChannel(session.id)}>Answer<kbd aria-hidden="true">Alt {alert.channel}</kbd></button>
+            ? <button className="tr-toast-action button small waiting" aria-label={`Answer ${channel} in its terminal`} onClick={() => jumpToChannel(session.id)}>Answer<kbd aria-hidden="true">{channelKeyHint(alert.channel)}</kbd></button>
             : <><button className="tr-toast-action quiet-button small" aria-label={`Open log for ${channel}`} onClick={() => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); }}>Open log</button>
               <button className="tr-toast-action button small primary" aria-label={`Retry ${channel}`} onClick={() => { setView('workspace'); void startSession(session.id); }}>Retry</button></>}
         </footer>

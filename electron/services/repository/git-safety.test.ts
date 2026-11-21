@@ -62,4 +62,14 @@ describe('reading a repository', () => {
     touch(); execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', 'status', '--porcelain=v2', '--ignore-submodules=none'], { cwd: repo, stdio: 'pipe' });
     expect(fs.existsSync(marker)).toBe(true);
   }, 60000);
+  it('refuses to read, rather than skip a filter, when the repository’s filter listing is too long to read in full', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-git-safety-'))); roots.push(root);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root, stdio: 'pipe' });
+    // A normal repository still reads.
+    await expect(readOnlyGitOptions(root)).resolves.toContain('core.fsmonitor=false');
+    // Well over the 256 KiB the listing is read to; the program's own filter comes last, past where the output would be cut.
+    const config = path.join(root, '.git', 'config'); const many = Array.from({ length: 14000 }, (_, i) => `[filter "a${i}"]\n\tclean = cat\n`).join('');
+    fs.appendFileSync(config, many + '[filter "evil"]\n\tclean = cat\n');
+    await expect(readOnlyGitOptions(root)).rejects.toMatchObject({ code: 'GIT_UNSAFE_CONFIG' });
+  }, 30000);
 });

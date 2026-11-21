@@ -283,6 +283,32 @@ describe('phone remote', () => {
     expect(relayed).toEqual([['far', { cols: 40, rows: 20 }], ['far', null]]);
   });
 
+  it("keeps a phone's size when an old stream of it closes while a newer one follows the channel", async () => {
+    const { server, running } = await remote(); const resizes: number[][] = [];
+    Object.assign(running[0], { cols: 120, rows: 40 });
+    (server as unknown as { host: RemoteHost }).host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); };
+    await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20, force: true }) });
+    const open = async () => { const controller = new AbortController(); const response = await fetch(base(server) + '/api/stream?sessionId=s1', { headers, signal: controller.signal }); await response.body!.getReader().read(); return controller; };
+    const old = await open(); const live = await open(); const streams = (server as unknown as { streams: Set<unknown> }).streams;
+    old.abort(); for (let i = 0; i < 100 && streams.size > 1; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    // The reconnected phone's stream still follows it: nothing is given back.
+    expect(streams.size).toBe(1); expect(resizes).toEqual([[40, 20]]);
+    live.abort(); for (let i = 0; i < 100 && resizes.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(resizes).toEqual([[40, 20], [120, 40]]);
+  });
+
+  it("passes a phone's force on to a linked computer and tells the phone whether it holds the size", async () => {
+    const { server } = await remote(); await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const asked: unknown[] = []; let held: boolean | undefined = false;
+    server.setRelay({ channels: () => [], snapshot: () => false, write: async () => {}, phoneKey: async () => { throw new Error('unused'); }, size: async (...args) => { asked.push(args); return held === undefined ? {} : { held }; } });
+    const size = async (force?: boolean) => (await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 'far', runId: 'r9', cols: 40, rows: 20, ...(force ? { force } : {}) }) })).json();
+    expect(await size()).toEqual({ ok: true, held: false }); held = true; expect(await size(true)).toEqual({ ok: true, held: true });
+    expect(asked.map((args) => (args as unknown[])[3])).toEqual([undefined, true]);
+    // A linked computer on an older Trace answers without `held`: as before, the phone is told only ok.
+    held = undefined; expect(await size()).toEqual({ ok: true });
+  });
+
   it('sends a new terminal size ahead of the output drawn at that size', async () => {
     const { server, running } = await remote(); await server.setEnabled(true); const token = await paired(server);
     Object.assign(running[0], { cols: 80, rows: 24 });

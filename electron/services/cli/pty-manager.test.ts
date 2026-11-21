@@ -520,10 +520,10 @@ describe('Gemini CLI terminal runs', () => {
   const ESC = String.fromCharCode(27); const BEL = String.fromCharCode(7);
   const status = (body: string) => `${ESC}]7501;${body}${BEL}`;
   const id = 'caf3f572-52a4-467c-8bc0-c7621834d34a';
-  function geminiFixture(lookup: (cwd: string, since: number) => string | null = () => null) {
+  function geminiFixture(lookup: (cwd: string, since: number) => string | null = () => null, known: string[] = []) {
     const processes: FakePty[] = []; const events: SessionEvent[] = []; const looked: [string, number][] = [];
     const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
-    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), geminiConversation: (cwd, since) => { looked.push([cwd, since]); return lookup(cwd, since); } });
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), geminiConversation: (cwd, since) => { looked.push([cwd, since]); return lookup(cwd, since); }, geminiKnown: () => known });
     managers.push(manager);
     return { manager, processes, events, looked, spawn, start: () => manager.start(1, { sessionId: 'gem', cwd: process.cwd(), config: { engine: 'gemini', model: '' }, cols: 80, rows: 24 }) };
   }
@@ -555,6 +555,10 @@ describe('Gemini CLI terminal runs', () => {
     expect(found.events.find((event) => event.type === 'conversation')).toMatchObject({ conversationId: id }); expect(found.looked[0][0]).toBe(process.cwd());
     const none = geminiFixture(() => null); await none.start(); none.processes[0].exit({ exitCode: 0 });
     expect(none.events.some((event) => event.type === 'conversation')).toBe(false);
+  });
+  it('does not take a conversation agy already had when the run started, which another agy changed meanwhile', async () => {
+    const mine = geminiFixture(() => id, [id.toUpperCase()]); await mine.start(); mine.processes[0].exit({ exitCode: 130 });
+    expect(mine.looked).toHaveLength(1); expect(mine.events.some((event) => event.type === 'conversation')).toBe(false);
   });
   it('starts agy with its status reports on', async () => {
     const { spawn, start } = geminiFixture(); await start();

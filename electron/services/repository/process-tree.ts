@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 
 /**
@@ -12,6 +12,18 @@ export function stopTree(pid: number | undefined) {
   // SIGTERM first: Git removes its *.lock files on it, and SIGKILL would leave .git/index.lock behind (as stop-process.ts).
   const signal = (name: NodeJS.Signals) => { try { process.kill(-pid, name); } catch { try { process.kill(pid, name); } catch { /* Already gone. */ } } };
   signal('SIGTERM'); setTimeout(() => signal('SIGKILL'), 1500).unref();
+}
+
+/**
+ * Calls `done` once with the exit code: at `close` (all output read), or `grace` ms after `exit` when a process the
+ * program left behind (a test run's background server) holds the output pipes open. Those pipes are then closed, as
+ * execFileTree does, so a step cannot stay "running" for ever.
+ */
+export function onChildEnd(child: ChildProcess, done: (code: number | null) => void, grace = 2000) {
+  let called = false; let timer: ReturnType<typeof setTimeout> | undefined;
+  const finish = (code: number | null) => { if (called) return; called = true; clearTimeout(timer); done(code); };
+  child.on('exit', (code) => { timer = setTimeout(() => { child.stdout?.destroy(); child.stderr?.destroy(); finish(code); }, grace); });
+  child.on('close', finish);
 }
 
 export interface TreeOutput { stdout: Buffer; stderr: Buffer }

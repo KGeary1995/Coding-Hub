@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -24,3 +25,14 @@ it('runs npm without handing ELECTRON_RUN_AS_NODE to what the script starts (an 
   const result = await checks.execute({ action: 'run', directory: root, script: 'test' }, async () => true);
   expect('output' in result && result.output).toContain('RUN_AS_NODE=unset');
 });
+// The script below needs a program that hands its output pipes to a child; Node does not on Windows, Python does.
+const python = spawnSync('python', ['--version'], { windowsHide: true }).status === 0;
+it.skipIf(!python)('ends the check when a process its script left running holds the output open', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'hub-checks-')); roots.push(root);
+  // The script starts a background process that shares its output pipes and outlives it by 4 s.
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: `python -c "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(4)'],stdout=sys.stdout,stderr=sys.stderr); print('done')"` } }));
+  const checks = new ProjectChecks(() => { throw new Error('Rules missing'); }); const started = Date.now();
+  expect(await checks.execute({ action: 'run', directory: root, script: 'test' }, async () => true)).toMatchObject({ exitCode: 0, timedOut: false });
+  expect(Date.now() - started).toBeLessThan(3500); expect(checks.running).toBe(false);
+  await new Promise((resolve) => setTimeout(resolve, 2500)); // The left-over process holds the folder until it ends.
+}, 20000);

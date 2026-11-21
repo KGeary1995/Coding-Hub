@@ -152,6 +152,38 @@ describe('linked computers', () => {
     expect(await works(kept)).toBe(false); expect(pc.server.status().devices).toEqual([]);
   });
 
+  it('hands the key back when the address answers as a different computer', async () => {
+    const pc = await computer('33333333-3333-4333-8333-333333333333', 'Other', 'pc-1');
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop());
+    await expect(mac.link(PC, pc.server.pair('computer').pairing!.code)).rejects.toMatchObject({ code: 'LINK_MISMATCH' });
+    expect(pc.server.status().devices).toEqual([]); expect(mac.status()[0]).toMatchObject({ linked: false });
+  });
+
+  it("passes a phone's force through to the other computer and returns whether it was held", async () => {
+    const idle = { seconds: 5 }; const pc = await computer(PC, 'Obsidian-Halo', 'pc-1', idle);
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop()); await mac.link(PC, pc.server.pair('computer').pairing!.code); await until(() => mac.channels().length === 1, 'the PC channels');
+    expect(await mac.size('pc-1', 'run-pc-1', { cols: 44, rows: 30 })).toEqual({ held: false }); expect(pc.sizes).toEqual([]);
+    expect(await mac.size('pc-1', 'run-pc-1', { cols: 44, rows: 30 }, true)).toEqual({ held: true }); expect(pc.sizes).toEqual(['44x30']);
+  });
+
+  it("sends a removed phone's revocation to a linked computer that was off, when it connects again", async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const mac = await computer(MAC, 'MacBook', 'mac-1'); const root = temporary(); let off = true;
+    const fetcher = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => off && String(input).includes('phone-key/revoke') ? Promise.reject(new TypeError('off')) : fetch(input, init)) as typeof fetch;
+    const make = () => new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetcher);
+    const link = make(); cleanup.push(() => link.stop()); mac.server.setRelay(link);
+    await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
+    const phone = await phoneToken(mac.server); const key = (await (await fetch(`${mac.url}api/computer-key`, { method: 'POST', headers: { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: PC }) })).json() as { token: string }).token;
+    const works = async () => (await fetch(`${pc.url}api/channels`, { headers: { Authorization: `Bearer ${key}` } })).status === 200;
+    const phoneId = mac.server.status().devices.find((device) => device.kind === 'phone')!.id; mac.server.revoke(phoneId);
+    const owed = () => fs.existsSync(path.join(root, 'linked-revocations.json')) ? fs.readFileSync(path.join(root, 'linked-revocations.json'), 'utf8') : '';
+    await until(() => owed().includes(phoneId), 'the revocation to be kept'); expect(await works()).toBe(true); expect(owed()).not.toContain(key);
+    // The computer is back: Trace on this one restarts (or reconnects), and the key is withdrawn and the entry cleared.
+    link.stop(); off = false; const again = make(); cleanup.push(() => again.stop()); again.start();
+    await until(() => !owed().includes(phoneId), 'the revocation to be sent'); expect(await works()).toBe(false);
+  });
+
   it('drops a link the other computer removed, offers a code instead, and does not link it again by itself', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const root = temporary();
     const make = () => new LinkedComputers(root, () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });

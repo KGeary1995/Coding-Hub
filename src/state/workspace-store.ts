@@ -223,7 +223,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
   // The same state when nothing changed (an `answered` after each Claude tool call, say), so nothing redraws for it.
   applyEvent: (event) => set((state) => { if (event.type === 'data') return state; let changed = false; const sessions = state.sessions.map((session) => { const next = applied(session, event); if (next !== session) changed = true; return next; }); return changed ? { sessions } : state; }),
-  setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null } : session) })),
+  setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session) })),
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();
@@ -268,7 +268,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   })),
   resetCodexConfig: (id) => set((state) => ({ sessions: state.sessions.map((session) => session.id === id && session.config.engine === 'codex' && session.status !== 'running' && session.status !== 'starting' ? { ...session, config: { engine: 'codex' as const, model: '', reasoningEffort: null } } : session) })),
   updateBinding: (id, binding) => set((state) => ({
-    sessions: state.sessions.map((session) => session.id === id && session.status !== 'running' && session.status !== 'starting' ? { ...session, binding, error: null, runningCwd: null } : session),
+    sessions: state.sessions.map((session) => session.id === id && session.status !== 'running' && session.status !== 'starting' ? { ...session, binding, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session),
   })),
   setTiles: (tiles) => set({ tiles }),
   arrange: (layoutMode) => set((state) => ({ layoutMode, tiles: arrangeTiles(state.sessions, layoutMode) })),

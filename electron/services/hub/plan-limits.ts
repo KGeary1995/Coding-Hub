@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
 import { codexWindows, parseClaudeUsage, parseGeminiUsage, type PlanLimits } from '../../../shared/plan-limits';
 import type { ClaudeAccountProfile } from '../../../shared/accounts';
-import { findExecutable, GEMINI_USAGE_ARGS, GEMINI_USAGE_COMMAND, hostEnvironment, probeCLI, type Executable } from '../cli/discovery';
+import { findExecutable, GEMINI_USAGE_ARGS, GEMINI_USAGE_COMMAND, closeInput, hostEnvironment, probeCLI, type Executable } from '../cli/discovery';
 import { atLeast } from '../cli/attention';
 
 const text = (value: unknown) => typeof value === 'string' ? value : '';
@@ -17,12 +17,14 @@ export const CLAUDE_USAGE_ARGS = ['-p', '/usage', '--output-format', 'json', '--
 export function readClaudeLimits(executable: Executable, env: Record<string, string>, account: string): Promise<PlanLimits> {
   const checkedAt = new Date().toISOString();
   return new Promise((resolve) => {
-    execFile(executable.file, [...executable.prefixArgs, ...CLAUDE_USAGE_ARGS], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
+    const child = execFile(executable.file, [...executable.prefixArgs, ...CLAUDE_USAGE_ARGS], { cwd: os.tmpdir(), env: { ...env, ...executable.extraEnv }, timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
       let result = ''; try { result = text(JSON.parse(stdout).result); } catch { /* Below. */ }
       const windows = parseClaudeUsage(result); const billedByApi = !error && /api key|api usage|pay-as-you-go/i.test(result);
       // API billing is a fact about the account; anything else without windows is a check that failed.
       resolve({ engine: 'claude', account, windows, plan: /subscription/i.test(result) ? 'Subscription' : null, checkedAt, error: windows.length ? null : error ? 'Claude Code did not answer /usage.' : billedByApi ? 'This account is billed by API usage, which has no session or weekly limit.' : 'Claude Code did not report usage limits.', failed: !windows.length && !billedByApi });
     });
+    // `claude -p` waits 3 seconds for input otherwise.
+    closeInput(child);
   });
 }
 
@@ -67,6 +69,11 @@ export function readCodexLimits(executable: Executable, env: Record<string, stri
   });
 }
 
+/** One account's or engine's check that could not run: shown as failed, without taking the other checks down with it. */
+async function guarded(engine: PlanLimits['engine'], account: string, name: string, task: () => Promise<PlanLimits | null>): Promise<PlanLimits | null> {
+  try { return await task(); } catch { return { engine, account, windows: [], plan: null, checkedAt: new Date().toISOString(), error: `Trace could not check ${name}'s usage limits.`, failed: true }; }
+}
+
 /**
  * Runs the tasks a few at a time, keeping their order. Each Claude account check starts a CLI, and up to eleven at once
  * (the default sign-in and ten profiles) slowed the computer and could make the checks time out.
@@ -90,20 +97,22 @@ export class PlanLimitsService {
     if (this.reading) return this.reading;
     // Each check starts the CLIs, so only an explicit Check now reads more often than every five minutes.
     if (!force && Date.now() - this.last < 5 * 60000) return Promise.resolve(this.latest);
+    // Stamped as the read starts: the window asks every five minutes exactly, and a read that ended later would refuse every second request.
+    this.last = Date.now();
     this.reading = (async () => {
       const env = this.environment(); const accounts: (() => Promise<PlanLimits>)[] = [];
       const claude = await findExecutable('claude', env).catch(() => null);
       if (claude) {
         let signedInAs: string | null = null; try { signedInAs = this.defaultName(); } catch { /* Unknown. */ }
-        accounts.push(async () => ({ ...await readClaudeLimits(claude, this.profileEnvironment(env), 'Default'), signedInAs }));
+        accounts.push(async () => (await guarded('claude', 'Default', 'Claude Code', async () => ({ ...await readClaudeLimits(claude, this.profileEnvironment(env), 'Default'), signedInAs })))!);
         let profiles: ClaudeAccountProfile[] = []; try { profiles = this.profiles(); } catch { /* Unreadable registry: default account only. */ }
-        for (const profile of profiles) accounts.push(() => readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name));
+        for (const profile of profiles) accounts.push(async () => (await guarded('claude', profile.name, 'Claude Code', () => readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name)))!);
       }
       const [codex, gemini] = await Promise.all([findExecutable('codex', env).catch(() => null), findExecutable('gemini', env).catch(() => null)]);
-      const [claudeLimits, codexLimits, geminiLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? readCodexLimits(codex, env) : null, gemini ? readGeminiLimits(gemini, env).catch(() => null) : null]);
-      this.latest = [...claudeLimits, ...(codexLimits ? [codexLimits] : []), ...(geminiLimits ? [geminiLimits] : [])]; this.last = Date.now();
+      const [claudeLimits, codexLimits, geminiLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? guarded('codex', 'Default', 'Codex', () => readCodexLimits(codex, env)) : null, gemini ? guarded('gemini', 'Default', 'Gemini CLI', () => readGeminiLimits(gemini, env)) : null]);
+      this.latest = [...claudeLimits, ...(codexLimits ? [codexLimits] : []), ...(geminiLimits ? [geminiLimits] : [])];
       return this.latest;
-    })().finally(() => { this.reading = null; });
+    })().catch((error: unknown) => { this.last = 0; throw error; }).finally(() => { this.reading = null; });
     return this.reading;
   }
 }

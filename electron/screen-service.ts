@@ -64,7 +64,7 @@ else {
     // The file goes first, so the service started again does not fail at once too.
     if (crashFile) setInterval(() => { if (fs.existsSync(crashFile)) { fs.rmSync(crashFile, { force: true }); setTimeout(() => { throw new Error('Failing on purpose for the smoke test.'); }); } }, 200);
     // Turned off in Trace's settings (or the setting is gone), or the other kind (administrator or not) is wanted: quit.
-    setInterval(() => { if (!wanted()) { void service.close().finally(() => app.exit(0)); } }, 3000);
+    setInterval(() => { if (!wanted()) { void service.close().finally(() => app.exit(0)); } else service.recheck(); }, 3000);
   });
 }
 

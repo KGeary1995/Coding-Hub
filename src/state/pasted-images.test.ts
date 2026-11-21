@@ -52,4 +52,16 @@ describe('quotePath', () => {
     expect(quotePath("/tmp/it's.png", false)).toBe("'/tmp/it'\\''s.png'");
     expect(quotePath('C:\\Users\\me\\My Pictures\\shot.png', true)).toBe('"C:\\Users\\me\\My Pictures\\shot.png"');
   });
+  it('single-quotes PowerShell paths in a Windows shell channel so nothing expands', () => {
+    expect(quotePath('C:\\Users\\me\\shot.png', true, true)).toBe('C:\\Users\\me\\shot.png');
+    expect(quotePath('C:\\me\\report $(calc).png', true, true)).toBe("'C:\\me\\report $(calc).png'");
+    expect(quotePath('C:\\me\\a`b.png', true, true)).toBe("'C:\\me\\a`b.png'");
+    expect(quotePath("C:\\me\\it's.png", true, true)).toBe("'C:\\me\\it''s.png'");
+    expect(quotePath('C:\\me\\a,b.png', true, true)).toBe("'C:\\me\\a,b.png'");
+    expect(quotePath('@list.txt', true, true)).toBe("'@list.txt'");
+  });
+  it('keeps double quotes for CLI channels on Windows and the POSIX form off Windows for a shell', () => {
+    expect(quotePath('C:\\me\\report $(calc).png', true, false)).toBe('"C:\\me\\report $(calc).png"');
+    expect(quotePath('/tmp/a b.png', false, true)).toBe("'/tmp/a b.png'");
+  });
 });

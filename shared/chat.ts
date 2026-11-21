@@ -141,3 +141,7 @@ export type ChatRequest =
 
 /** The longest piece of a tool's output shown in the thread; the rest stays in Claude's own transcript. */
 export const TOOL_RESULT_LIMIT = 4000;
+
+/** Starts of the prompts Trace itself sends a hierarchy Round Table's builder (review-chain.ts, round-table.ts); a person's own "[WIP] …" message is not one. */
+const TRACE_PROMPT = /^\[(Step: |Trace Round Table|The person answers\])/;
+export function isTracePrompt(text: string): boolean { return TRACE_PROMPT.test(text); }
