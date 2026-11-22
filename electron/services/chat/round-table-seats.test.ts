@@ -32,20 +32,24 @@ describe('a discussion table with three seats', () => {
     tables.send(A, 'Plan the cache.', []);
     expect(sent.map((item) => item.runId)).toEqual([A, B, C]);
     expect(to(A)[0].text).toContain('with the person, Codex and Opus. The others call you Claude Code.'); expect(to(A)[0].text).toContain('You are the driver');
-    expect(to(B)[0].text).toContain('You are a reviewer: read files and check the work of the driver, Claude Code,'); expect(to(B)[0].text).toContain("When Trace shows you the others' answers, reply to them briefly");
+    expect(to(B)[0].text).toContain('You are a reviewer: read files, give your own view of what the person asked and check the plan and work of the driver, Claude Code,'); expect(to(B)[0].text).toContain("When Trace shows you the others' answers, reply to them briefly");
     reply(A, 'Use an LRU.'); reply(B, 'Add a TTL.'); expect(sent).toHaveLength(3);
     reply(C, 'Both.');
     // Round 1: each gets the two other answers, labelled.
     expect(to(A)[1].text).toContain('[Trace Round Table · round 1 of 3] Codex answered:\n\nAdd a TTL.\n\nOpus answered:\n\nBoth.');
     expect(to(C)[1].text).toContain('Claude Code answered:\n\nUse an LRU.\n\nCodex answered:\n\nAdd a TTL.');
     reply(A, 'AGREE'); reply(B, 'AGREE'); reply(C, '**AGREE**');
-    expect(sent).toHaveLength(6); expect(last()).toMatchObject({ phase: 'idle', agreed: true, round: 1 });
+    // All agree: no further round, and the driver alone does the work.
+    expect(sent).toHaveLength(7); expect(to(A)[2].text).toContain('the discussion is over: you all agree] Now carry out'); expect(last()).toMatchObject({ phase: 'acting', agreed: true, round: 1 });
+    reply(A, 'Built the cache.'); expect(sent).toHaveLength(7); expect(last()).toMatchObject({ phase: 'idle', agreed: true, round: 1 });
   });
   it('is not agreed while one seat still disagrees', () => {
     const { tables, sent, reply, last } = setup(); tables.open(1, A, three, 'a', 1);
     tables.send(A, 'Go', []); reply(A, 'x'); reply(B, 'y'); reply(C, 'z');
     reply(A, 'AGREE'); reply(B, 'AGREE'); reply(C, 'No: the TTL is too short.');
-    expect(sent).toHaveLength(6); expect(last()).toMatchObject({ phase: 'idle', agreed: false });
+    // The rounds are used up: the driver does the work, and is shown the objection it has not seen yet.
+    expect(sent).toHaveLength(7); expect(sent[6].runId).toBe(A); expect(sent[6].text).toContain('Opus answered:\n\nNo: the TTL is too short.'); expect(sent[6].text).toContain('Codex answered:\n\nAGREE (nothing to add)');
+    expect(last()).toMatchObject({ phase: 'acting', agreed: false });
   });
   it('lets the driver be any seat by its session, keeps the others read-only, and declines their edits by name', () => {
     const { tables, modes, answers, ask } = setup();

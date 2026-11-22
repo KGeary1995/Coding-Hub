@@ -86,7 +86,7 @@ export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { 
 }
 
 export const AGENT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
-const PHASE = (many: boolean): Record<RoundTableState['phase'], string> => ({ joining: many ? 'Catching the others up' : 'Catching the other agent up', answering: many ? 'All answering' : 'Both answering', discussing: 'Discussing', idle: 'Your turn' });
+const PHASE = (many: boolean): Record<RoundTableState['phase'], string> => ({ joining: many ? 'Catching the others up' : 'Catching the other agent up', answering: many ? 'All answering' : 'Both answering', discussing: 'Discussing', acting: 'Making the changes', idle: 'Your turn' });
 
 export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'gemini' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
 /**
@@ -220,7 +220,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
   const seats: BarSeat[] = given ?? seatViews(table, leadEngine); const many = seats.length > 2;
   const driver = seats.find((seat) => seat.driver) ?? seats[0]; const others = seats.filter((seat) => seat !== driver); const hidden = seats.filter((seat) => !seat.lead);
   const run = onRequest; const images = waitingImageCount(table); const counted = seats.filter((seat) => seat.tokens !== undefined);
-  const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'idle' && table.agreed ? (many ? 'They all agree. Your turn' : 'They agree. Your turn') : PHASE(many)[table.phase];
+  const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'acting' ? `${driver.name} making the changes` : table.phase === 'idle' && table.agreed ? (many ? 'They all agree. Your turn' : 'They agree. Your turn') : PHASE(many)[table.phase];
   // In a narrow tile the token counts, then who drives, leave the bar (chat.css): there they are this tooltip, and still read out.
   // Narrower still, Rounds, Stop and Show keep only their field or icon, and then the title leaves: their words stay their names,
   // and each has a tooltip, as every control that shows only an icon has.

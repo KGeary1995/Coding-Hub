@@ -94,14 +94,22 @@ interface Table {
   turnStart: Promise<string | null> | null; reviewing: boolean;
   /** Stop was pressed: the turns it ends are expected, not failures. Cleared with the person's next message. */
   halted: boolean;
+  /**
+   * The person's message is being discussed and is still to be carried out: until the discussion is over nobody edits,
+   * the driver included, and then the driver gets one more turn to do the work (`carryOut`). False with no rounds.
+   */
+  act: boolean;
 }
 
 /**
  * Round Tables: the person and two or more agents (Claude Code or Codex chats, in any mix) in one conversation. Each
  * table is led by the chat run it was opened on and seats the other chat runs in the same folder. Trace passes messages
  * between them: the person's go to every seat; when all have answered, each gets the others' answers, for up to
- * `rounds` rounds or until all say AGREE. The driver may edit files; every other seat reviews, read-only, and Trace
- * declines any edit it still asks for.
+ * `rounds` rounds or until all say AGREE. Then the driver carries out what the person asked, with the whole discussion
+ * in view (from 1.29; before, it started on the person's message at once, beside the others and before it had heard
+ * them, and nothing told it to act on what was said). Only the driver edits files, and only in that last turn: every
+ * other turn is read-only, and Trace declines any edit asked for in one. With no rounds there is no discussion: the
+ * driver starts at once.
  */
 export class RoundTables {
   private tables = new Map<string, Table>();
@@ -152,8 +160,10 @@ export class RoundTables {
   }
   private publish(table: Table) { this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'table', table: this.state(table) } }); }
   private notice(table: Table, text: string) { this.host.emit(table.owner, { sessionId: table.lead.sessionId, runId: table.lead.runId, event: { type: 'notice', text } }); }
+  /** Whether a seat may change files now: the driver, once the discussion of the person's message is over. */
+  private edits(table: Table, seat: Seat) { return seat === table.driver && !table.act; }
   private roles(table: Table) {
-    for (const seat of table.seats) this.host.setReadOnly(seat.runId, seat !== table.driver);
+    for (const seat of table.seats) { try { this.host.setReadOnly(seat.runId, !this.edits(table, seat)); } catch { /* Ended. */ } }
   }
 
   /** What an agent is told about the table, once, before its first message here. With two seats it reads as before 1.26. */
@@ -163,9 +173,9 @@ export class RoundTables {
     // A seat whose name is not simply its agent's (two Claudes, a name the person gave) is told what the others call it.
     const self = !two || name !== NAME[seat.engine] ? ` The others call you ${name}.` : '';
     const role = seat === table.driver
-      ? `You are the driver: you make the file changes. Carry out what the person asked without asking again whether to proceed; ask only about choices that are theirs to make, or before anything that publishes, deletes or cannot be undone.`
-      : two ? `You are the reviewer: read files and check the driver's work, but do not edit files (Trace keeps you read-only).`
-        : `You are a reviewer: read files and check the work of the driver, ${names.get(table.driver)}, but do not edit files (Trace keeps you read-only).`;
+      ? `You are the driver: you make the file changes, once the discussion is over. While Trace says to discuss, say how you would do it and change nothing (Trace keeps you read-only until then). When Trace tells you the discussion is over, carry out what the person asked without asking again whether to proceed; ask only about choices that are theirs to make, or before anything that publishes, deletes or cannot be undone.`
+      : two ? `You are the reviewer: read files, give your own view of what the person asked and check the driver's plan and work, but do not edit files (Trace keeps you read-only).`
+        : `You are a reviewer: read files, give your own view of what the person asked and check the plan and work of the driver, ${names.get(table.driver)}, but do not edit files (Trace keeps you read-only).`;
     // The fixed forms Trace reads into the review record (shared/findings.ts).
     const record = seat === table.driver
       ? `When Trace lists open findings, answer each on its own line as "FIXED F<n>: what you changed" or "DECLINED F<n>: why".`
@@ -190,7 +200,7 @@ export class RoundTables {
     if (inputs.some((input) => this.tableOf(input.runId))) throw new HubError('TABLE_TAKEN', 'One of these chats is already at a Round Table.');
     const runs = checkTable(this.host, owner, 'discussion', inputs);
     const made = inputs.map((input) => this.seat(input)); const lead = made[0];
-    const table: Table = { owner, lead, seats: made, driver: this.driverOf(made, driver), rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: runs[0].cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: false, halted: false };
+    const table: Table = { owner, lead, seats: made, driver: this.driverOf(made, driver), rounds: Math.max(0, Math.min(5, rounds)), round: 0, phase: 'idle', agreed: false, act: false, queued: null, recent: [...(this.recent.get(leadRunId) ?? [])], cwd: runs[0].cwd, findings: (saved.findings ?? []).slice(0, MAX_FINDINGS).map((finding) => ({ ...finding })), turnStart: null, reviewing: false, kept: false, halted: false };
     if (saved.waiting !== undefined || saved.waitingImages?.length) table.queued = { text: saved.waiting ?? '', images: (saved.waitingImages ?? []).slice(0, MAX_IMAGES) };
     table.kept = Boolean(table.queued);
     this.tables.set(leadRunId, table); this.roles(table);
@@ -231,13 +241,16 @@ export class RoundTables {
   }
   private ask(table: Table, text: string, images: ChatImage[]) {
     table.round = 0; table.agreed = false; table.halted = false; table.phase = 'answering'; this.snapshot(table);
+    // With rounds to discuss in, nobody changes files yet: the driver does once the discussion is over.
+    table.act = table.rounds > 0; this.roles(table);
+    const first = table.act ? `\n\n[Trace Round Table] Discuss this first: say how you would handle it and what to watch for, and change no files yet. You will see what the ${table.seats.length === 2 ? 'other says' : 'others say'}; once the discussion is over, ${this.nameOf(table, table.driver)} carries it out.` : '';
     // Before this message is remembered: a newcomer's latest messages are those before it.
     const intros = new Map(table.seats.map((seat) => [seat, this.intro(table, seat)]));
     // The person's messages reach the agents from here, not from the window, so they are remembered here.
     for (const seat of table.seats) this.remember(seat.runId, { type: 'user', text, images: images.length });
     for (const seat of table.seats) {
       seat.busy = true; seat.text = ''; seat.answer = null;
-      this.host.send(seat.runId, `${intros.get(seat)}${text}`, images);
+      this.host.send(seat.runId, `${intros.get(seat)}${text}${first}`, images);
     }
     this.publish(table);
   }
@@ -292,7 +305,7 @@ export class RoundTables {
    * all as soon as they have stopped (it was shown as sent, so it is not dropped).
    */
   stop(leadRunId: string) {
-    const table = this.leading(leadRunId); table.round = table.rounds; table.halted = true;
+    const table = this.leading(leadRunId); table.round = table.rounds; table.halted = true; table.act = false;
     for (const seat of table.seats) if (seat.busy) this.host.interrupt(seat.runId);
     table.phase = this.busy(table) ? table.phase : 'idle'; this.publish(table);
   }
@@ -329,11 +342,12 @@ export class RoundTables {
     const table = this.tableOf(runId); if (!table) return null;
     const seat = table.seats.find((each) => each.runId === runId)!;
     if (event.type === 'assistant') { const words = event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n'); if (words) seat.text = seat.text ? `${seat.text}\n${words}` : words; return null; }
-    if (event.type === 'permission' && seat !== table.driver && isEdit(event)) {
+    if (event.type === 'permission' && !this.edits(table, seat) && isEdit(event)) {
       this.host.answer(runId, event.requestId, false);
-      return `Trace declined ${event.toolName} for ${this.nameOf(table, seat)}: the reviewer does not edit files. Swap the driver to let it.`;
+      return seat === table.driver ? `Trace declined ${event.toolName} for ${this.nameOf(table, seat)}: files change once the discussion is over.`
+        : `Trace declined ${event.toolName} for ${this.nameOf(table, seat)}: the reviewer does not edit files. Swap the driver to let it.`;
     }
-    if (event.type === 'permission' && seat !== table.driver && allowAtFull(this.host, runId, event.requestId)) return '';
+    if (event.type === 'permission' && !this.edits(table, seat) && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
     // The end of a turn from before this table opened: the seat is free, and a message waiting for it goes now.
     if (seat.stale) {
@@ -348,7 +362,7 @@ export class RoundTables {
     // A turn that failed (a usage limit, an API error) or was interrupted from the tile, not one the table's Stop ended,
     // ends the discussion: the others are not sent "(no answer)" for every round left. Worded to fit either cause.
     if (event.isError && !table.halted) {
-      table.round = table.rounds;
+      table.round = table.rounds; table.act = false;
       this.notice(table, `${this.nameOf(table, seat)} ended its turn early, so the Round Table discussion ends here${event.error ? `: ${event.error}` : '.'}`);
     }
     this.settle(table, seat, event.isError);
@@ -386,24 +400,51 @@ export class RoundTables {
     this.discuss(table);
   }
 
-  /** After all answered: stop, or pass each the others' answers for the next round. */
+  /** What the other seats last said, as one seat is shown it. */
+  private relayed(table: Table, to: Seat, given: Map<Seat, string | null>) {
+    const names = this.names(table);
+    return table.seats.filter((other) => other !== to).map((other) => {
+      let answer = cut(given.get(other) || '(no answer)'); if (AGREES.test(answer)) answer = 'AGREE (nothing to add)';
+      return `${names.get(other)} answered:\n\n${answer}`;
+    }).join('\n\n');
+  }
+  /** After all answered: pass each the others' answers for the next round; or, the discussion over, have the driver do the work; or stop. */
   private discuss(table: Table) {
     const answers = table.seats.map((seat) => seat.answer ?? '');
-    table.agreed = table.round > 0 && answers.every((answer) => AGREES.test(answer));
-    if (table.agreed || table.round >= table.rounds || answers.every((answer) => !answer)) { table.phase = 'idle'; this.publish(table); return; }
+    // The driver's own last turn is not part of the discussion: whether they agreed stays as the discussion left it.
+    if (table.phase !== 'acting') table.agreed = table.round > 0 && answers.every((answer) => AGREES.test(answer));
+    if (table.phase === 'acting' || table.agreed || table.round >= table.rounds || answers.every((answer) => !answer)) {
+      // Stop, a failed turn or no answer at all ends it without the work; so does a table that lost its rounds meanwhile.
+      if (table.act && !table.halted && answers.some(Boolean)) { this.carryOut(table); return; }
+      table.act = false; this.roles(table); table.phase = 'idle'; this.publish(table); return;
+    }
     table.round++; table.phase = 'discussing'; this.snapshot(table);
     // Every answer is read before any seat starts its next turn (which clears its answer).
-    const given = new Map(table.seats.map((seat) => [seat, seat.answer])); const names = this.names(table);
+    const given = new Map(table.seats.map((seat) => [seat, seat.answer]));
     for (const each of table.seats) {
-      const relayed = table.seats.filter((other) => other !== each).map((other) => {
-        let answer = cut(given.get(other) || '(no answer)'); if (AGREES.test(answer)) answer = 'AGREE (nothing to add)';
-        return `${names.get(other)} answered:\n\n${answer}`;
-      }).join('\n\n');
+      const relayed = this.relayed(table, each, given);
       const intro = this.intro(table, each);
       each.busy = true; each.answer = null; each.text = '';
       const waiting = findingsFor(table.findings, each === table.driver ? 'driver' : 'reviewer');
       this.host.send(each.runId, `${intro}[Trace Round Table · round ${table.round} of ${table.rounds}] ${relayed}\n\n${waiting ? `${waiting}\n\n` : ''}Reply briefly: agree, disagree or add what is missing. If you fully agree and have nothing to add, reply with exactly AGREE.`, []);
     }
+    this.publish(table);
+  }
+
+  /**
+   * The discussion is over (all agree, or the rounds are used up): the driver, now free to edit, is shown what the others
+   * said last (it has not seen that yet) and carries out what the person asked. The others wait; their answers are
+   * cleared, so the record does not read them a second time when the driver is done.
+   */
+  private carryOut(table: Table) {
+    const driver = table.driver; const given = new Map(table.seats.map((seat) => [seat, seat.answer]));
+    const how = table.agreed ? (table.seats.length === 2 ? 'you both agree' : 'you all agree') : `after ${table.round} of ${table.rounds} ${table.rounds === 1 ? 'round' : 'rounds'}`;
+    const relayed = table.agreed ? '' : `${this.relayed(table, driver, given)}\n\n`; const intro = this.intro(table, driver);
+    table.act = false; table.phase = 'acting'; this.roles(table); this.snapshot(table);
+    for (const seat of table.seats) { seat.answer = null; seat.text = ''; }
+    driver.busy = true;
+    const waiting = findingsFor(table.findings, 'driver');
+    this.host.send(driver.runId, `${intro}[Trace Round Table · the discussion is over: ${how}] ${relayed}${waiting ? `${waiting}\n\n` : ''}Now carry out what the person asked. You may change files again. Go by the whole conversation: use what the others said where they are right, and say in a line where you chose otherwise and why. If nothing is left to do (the person only asked a question, say), give the answer you reached in a few lines instead. End with a short summary of what you changed.`, []);
     this.publish(table);
   }
 
