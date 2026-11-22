@@ -59,6 +59,7 @@ import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/upd
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
 import { channelName } from '../shared/channel-name';
+import { hiddenSeatIds } from '../shared/table-seats';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 import { setBackupRoot } from './services/hub/file-backups';
@@ -212,8 +213,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
 /** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
-  // A Round Table's partner (the lead's saved roundTable.partner, as the window hides it) is marked, not listed as a channel.
-  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
+  // A Round Table's hidden seats (every seat but the lead's, as the window hides them) are marked, not listed as channels.
+  const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? hiddenSeatIds(session.roundTable, session.id) : []) if (saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isChatEngineConfig(session.config) && session.config.chat ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
     ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }

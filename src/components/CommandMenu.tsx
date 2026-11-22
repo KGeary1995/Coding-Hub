@@ -42,7 +42,7 @@ export function CommandMenu() {
   const dialog = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const { sessions: all, rootDirectory, setView, arrange } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, rootDirectory: s.rootDirectory, setView: s.setView, arrange: s.arrange })));
-  // Round Table partners start, stop and are answered with their lead's channel.
+  // Round Table seats start, stop and are answered with their lead's channel.
   const sessions = useMemo(() => channelsOf(all), [all]);
   const usage = useHubStore((state) => state.usage);
   const { scope, text } = parseQuery(input, chosenScope);

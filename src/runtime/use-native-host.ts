@@ -24,7 +24,8 @@ function chatTurnDone(sessionId: string, failed: boolean) {
   const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
   // A hierarchy's task is done on the planner's APPROVED (chainTasks), never when a seat's turn ends.
   if (table?.kind === 'hierarchy' || lead?.roundTable?.kind === 'hierarchy') return;
-  if (lead && table && seat && seat.config.engine !== table.driver) return;
+  // Only the driver's reply says whether the work is done: the seat that edits (by session from 1.26, else by its agent).
+  if (lead && table && seat && (table.driverSeat ? sessionId !== table.driverSeat : seat.config.engine !== table.driver)) return;
   void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
 }
 import { permissionsRefused } from './permissions';
@@ -77,7 +78,7 @@ export function useNativeHost() {
       applyChatEvent(envelope); if (envelope.event.type === 'done') chatTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) { rememberTable(envelope.sessionId, envelope.event.table); chainTasks(envelope.sessionId, envelope.event.table); }
       // Tasks from Tasks the host removed from a hierarchy table without starting them (dropped, or the table closed): back to To do.
       if (envelope.event.type === 'table' && envelope.event.discarded?.length) void returnTasks(envelope.sessionId, envelope.event.discarded, envelope.event.table?.chain?.task);
-      // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden partner stopped and removed.
+      // Closed by the person, here or from a phone or linked computer: forgotten, and its hidden seats stopped and removed.
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
     const unsubscribeTables = useWorkspaceStore.subscribe(restoreTables);
@@ -152,7 +153,9 @@ export async function startSession(id: string) {
   // A hierarchy table's reviewer saved before it had a model of its own would start on whatever Codex's settings
   // default to, and one saved on a retired reviewer model (gpt-6-astra) on that: both get the table's (Models on the bar
   // can change it while the channel is stopped).
-  if (session.config.engine === 'codex' && (!session.config.model || RETIRED_REVIEWER_MODELS.includes(session.config.model)) && state.sessions.some((item) => item.roundTable?.kind === 'hierarchy' && item.roundTable.partner === id)) {
+  // A table saved from 1.26 has its seats' own models ('' is a choice there): only the retired reviewer model is replaced.
+  const hierarchyLead = leadOf(state.sessions, id)?.roundTable;
+  if (session.config.engine === 'codex' && hierarchyLead?.kind === 'hierarchy' && (RETIRED_REVIEWER_MODELS.includes(session.config.model) || (!session.config.model && !hierarchyLead.seats))) {
     state.updateConfig(id, { ...session.config, model: HIERARCHY_MODELS.reviewer });
     const updated = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
     if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);
@@ -174,8 +177,7 @@ export async function startSession(id: string) {
       focusTerminal(id);
     }
   } catch { useWorkspaceStore.getState().setSessionError(id, 'The channel could not be started.', true); }
-  // A Round Table's partner has no tile to start it from: it starts with its lead, and restoreTables seats it again.
-  // A hierarchy table's planner too: its hidden seats start together.
+  // A Round Table's hidden seats have no tile to start them from: they start with their lead, and restoreTables seats them again.
   const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
   await Promise.all(seats.map((seat) => lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
@@ -187,14 +189,14 @@ export async function settled(ids: (string | undefined)[], past: 'running' | 'st
   for (const end = Date.now() + ms; busy() && Date.now() < end;) await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
-/** Stops a channel, and the hidden partner of a Round Table it leads with it (that has no Stop of its own). */
+/** Stops a channel, and the hidden seats of a Round Table it leads with it (they have no Stop of their own). */
 export async function stopSession(id: string): Promise<boolean> {
   const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
   const stopped = await Promise.all([stopRun(id), ...seats.map((seat) => stopRun(seat.id))]);
   return stopped.every(Boolean);
 }
 /**
- * Stops a channel and closes it, with a Round Table's partner; false when it could not be stopped, or when the table's
+ * Stops a channel and closes it, with a Round Table's hidden seats; false when it could not be stopped, or when the table's
  * findings could not be saved to shared memory (the channel stays then, with the reason on it).
  */
 export async function closeChannel(id: string): Promise<boolean> {
@@ -257,7 +259,7 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): s
   const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
   // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
   if (chat && (engine === 'claude' || engine === 'codex')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
-  // In the folder another channel works in (a Round Table's partner), whatever the workspace root is now.
+  // In the folder another channel works in (a Round Table's seat), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
   if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);
     if (added && added.id !== source.id) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === added.id ? { ...session, binding: cwd ? { mode: 'independent', cwd } : { ...source.binding } } : session) })); }

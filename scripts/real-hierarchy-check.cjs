@@ -9,7 +9,7 @@
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
-const { tileControl } = require('./lib/navigate.cjs');
+const { startTable, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); const rejectOnce = process.argv.includes('--reject-once'); const reviseAndModels = process.argv.includes('--revise-and-models'); fs.mkdirSync(out, { recursive: true });
@@ -37,7 +37,7 @@ async function until(page, test, minutes, label) {
   let { app, page } = await launch();
   try {
     await page.waitForSelector('.tr-empty, .session-tile'); await page.getByRole('button', { name: 'Open project', exact: true }).click(); await page.waitForSelector('.session-tile');
-    await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: 'Round Table (hierarchy)', exact: true }).click();
+    await startTable(page, 'Round Table (hierarchy)');
     await page.waitForSelector('.chain-bar', { timeout: 240000 }); await shot(page, '01-open'); note('open', { bar: await bar(page) });
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' });
     if (reviseAndModels) {

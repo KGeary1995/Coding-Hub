@@ -156,3 +156,53 @@ describe('the hierarchy bar folds in a tile too short for it', () => {
     expect(element.props.children.flat().some((child) => (child as { type?: string; props?: { className?: string } } | null)?.type === 'span' && (child as { props: { className: string } }).props.className === 'table-waiting')).toBe(true);
   });
 });
+
+describe('the hierarchy bar of a table with its own seats', () => {
+  type Chain = NonNullable<RoundTableState['chain']>;
+  const seated = (list: { id: string; engine: 'claude' | 'codex'; duties: ('plan' | 'challenge' | 'build' | 'review' | 'final')[]; name?: string }[], step: Chain['step'], chain: Partial<Chain> = {}, extra: Partial<RoundTableState> = {}): RoundTableState => ({ ...table(step), partner: { sessionId: list[1].id, runId: 'r', engine: list[1].engine }, seats: list.map((seat) => ({ sessionId: seat.id, runId: `run-${seat.id}`, engine: seat.engine, duties: seat.duties, ...(seat.name ? { name: seat.name } : {}) })), chain: { ...table(step).chain!, ...chain }, ...extra });
+  const render = (state: RoundTableState, extra: Partial<Parameters<typeof ChainBar>[0]> = {}) => renderToStaticMarkup(<ChainBar table={state} busy={false} plannerName="x" builderName="y" onRequest={() => {}} {...extra} />);
+  const steps = (html: string) => [...html.matchAll(/<li class="[^"]*"(?: aria-current="step")?>([^<]*)<\/li>/g)].map((match) => match[1]);
+  const basic = [{ id: 'b', engine: 'claude' as const, duties: ['build' as const] }, { id: 'p', engine: 'claude' as const, duties: ['plan' as const] }, { id: 'r', engine: 'codex' as const, duties: ['review' as const] }];
+
+  it('shows only the steps it has: no challenge without a challenger, no final review without a final seat', () => {
+    expect(steps(render(seated(basic, 'planning')))).toEqual(['Plan', 'Approve', 'Build', 'Review', 'Fix']);
+    // Challengers and a final seat bring their steps back; without reviewers there is no review or fix.
+    const lean = [{ id: 'b', engine: 'claude' as const, duties: ['build' as const] }, { id: 'p', engine: 'claude' as const, duties: ['plan' as const, 'challenge' as const, 'final' as const] }];
+    expect(steps(render(seated(lean, 'planning')))).toEqual(['Plan', 'Challenge', 'Approve', 'Build', 'Final review']);
+    // A table before 1.26 has every step, as ever.
+    expect(steps(render(table('planning')))).toEqual(['Plan', 'Challenge', 'Approve', 'Build', 'Review', 'Fix', 'Final review']);
+  });
+  it('names the seats, with what each does, instead of the fixed roles', () => {
+    const html = render(seated([{ id: 'b', engine: 'claude', duties: ['build'] }, { id: 'p', engine: 'claude', duties: ['plan', 'final'], name: 'Lead planner' }, { id: 'r', engine: 'codex', duties: ['review'] }], 'planning'), { seats: [{ id: 'p', role: 'Plans, final review', detail: 'Fable 5.2', name: 'Lead planner', colour: 'planner', state: 'working', tokens: 0 }] });
+    expect(html).toContain('Lead planner writing the plan…'); expect(html).toMatch(/<strong>Lead planner<\/strong><span>Plans, final review · Fable 5\.2 · working<\/span>/);
+    expect(html).not.toContain('Codex'); expect(html).toContain('Close the Round Table and stop its other agents');
+  });
+  it('says whose turn it is when several seats review, one after another', () => {
+    const two = [...basic, { id: 'r2', engine: 'claude' as const, duties: ['review' as const] }];
+    const html = render(seated(two, 'reviewing', { turnSeat: 'r2', reviewRound: 1 }));
+    expect(html).toContain('Reviewer 2 reviewing (round 1 of 2)'); expect(html).toMatch(/<li class="current" aria-current="step">Review · Reviewer 2<\/li>/);
+    // With one reviewer there is only one turn, so the step shows no name.
+    expect(render(seated(basic, 'reviewing', { turnSeat: 'r', reviewRound: 1 }))).toMatch(/<li class="current" aria-current="step">Review<\/li>/);
+    // Before the host names a turn, every seat that takes the step is named.
+    expect(render(seated(two, 'reviewing', { reviewRound: 1 }))).toContain('Reviewer and Reviewer 2 reviewing (round 1 of 2)');
+  });
+  it('says two challengers raised no challenges, and who challenges when the plan is sent back', () => {
+    const two = [...basic, { id: 'c1', engine: 'codex' as const, duties: ['challenge' as const] }, { id: 'c2', engine: 'claude' as const, duties: ['challenge' as const] }];
+    expect(render(seated(two, 'plan-review', { challenged: true }))).toContain('(the challengers raised no challenges)');
+    expect(render(seated(two, 'challenging', { turnSeat: 'c2' }))).toContain('Challenger 2 challenging the plan…');
+    expect(render(seated(two, 'stopped', { stoppedAt: 'challenging' }))).toContain('title="Show the plan to you without the challenges"');
+    expect(render(seated(two, 'plan-review', { challenged: true, challenges: [{ id: 'C1', severity: 'low', text: 't' }] }))).toContain('Challenges to the plan · 1');
+  });
+  it('is done when the review rounds end, with no final reviewer to approve it', () => {
+    expect(render(seated(basic, 'done'))).toContain('Done: the review rounds are over'); expect(render(seated([...basic.slice(0, 2), { id: 'f', engine: 'codex', duties: ['final'] }], 'done'))).toContain('Approved by Final reviewer');
+  });
+  it('sets the review rounds while the table rests, only for a table with reviewers, and has a Seats button where it is given one', () => {
+    const requests: unknown[] = []; const state = seated(basic, 'idle');
+    const element = ChainBar({ table: state, busy: false, plannerName: 'x', builderName: 'y', onRequest: (request) => requests.push(request), onSeats: () => {} });
+    const html = renderToStaticMarkup(element); expect(html).toContain('aria-label="Review rounds"'); expect(html).toMatch(/<option value="1">1<\/option><option value="2" selected="">2<\/option>/); expect(html).toContain('>Seats<');
+    const find = (node: unknown): { props: { onChange: (event: { target: { value: string } }) => void } } | null => { if (!node || typeof node !== 'object') return null; if (Array.isArray(node)) { for (const child of node) { const found = find(child); if (found) return found; } return null; } const props = (node as { props?: { children?: unknown; 'aria-label'?: string } }).props; if (props?.['aria-label'] === 'Review rounds') return node as never; return find(props?.children); };
+    find(element)!.props.onChange({ target: { value: '4' } }); expect(requests).toEqual([{ action: 'table-rounds', rounds: 4 }]);
+    expect(render(state, { busy: true })).toMatch(/<select aria-label="Review rounds" disabled=""/);
+    expect(render(seated(basic.slice(0, 2), 'idle'))).not.toContain('Review rounds'); expect(render(table('idle'))).not.toContain('Review rounds'); expect(render(state)).not.toContain('Seats</span>');
+  });
+});

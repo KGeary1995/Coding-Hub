@@ -24,6 +24,19 @@ async function addChannel(page, engine = 'Claude Code') {
 }
 
 /**
+ * Starts a Round Table through + Channel: the menu item opens the setup panel (seats, models, presets) with that kind's
+ * table chosen, and Start Round Table starts it as it is. `setup`: changes made in the panel first.
+ */
+async function startTable(page, item = 'Round Table', setup) {
+  await page.getByRole('button', { name: 'New channel', exact: true }).click();
+  await page.getByRole('menuitem', { name: item, exact: true }).click();
+  const panel = page.locator('dialog.table-setup'); await panel.waitFor();
+  if (setup) await setup(panel);
+  await panel.getByRole('button', { name: 'Start Round Table', exact: true }).click();
+  await panel.waitFor({ state: 'detached' });
+}
+
+/**
  * A control in a channel's detail row, which shows when the person points at the tile's header, or while a control in it
  * has the keyboard focus. The test's own pointer is not enough: the window is on the real screen, and the real pointer
  * moving over it (the person at the computer) took the header's hover away before the click, which then waited 20 s on a
@@ -36,4 +49,4 @@ async function tileControl(scope, name) {
   return button;
 }
 
-module.exports = { openView, addChannel, tileControl };
+module.exports = { openView, addChannel, startTable, tileControl };

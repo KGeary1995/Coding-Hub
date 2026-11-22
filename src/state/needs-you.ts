@@ -2,6 +2,7 @@ import type { Session } from '../../shared/types';
 import type { UsageRecord } from '../../shared/hub';
 import type { Task } from '../../shared/workbench';
 import { waitingImageCount, type RoundTableState } from '../../shared/chat';
+import { hiddenSeatIds } from '../../shared/table-seats';
 import { channelAlerts } from './channel-state';
 
 /**
@@ -14,7 +15,7 @@ const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked
 export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   // Findings of a closed table that could not be saved to shared memory: kept with the channel until saved.
-  for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !sessions.some((other) => other.id === record.partner)) items.push({ key: `s:${session.id}`, kind: 'findings-unsaved', title: 'Round Table findings not saved yet', detail: `${record.findings.length} ${record.findings.length === 1 ? 'finding' : 'findings'} from a closed table could not be written to shared memory.`, since: null, sessionId: session.id, taskId: null, action: 'save-findings' }); }
+  for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) items.push({ key: `s:${session.id}`, kind: 'findings-unsaved', title: 'Round Table findings not saved yet', detail: `${record.findings.length} ${record.findings.length === 1 ? 'finding' : 'findings'} from a closed table could not be written to shared memory.`, since: null, sessionId: session.id, taskId: null, action: 'save-findings' }); }
   // A hierarchy table's plan waits for the person's approval.
   for (const [sessionId, table] of Object.entries(tables)) if (table?.kind === 'hierarchy' && table.chain?.step === 'plan-review') items.push({ key: `p:${sessionId}`, kind: 'plan-review', title: 'A Round Table plan waits for your approval', detail: table.chain.task.length > 120 ? table.chain.task.slice(0, 120) + '…' : table.chain.task, since: null, sessionId, taskId: null, action: 'answer' });
   // A Round Table message kept from before a restart waits for the person to send or drop it.

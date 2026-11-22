@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hiddenSeatIds } from './table-seats';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -33,7 +34,7 @@ export const LEGACY_CHAIN_STEPS = ['second-reviewing', 'comparing'] as const;
 const legacyChainStep = z.enum([...chainSteps, ...LEGACY_CHAIN_STEPS]);
 const planChallenge = z.object({ id: z.string().regex(/^C\d{1,3}$/), severity: z.enum(['high', 'medium', 'low']), text: z.string().min(1).max(500), answer: z.enum(['accepted', 'rejected']).optional(), reason: z.string().max(500).optional() }).strict();
 /** A hierarchy table's work, saved with it (shared/chat.ts SavedChain). */
-const chainFields = { task: z.string().max(410_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000), challenges: z.array(planChallenge).max(50).optional(), challenged: z.literal(true).optional(), replan: z.string().max(20_000).optional(), revision: z.string().max(410_000).optional(), held: z.string().max(2_000).optional(), nextTasks: z.array(z.string().min(1).max(200_000)).max(10).optional(), images: z.array(chatImage).max(10).refine((images) => images.reduce((sum, image) => sum + image.data.length, 0) <= 6_000_000, 'Too much image data to keep.').optional() };
+const chainFields = { blockedSeat: identifier.optional(), turnSeat: identifier.optional(), task: z.string().max(410_000), plan: z.string().max(200_000), report: z.string().max(200_000), reviewRound: z.number().int().min(0).max(10), finalRound: z.number().int().min(0).max(10), verdict: z.enum(['approved', 'changes']).nullable(), note: z.string().max(20_000), challenges: z.array(planChallenge).max(50).optional(), challenged: z.literal(true).optional(), replan: z.string().max(20_000).optional(), revision: z.string().max(410_000).optional(), held: z.string().max(2_000).optional(), nextTasks: z.array(z.string().min(1).max(200_000)).max(10).optional(), images: z.array(chatImage).max(10).refine((images) => images.reduce((sum, image) => sum + image.data.length, 0) <= 6_000_000, 'Too much image data to keep.').optional() };
 export const savedChainSchema = z.object({ step: chainStep, stoppedAt: chainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer']).optional(), ...chainFields }).strict();
 /** A chain as Trace 1.20 saved it, with its Gemini seat's steps and flags (loading only; migrateWorkspace drops them). */
 const legacyChainSchema = z.object({ step: legacyChainStep, stoppedAt: legacyChainStep.optional(), blocked: z.enum(['planner', 'builder', 'reviewer', 'challenger']).optional(), ...chainFields, geminiReviewed: z.literal(true).optional(), compared: z.literal(true).optional(), firstFinding: z.number().int().min(0).max(50).optional() }).strict();
@@ -74,7 +75,14 @@ const sessionFields = {
   preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
   createdAt: z.string().datetime(),
 };
-const tableFields = { partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
+const seatDuty = z.enum(['plan', 'challenge', 'build', 'review', 'final']);
+/** What the person sets for a Round Table seat (shared/table-seats.ts SeatSettings); the limits are MAX_SEAT_NAME and MAX_SEAT_INSTRUCTIONS there. */
+const seatSettings = { name: z.string().min(1).max(40).optional(), instructions: z.string().min(1).max(4000).optional(), duties: z.array(seatDuty).min(1).max(5).optional() };
+const savedSeat = z.object({ session: identifier, ...seatSettings }).strict();
+const seatReference = runReferenceSchema.extend(seatSettings).strict();
+/** A table preset (shared/table-seats.ts TablePreset), kept in the preferences. Whether its seats make a table (checkSeats) is checked where it is used. */
+export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex']), model, ...seatSettings }).strict()).min(2).max(MAX_CHANNELS) }).strict();
+const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
 const tileSchema = z.object({
   sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),
   w: z.number().int().min(3).max(12), h: z.number().int().min(10).max(1000),
@@ -82,11 +90,11 @@ const tileSchema = z.object({
 }).strict();
 const workspaceShape = { version: z.literal(1), rootDirectory: directory.nullable(), tiles: z.array(tileSchema).min(1).max(MAX_CHANNELS), layoutMode: z.enum(['columns', 'rows', 'grid']), focusedSessionId: identifier.nullable() };
 /** Each channel has one tile (a Round Table's hidden seats have none), the focused one exists, and tiles fit and do not overlap. */
-function checkLayout(workspace: { sessions: { id: string; roundTable?: { partner: string; planner?: string; challenger?: string } }[]; tiles: z.infer<typeof tileSchema>[]; focusedSessionId: string | null }, context: z.RefinementCtx) {
+function checkLayout(workspace: { sessions: { id: string; roundTable?: { partner: string; planner?: string; challenger?: string; seats?: { session: string }[] } }[]; tiles: z.infer<typeof tileSchema>[]; focusedSessionId: string | null }, context: z.RefinementCtx) {
   const ids = new Set(workspace.sessions.map((session) => session.id));
   const tileIds = new Set(workspace.tiles.map((tile) => tile.sessionId));
   /** A Round Table's partner runs inside its lead's tile, so it has none (1.16.0 and 1.16.1 saved one; hydrate drops it). */
-  const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable ? [session.roundTable.partner, session.roundTable.planner, session.roundTable.challenger].filter((id): id is string => Boolean(id) && id !== session.id && ids.has(id!)) : []));
+  const seated = new Set(workspace.sessions.flatMap((session) => session.roundTable ? hiddenSeatIds(session.roundTable, session.id).filter((id) => ids.has(id)) : []));
   if (ids.size !== workspace.sessions.length || tileIds.size !== workspace.tiles.length || [...tileIds].some((id) => !ids.has(id)) || [...ids].some((id) => !seated.has(id) && !tileIds.has(id))) context.addIssue({ code: 'custom', message: 'Each channel must have exactly one grid tile.' });
   if (workspace.focusedSessionId && !ids.has(workspace.focusedSessionId)) context.addIssue({ code: 'custom', message: 'The focused channel does not exist.' });
   for (const tile of workspace.tiles) if (tile.x + tile.w > 12 || tile.w < tile.minW || tile.h < tile.minH) context.addIssue({ code: 'custom', message: 'Invalid grid dimensions.' });
@@ -131,13 +139,14 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
   runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional(), seats: z.array(seatReference).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-seats'), seats: z.array(seatReference).min(2).max(MAX_CHANNELS), driverSeat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-continue'), skipChallenge: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-next-drop'), index: z.number().int().min(0).max(9), head: z.string().min(1).max(200) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']), seat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-stop') }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-close') }).strict(),

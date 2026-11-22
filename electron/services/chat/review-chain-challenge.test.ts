@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent, SavedChain } from '../../../shared/chat';
 import type { TableHost } from './round-table';
-import { ReviewChains } from './review-chain';
+import { legacySeats, ReviewChains } from './review-chain';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -21,7 +21,7 @@ function setup(state: string | null = 'a'.repeat(64)) {
     chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } }); await settle();
   };
   const last = () => (events.filter((e) => e.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>).table!;
-  const open = (saved: { chain?: SavedChain } = {}) => chains.open(1, BUILDER, REVIEWER, PLANNER, { findings: [], ...saved });
+  const open = (saved: { chain?: SavedChain } = {}) => chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { findings: [], ...saved });
   return { chains, sent, reply, last, open };
 }
 

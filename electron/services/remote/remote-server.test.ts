@@ -797,6 +797,12 @@ describe('phone permissions and chat channels', () => {
     expect((await post(server, token, '/api/chat', open)).status).toBe(403);
     server.setCanRun(server.status().devices[0].id, true); expect((await post(server, token, '/api/chat', open)).status).toBe(200); expect(chats.at(-1)).toEqual(open);
     expect((await post(server, token, '/api/chat', { ...open, partner: { sessionId: 'elsewhere', runId: RUN } })).status).toBe(400);
+    // Every seat (from 1.26) must be a channel here, at opening and when the seats change.
+    expect((await post(server, token, '/api/chat', { ...open, seats: [ref, { sessionId: 's2', runId: RUN }, { sessionId: 'elsewhere', runId: RUN }] })).status).toBe(400);
+    const seats = { action: 'table-seats', ...ref, seats: [ref, { sessionId: 's2', runId: RUN, name: 'Reviewer' }] };
+    expect((await post(server, token, '/api/chat', seats)).status).toBe(200); expect(chats.at(-1)).toEqual(seats);
+    expect((await post(server, token, '/api/chat', { ...seats, seats: [ref, { sessionId: 'elsewhere', runId: RUN }] })).status).toBe(400);
+    server.setCanRun(server.status().devices[0].id, false); expect((await post(server, token, '/api/chat', seats)).status).toBe(403);
     // Eleven images, an unknown image type, extra fields, an unknown channel and a stale run are refused.
     expect((await post(server, token, '/api/chat', { action: 'send', ...ref, text: '', images: Array(11).fill(image) })).status).toBe(400);
     expect((await post(server, token, '/api/chat', { action: 'send', ...ref, text: 'x', images: [{ mediaType: 'image/svg+xml', data: 'PHN2Zz4=' }] })).status).toBe(400);

@@ -1,6 +1,6 @@
 {
   "name": "ai-coding-hub",
-  "version": "1.25.1",
+  "version": "1.26.0",
   "private": true,
   "description": "A local desktop workspace for Claude Code and Codex CLI sessions.",
   "main": "dist-electron/electron/entry.js",
@@ -34,6 +34,7 @@
     "test:models-stability": "npm run build && node scripts/models-stability-smoke.cjs",
     "test:remote": "npm run build && node scripts/remote-smoke.cjs",
     "test:paste": "npm run build && node scripts/paste-smoke.cjs",
+    "test:tables": "npm run build && node scripts/table-seats-smoke.cjs",
     "test:screen": "npm run build && node scripts/screen-smoke.cjs",
     "test:screen-service": "npm run build && node scripts/screen-service-smoke.cjs"
   },
@@ -49,6 +50,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/headless": "^6.0.0",
     "@xterm/xterm": "^6.0.0",

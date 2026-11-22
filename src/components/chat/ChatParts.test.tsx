@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ChatBlock } from '../../../shared/chat';
 import type { ChatItem, ToolResult } from '../../state/chat-store';
 import { Item, type ItemProps, sameItem, TableBar } from './ChatParts';
+import { seatViews } from './seat-view';
 
 const said = (id: string, text: string, streaming = ''): ChatItem => ({ kind: 'assistant', id, blocks: [{ type: 'text', text }], streaming });
 const answer = () => () => {}; const view = () => {};
@@ -81,10 +82,12 @@ describe('a Round Table message waiting to go', () => {
   });
 });
 
+
 describe('a Round Table bar and its token counts', () => {
   const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
+  const counted = (lead: number, partner: number) => seatViews(table, 'claude').map((seat, index) => ({ ...seat, tokens: index ? partner : lead }));
   it('keeps who drives and the counts in a tooltip as well as in the bar, so a narrow tile can take them out of the bar', () => {
-    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} tokens={{ lead: 12_400, partner: 800 }} onRequest={() => {}} />);
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={counted(12_400, 800)} onRequest={() => {}} />);
     expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews. New tokens today: Claude 12k · Codex 800">');
     expect(html).toContain('<span class="table-roles">Claude drives · Codex reviews</span>');
     expect(html).toMatch(/class="table-tokens tnum"[^>]*><b class="seat-text-claude">Claude 12k<\/b> · <b class="seat-text-codex">Codex 800<\/b>/);
