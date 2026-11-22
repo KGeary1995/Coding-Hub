@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { ArrowLeftRight, Asterisk, ChevronDown, ChevronRight, MessagesSquare, Settings2, Square, TerminalSquare, User, X } from 'lucide-react';
+import { ArrowLeftRight, Asterisk, ChevronDown, ChevronRight, MessagesSquare, Settings2, Sparkle, Square, TerminalSquare, User, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
 import { isTracePrompt, late, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
@@ -85,10 +85,10 @@ export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { 
   </div>;
 }
 
-export const AGENT = { claude: 'Claude', codex: 'Codex' } as const;
+export const AGENT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
 const PHASE = (many: boolean): Record<RoundTableState['phase'], string> => ({ joining: many ? 'Catching the others up' : 'Catching the other agent up', answering: many ? 'All answering' : 'Both answering', discussing: 'Discussing', idle: 'Your turn' });
 
-export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
+export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'gemini' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
 /**
  * Whether a message would draw the same: the store keeps a settled item's object while another streams, and the tool
  * results that matter are its own tool calls'. So a streamed piece, a keystroke in the message box or another channel's
@@ -175,7 +175,7 @@ export function useHint(field: RefObject<HTMLTextAreaElement>, hints: string[]) 
 }
 
 /** A seat's avatar glyph: the person, or the engine's mark as on its tile (a planner is a Claude model). */
-const SEAT_ICON = { you: User, claude: Asterisk, planner: Asterisk, codex: TerminalSquare } as const;
+const SEAT_ICON = { you: User, claude: Asterisk, planner: Asterisk, codex: TerminalSquare, gemini: Sparkle } as const;
 function SeatAvatar({ seat }: { seat: keyof typeof SEAT_ICON }) { const Icon = SEAT_ICON[seat]; return <i className={`seat-hex seat-${seat}`} aria-hidden="true"><Icon /></i>; }
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
@@ -226,7 +226,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
   // and each has a tooltip, as every control that shows only an icon has.
   const roles = `${driver.name} drives · ${joinNames(others.map((seat) => seat.name))} ${others.length === 1 ? 'reviews' : 'review'}`;
   const about = counted.length ? `${roles}. New tokens today: ${counted.map((seat) => `${seat.name} ${short(seat.tokens!)}`).join(' · ')}` : roles;
-  const swap = others[0]; const stopAll = many ? 'all' : 'both';
+  const swap = others[0]; const swapEngine = swap && swap.engine !== 'gemini' ? swap.engine : null; const stopAll = many ? 'all' : 'both';
   // Grouped, so a narrow tile wraps whole groups (who sits there; how the others are doing; who drives and Rounds; where it is and its buttons), never one control alone.
   return <div className="table-bar" role="group" aria-label="Round Table">
     <span className="table-group" title={about}>
@@ -237,8 +237,8 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
       {hidden.map((seat) => seat.state && <span key={seat.id} className={`table-partner ${seat.state === 'needs approval' ? 'waiting' : ''}`} title={`${seat.name} runs in the background in this channel`}><b className={`seat-text-${seat.colour}`}>{seat.name}</b> {seat.state}</span>)}
       {counted.length > 0 && <span className="table-tokens tnum" title="New tokens today in each agent's channel">{counted.map((seat, index) => <Fragment key={seat.id || index}>{index > 0 && ' · '}<b className={`seat-text-${seat.colour}`}>{seat.name} {short(seat.tokens!)}</b></Fragment>)}</span>}</span>}
     <span className="table-group">
-      {!many && swap && <button className="quiet-button small" title={`Let ${swap.name} edit files and make ${driver.name} the reviewer`} onClick={() => run({ action: 'table-driver', driver: swap.engine, ...(table.seats && swap.id ? { seat: swap.id } : {}) })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>}
-      {many && <label className="table-rounds" title="The agent that edits files; the others review and stay read-only"><span className="table-label">Edits files</span><select aria-label="Agent that edits files" value={driver.id} onChange={(event) => { const next = seats.find((seat) => seat.id === event.target.value); if (next) run({ action: 'table-driver', driver: next.engine, seat: next.id }); }}>{seats.map((seat) => <option key={seat.id} value={seat.id}>{seat.name}</option>)}</select></label>}
+      {!many && swap && swapEngine && <button className="quiet-button small" title={`Let ${swap.name} edit files and make ${driver.name} the reviewer`} onClick={() => run({ action: 'table-driver', driver: swapEngine, ...(table.seats && swap.id ? { seat: swap.id } : {}) })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>}
+      {many && <label className="table-rounds" title="The agent that edits files; the others review and stay read-only"><span className="table-label">Edits files</span><select aria-label="Agent that edits files" value={driver.id} onChange={(event) => { const next = seats.find((seat) => seat.id === event.target.value); if (next && next.engine !== 'gemini') run({ action: 'table-driver', driver: next.engine, seat: next.id }); }}>{seats.filter((seat) => seat.engine !== 'gemini').map((seat) => <option key={seat.id} value={seat.id}>{seat.name}</option>)}</select></label>}
       <label className="table-rounds" title={`Rounds: how many times each agent replies to the ${many ? 'others' : 'other'}`}><span className="table-label">Rounds</span><select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
       {onSeats && <button className="quiet-button small" disabled={busy} title={busy ? 'Seats can be changed when the Round Table is not working' : 'Add or remove agents, and change their names, instructions and models'} onClick={onSeats}><Settings2 size={13} /><span className="table-label">Seats</span></button>}</span>
     <span className="table-group table-end">

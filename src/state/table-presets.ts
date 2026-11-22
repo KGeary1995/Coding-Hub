@@ -15,7 +15,7 @@ export const leadIndex = (preset: TablePreset) => preset.kind === 'hierarchy' ? 
 export const checkPreset = (preset: TablePreset): string | null => {
   if (!preset.name.trim()) return 'Give the table a name.';
   if (preset.kind === 'discussion' && preset.driver !== undefined && (preset.driver < 0 || preset.driver >= preset.seats.length)) return 'The seat that edits is not at the table.';
-  return checkSeats(preset.kind, preset.seats, Math.max(0, leadIndex(preset)));
+  return checkSeats(preset.kind, preset.seats, Math.max(0, leadIndex(preset)), preset.kind === 'discussion' ? preset.driver ?? 0 : undefined);
 };
 
 /** Reads the latest preferences from the host, changes the person's presets, saves, and updates the window. The error message, or null. */

@@ -20,7 +20,7 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   /** A chat channel: its events arrive on the stream as `chat` (with a `chat-replay` first) and it is answered through /api/chat. */
   chat?: true;
   /** A Round Table: this chat leads one, and `table` is the other agent at it (from 1.16.3). */
-  table?: 'claude' | 'codex';
+  table?: 'claude' | 'codex' | 'gemini';
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
   account?: AccountLabel }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
@@ -109,7 +109,7 @@ export type RemoteRequest =
  * show it), the plan limits the CLIs last reported, and the daily budgets set in Settings (null when neither is set;
  * `warnAt` is the share, 0–1, at which Trace warns first). Only this computer: linked computers are not added in.
  */
-export interface RemoteUsage { day: string; tokens: { claude: number; codex: number }; cost: number | null; complete: boolean; limits: PlanLimits[]; budget: { tokens: number | null; dollars: number | null; warnAt: number } | null }
+export interface RemoteUsage { day: string; tokens: { claude: number; codex: number; /** From 1.28. */ gemini?: number }; cost: number | null; complete: boolean; limits: PlanLimits[]; budget: { tokens: number | null; dollars: number | null; warnAt: number } | null }
 /**
  * A task on this computer's board (GET /api/tasks). `status` names the board's columns: todo (To do, stored `queued`),
  * working (`active`), review and done. `channel` is its channel's place here (1-based), null when it has none or that

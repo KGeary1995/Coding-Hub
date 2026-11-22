@@ -18,6 +18,17 @@ describe('a workspace saved with Gemini channels', () => {
     expect(workspace!.tiles.map(({ sessionId, x, w }) => ({ sessionId, x, w }))).toEqual([{ sessionId: 'a', x: 0, w: 6 }, { sessionId: 'c', x: 6, w: 6 }]);
     expect(savedWorkspaceSchema.safeParse(workspace).success).toBe(true);
   });
+  it('keeps a Gemini CLI seat of today’s tables (named in the table’s seats), through loading and saving', () => {
+    const seat = { ...session('g', 'gemini'), config: { engine: 'gemini', model: 'gemini-4-neon-high', chat: true } };
+    const lead = { ...session('a', 'claude'), config: { ...config('claude'), chat: true }, roundTable: { partner: 'g', driver: 'claude', rounds: 1, seats: [{ session: 'a' }, { session: 'g' }], driverSeat: 'a' } };
+    const saved = savedWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [lead, seat], tiles: [tile('a', 0)] });
+    const { workspace, removedChannels } = migrateWorkspace(saved);
+    expect(removedChannels).toBe(0); expect(workspace!.sessions.map((item) => item.id)).toEqual(['a', 'g']); expect(workspace!.sessions[0].roundTable?.seats).toEqual([{ session: 'a' }, { session: 'g' }]);
+    expect(savedWorkspaceSchema.safeParse(workspace).success).toBe(true);
+    // The same Gemini chat with no table to seat it (its lead closed) is not a channel of its own, and goes.
+    const orphan = savedWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), seat], tiles: [tile('a', 0), tile('g', 4)] });
+    expect(migrateWorkspace(orphan).workspace!.sessions.map((item) => item.id)).toEqual(['a']);
+  });
   it('keeps the tiles as they were when no tile was removed', () => {
     const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), session('c', 'codex')], tiles: [tile('a', 0), tile('c', 4)] });
     expect(migrateWorkspace(saved).workspace!.tiles).toEqual(saved.tiles);

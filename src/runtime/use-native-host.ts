@@ -35,7 +35,7 @@ import { permissionsRefused, setPermissions } from './permissions';
 import { askForHandoff } from './auto-handoff';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatRun } from '../../shared/types';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -96,8 +96,8 @@ export function useNativeHost() {
       if (event.type === 'answered' && event.finished) { taskTurnDone(event.sessionId); void askForHandoff(event.sessionId).catch(() => {}); }
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
-      // A chat's thread: Claude Code's or Codex's.
-      const chatRun = before && isChatEngineConfig(before.config) && before.config.chat === true;
+      // A chat's thread: Claude Code's or Codex's, or a Round Table's Gemini seat.
+      const chatRun = before && isChatRun(before.config);
       if (event.type === 'started' && before && chatRun) chatStarted(event.sessionId, event.runId, isAgentConfig(before.config) && Boolean(before.config.resumeId));
       if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);

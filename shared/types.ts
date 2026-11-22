@@ -41,11 +41,18 @@ export interface CodexCLIEngineConfig {
 }
 
 /**
- * Gemini CLI (`agy`), always a terminal: no chat, shared memory or Round Table seat (the person's choice, 2026-11-18).
+ * Gemini CLI (`agy`): a terminal channel, with no chat channel of its own, shared memory or tasks. From 1.28 it can
+ * also sit at a Round Table (`chat`), as the person asked on 2026-11-22 (1.20 had a fixed Gemini seat, removed in 1.21).
  * `model` is an agy model ID, which names its effort too (gemini-4-neon-high); empty uses agy's own default.
  */
 export interface GeminiCLIEngineConfig {
   engine: 'gemini';
+  /**
+   * A Round Table seat (from 1.28): Gemini CLI's agent protocol server (`agy acp`) instead of its terminal, always in
+   * its plan mode. Only ever a hidden seat that reviews or plans: never a channel of its own, the table's lead, or the
+   * seat that edits. It has no shared memory or tasks (isChatEngineConfig stays false for it).
+   */
+  chat?: boolean;
   /** agy's conversation ID (`--conversation`). */
   resumeId?: string;
   permissions?: PermissionLevel;
@@ -56,6 +63,10 @@ export interface GeminiCLIEngineConfig {
 export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig | GeminiCLIEngineConfig;
 /** The engines with chat channels, shared memory, tasks and Round Table seats. */
 export type ChatEngine = 'claude' | 'codex';
+/** The agents that can sit at a Round Table: the chat engines, and Gemini CLI as a seat that reviews or plans. */
+export type SeatEngine = ChatEngine | 'gemini';
+/** A run driven through its structured protocol and drawn (or seated) by Trace, not a terminal: a chat channel, or a Gemini seat. */
+export const isChatRun = (config: ChannelConfig): boolean => config.engine !== 'shell' && config.chat === true;
 export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
 /** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */

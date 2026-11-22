@@ -30,7 +30,7 @@ export const legacySeats = (partnerRunId: string, plannerRunId: string): SeatInp
 const sameDuties = (a: readonly SeatDuty[], b: readonly SeatDuty[]) => a.length === b.length && a.every((duty) => b.includes(duty));
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex'; duties: SeatDuty[]; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
+interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex' | 'gemini'; duties: SeatDuty[]; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
   /** Still in a turn from before this table opened (Reopen while it worked): its `done` ends that old turn, never a step. */
   stale?: boolean }
 interface Chain {
@@ -149,7 +149,8 @@ export class ReviewChains {
     return {
       kind: 'hierarchy', seats: chain.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, duties: [...seat.duties], ...settings(seat) })),
       partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, planner: { sessionId: planner.sessionId, runId: planner.runId, engine: planner.engine as 'claude' },
-      driver: chain.builder.engine, rounds: chain.rounds, round: chain.reviewRound, phase: working ? 'answering' : 'idle', agreed: chain.verdict === 'approved',
+      // The builder leads, and a Gemini CLI seat never leads (checkSeats).
+      driver: chain.builder.engine as 'claude' | 'codex', rounds: chain.rounds, round: chain.reviewRound, phase: working ? 'answering' : 'idle', agreed: chain.verdict === 'approved',
       findings: chain.findings.map((finding) => ({ ...finding })),
       ...(chain.step === 'stopped' && this.busy(chain) ? { stopping: true } : {}),
       chain: { step: chain.step, ...(chain.stoppedAt ? { stoppedAt: chain.stoppedAt } : {}), ...(chain.blocked ? { blocked: this.kind(chain, chain.blocked), blockedSeat: chain.blocked.sessionId } : {}), ...(chain.turn && turnStep && TAKEN_IN_TURN.includes(turnStep) ? { turnSeat: chain.turn.sessionId } : {}),

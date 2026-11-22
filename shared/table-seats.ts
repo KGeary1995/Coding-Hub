@@ -5,7 +5,7 @@
  * Pure logic, shared by the host (round-table.ts, review-chain.ts), the window and the phone.
  */
 import { HIERARCHY_MODELS } from './chat';
-import type { ChatEngine } from './types';
+import type { SeatEngine } from './types';
 
 /**
  * What a hierarchy seat does. plan: writes the plan (and answers the challenges to it). challenge: challenges the plan
@@ -17,7 +17,13 @@ export const SEAT_DUTIES: readonly SeatDuty[] = ['plan', 'challenge', 'build', '
 export const DUTY_LABEL: Record<SeatDuty, string> = { plan: 'Plans', challenge: 'Challenges the plan', build: 'Builds', review: 'Reviews', final: 'Final review' };
 /** A seat's default name at a hierarchy table, from the first of its duties in this order. */
 const DUTY_NAME: [SeatDuty, string][] = [['build', 'Builder'], ['plan', 'Planner'], ['review', 'Reviewer'], ['challenge', 'Challenger'], ['final', 'Final reviewer']];
-const ENGINE_NAME: Record<ChatEngine, string> = { claude: 'Claude Code', codex: 'Codex' };
+const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+/**
+ * A Gemini CLI seat reviews or plans and never edits: Trace runs it in Gemini CLI's plan mode and declines its file
+ * changes. So it cannot lead a table (the lead's channel shows it, and a hierarchy's lead builds), be the discussion
+ * seat that edits, or build.
+ */
+export const GEMINI_SEAT_RULE = 'A Gemini CLI seat reviews or plans: it cannot lead the table, edit files or build.';
 export const MAX_SEAT_NAME = 40;
 export const MAX_SEAT_INSTRUCTIONS = 4000;
 export const MAX_TABLE_PRESETS = 20;
@@ -32,11 +38,11 @@ export interface SeatSettings { name?: string; instructions?: string; duties?: S
 /** A seat as saved with its table (SavedRoundTable.seats): the lead's own entry too, by session id. */
 export interface SavedSeat extends SeatSettings { session: string }
 /** A seat of an open table (RoundTableState.seats), the lead first. */
-export interface TableSeatState extends SeatSettings { sessionId: string; runId: string; engine: ChatEngine }
+export interface TableSeatState extends SeatSettings { sessionId: string; runId: string; engine: SeatEngine }
 /** A seat named in a request (table-open, table-seats): a running chat, with what the person set for it. */
 export interface SeatReference extends SeatSettings { sessionId: string; runId: string }
 /** A seat of a preset: started as a chat channel of this engine and model ('' for the CLI's default). */
-export interface TablePresetSeat extends SeatSettings { engine: ChatEngine; model: string }
+export interface TablePresetSeat extends SeatSettings { engine: SeatEngine; model: string }
 /**
  * A table the person can start again and again (HubPreferences.tablePresets, and the two built in). The lead, whose
  * channel shows the table, is the first seat at a discussion table and the builder at a hierarchy. `driver`: the index
@@ -78,8 +84,10 @@ export function savedSeats(table: { partner: string; planner?: string; kind?: 'h
  * exactly one builder (the lead, who does nothing else: it is the only seat that edits) and exactly one planner; at most
  * one seat gives the final review; challengers and reviewers are as many as the person likes, or none.
  */
-export function checkSeats(kind: TableKind, seats: readonly SeatSettings[], lead = 0): string | null {
+/** `driver`: the index of the discussion seat that edits, when the caller knows it. A seat's `engine`, when given, is held to GEMINI_SEAT_RULE. */
+export function checkSeats(kind: TableKind, seats: readonly (SeatSettings & { engine?: SeatEngine })[], lead = 0, driver?: number): string | null {
   if (seats.length < MIN_SEATS) return 'A Round Table needs at least two agents.';
+  if (seats[lead]?.engine === 'gemini' || (kind === 'discussion' && driver !== undefined && seats[driver]?.engine === 'gemini') || seats.some((seat) => seat.engine === 'gemini' && seat.duties?.includes('build'))) return GEMINI_SEAT_RULE;
   if (seats.length > MAX_SEATS) return `A Round Table seats at most ${MAX_SEATS} agents.`;
   for (const seat of seats) {
     if ((seat.name?.length ?? 0) > MAX_SEAT_NAME) return `A seat's name is at most ${MAX_SEAT_NAME} characters.`;
@@ -98,7 +106,7 @@ export function checkSeats(kind: TableKind, seats: readonly SeatSettings[], lead
 }
 
 /** A seat's name when the person gave none: what it does at a hierarchy table, its agent at a discussion table. */
-export function defaultSeatName(seat: { engine: ChatEngine; duties?: readonly SeatDuty[] }, kind: TableKind): string {
+export function defaultSeatName(seat: { engine: SeatEngine; duties?: readonly SeatDuty[] }, kind: TableKind): string {
   if (kind === 'hierarchy') for (const [duty, name] of DUTY_NAME) if (seat.duties?.includes(duty)) return name;
   return ENGINE_NAME[seat.engine];
 }
@@ -106,7 +114,7 @@ export function defaultSeatName(seat: { engine: ChatEngine; duties?: readonly Se
  * The name each seat goes by, in order: its own, or its default; two seats that would share a name are numbered
  * ("Reviewer", "Reviewer 2"), so a prompt or a label never leaves it open who is meant.
  */
-export function seatNames(seats: readonly { name?: string; engine: ChatEngine; duties?: readonly SeatDuty[] }[], kind: TableKind): string[] {
+export function seatNames(seats: readonly { name?: string; engine: SeatEngine; duties?: readonly SeatDuty[] }[], kind: TableKind): string[] {
   const seen = new Map<string, number>();
   return seats.map((seat) => {
     const base = seat.name?.trim() || defaultSeatName(seat, kind); const count = (seen.get(base.toLowerCase()) ?? 0) + 1; seen.set(base.toLowerCase(), count);

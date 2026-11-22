@@ -34,7 +34,7 @@ import { chatHistory, chatText, taskHistory } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
 import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment } from './services/cli/discovery';
-import { geminiConversationSince } from './services/cli/gemini-conversations';
+import { geminiConversationSince, geminiHome } from './services/cli/gemini-conversations';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
 import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
@@ -130,7 +130,9 @@ const channelAccount = (config: { engine: string; accountProfileId?: string }): 
 };
 /** Session and weekly usage limits for the Claude accounts and Codex, read from the CLIs without model requests. */
 /** Today's usage from the CLIs' own logs: the default homes and every Claude profile's. */
-const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? [], undefined, path.join(storageRoot, 'day-usage.json'));
+const dayUsage = new DayUsage(() => [{ engine: 'claude' as const, root: process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude') }, { engine: 'codex' as const, root: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') }, ...(() => { try { return claudeProfiles.list().map((profile) => ({ engine: 'claude' as const, root: claudeProfiles.directory(profile.id) })); } catch { return []; } })()], () => hub?.preferences().prices ?? [], undefined, path.join(storageRoot, 'day-usage.json'),
+  // Gemini CLI's own conversation files: its terminal channels' and Round Table seats' usage.
+  () => geminiHome());
 const planLimits = new PlanLimitsService(() => claudeProfiles.list(), (base, id) => claudeProfiles.environment(base, id), undefined, undefined, () => claudeProfiles.labels().default?.name ?? null);
 const accounts = new AccountLoginManager((owner, event) => sendToRenderer(IPC_CHANNELS.accountEvent, event, owner), { onEventError: () => hostHealth?.record('login-event-delivery-failed'), profiles: claudeProfiles, profileInUse: (id) => manager.usesProfile(id), openGuide: (url) => shell.openExternal(url) });
 // Live coaching's reviews run in its coaching folder; their sessions are kept so their usage counts, but are not history.

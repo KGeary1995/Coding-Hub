@@ -16,12 +16,12 @@ describe('engine model settings', () => {
 });
 
 describe('Gemini CLI channels, and the Gemini seat removed after 1.20', () => {
-  it('a Gemini CLI channel can be started and configured; a Gemini chat (1.20’s seat) cannot', () => {
-    for (const config of [{ engine: 'gemini', model: 'gemini-4-argon-high' }, { engine: 'gemini', model: '', permissions: 'ask', resumeId: '11111111-1111-4111-8111-111111111111' }]) {
+  it('a Gemini CLI channel can be started and configured, and so can a Gemini seat (1.20’s, back in 1.28)', () => {
+    for (const config of [{ engine: 'gemini', model: 'gemini-4-argon-high' }, { engine: 'gemini', model: '', permissions: 'ask', resumeId: '11111111-1111-4111-8111-111111111111' }, { engine: 'gemini', model: 'gemini-4-argon-high', chat: true }]) {
       expect(channelConfigSchema.safeParse(config).success).toBe(true);
       expect(startSessionSchema.safeParse({ sessionId: 'g1', cwd: '/p', config, cols: 80, rows: 24 }).success).toBe(true);
     }
-    for (const config of [{ engine: 'gemini', model: 'gemini-4-argon-high', chat: true }, { engine: 'gemini', model: '--yolo' }, { engine: 'gemini', model: 'm', memoryKey: 'k' }]) expect(channelConfigSchema.safeParse(config).success).toBe(false);
+    for (const config of [{ engine: 'gemini', model: '--yolo' }, { engine: 'gemini', model: 'm', memoryKey: 'k' }]) expect(channelConfigSchema.safeParse(config).success).toBe(false);
   });
   it('a table request no longer names a Gemini seat; Continue leaves out a challenge, not Gemini', () => {
     const run = { sessionId: 's', runId: '11111111-1111-4111-8111-111111111111' };

@@ -195,7 +195,9 @@ describe('Round Table presets in the preferences', () => {
     expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: [preset, { id: 'talk', name: 'Three agents', kind: 'discussion', rounds: 2, driver: 1, seats: [{ engine: 'claude', model: '' }, { engine: 'codex', model: '' }, { engine: 'claude', model: '' }] }] }).success).toBe(true);
     expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES }).success).toBe(true);
     expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: Array.from({ length: 21 }, (_, n) => ({ ...preset, id: `p${n}` })) }).success).toBe(false);
-    expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: [{ ...preset, seats: [{ engine: 'gemini', model: '' }, preset.seats[1]] }] }).success).toBe(false);
+    expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: [{ ...preset, seats: [{ engine: 'copilot', model: '' }, preset.seats[1]] }] }).success).toBe(false);
+    // A Gemini CLI seat can be kept in a preset (from 1.28); where it may sit is checkSeats' rule, not the file's.
+    expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: [{ ...preset, seats: [preset.seats[0], { engine: 'gemini', model: '' }] }] }).success).toBe(true);
     expect(preferencesSchema.safeParse({ ...DEFAULT_PREFERENCES, tablePresets: [{ ...preset, extra: true }] }).success).toBe(false);
   });
 });

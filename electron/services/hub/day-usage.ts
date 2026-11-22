@@ -2,9 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { localDay, LOG_DAYS, type DayUsage as DayUsageTotals, type LogDay, type LogUsage, type PriceRate, type UsageRecord } from '../../../shared/hub';
 import { subagentLogsAsync, usageCost } from './telemetry';
+import { geminiUsageFiles, readGeminiRequests } from './gemini-usage';
 
 type Json = Record<string, any>;
 type Engine = 'claude' | 'codex';
+/** Gemini CLI's usage is read from its conversation files (gemini-usage.ts), not from a log like the other two. */
+type AnyEngine = Engine | 'gemini';
+/** What one conversation file has added so far: its rows before the last are settled; the last one may still be growing, so it is read again and its earlier share (`tail`) taken off first. */
+interface GeminiFile { settled: number; mtime: number; tail: { day: string; model: string; tokens: Tokens } | null }
+/** Gemini CLI's files are looked at this often at most: each look opens the changed ones. */
+const GEMINI_EVERY = 15000;
 interface Tokens { input: number; output: number; cached: number; cacheWrite: number }
 /** Where a log was read to; for Codex, the session's running total so far and its model. */
 interface FileState { engine: Engine; offset: number; partial: Buffer; model: string; total: Tokens }
@@ -42,7 +49,9 @@ export class DayUsage {
   /** Tokens by day, engine and model. */
   private used = new Map<string, Map<string, Tokens>>();
   private complete = false; private reading: Promise<void> | null = null; private readAt = 0; private loaded = false; private dirty = false; private savedAt = 0; private saving: Promise<void> | null = null;
-  constructor(private sources: () => UsageSource[], private rates: () => PriceRate[], private now = () => new Date(), private file: string | null = null) {}
+  private gemini = new Map<string, GeminiFile>(); private geminiReadAt = 0;
+  /** `geminiHome`: Gemini CLI's data folder (null: none, as in most tests). */
+  constructor(private sources: () => UsageSource[], private rates: () => PriceRate[], private now = () => new Date(), private file: string | null = null, private geminiHome: () => string | null = () => null) {}
   /** Every day's totals from what has been read; `complete` is false while a read is still going (see `settled`). */
   days(): LogUsage {
     if (!this.reading && Date.now() - this.readAt >= FRESH) void this.refresh();
@@ -50,7 +59,7 @@ export class DayUsage {
     let rates: PriceRate[] = []; try { rates = this.rates(); } catch { /* Unpriced. */ }
     const days: LogUsage['days'] = {};
     for (const [key, models] of this.used) {
-      const [day, engine] = key.split('\n') as [string, Engine]; if (day < oldest) continue;
+      const [day, engine] = key.split('\n') as [string, AnyEngine]; if (day < oldest) continue;
       const entry = (days[day] ??= {}); const total: LogDay = entry[engine] ??= { input: 0, output: 0, cached: 0, cacheWrite: 0, cost: null };
       for (const [model, used] of models) {
         // `input` is input outside the cache: Codex counts cached input inside its input, Claude reports it separately.
@@ -63,8 +72,8 @@ export class DayUsage {
   /** Today's totals, for the status bar. */
   totals(): DayUsageTotals {
     const { days, complete } = this.days(); const day = localDay(this.now()); const today = days[day] ?? {};
-    const cost = [today.claude?.cost, today.codex?.cost].reduce<number | null>((sum, value) => value === null || value === undefined ? sum : (sum ?? 0) + value, null);
-    return { day, claude: today.claude ? today.claude.input + today.claude.cacheWrite + today.claude.output : 0, codex: today.codex ? today.codex.input + today.codex.output : 0, cost, complete };
+    const cost = [today.claude?.cost, today.codex?.cost, today.gemini?.cost].reduce<number | null>((sum, value) => value === null || value === undefined ? sum : (sum ?? 0) + value, null);
+    return { day, claude: today.claude ? today.claude.input + today.claude.cacheWrite + today.claude.output : 0, codex: today.codex ? today.codex.input + today.codex.output : 0, ...(today.gemini ? { gemini: today.gemini.input + today.gemini.output } : {}), cost, complete };
   }
   /** Reads what the logs gained since the last read; calls while one runs share it. Never rejects. */
   refresh(): Promise<void> {
@@ -88,7 +97,7 @@ export class DayUsage {
     const used: Record<string, Record<string, number[]>> = {}; for (const [key, models] of this.used) used[key] = Object.fromEntries([...models].map(([model, value]) => [model, list(value)]));
     const seen: Record<string, string[]> = {}; for (const [id, day] of this.seen) (seen[day] ??= []).push(id);
     // One name (saves run one at a time, and one Trace runs at a time), so a save cut short is overwritten by the next.
-    const text = JSON.stringify({ version: SAVED_VERSION, files, used, seen }); const target = this.file; const temporary = `${target}.tmp`;
+    const text = JSON.stringify({ version: SAVED_VERSION, files, used, seen, gemini: Object.fromEntries([...this.gemini].map(([file, state]) => [file, { settled: state.settled, mtime: state.mtime, tail: state.tail ? { day: state.tail.day, model: state.tail.model, tokens: list(state.tail.tokens) } : null }])) }); const target = this.file; const temporary = `${target}.tmp`;
     this.dirty = false; this.savedAt = Date.now();
     const write = async () => { await fs.promises.mkdir(path.dirname(target), { recursive: true, mode: 0o700 }); await fs.promises.writeFile(temporary, text, { mode: 0o600 }); await fs.promises.rename(temporary, target); };
     const next: Promise<void> = (this.saving ?? Promise.resolve()).then(write).catch(async () => { this.dirty = true; /* Saved again after the next read. */ await fs.promises.unlink(temporary).catch(() => {}); }).finally(() => { if (this.saving === next) this.saving = null; });
@@ -99,6 +108,7 @@ export class DayUsage {
     if (!this.loaded) { this.loaded = true; await this.load(); }
     const now = this.now(); const first = this.first(now); const oldest = localDay(first); const found = new Set<string>(); let cut = false;
     for (const source of this.sources()) { const candidates = await this.candidates(source, first.getTime(), now); cut ||= candidates.cut; for (const { file, size } of candidates.files) { found.add(file); await this.read(source.engine, file, size, oldest); } }
+    await this.readGemini(first.getTime(), oldest);
     // Logs that left the window, and replies and days older than it, are not needed again. A Codex rollout keeps its
     // running total until its date folder leaves the window: one listing without it (moved away and back, a failed stat)
     // must not read it again from its start with a zero total and count it twice. Claude replies count once by id.
@@ -118,11 +128,39 @@ export class DayUsage {
     try {
       if (saved?.version !== SAVED_VERSION) return;
       for (const [file, state] of Object.entries(saved.files as Record<string, Json>)) { if (count(state.offset) !== state.offset || typeof state.model !== 'string' || (state.engine !== 'claude' && state.engine !== 'codex')) throw new Error('Not a log.'); this.files.set(file, { engine: state.engine, offset: state.offset, partial: Buffer.alloc(0), model: state.model, total: tokens(state.total) }); }
-      for (const [key, models] of Object.entries(saved.used as Record<string, Record<string, unknown>>)) { if (!/^\d{4}-\d{2}-\d{2}\n(claude|codex)$/.test(key)) throw new Error('Not a day.'); this.used.set(key, new Map(Object.entries(models).map(([model, value]) => [model, tokens(value)]))); }
+      for (const [key, models] of Object.entries(saved.used as Record<string, Record<string, unknown>>)) { if (!/^\d{4}-\d{2}-\d{2}\n(claude|codex|gemini)$/.test(key)) throw new Error('Not a day.'); this.used.set(key, new Map(Object.entries(models).map(([model, value]) => [model, tokens(value)]))); }
       for (const [day, ids] of Object.entries(saved.seen as Record<string, unknown>)) { if (!Array.isArray(ids)) throw new Error('Not ids.'); for (const id of ids) if (typeof id === 'string') this.seen.set(id, day); }
-    } catch { this.files.clear(); this.used.clear(); this.seen.clear(); }
+      // Absent in a file saved before Gemini CLI's usage was read: its conversations are then read from their start.
+      for (const [file, state] of Object.entries((saved.gemini ?? {}) as Record<string, Json>)) { if (count(state.settled) !== state.settled || typeof state.mtime !== 'number') throw new Error('Not a conversation.'); this.gemini.set(file, { settled: state.settled, mtime: state.mtime, tail: state.tail ? { day: String(state.tail.day), model: String(state.tail.model), tokens: tokens(state.tail.tokens) } : null }); }
+    } catch { this.files.clear(); this.used.clear(); this.seen.clear(); this.gemini.clear(); }
   }
-  private add(day: string, engine: Engine, model: string, tokens: Tokens) {
+  /**
+   * Gemini CLI's requests since the last look, from the conversation files that changed (terminal channels and Round
+   * Table seats alike). A request counts on the day of the step it followed (the file's last change when it has none).
+   * One conversation is read between two turns of the event loop: its request records are a few megabytes at most.
+   */
+  private async readGemini(since: number, oldest: string) {
+    const home = this.geminiHome(); if (!home || Date.now() - this.geminiReadAt < GEMINI_EVERY) return; this.geminiReadAt = Date.now();
+    const present = new Set<string>();
+    for (const { file, mtime } of geminiUsageFiles(home, since)) {
+      present.add(file); const state = this.gemini.get(file) ?? { settled: 0, mtime: 0, tail: null }; if (state.mtime === mtime) continue;
+      await new Promise((resolve) => setImmediate(resolve));
+      const read = readGeminiRequests(file, state.settled); if (!read) continue;
+      const negative = (used: Tokens): Tokens => ({ input: -used.input, output: -used.output, cached: -used.cached, cacheWrite: 0 });
+      if (state.tail) this.add(state.tail.day, 'gemini', state.tail.model, negative(state.tail.tokens));
+      // Fewer rows than were counted: another file under the same name. What it holds now is not added to what the old one gave.
+      if (read.rows < state.settled) { this.gemini.set(file, { settled: read.rows, mtime, tail: null }); this.dirty = true; continue; }
+      let tail: GeminiFile['tail'] = null;
+      for (const request of read.requests) {
+        const day = localDay(new Date((request.at ?? mtime / 1000) * 1000)); if (day < oldest) continue;
+        const used = { input: request.input, output: request.output, cached: request.cached, cacheWrite: 0 }; this.add(day, 'gemini', request.model, used);
+        if (request.row === read.rows - 1) tail = { day, model: request.model, tokens: used };
+      }
+      this.gemini.set(file, { settled: Math.max(0, read.rows - 1), mtime, tail }); this.dirty = true;
+    }
+    for (const file of this.gemini.keys()) if (!present.has(file)) { this.gemini.delete(file); this.dirty = true; }
+  }
+  private add(day: string, engine: AnyEngine, model: string, tokens: Tokens) {
     const key = `${day}\n${engine}`; let models = this.used.get(key); if (!models) { models = new Map(); this.used.set(key, models); }
     const used = models.get(model) ?? zero(); for (const name of ['input', 'output', 'cached', 'cacheWrite'] as const) used[name] += tokens[name]; models.set(model, used);
   }

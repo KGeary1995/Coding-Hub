@@ -106,7 +106,8 @@ export interface RoundTableState {
   chain?: SavedChain;
   /** A hierarchy table was stopped and a seat's interrupted turn has not ended yet: Continue waits for it. */
   stopping?: boolean;
-  partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' };
+  /** `gemini` from 1.28: a Gemini CLI seat can be the first other seat. */
+  partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' | 'gemini' };
   driver: 'claude' | 'codex'; rounds: number; round: number;
   /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */
   phase: 'joining' | 'answering' | 'discussing' | 'idle';

@@ -14,7 +14,7 @@ export const FROM_PHONE: Record<RemoteTaskStatus, Task['status']> = { todo: 'que
 
 export function remoteUsage(today: DayUsage, limits: PlanLimits[], budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null): RemoteUsage {
   const set = budget && (budget.dailyTokens || budget.dailyCost);
-  return { day: today.day, tokens: { claude: today.claude, codex: today.codex }, cost: today.cost, complete: today.complete, limits,
+  return { day: today.day, tokens: { claude: today.claude, codex: today.codex, ...(today.gemini ? { gemini: today.gemini } : {}) }, cost: today.cost, complete: today.complete, limits,
     budget: set ? { tokens: budget.dailyTokens || null, dollars: budget.dailyCost || null, warnAt: (budget.limitWarning ?? DEFAULT_WARNING) / 100 } : null };
 }
 /** Newest change first; `channel` from the channel's place in this computer's workspace. */

@@ -2,9 +2,9 @@ import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../
 import { HubError } from '../cli/engine-adapter';
 import type { PermissionLevel } from '../../../shared/types';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
-import { checkSeats, seatNames, type SeatSettings, type TableKind } from '../../../shared/table-seats';
+import { checkSeats, GEMINI_SEAT_RULE, seatNames, type SeatSettings, type TableKind } from '../../../shared/table-seats';
 
-type Engine = 'claude' | 'codex';
+type Engine = 'claude' | 'codex' | 'gemini';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
 export interface TableHost {
   /** `permissions`: the level the person set for the run; at Full a read-only seat runs its commands without asking. */
@@ -21,7 +21,7 @@ export interface TableHost {
 /** A seat named for a table (table-open, table-seats): a running chat, with what the person set for it. Its session is read from the run (pty-manager checks a request's pair). */
 export interface SeatInput extends SeatSettings { runId: string; sessionId?: string }
 
-export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
 /** Names in a sentence: "A", "A and B", "A, B and C". */
 export const list = (names: readonly string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 /**
@@ -133,6 +133,8 @@ export class RoundTables {
   /** The seat that edits: a seat's session id, or (as before 1.26) an engine, meaning the first seat of that agent. */
   private driverOf(seats: Seat[], driver: string): Seat {
     const seat = seats.find((each) => each.sessionId === driver) ?? seats.find((each) => each.engine === driver);
+    // A Gemini CLI seat runs in plan mode and has its edits declined: it is never the seat that edits.
+    if (seat?.engine === 'gemini') throw new HubError('TABLE_DRIVER', GEMINI_SEAT_RULE);
     if (seat) return seat;
     // An engine no seat has (a table of two Claudes asked for Codex): the lead drives, as the table's own channel.
     if (driver === 'claude' || driver === 'codex') return seats[0];
@@ -141,7 +143,7 @@ export class RoundTables {
   private state(table: Table): RoundTableState {
     const partner = table.seats[1];
     return { seats: table.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, ...settings(seat) })), driverSeat: table.driver.sessionId,
-      partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, driver: table.driver.engine, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
+      partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, driver: table.driver.engine as 'claude' | 'codex', rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
   }
   /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64; beyond that they are counted as dropped. */
   private keptImages(images: ChatImage[]) {

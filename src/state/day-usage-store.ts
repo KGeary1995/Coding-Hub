@@ -31,6 +31,6 @@ export async function refreshDayUsage() {
  * are read every few seconds, and a long day's first read takes more than one pass).
  */
 export function dayTotal(logs: DayUsage | null, trace: { tokens: number; cost: number | null }, now = new Date()) {
-  const fromLogs = logs && logs.day === localDay(now) ? logs.claude + logs.codex : null;
+  const fromLogs = logs && logs.day === localDay(now) ? logs.claude + logs.codex + (logs.gemini ?? 0) : null;
   return fromLogs === null || fromLogs < trace.tokens ? { ...trace, logs: null } : { tokens: fromLogs, cost: logs!.cost, logs };
 }

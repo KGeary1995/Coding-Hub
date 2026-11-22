@@ -1,5 +1,5 @@
 import { BUILT_IN_PRESETS, checkSeats, isBuiltInPreset, seatNames, type SeatDuty, type TableKind, type TablePreset, type TablePresetSeat } from '../../../shared/table-seats';
-import type { ChatEngine, Session } from '../../../shared/types';
+import type { ChatEngine, SeatEngine, Session } from '../../../shared/types';
 import { modelValue } from '../../../shared/schemas';
 import type { EditableSeat, SeatPlan } from '../../runtime/round-table';
 import { leadIndex } from '../../state/table-presets';
@@ -12,7 +12,7 @@ import { modelProblem } from './seat-model';
  */
 export type SetupMode = { type: 'new'; table?: TableKind } | { type: 'chat'; leadId: string } | { type: 'edit'; leadId: string };
 export interface DraftSeat {
-  key: string; engine: ChatEngine; /** As typed; blank is the CLI's default. */ model: string; name: string; instructions: string; duties: SeatDuty[];
+  key: string; engine: SeatEngine; /** As typed; blank is the CLI's default. */ model: string; name: string; instructions: string; duties: SeatDuty[];
   /** The channel's session, for a seat that exists already. */
   session?: string; lead: boolean;
   /** Its agent cannot change: a seat that exists, or the channel a table is started on. */ keepsAgent: boolean;
@@ -55,7 +55,7 @@ export const toPlan = (draft: Draft): SeatPlan => ({ seats: draft.seats.map((sea
 /** Why this draft cannot be started or applied, in words for the person, or null. */
 export function draftProblem(draft: Draft): string | null {
   for (const seat of draft.seats) { const why = modelProblem(seat.model); if (why) return why; }
-  const why = checkSeats(draft.kind, draft.seats.map((seat) => seatOf(seat, draft.kind)), Math.max(0, draft.seats.findIndex((seat) => seat.lead)));
+  const why = checkSeats(draft.kind, draft.seats.map((seat) => seatOf(seat, draft.kind)), Math.max(0, draft.seats.findIndex((seat) => seat.lead)), draft.kind === 'discussion' ? draft.driver : undefined);
   if (why) return why;
   if (draft.kind === 'discussion' && !draft.seats[draft.driver]) return 'Choose the agent that edits files.';
   const [low, high] = roundsRange(draft.kind);

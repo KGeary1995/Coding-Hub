@@ -44,7 +44,8 @@ export const memoryKeySchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}
 const memoryKey = memoryKeySchema.optional();
 /** A Gemini CLI channel (1.19 saved the same fields, so its channels load as they are). */
 const geminiFields = { engine: z.literal('gemini'), resumeId: z.uuid().optional(), permissions, model };
-const geminiConfigSchema = z.object(geminiFields).strict();
+/** `chat`: a Round Table seat (1.20, and again from 1.28). */
+const geminiConfigSchema = z.object({ ...geminiFields, chat: z.boolean().optional() }).strict();
 /** Claude Code and Codex, the engines with chats, memory and Round Table seats. */
 const chatEngineOptions = [
   z.object({ engine: z.literal('claude'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), accountProfileId: z.uuid().optional(), permissions, chrome: z.boolean().optional(), memoryKey, model, thinking: z.object({ budget_tokens: tokens }).strict(), tokenLimits: z.object({ maxOutputTokens: tokens, maxSessionTokens: tokens }).strict() }).strict(),
@@ -81,7 +82,7 @@ const seatSettings = { name: z.string().min(1).max(40).optional(), instructions:
 const savedSeat = z.object({ session: identifier, ...seatSettings }).strict();
 const seatReference = runReferenceSchema.extend(seatSettings).strict();
 /** A table preset (shared/table-seats.ts TablePreset), kept in the preferences. Whether its seats make a table (checkSeats) is checked where it is used. */
-export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex']), model, ...seatSettings }).strict()).min(2).max(MAX_CHANNELS) }).strict();
+export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex', 'gemini']), model, ...seatSettings }).strict()).min(2).max(MAX_CHANNELS) }).strict();
 const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
 const tileSchema = z.object({
   sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),

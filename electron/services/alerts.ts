@@ -33,7 +33,7 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 export function usageAlerts(today: DayUsage, limits: PlanLimits[], preferences: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'>, warned: Set<string>): DesktopAlert[] {
   const alerts: DesktopAlert[] = []; const warning = (preferences.limitWarning ?? DEFAULT_WARNING) / 100;
   const once = (key: string, alert: DesktopAlert) => { if (warned.has(key)) return; warned.add(key); alerts.push(alert); };
-  const tokens = today.claude + today.codex;
+  const tokens = today.claude + today.codex + (today.gemini ?? 0);
   const budget = (kind: 'tokens' | 'cost', used: number | null, limit: number | null | undefined, text: (value: number) => string) => {
     if (!limit || used === null) return;
     const share = used / limit; const level = share >= 1 ? 100 : share >= warning ? Math.round(warning * 100) : 0; if (!level) return;

@@ -7,7 +7,7 @@ const A = '11111111-1111-4111-8111-111111111111'; const B = '22222222-2222-4222-
 
 /** Four running chats in one folder (Claude, Codex, Claude, Codex); records what the coordinator sends and sets. */
 function setup() {
-  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number; busy?: boolean; permissions?: 'ask' | 'edits' | 'full' }> = {
+  const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex' | 'gemini'; cwd: string; owner: number; busy?: boolean; permissions?: 'ask' | 'edits' | 'full' }> = {
     [A]: { sessionId: 'a', engine: 'claude', cwd: '/p', owner: 1 }, [B]: { sessionId: 'b', engine: 'codex', cwd: '/p', owner: 1 },
     [C]: { sessionId: 'c', engine: 'claude', cwd: '/p', owner: 1 }, [D]: { sessionId: 'd', engine: 'codex', cwd: '/p', owner: 1 },
   };
@@ -58,6 +58,19 @@ describe('a discussion table with three seats', () => {
     tables.setDriver(A, 'b'); expect(modes).toEqual({ [A]: true, [B]: false, [C]: true });
     tables.setDriver(A, 'claude'); expect(modes).toEqual({ [A]: false, [B]: true, [C]: true });
     expect(() => tables.setDriver(A, 'nobody')).toThrow(/must sit at this Round Table/);
+  });
+  it('seats a Gemini CLI agent as a reviewer: it hears the others, its edits are declined, and it is never the seat that edits', () => {
+    const { tables, runs, modes, answers, ask, reply, to, last } = setup(); runs[B].engine = 'gemini';
+    tables.open(1, A, [{ sessionId: 'a', runId: A }, { sessionId: 'b', runId: B }], 'a', 1);
+    expect(modes).toEqual({ [A]: false, [B]: true }); expect(last().seats!.map((seat) => seat.engine)).toEqual(['claude', 'gemini']);
+    // What Gemini CLI asks to write (its protocol names any file change so) is declined, as for any reviewer.
+    expect(ask(B, 'r1', 'File changes')).toBe('Trace declined File changes for Gemini CLI: the reviewer does not edit files. Swap the driver to let it.');
+    expect(answers).toEqual([{ runId: B, requestId: 'r1', allow: false }]);
+    expect(() => tables.setDriver(A, 'b')).toThrow(/Gemini CLI seat reviews or plans/); expect(() => tables.setDriver(A, 'gemini')).toThrow(/Gemini CLI seat reviews or plans/);
+    // A message goes to both, and each then reads what the other said.
+    tables.send(A, 'What is this project?', []); expect(to(B).at(-1)!.text).toContain('What is this project?');
+    reply(A, 'A scratch project.'); reply(B, 'About lighthouses.');
+    expect(to(A).at(-1)!.text).toContain('About lighthouses.'); expect(to(B).at(-1)!.text).toContain('A scratch project.');
   });
   it('records every reviewer’s findings and the driver’s answers', async () => {
     const { tables, reply, last } = setup(); tables.open(1, A, three, 'a', 1);
