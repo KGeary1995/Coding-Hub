@@ -5,6 +5,7 @@ import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
 import { isAgentConfig } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
 import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
+import { hiddenSeatIds, savedSeats, type SavedSeat } from '../../shared/table-seats';
 
 export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
@@ -37,36 +38,38 @@ export function createSession(engine: ChannelEngine, binding: WorkspaceBinding =
 }
 
 /**
- * Chat channels seated at another channel's Round Table (the lead's saved `roundTable.partner`). They run in the
- * background with no tile, number or alert of their own: the lead's tile carries the table. Tables saved by 1.16
+ * Chat channels seated at another channel's Round Table (every saved seat but the lead's own: `roundTable.seats`, or the
+ * `partner` and `planner` of a table saved before 1.26). They run in the background with no tile, number or alert of their own: the lead's tile carries the table. Tables saved by 1.16
  * name their partner the same way, so those partners are hidden on load too.
  */
 export function seatedIds(sessions: Session[]) {
   const ids = new Set<string>();
-  for (const session of sessions) for (const seat of session.roundTable ? [session.roundTable.partner, session.roundTable.planner] : []) if (seat && seat !== session.id && sessions.some((item) => item.id === seat)) ids.add(seat);
+  for (const session of sessions) for (const seat of session.roundTable ? hiddenSeatIds(session.roundTable, session.id) : []) if (sessions.some((item) => item.id === seat)) ids.add(seat);
   return ids;
 }
 /** The channels the person sees, in tile order: every session but seated partners (the same array when there are none). */
 export function channelsOf(sessions: Session[]) { const seated = seatedIds(sessions); return seated.size ? sessions.filter((session) => !seated.has(session.id)) : sessions; }
 /** The channel whose Round Table this session sits at, if it is a seated partner. */
-export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && (session.roundTable?.partner === id || session.roundTable?.planner === id)) ?? null;
+export const leadOf = (sessions: Session[], id: string) => sessions.find((session) => session.id !== id && session.roundTable && hiddenSeatIds(session.roundTable, session.id).includes(id)) ?? null;
 /** The hidden planner of a channel that leads a hierarchy Round Table. */
 export const plannerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable?.planner ? sessions.find((session) => session.id === lead.roundTable!.planner && session.id !== id) ?? null : null; };
-/** Every hidden seat at the Round Table a channel leads: its partner (reviewer) and planner, those it has. */
-export const hiddenSeats = (sessions: Session[], id: string) => [partnerOf(sessions, id), plannerOf(sessions, id)].filter((seat): seat is Session => Boolean(seat));
+/** Every hidden seat at the Round Table a channel leads, in saved order, those that still exist. */
+export const hiddenSeats = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable ? hiddenSeatIds(lead.roundTable, id).flatMap((seat) => sessions.find((session) => session.id === seat) ?? []) : []; };
+/** The seats a channel's table has, the lead first, each with its session (null when that channel is gone): what the person set for it, and who it is. */
+export const seatsOf = (sessions: Session[], leadId: string): { seat: SavedSeat; session: Session | null }[] => { const lead = sessions.find((session) => session.id === leadId); return lead?.roundTable ? savedSeats(lead.roundTable, leadId).map((seat) => ({ seat, session: sessions.find((session) => session.id === seat.session) ?? null })) : []; };
 /** A session's channel number as the person sees it (a Round Table's partner goes by its lead's), or 0 for none. */
 export const channelNumber = (sessions: Session[], id: string | null) => id ? channelsOf(sessions).findIndex((session) => session.id === (leadOf(sessions, id)?.id ?? id)) + 1 : 0;
-/** The hidden partner of a channel that leads a Round Table. */
+/** The hidden partner (the first other seat) of a channel that leads a Round Table. */
 export const partnerOf = (sessions: Session[], id: string) => { const lead = sessions.find((session) => session.id === id); return lead?.roundTable ? sessions.find((session) => session.id === lead.roundTable!.partner && session.id !== id) ?? null : null; };
 /**
- * The folder a Round Table's lead must start in: its partner's, when the partner has a folder of its own. Hidden seats
+ * The folder a Round Table's lead must start in: a hidden seat's, when it has a folder of its own. Hidden seats
  * keep the folder they were seated in; a lead that follows the workspace root would otherwise start elsewhere after the
  * root changed, and the host refuses to seat agents in different folders. Null for anything else.
  */
 export function tableDirectory(sessions: Session[], session: Session): string | null {
   if (!session.roundTable) return null;
-  const partner = partnerOf(sessions, session.id);
-  return partner?.binding.mode === 'independent' ? partner.binding.cwd : null;
+  const seat = hiddenSeats(sessions, session.id).find((item) => item.binding.mode === 'independent');
+  return seat?.binding.mode === 'independent' ? seat.binding.cwd : null;
 }
 /**
  * Why no channel can be added: every session counts toward the eight, a hidden Round Table partner too (it is a running
@@ -75,7 +78,7 @@ export function tableDirectory(sessions: Session[], session: Session): string | 
 export function channelsFullNote(sessions: Session[]) {
   if (sessions.length < MAX_CHANNELS) return null;
   return seatedIds(sessions).size
-    ? `This computer already runs ${MAX_CHANNELS} agents and terminals, the most Trace runs at once (a Round Table runs two agents in one channel). Close a channel first.`
+    ? `This computer already runs ${MAX_CHANNELS} agents and terminals, the most Trace runs at once (a Round Table runs several agents in one channel). Close a channel first.`
     : `This computer already has ${MAX_CHANNELS} channels. Close one there first.`;
 }
 
@@ -253,7 +256,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const sessions = state.sessions.filter((session) => !gone.has(session.id)).map((session) => {
       if (!session.roundTable) return session;
       // Findings not yet saved to shared memory stay on the record (Needs you saves them), as a closed table's do.
-      if (gone.has(session.roundTable.partner) || (session.roundTable.planner && gone.has(session.roundTable.planner))) return session.roundTable.findings?.length ? session : { ...session, roundTable: undefined };
+      if (hiddenSeatIds(session.roundTable, session.id).some((seat) => gone.has(seat))) return session.roundTable.findings?.length ? session : { ...session, roundTable: undefined };
       return session;
     });
     return {
@@ -278,8 +281,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorkspace {
   return {
     version: 1, rootDirectory: state.rootDirectory,
-    // A table whose partner is gone is not saved, unless it still holds findings that could not be saved to memory.
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && (state.sessions.some((item) => item.id === roundTable.partner) || roundTable.findings?.length) ? { roundTable } : {}) })),
+    // A table whose hidden seats are all gone is not saved, unless it still holds findings that could not be saved to memory.
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && (hiddenSeatIds(roundTable, id).some((seat) => state.sessions.some((item) => item.id === seat)) || roundTable.findings?.length) ? { roundTable } : {}) })),
     // Saved tiles always match the channels, whichever path added or removed a hidden seat.
     tiles: fitTiles(state.sessions, state.tiles, state.layoutMode), layoutMode: state.layoutMode,
     focusedSessionId: state.focusedSessionId && channelsOf(state.sessions).some((session) => session.id === state.focusedSessionId) ? state.focusedSessionId : null,

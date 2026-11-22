@@ -20,10 +20,13 @@ import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
-import { ReviewChains } from '../chat/review-chain';
+import { legacySeats, ReviewChains } from '../chat/review-chain';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
-import type { ChatEnvelope, ChatEvent } from '../../../shared/chat';
+import type { ChatEnvelope, ChatEvent, RoundTableState } from '../../../shared/chat';
 import { repositoryState } from '../workbench/repository-state';
+
+/** The runs of a table's seats other than its lead, which have no tile of their own. */
+const hiddenRuns = (table: RoundTableState) => (table.seats ?? []).slice(1).map((seat) => seat.runId);
 
 function canonical(directory: string) {
   let resolved = path.resolve(directory); try { resolved = realpathSync(resolved); } catch { /* Missing paths compare as given. */ }
@@ -365,6 +368,8 @@ export class PtyManager {
     });
   }
   private seated(runIds: string[]) { try { this.dependencies.onSeated?.(runIds); } catch { this.dependencies.onEventError?.(); } }
+  /** A run sits at one table at a time: refused if any of these already sits at a table of the other kind (each kind checks its own). */
+  private notSeated(runIds: string[], other: { isSeated(runId: string): boolean }) { if (runIds.some((runId) => other.isSeated(runId))) throw new HubError('TABLE_TAKEN', 'One of these chats is already at a Round Table.'); }
   /** `remote`: from a phone or linked computer, so the person's message is marked for the window to add (it did not send it). */
   private chatRequest(payload: unknown, remote: boolean, find: (reference: { sessionId: string; runId: string }) => ManagedRun) {
     const parsed = chatRequestSchema.safeParse(payload);
@@ -386,18 +391,29 @@ export class PtyManager {
       if (remote) throw new HubError('PERMISSIONS_LOCAL', 'Change an agent’s permissions on the computer it runs on.');
       run.chat.setPermissions(request.level);
     }
-    else if (request.action === 'table-open' && request.kind === 'hierarchy') {
-      // A hierarchy seats three runs of one window: the builder (this chat), the reviewer (partner) and the planner.
-      if (!request.planner) throw new HubError('TABLE_PLANNER', 'A hierarchy Round Table needs its planner chat.');
-      if (find(request.partner).owner !== owner || find(request.planner).owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
-      this.chains.open(owner, request.runId, request.partner.runId, request.planner.runId, { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}), ...(request.chain ? { chain: request.chain } : {}) });
-      this.seated([request.partner.runId, request.planner.runId]);
-    }
     else if (request.action === 'table-open') {
-      // Both agents' runs belong to the same window, which shows the table.
-      if (find(request.partner).owner !== owner) throw new HubError('STALE_SESSION', 'That partner channel is not in the same window.');
-      this.tables.open(owner, request.runId, request.partner.runId, request.driver, request.rounds, { ...(request.rejoin ? { rejoin: true } : {}), ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) });
-      this.seated([request.partner.runId]);
+      // Every seat's run belongs to the window that shows the table; the lead's own entry (if listed) is this chat.
+      for (const seat of request.seats ?? [request.partner, ...(request.planner ? [request.planner] : [])]) if (find(seat).owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
+      const saved = { ...(request.findings ? { findings: request.findings } : {}), ...(request.waiting !== undefined ? { waiting: request.waiting } : {}), ...(request.waitingImages?.length ? { waitingImages: request.waitingImages } : {}) };
+      let table: RoundTableState;
+      if (request.kind === 'hierarchy') {
+        // Without `seats` (before 1.26): the builder (this chat), the reviewer (partner) and the planner.
+        if (!request.seats && !request.planner) throw new HubError('TABLE_PLANNER', 'A hierarchy Round Table needs its planner chat.');
+        const seats = request.seats ?? legacySeats(request.partner.runId, request.planner!.runId);
+        this.notSeated([request.runId, ...seats.map((seat) => seat.runId)], this.tables);
+        table = this.chains.open(owner, request.runId, seats, { ...saved, ...(request.chain ? { chain: request.chain } : {}), rounds: request.rounds });
+      } else {
+        const seats = request.seats ?? [request.partner];
+        this.notSeated([request.runId, ...seats.map((seat) => seat.runId)], this.chains);
+        table = this.tables.open(owner, request.runId, seats, request.driverSeat ?? request.driver, request.rounds, { ...(request.rejoin ? { rejoin: true } : {}), ...saved });
+      }
+      this.seated(hiddenRuns(table));
+    }
+    else if (request.action === 'table-seats') {
+      for (const seat of request.seats) if (find(seat).owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
+      const hierarchy = this.chains.has(request.runId);
+      this.notSeated(request.seats.map((seat) => seat.runId).filter((runId) => runId !== request.runId), hierarchy ? this.tables : this.chains);
+      this.seated(hiddenRuns(hierarchy ? this.chains.setSeats(request.runId, request.seats) : this.tables.setSeats(request.runId, request.seats, request.driverSeat)));
     }
     else if (request.action === 'table-send') {
       if (!request.text.trim() && !request.images.length) throw new HubError('EMPTY_MESSAGE', 'Write a message or attach an image.');
@@ -408,14 +424,15 @@ export class PtyManager {
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
     else if (request.action === 'table-next-drop') { if (!this.chains.has(request.runId)) throw new HubError('TABLE_STEP', 'Only a hierarchy Round Table keeps tasks from Tasks waiting.'); this.chains.dropNext(request.runId, request.index, request.head); }
     else if (this.chains.has(request.runId)) {
-      // A hierarchy's roles and rounds are fixed; the rest works as at any table.
+      // Only the builder edits at a hierarchy; the rest works as at any table.
       if (request.action === 'table-waiting') this.chains.waiting(request.runId, request.send);
+      else if (request.action === 'table-rounds') this.chains.setRounds(request.runId, request.rounds);
       else if (request.action === 'table-stop') this.chains.stop(request.runId);
       else if (request.action === 'table-close') this.chains.close(request.runId);
-      else throw new HubError('TABLE_FIXED', 'A hierarchy Round Table has fixed roles and rounds.');
+      else throw new HubError('TABLE_FIXED', 'At a hierarchy Round Table only the builder edits files, and the builder is the channel that shows the table. To have another agent edit, open the table from that agent’s channel.');
     }
     else if (request.action === 'table-waiting') this.tables.waiting(request.runId, request.send);
-    else if (request.action === 'table-driver') this.tables.setDriver(request.runId, request.driver);
+    else if (request.action === 'table-driver') this.tables.setDriver(request.runId, request.seat ?? request.driver);
     else if (request.action === 'table-rounds') this.tables.setRounds(request.runId, request.rounds);
     else if (request.action === 'table-stop') this.tables.stop(request.runId);
     else this.tables.close(request.runId);

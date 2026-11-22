@@ -1,6 +1,7 @@
 import type { Session } from '../../shared/types';
 import { freshInput, localDay, newTokens, type UsageRecord } from '../../shared/hub';
-import { channelsOf, hiddenSeats, leadOf } from './workspace-store';
+import { seatNames } from '../../shared/table-seats';
+import { channelsOf, hiddenSeats, leadOf, seatsOf } from './workspace-store';
 
 /** What a session is doing, as the Midnight design shows it (docs/design/midnight/README.md, section 5). */
 export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
@@ -52,12 +53,18 @@ export function usageFor(session: Session, records: UsageRecord[]) {
   return session.runId ? records.find((record) => record.runId === session.runId) : undefined;
 }
 
+/** What a hidden seat is called in an alert: the name the person gave it, what it does at a hierarchy table, else its agent. */
+function seatLabel(sessions: Session[], lead: Session, seat: Session) {
+  const kind = lead.roundTable?.kind ?? 'discussion'; const seats = seatsOf(sessions, lead.id); const index = seats.findIndex((item) => item.seat.session === seat.id);
+  const names = seatNames(seats.map((item) => ({ ...item.seat, engine: item.session?.config.engine === 'codex' ? 'codex' as const : 'claude' as const })), kind);
+  return index >= 0 && (seats[index].seat.name?.trim() || kind === 'hierarchy') ? names[index] : seat.config.engine === 'codex' ? 'Codex' : 'Claude';
+}
 export interface ChannelAlert { sessionId: string; channel: number; state: 'waiting' | 'failed' | 'limit'; text: string }
 
 /**
  * Channels that need the person: waiting first, then failed, then near a limit. Channel numbers follow tile order. A
- * Round Table's hidden partner is reported under its lead's number and named, and `sessionId` stays the partner's (its
- * approval is answered in the lead's tile, which jumpToChannel opens; Retry starts the partner).
+ * Round Table's hidden seat is reported under its lead's number and named, and `sessionId` stays the seat's (its
+ * approval is answered in the lead's tile, which jumpToChannel opens; Retry starts the seat).
  */
 export function channelAlerts(sessions: Session[], records: UsageRecord[]): ChannelAlert[] {
   const order = { waiting: 0, failed: 1, limit: 2 } as const;
@@ -66,7 +73,7 @@ export function channelAlerts(sessions: Session[], records: UsageRecord[]): Chan
     const usage = usageFor(session, records); const state = channelState(session, usage);
     if (state !== 'waiting' && state !== 'failed' && state !== 'limit') return;
     const lead = leadOf(sessions, session.id); const index = tiles.indexOf(lead ?? session); if (index < 0) return;
-    const channel = index + 1; const label = lead ? `CH${channel} ${session.config.engine === 'codex' ? 'Codex' : 'Claude'}` : `CH${channel}`;
+    const channel = index + 1; const label = lead ? `CH${channel} ${seatLabel(sessions, lead, session)}` : `CH${channel}`;
     const text = state === 'waiting' ? `${label} needs approval` : state === 'failed' ? `${label} failed` : `${label} ${usage?.context && usage.context.limit > 0 ? `ctx ${Math.round(usage.context.used / usage.context.limit * 100)}%` : 'near budget'}`;
     alerts.push({ sessionId: session.id, channel, state, text });
   });
@@ -98,6 +105,6 @@ export function todayTotals(records: UsageRecord[], now = new Date()) {
  * starts a new run, often resuming the same conversation, and the day's count carries on.
  */
 export const channelToday = (sessionId: string, records: UsageRecord[], now = new Date()) => todayTotals(records.filter((record) => record.sessionId === sessionId), now);
-/** New tokens today in a channel as the person sees it: its own, and every hidden seat's at the Round Table it leads (partner and planner). */
+/** New tokens today in a channel as the person sees it: its own, and every hidden seat's at the Round Table it leads. */
 export const channelTokensToday = (sessions: Session[], sessionId: string, records: UsageRecord[], now = new Date()) =>
   [sessionId, ...hiddenSeats(sessions, sessionId).map((seat) => seat.id)].reduce((sum, id) => sum + channelToday(id, records, now).tokens, 0);

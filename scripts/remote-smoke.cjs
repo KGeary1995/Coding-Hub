@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView, tileControl } = require('./lib/navigate.cjs');
+const { openView, startTable, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 /** Not Trace's own port (47821), so the test also runs while an installed Trace is open. */
@@ -252,7 +252,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-chat.png') });
     // A Round Table from the phone: Codex joins this chat as a chat channel in the same folder, started, and seated.
     await phone.getByRole('button', { name: 'Round Table: add Codex', exact: true }).click();
-    await phone.locator('.phone-chat .table-bar').filter({ hasText: 'Claude drives' }).waitFor({ timeout: 90000 });
+    await phone.locator('.phone-chat .table-bar').filter({ hasText: 'Claude Code drives' }).waitFor({ timeout: 90000 });
     await phone.locator('#channel-list, .phone-chat').first().waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-table.png') });
     await phone.getByRole('button', { name: 'Stop CH3', exact: true }).click();
@@ -276,7 +276,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.locator('.note').filter({ hasText: 'From the phone' }).waitFor();
     await phone.locator('.tabbar').getByRole('button', { name: 'Channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
     // A hierarchy Round Table started on the computer: the planner's reply reaches the phone, labelled, under the steps bar.
-    await openView(page, 'Workspace'); await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: 'Round Table (hierarchy)', exact: true }).click();
+    await openView(page, 'Workspace'); await startTable(page, 'Round Table (hierarchy)');
     await page.locator('.chain-bar').waitFor({ timeout: 90000 });
     const tableBox = page.getByRole('textbox', { name: 'Message to the Round Table' }); await page.waitForFunction(() => [...document.querySelectorAll('textarea')].some((area) => area.getAttribute('aria-label') === 'Message to the Round Table' && !area.disabled));
     await tableBox.fill('Plan a footer'); await tableBox.press('Enter');

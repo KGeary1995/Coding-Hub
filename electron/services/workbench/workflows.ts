@@ -80,7 +80,8 @@ export class Workflows {
    workspace.sessions = workspace.sessions.map((session) => { const id = randomUUID(); ids.set(session.id, id); return { ...session, id, binding: session.binding.mode === 'workspace' ? { mode: 'workspace' as const } : { mode: 'independent' as const, cwd }, createdAt: new Date().toISOString() }; });
    // A Round Table's seats get new ids too (they have no tile of their own); an older template may still hold the table's work.
    tableShape(workspace);
-   for (const session of workspace.sessions) if (session.roundTable) session.roundTable = { ...session.roundTable, partner: ids.get(session.roundTable.partner) ?? session.roundTable.partner, ...(session.roundTable.planner ? { planner: ids.get(session.roundTable.planner) ?? session.roundTable.planner } : {}) };
+   for (const session of workspace.sessions) if (session.roundTable) session.roundTable = { ...session.roundTable, partner: ids.get(session.roundTable.partner) ?? session.roundTable.partner, ...(session.roundTable.planner ? { planner: ids.get(session.roundTable.planner) ?? session.roundTable.planner } : {}),
+     ...(session.roundTable.seats ? { seats: session.roundTable.seats.map((seat) => ({ ...seat, session: ids.get(seat.session) ?? seat.session })) } : {}), ...(session.roundTable.driverSeat ? { driverSeat: ids.get(session.roundTable.driverSeat) ?? session.roundTable.driverSeat } : {}) };
    workspace.tiles = workspace.tiles.map((tile) => ({ ...tile, sessionId: ids.get(tile.sessionId)! }));
    const checked = savedWorkspaceSchema.safeParse(workspace); if (!checked.success) throw new HubError('TEMPLATE_INVALID', `This template cannot be applied: ${checked.error.issues[0]?.message ?? 'its layout is not valid'}. Nothing was changed. Delete it and save the workspace as a template again.`);
    if (!await this.confirm('Apply project template', detail)) return null;

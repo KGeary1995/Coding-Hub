@@ -4,6 +4,7 @@
  * These are the events the host turns Claude's messages into, and the requests the window sends back.
  */
 import type { PermissionLevel } from './types';
+import type { SeatReference, TableSeatState } from './table-seats';
 export interface ChatImage { mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string }
 export type ChatBlock =
   | { type: 'text'; text: string }
@@ -75,7 +76,9 @@ export function late(chain: { finalRound: number }, step: ChainStep | null | und
 /** One of the reviewer's challenges to a plan, and the planner's answer to it. */
 export interface PlanChallenge { id: string; severity: 'high' | 'medium' | 'low'; text: string; answer?: 'accepted' | 'rejected'; reason?: string }
 /** Where a hierarchy table's work stands, kept with the table so a restart can pick it up. */
-export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer'; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
+export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The seat that said TASK BLOCKED: the person's answer goes back to it, also after a restart. */ blocked?: 'planner' | 'builder' | 'reviewer';
+  /** From 1.26, by session id: the seat that said TASK BLOCKED (`blocked` still names its kind, for a Trace before 1.26), and the seat whose turn the step is (or was, when stopped): with several challengers or reviewers they take the step one after another. */
+  blockedSeat?: string; turnSeat?: string; task: string; plan: string; report: string; reviewRound: number; finalRound: number; verdict: 'approved' | 'changes' | null; note: string;
   /** The reviewer's challenges to this task's plan, with the planner's answers; and whether this task's plan was already challenged (once per task). */
   challenges?: PlanChallenge[]; challenged?: true;
   /** Present while the planner writes the plan again after the final review (the person wrote meanwhile): the final review's request, '' when it had none. */
@@ -91,6 +94,13 @@ export interface SavedChain { step: ChainStep; stoppedAt?: ChainStep; /** The se
 export interface RoundTableState {
   /** hierarchy: planner, builder and reviewer in fixed steps (from 1.17); absent: the discussion table. */
   kind?: 'hierarchy';
+  /**
+   * Every seat, the lead first, with its name, instructions and (hierarchy) duties (shared/table-seats.ts; from 1.26).
+   * `partner` and `planner` stay filled for a phone or linked computer on an older Trace: the first other seat, and the
+   * hierarchy's planner. `driverSeat`: the session of the discussion seat that edits files (`driver` is its engine).
+   * At a hierarchy `rounds` is its review rounds.
+   */
+  seats?: TableSeatState[]; driverSeat?: string;
   /** The hierarchy's planner and final reviewer (a Claude chat); `partner` is its reviewer (Codex), who also challenges the plan. */
   planner?: { sessionId: string; runId: string; engine: 'claude' };
   chain?: SavedChain;
@@ -122,6 +132,8 @@ export type ChatRequest =
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
   | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain;
+    /** From 1.26: every seat, the lead's own entry included (in any place), with what the person set for each; `partner` and `planner` are then not read. Absent: Claude Code with Codex, or planner, builder and reviewer, as before 1.26. */
+    seats?: SeatReference[]; driverSeat?: string;
     /** A saved table seated again (after a restart, or a seat started again): both conversations resumed, so no joining summary. */
     rejoin?: true }
   /** A hierarchy table's plan: approve it (the builder starts), or send it back with what to change. */
@@ -133,7 +145,15 @@ export type ChatRequest =
   /** Removes a task from Tasks waiting at a hierarchy table: the one at `index`, only if it still starts with `head`. */
   | { action: 'table-next-drop'; sessionId: string; runId: string; index: number; head: string }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
-  | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex' }
+  /** `seat`: the session of the seat that edits from now on (from 1.26; `driver`, its engine, is read only without it). */
+  | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex'; seat?: string }
+  /**
+   * The table's seats from now on (from 1.26): seats added (running chats in the same folder and window) or removed,
+   * and each one's name, instructions and duties. Refused while the table works: a discussion table must be idle, a
+   * hierarchy between tasks (idle or done) to add, remove or change duties, and at rest to change names or instructions.
+   * The lead stays. Every seat is told about the table again with its next message.
+   */
+  | { action: 'table-seats'; sessionId: string; runId: string; seats: SeatReference[]; driverSeat?: string }
   | { action: 'table-rounds'; sessionId: string; runId: string; rounds: number }
   /** Stops both agents and the discussion; the table stays open. */
   | { action: 'table-stop'; sessionId: string; runId: string }

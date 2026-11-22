@@ -9,7 +9,7 @@ import { GeminiModelPicker } from './GeminiModelPicker';
 import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue, permissionLevel } from '../../shared/schemas';
 
 // Claude Code aliases follow the current models; the listed IDs are current releases.
-const claudeModels = ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+export const claudeModels = ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 
 function tokenValue(value: string): number | null {
   if (value === '') return null;

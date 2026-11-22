@@ -1,6 +1,8 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { workbench } from './workbench';
 import type { Session } from '../../shared/types';
 import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
@@ -133,6 +135,19 @@ function webglLost(entry: TerminalEntry, addon: WebglAddon) {
 
 function reportInputError(id: string, message: string) { useWorkspaceStore.getState().setSessionError(id, message); }
 
+/**
+ * A web address in a terminal opens in the browser on Ctrl+click (Cmd+click on a Mac), through the host, which allows
+ * only http and https. A plain click stays the terminal's (focus, selection, a CLI's own mouse). Without this nothing
+ * opened: xterm's own handler calls window.open, which Trace's window refuses, and plain addresses were not links at all.
+ */
+const LINK_HINT = `${MAC ? 'Cmd' : 'Ctrl'}+click to open in the browser`;
+export function openTerminalLink(event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'>, address: string) {
+  if (!(MAC ? event.metaKey : event.ctrlKey)) return;
+  void workbench({ action: 'flow-open-link', url: address }).catch(() => { /* Refused by the host (not a web address): nothing opens. */ });
+}
+/** While the pointer is on a link the terminal's tooltip says how to open it. */
+const linkHover = (element: HTMLElement) => ({ hover: () => { element.title = LINK_HINT; }, leave: () => { element.removeAttribute('title'); } });
+
 /** Terminal instances outlive React tiles so navigation and isolation keep scrollback. */
 export function getTerminal(session: Session, container?: HTMLElement): TerminalEntry {
   const existing = terminals.get(session.id);
@@ -145,10 +160,14 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
     fontFamily: TERMINAL_FONT,
     fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.45,
     theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[session.config.engine] },
+    // Links a CLI marks itself (OSC 8), such as a file name that points at a pull request.
+    linkHandler: { activate: openTerminalLink, ...linkHover(element) },
   });
   measureLikeTheCLIs(terminal);
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  // Addresses written out in the output.
+  terminal.loadAddon(new WebLinksAddon(openTerminalLink, linkHover(element)));
   terminal.open(element);
   const entry: TerminalEntry = { terminal, element, fit, run: null, inputQueue: Promise.resolve() };
   terminals.set(session.id, entry);

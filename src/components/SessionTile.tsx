@@ -7,7 +7,7 @@ import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAl
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
-import { channelsOf, partnerOf, useWorkspaceStore } from '../state/workspace-store';
+import { channelsOf, hiddenSeats, useWorkspaceStore } from '../state/workspace-store';
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
@@ -57,9 +57,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   /** Close on a running channel asks first: it stops the agent mid-task, and the tile cannot be brought back. */
   const [confirmClose, setConfirmClose] = useState(false);
   const usage = useHubStore((s) => usageFor(session, s.usage));
-  // A Round Table is one channel running two agents: its tokens are both agents', as in the status bar.
-  const seatId = useWorkspaceStore((s) => partnerOf(s.sessions, session.id)?.id ?? null);
-  // Every agent at the table: the partner, and a hierarchy's planner too.
+  // A Round Table is one channel running several agents: its tokens are every agent's, as in the status bar.
+  const atTable = useWorkspaceStore((s) => hiddenSeats(s.sessions, session.id).length > 0);
   const today = { tokens: useHubStore((s) => channelTokensToday(useWorkspaceStore.getState().sessions, session.id, s.usage)) };
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
@@ -80,7 +79,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = seatId ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini CLI' : 'Codex CLI';
+  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini CLI' : 'Codex CLI';
   // The engine's mark, in its avatar: a shape as well as a colour.
   const EngineIcon = ENGINE_ICONS[engine];
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
@@ -93,11 +92,11 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // One terminal line's height, for what lies over the terminal's top (tile.css, --term-cover).
   const tile = useRef<HTMLElement>(null); useTerminalRow(tile, session.id, !chat);
   const busy = session.status === 'running' || session.status === 'starting';
-  // A Round Table's hidden partner waiting on an approval holds this tile: its card is in this thread.
-  const partner = useWorkspaceStore((s) => partnerOf(s.sessions, session.id));
+  // A Round Table's hidden seat waiting on an approval holds this tile: its card is in this thread.
+  const seatWaiting = useWorkspaceStore((s) => hiddenSeats(s.sessions, session.id).some((seat) => seat.status === 'running' && seat.attention));
   // Counts, not the list: a change to another channel then does not draw this tile again.
   const sessionCount = useWorkspaceStore((s) => s.sessions.length); const channelCount = useWorkspaceStore((s) => channelsOf(s.sessions).length);
-  const state = session.status === 'running' && partner?.status === 'running' && partner.attention ? 'waiting' as const : channelState(session, usage); const meta = CHANNEL_STATES[state];
+  const state = session.status === 'running' && seatWaiting ? 'waiting' as const : channelState(session, usage); const meta = CHANNEL_STATES[state];
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
   const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
@@ -110,7 +109,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     try { return await stopSession(session.id); } finally { setStopping(false); }
   }
   async function close() {
-    // A Round Table's hidden partner is stopped and closed with it.
+    // A Round Table's hidden seats are stopped and closed with it.
     setStopping(true);
     try { await closeChannel(session.id); } finally { setStopping(false); }
   }

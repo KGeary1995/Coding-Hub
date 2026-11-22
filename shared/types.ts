@@ -74,7 +74,10 @@ export type WorkspaceBinding =
   | { mode: 'independent'; cwd: string };
 
 /** A Round Table this chat channel leads, kept with the workspace so it is opened again when both chats run after a restart. */
-export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number; /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }
+export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number;
+  /** From 1.26: every seat (the lead too) with its name, instructions and duties, and the discussion seat that edits; absent in a table saved before (shared/table-seats.ts savedSeats). `partner` stays the first other seat. */
+  seats?: import('./table-seats').SavedSeat[]; driverSeat?: string;
+  /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }
 export interface Session {
   roundTable?: SavedRoundTable;
   budget?: import('./productivity').SessionBudget;

@@ -59,7 +59,7 @@ export function TasksPanel() {
   /** The task whose Remove was pressed: removing has no undo, so it asks first. */
   const [removing, setRemoving] = useState<string | null>(null);
   const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
-  // A Round Table's hidden partner is not offered: tasks go to the channel that leads it.
+  // A Round Table's hidden seats are not offered: tasks go to the channel that leads it.
   // Tasks read their outcome from the CLI's transcript: Claude Code and Codex only.
   const agents = channelsOf(sessions).filter((session) => isChatEngineConfig(session.config));
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };

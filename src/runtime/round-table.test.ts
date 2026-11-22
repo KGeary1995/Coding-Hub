@@ -5,7 +5,8 @@ import { savedWorkspaceSchema } from '../../shared/schemas';
 import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
-import { forgetTable, hierarchyDetached, openHierarchy, openRoundTable, rememberTable, restoreTables } from './round-table';
+import { changeSeats, forgetTable, hierarchyDetached, openHierarchy, openRoundTable, openTable, rememberTable, restoreTables, seatRoom, tableDetached, tableSeats } from './round-table';
+import type { TablePreset } from '../../shared/table-seats';
 import { closeChannel, remoteControl, startSession, stopSession } from './use-native-host';
 import { useTaskStore } from '../state/task-store';
 import type { Task } from '../../shared/workbench';
@@ -136,7 +137,7 @@ describe('A Round Table in one tile', () => {
     expect(await openRoundTable(lead.id)).toBeNull();
     const { sessions, tiles } = useWorkspaceStore.getState(); const partner = sessions.at(-1)!;
     expect(partner.config).toMatchObject({ engine: 'codex', chat: true }); expect(partner.status).toBe('running');
-    expect(find(lead.id)!.roundTable).toEqual({ partner: partner.id, driver: 'claude', rounds: 2 });
+    expect(find(lead.id)!.roundTable).toEqual({ partner: partner.id, driver: 'claude', rounds: 2, seats: [{ session: lead.id }, { session: partner.id }], driverSeat: lead.id });
     expect(tiles.map((tile) => tile.sessionId)).toEqual([lead.id, shell.id]);
 
     const failing = host({ ok: false, error: { message: 'One of these chats is already at a Round Table.' } });
@@ -165,9 +166,9 @@ describe('A Round Table in one tile', () => {
     const lead = await runningLead(); await openHierarchy(lead.id);
     const reviewer = useWorkspaceStore.getState().sessions.find((session) => session.config.engine === 'codex')!;
     expect(modelOf(reviewer.id)).toBe(HIERARCHY_MODELS.reviewer); expect(HIERARCHY_MODELS.reviewer).toBe('gpt-6.1-sol');
-    // A table saved before the reviewer had a model of its own: it gets the table's when it starts again.
+    // A table saved before the reviewer had a model of its own (and before seats were saved): it gets the table's when it starts again.
     await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
-    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === reviewer.id ? { ...session, config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null } } : session) }));
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === reviewer.id ? { ...session, config: { engine: 'codex' as const, chat: true, model: '', reasoningEffort: null } } : session.id === lead.id ? { ...session, roundTable: { ...session.roundTable!, partner: reviewer.id, seats: undefined } } : session) }));
     await startSession(lead.id); expect(modelOf(reviewer.id)).toBe('gpt-6.1-sol');
     // One saved on the retired gpt-6-astra: it starts on the table's model too.
     await stopSession(lead.id); await vi.waitFor(() => expect(find(reviewer.id)!.status).toBe('exited'));
@@ -188,7 +189,7 @@ describe('A Round Table in one tile', () => {
     const more = Array.from({ length: 6 }, () => createSession('shell'));
     const sessions = [...useWorkspaceStore.getState().sessions, ...more];
     expect(channelsOf(sessions)).toHaveLength(7); expect(sessions.find((session) => session.id === partner.id)).toBeDefined();
-    expect(channelsFullNote(sessions)).toContain('a Round Table runs two agents in one channel');
+    expect(channelsFullNote(sessions)).toContain('a Round Table runs several agents in one channel');
     expect(channelsFullNote(more)).toBeNull();
   });
 });
@@ -221,7 +222,7 @@ describe('Round Table tiles and seats that come and go', () => {
     useChatStore.setState({ threads: { [lead.id]: { ...useChatStore.getState().threads[lead.id], table: { kind: 'hierarchy', partner: { sessionId: reviewer.id, runId: RUN_B, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false } } as never } });
     expect(hierarchyDetached(lead.id)).toBeNull();
     useChatStore.setState({ threads: {} }); useWorkspaceStore.setState((state) => ({ sessions: state.sessions.filter((session) => session.id !== planner.id) }));
-    expect(hierarchyDetached(lead.id)).toMatch(/lost its planner or reviewer/);
+    expect(hierarchyDetached(lead.id)).toMatch(/lost its Planner/);
     expect(hierarchyDetached(reviewer.id)).toBeNull();
   });
 });
@@ -301,5 +302,141 @@ describe('closing a Round Table’s channel from its tile', () => {
     useWorkspaceStore.setState({ sessions: [{ ...lead, status: 'starting', roundTable: { partner: partner.id, driver: 'codex', rounds: 3, findings: [finding('F1', 'open')] } }, partner, shell] });
     expect(await remoteControl(lead.id, 'close')).toBe('This channel is still starting. Close it again once it runs.');
     expect(writes).toEqual([]); expect(find(lead.id)!.roundTable?.findings).toHaveLength(1);
+  });
+});
+
+describe('Round Tables of any number of seats', () => {
+  const discussion: TablePreset = { id: 'mine', name: 'Three', kind: 'discussion', rounds: 1, driver: 1, seats: [{ engine: 'claude', model: '', name: 'Lead' }, { engine: 'codex', model: 'gpt-x', name: 'Skeptic', instructions: 'Doubt everything.' }, { engine: 'claude', model: 'opus-y' }] };
+  const hierarchy: TablePreset = { id: 'mine2', name: 'No final review', kind: 'hierarchy', rounds: 3, seats: [{ engine: 'claude', model: 'opus-y', duties: ['build'] }, { engine: 'claude', model: 'fable-z', duties: ['plan'] }, { engine: 'codex', model: '', duties: ['challenge'], name: 'Hard questions' }, { engine: 'codex', model: '', duties: ['review'] }] };
+  type Open = { seats: { sessionId: string; runId: string; name?: string; instructions?: string; duties?: string[] }[]; driverSeat?: string; partner: { sessionId: string }; planner?: { sessionId: string }; kind?: string; rounds: number; driver: string; rejoin?: boolean };
+  const lastOpen = (chats: { action: string }[]) => chats.filter((request) => request.action === 'table-open').at(-1) as unknown as Open;
+  it('opens a three-seat discussion: a hidden chat per seat on its agent and model, the request naming every seat', async () => {
+    const { codingHub, chats } = host(); const shell = createSession('shell');
+    const lead = await runningLead([shell]); expect(await openTable(lead.id, discussion)).toBeNull();
+    const sessions = useWorkspaceStore.getState().sessions; const hidden = sessions.filter((session) => ![lead.id, shell.id].includes(session.id));
+    expect(hidden.map((session) => [session.config.engine, (session.config as { model: string }).model, (session.config as { chat?: boolean }).chat])).toEqual([['codex', 'gpt-x', true], ['claude', 'opus-y', true]]);
+    expect(channelsOf(sessions).map((session) => session.id)).toEqual([lead.id, shell.id]);
+    const request = lastOpen(chats);
+    expect(request.seats.map((seat) => seat.sessionId)).toEqual([lead.id, hidden[0].id, hidden[1].id]);
+    expect(request.seats.map((seat) => seat.name)).toEqual(['Lead', 'Skeptic', undefined]); expect(request.seats[1].instructions).toBe('Doubt everything.');
+    expect(request).toMatchObject({ driverSeat: hidden[0].id, driver: 'codex', rounds: 1, partner: { sessionId: hidden[0].id } });
+    expect(find(lead.id)!.roundTable).toMatchObject({ partner: hidden[0].id, driver: 'codex', driverSeat: hidden[0].id, rounds: 1, seats: [{ session: lead.id, name: 'Lead' }, { session: hidden[0].id, name: 'Skeptic', instructions: 'Doubt everything.' }, { session: hidden[1].id }] });
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
+    expect(codingHub.startSession).toHaveBeenCalledTimes(3);
+    expect(tableSeats(lead.id).map((seat) => [seat.lead, seat.driver, seat.model])).toEqual([[true, false, ''], [false, true, 'gpt-x'], [false, false, 'opus-y']]);
+  });
+  it('opens a hierarchy without a final reviewer: the planner and the extra seats named, the builder the lead', async () => {
+    const { chats } = host(); const lead = await runningLead(); expect(await openTable(lead.id, hierarchy)).toBeNull();
+    const hidden = useWorkspaceStore.getState().sessions.filter((session) => session.id !== lead.id); const request = lastOpen(chats);
+    expect(request).toMatchObject({ kind: 'hierarchy', rounds: 3, planner: { sessionId: hidden[0].id }, partner: { sessionId: hidden[0].id } }); expect(request).not.toHaveProperty('driverSeat');
+    expect(request.seats.map((seat) => seat.duties)).toEqual([['build'], ['plan'], ['challenge'], ['review']]); expect(request.seats[2].name).toBe('Hard questions');
+    expect((hidden[0].config as { model: string }).model).toBe('fable-z');
+    expect(find(lead.id)!.roundTable).toMatchObject({ kind: 'hierarchy', planner: hidden[0].id, rounds: 3 });
+  });
+  it('refuses seats that make no table, with the reason, before adding anything', async () => {
+    host(); const lead = await runningLead();
+    expect(await openTable(lead.id, { ...hierarchy, seats: hierarchy.seats.map((seat) => ({ ...seat, duties: ['review' as const] })) })).toMatch(/exactly one builder/);
+    expect(await openTable(lead.id, { ...discussion, driver: 0, seats: [discussion.seats[0]] })).toMatch(/at least two/);
+    expect(useWorkspaceStore.getState().sessions).toHaveLength(1);
+  });
+  it('stops and removes every seat when one cannot start, or the host refuses', async () => {
+    const { codingHub, stops } = host(); const lead = await runningLead();
+    const start = codingHub.startSession.getMockImplementation()!;
+    codingHub.startSession.mockImplementation(async (request: { sessionId: string; cwd: string }) => find(request.sessionId)!.config.engine === 'codex' ? { ok: false as const, error: { code: 'X', message: 'Codex is not installed.' } } as never : start(request));
+    expect(await openTable(lead.id, discussion)).toBe('Codex is not installed.');
+    expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([lead.id]); expect(find(lead.id)!.roundTable).toBeUndefined(); expect(stops).toHaveLength(1);
+    codingHub.startSession.mockImplementation(start); codingHub.chat.mockImplementation(async () => ({ ok: false, error: { message: 'Not in the same folder.' } }));
+    expect(await openTable(lead.id, discussion)).toBe('Not in the same folder.');
+    expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([lead.id]);
+  });
+  it('refuses a table with more seats than there are places left', async () => {
+    host(); const lead = await runningLead(Array.from({ length: 6 }, () => createSession('shell')));
+    expect(seatRoom(lead.id)).toBe(2); expect(seatRoom()).toBe(1); expect(await openTable(lead.id, discussion)).toMatch(/Close a channel first/);
+    expect(useWorkspaceStore.getState().sessions).toHaveLength(7);
+  });
+  it('seats a saved table again only once every one of its seats runs, with all of them named', async () => {
+    const { chats } = host(); const lead = await runningLead(); await openTable(lead.id, discussion);
+    const ids = useWorkspaceStore.getState().sessions.map((session) => session.id).filter((id) => id !== lead.id); chats.length = 0; useChatStore.setState({ threads: {} });
+    // A new run of the first seat only: the other is still stopped.
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.includes(session.id) ? { ...session, status: 'exited' as const } : session) }));
+    run(ids[0], '55555555-5555-4555-8555-555555555555'); restoreTables(); expect(chats).toEqual([]);
+    run(ids[1], '66666666-6666-4666-8666-666666666666'); restoreTables();
+    const request = lastOpen(chats); expect(request).toMatchObject({ rejoin: true, driverSeat: ids[0], partner: { sessionId: ids[0] } });
+    expect(request.seats.map((seat) => seat.sessionId)).toEqual([lead.id, ids[0], ids[1]]); expect(request.seats.every((seat) => seat.runId)).toBe(true); expect(request.seats[1].name).toBe('Skeptic');
+  });
+  describe('changing the seats of a table', () => {
+    /** A two-seat discussion table, open on the host. */
+    async function opened() {
+      const hosted = host(); const lead = await runningLead(); await openTable(lead.id, { ...discussion, seats: discussion.seats.slice(0, 2), driver: 0 });
+      const [first, second] = tableSeats(lead.id);
+      useChatStore.setState({ threads: { [lead.id]: { table: { partner: { sessionId: second.session, runId: find(second.session)!.runId!, engine: 'codex' }, driver: 'claude', rounds: 1, round: 0, phase: 'idle', agreed: false } } } as never });
+      hosted.chats.length = 0; hosted.stops.length = 0; return { ...hosted, lead, first, second };
+    }
+    const seatsRequest = (chats: { action: string }[]) => chats.find((item) => item.action === 'table-seats') as unknown as { seats: { sessionId: string; name?: string }[]; driverSeat?: string };
+    it('adds a seat: started, announced to the host with every seat, then saved', async () => {
+      const { chats, lead, first, second } = await opened();
+      expect(await changeSeats(lead.id, { seats: [first, { ...second, name: 'Skeptic 2' }, { engine: 'claude', model: '', name: 'Third' }] })).toBeNull();
+      const request = seatsRequest(chats);
+      expect(request.seats.map((seat) => seat.name)).toEqual(['Lead', 'Skeptic 2', 'Third']); expect(request.driverSeat).toBe(lead.id); expect(request.seats[0].sessionId).toBe(lead.id);
+      expect(find(lead.id)!.roundTable!.seats).toHaveLength(3); expect(find(lead.id)!.roundTable!.seats![2]).toMatchObject({ name: 'Third' });
+      expect(channelsOf(useWorkspaceStore.getState().sessions)).toHaveLength(1); expect(find(request.seats[2].sessionId)!.status).toBe('running');
+    });
+    it('removes a seat only after the host accepted it, then stops and removes that seat', async () => {
+      const { codingHub, chats, stops, lead, first, second } = await opened();
+      await changeSeats(lead.id, { seats: [first, second, { engine: 'claude', model: '' }] }); const third = tableSeats(lead.id)[2]; chats.length = 0;
+      const seen: number[] = []; codingHub.chat.mockImplementation(async (request: { action: string }) => { chats.push(request); seen.push(stops.length); return { ok: true }; });
+      expect(await changeSeats(lead.id, { seats: [first, second] })).toBeNull();
+      expect(seatsRequest(chats).seats.map((seat) => seat.sessionId)).toEqual([lead.id, second.session]); expect(seen).toEqual([0]);
+      expect(stops).toEqual([third.session]); expect(find(third.session)).toBeUndefined(); expect(find(lead.id)!.roundTable!.seats).toHaveLength(2);
+    });
+    it('puts everything back when the host refuses: the seats just added are stopped and removed', async () => {
+      const { codingHub, stops, lead, first, second } = await opened(); const before = find(lead.id)!.roundTable;
+      codingHub.chat.mockImplementation(async () => ({ ok: false, error: { message: 'The table is working. Wait for it to finish.' } }));
+      expect(await changeSeats(lead.id, { seats: [first, second, { engine: 'codex', model: '' }] })).toBe('The table is working. Wait for it to finish.');
+      expect(stops).toHaveLength(1); expect(useWorkspaceStore.getState().sessions).toHaveLength(2); expect(find(lead.id)!.roundTable).toEqual(before);
+    });
+    it('refuses what cannot be a table, and a seat whose agent was changed', async () => {
+      const { stops, lead, first, second } = await opened();
+      expect(await changeSeats(lead.id, { seats: [first] })).toMatch(/at least two/);
+      expect(await changeSeats(lead.id, { seats: [second, { engine: 'claude', model: '' }] })).toMatch(/leads the Round Table/);
+      expect(await changeSeats(lead.id, { seats: [first, { ...second, engine: 'claude' }] })).toMatch(/keeps its agent/);
+      expect(await changeSeats(lead.id, { seats: [first, { ...second, session: 'someone-else' }] })).toMatch(/not at the Round Table/);
+      expect(stops).toEqual([]); expect(useWorkspaceStore.getState().sessions).toHaveLength(2);
+    });
+    it('changes a table that is saved but not open on record only, starting new seats and removing dropped ones', async () => {
+      const { chats, stops, lead, first, second } = await opened(); useChatStore.setState({ threads: {} });
+      expect(await changeSeats(lead.id, { seats: [first, { engine: 'claude', model: '', name: 'Extra' }] })).toBeNull();
+      expect(chats.map((request) => request.action)).not.toContain('table-seats'); expect(stops).toEqual([second.session]); expect(find(second.session)).toBeUndefined();
+      const seats = find(lead.id)!.roundTable!.seats!; expect(seats.map((seat) => seat.name)).toEqual(['Lead', 'Extra']); expect(find(seats[1].session)!.status).toBe('running');
+    });
+    it('starts a seat again on its new model, last, once the host has accepted the rest', async () => {
+      const { codingHub, chats, lead, first, second } = await opened();
+      expect(await changeSeats(lead.id, { seats: [first, { ...second, model: 'gpt-new', name: 'Skeptic' }] })).toBeNull();
+      expect(startedModel(codingHub, second.session)).toBe('gpt-new'); expect(find(second.session)!.config).toMatchObject({ model: 'gpt-new' }); expect(find(second.session)!.status).toBe('running');
+      expect(chats.map((request) => request.action)).toEqual(['table-seats']); expect(codingHub.stopSession).toHaveBeenCalledTimes(1);
+    });
+    it('sends the new rounds and the new editing seat as requests of their own', async () => {
+      const { chats, lead, first, second } = await opened();
+      expect(await changeSeats(lead.id, { seats: [first, second], driver: 1, rounds: 4 })).toBeNull();
+      expect(chats).toContainEqual(expect.objectContaining({ action: 'table-rounds', rounds: 4 })); expect(chats).toContainEqual(expect.objectContaining({ action: 'table-driver', driver: 'codex', seat: second.session }));
+      expect(find(lead.id)!.roundTable).toMatchObject({ driver: 'codex', driverSeat: second.session, rounds: 4 });
+    });
+  });
+});
+
+describe('seat names and saved seats', () => {
+  it('saves the seats and the editing seat with the table, and names a hidden seat in its alert', () => {
+    const { lead, partner, table } = seated();
+    const seats = [{ sessionId: lead.id, runId: RUN_A, engine: 'claude' as const, name: 'Lead' }, { sessionId: partner.id, runId: RUN_B, engine: 'codex' as const, name: 'Skeptic', instructions: 'Doubt.' }];
+    rememberTable(lead.id, { ...table, seats, driverSeat: lead.id });
+    expect(savedWorkspace().sessions[0].roundTable).toEqual({ partner: partner.id, driver: 'codex', rounds: 3, seats: [{ session: lead.id, name: 'Lead' }, { session: partner.id, name: 'Skeptic', instructions: 'Doubt.' }], driverSeat: lead.id });
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
+    const waiting = useWorkspaceStore.getState().sessions.map((session) => session.id === partner.id ? { ...session, status: 'running' as const, runId: RUN_B, attention: { message: 'Approve Bash', at: new Date().toISOString() } } : session);
+    expect(channelAlerts(waiting, [])[0].text).toBe('CH1 Skeptic needs approval');
+  });
+  it('lets a table of a discussion say it is not open, while a message to it is still allowed', () => {
+    const { lead, partner } = seated(); useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === lead.id ? { ...session, status: 'running' as const, runId: RUN_A, roundTable: { partner: partner.id, driver: 'claude' as const, rounds: 2 } } : session) }));
+    expect(tableDetached(lead.id)).toMatch(/stopped\. Press Reopen to start it again\./); expect(hierarchyDetached(lead.id)).toBeNull();
+    run(partner.id, RUN_B); expect(tableDetached(lead.id)).toMatch(/opening/);
   });
 });

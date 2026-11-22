@@ -176,8 +176,9 @@ describe('Round Table', () => {
     expect(sent).toHaveLength(2); expect(last().table!.phase).toBe('idle');
   });
 
-  it('refuses two of the same agent, different folders, and a chat already at a table, and closes when a chat ends', () => {
-    expect(() => setup({ engines: ['claude', 'claude'] }).tables.open(1, CLAUDE, CODEX, 'claude', 1)).toThrow('Claude Code and Codex');
+  it('seats two of the same agent (from 1.26), refuses different folders and a chat already at a table, and closes when a chat ends', () => {
+    const twins = setup({ engines: ['claude', 'claude'] }); expect(twins.tables.open(1, CLAUDE, CODEX, 'claude', 1)).toMatchObject({ driverSeat: 'lead', seats: [{ sessionId: 'lead' }, { sessionId: 'partner' }] });
+    twins.tables.send(CLAUDE, 'Go', []); expect(twins.sent[0].text).toContain('with the person and Claude Code 2.'); expect(twins.sent[1].text).toContain('The others call you Claude Code 2.');
     expect(() => setup({ cwd: '/other' }).tables.open(1, CLAUDE, CODEX, 'claude', 1)).toThrow('same folder');
     const { tables, modes, last } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 1);

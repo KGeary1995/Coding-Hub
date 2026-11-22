@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../../shared/workbench';
 import { promptMark, SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
-import { ReviewChains } from './review-chain';
+import { legacySeats, ReviewChains } from './review-chain';
 
 const calls: Record<string, unknown>[] = []; let listed: Task[] = [];
 vi.mock('../../../src/runtime/workbench', () => ({ workbench: vi.fn(async (request: Record<string, unknown>) => { calls.push(request); return request.action === 'task-list' ? listed : null; }) }));
@@ -24,7 +24,7 @@ describe('two tasks from Tasks at one hierarchy table', () => {
       chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'assistant', messageId: crypto.randomUUID(), blocks: [{ type: 'text', text }] } });
       chains.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } }); await new Promise((resolve) => setTimeout(resolve, 0));
     };
-    chains.open(1, B, R, P); chains.send(B, `${promptMark(footer)} ${SIGNAL_INSTRUCTION}`, []);
+    chains.open(1, B, legacySeats(R, P)); chains.send(B, `${promptMark(footer)} ${SIGNAL_INSTRUCTION}`, []);
     await reply(P, 'Plan'); await reply(R, 'NO CHALLENGES'); chains.plan(B, true); await reply(B, 'Built.'); await reply(R, 'NO FINDINGS');
     // The header task arrives while the planner reviews the footer.
     chains.send(B, `${promptMark(header)} ${SIGNAL_INSTRUCTION}`, []);

@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
-import { AGENT, ChainBar, EMPTY, Item, readImage, TableBar, useHint, useSteady } from './ChatParts';
+import { AGENT, ChainBar, EMPTY, readImage, type SeatThread, TableBar, ThreadItems, useHint, useMergedThread, useSeatAnswers, workingText } from './ChatParts';
+import { followSeats, joinNames, seatRun, seatViews, tableSeatIds } from './seat-view';
 
 /**
  * A chat channel that runs on another device's computer: on the phone, and in another computer's tab on the desktop. The
@@ -32,7 +34,7 @@ export const linkedChatKey = (computerId: string) => (sessionId: string) => `${c
 export interface RemoteChatProps {
   sessionId: string; runId: string | null; engine: 'claude' | 'codex'; running: boolean;
   send: (request: ChatRequest) => Promise<void>;
-  /** Follows another channel's chat events (a Round Table's partner) until the returned function is called; none when they all arrive anyway. */
+  /** Follows another channel's chat events (every other seat of a Round Table) until the returned function is called; none when they all arrive anyway. */
   follow?: (sessionId: string) => () => void;
   keyOf?: (sessionId: string) => string;
   className?: string;
@@ -45,23 +47,20 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   const [opening, setOpening] = useState(false);
   const chat = useChatStore((state) => state.threads[keyOf(sessionId)] ?? EMPTY);
   const table = chat.table ?? null;
-  const partner = useChatStore((state) => table ? state.threads[keyOf(table.partner.sessionId)] ?? EMPTY : EMPTY);
-  // A hierarchy table's planner (and final reviewer) answers here too, as on the computer.
-  const hierarchy = table?.kind === 'hierarchy'; const plannerId = table?.planner?.sessionId ?? null;
-  const planner = useChatStore((state) => plannerId ? state.threads[keyOf(plannerId)] ?? EMPTY : EMPTY);
-  const busy = chat.busy || (table !== null && (partner.busy || planner.busy));
+  // A Round Table's other seats answer here too (as on the computer), each in its own thread: one selector for any number of them.
+  const hierarchy = table?.kind === 'hierarchy'; const hiddenKey = table ? tableSeatIds(table, sessionId).join('|') : '';
+  const hiddenIds = useMemo(() => hiddenKey ? hiddenKey.split('|') : [], [hiddenKey]);
+  const threads = useChatStore(useShallow((state) => hiddenIds.map((id) => state.threads[keyOf(id)] ?? EMPTY)));
+  const busy = chat.busy || (table !== null && threads.some((thread) => thread.busy));
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState(''); const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const file = useRef<HTMLInputElement>(null); const input = useRef<HTMLTextAreaElement>(null);
-  // A Round Table's partner answers here too, so its events are followed while the table is open.
-  useEffect(() => table && follow ? follow(table.partner.sessionId) : undefined, [table?.partner.sessionId, follow]);
-  useEffect(() => plannerId && follow ? follow(plannerId) : undefined, [plannerId, follow]);
-  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, partner, planner]);
-  const items = useMemo(() => {
-    const own = chat.items.map((item) => ({ item, from: 'lead' as const }));
-    if (!table) return own;
-    return [...own, ...partner.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'partner' as const })), ...(hierarchy ? planner.items.filter((item) => item.kind !== 'user').map((item) => ({ item, from: 'planner' as const })) : [])].sort((a, b) => (a.item.order ?? 0) - (b.item.order ?? 0));
-  }, [chat.items, partner.items, planner.items, table, hierarchy]);
+  // Every seat's events are followed while the table is open.
+  useEffect(() => follow && hiddenIds.length ? followSeats(follow, hiddenIds) : undefined, [hiddenKey, follow]);
+  const views = useMemo(() => table ? seatViews(table, engine, { builderWorking: 'The builder', plannerWorking: 'The planner', plannerColour: 'claude' }, sessionId) : [], [table, engine, sessionId]);
+  const sources: SeatThread[] = table ? views.map((seat) => ({ seat, thread: seat.lead ? chat : threads[hiddenIds.indexOf(seat.id)] ?? EMPTY })) : [{ seat: { id: sessionId, engine, lead: true, name: AGENT[engine], working: AGENT[engine], duties: [], driver: false, colour: engine }, thread: chat }];
+  const entries = useMergedThread(sources);
+  useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, entries]);
   const live = running && runId !== null;
   const act = async (request: ChatRequest) => { setError(''); try { await send(request); return true; } catch (e) { setError((e as Error).message); return false; } };
   const submit = async () => {
@@ -71,30 +70,26 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     if (await act(table ? { action: 'table-send', sessionId, runId: runId!, text: message, images } : { action: 'send', sessionId, runId: runId!, text: message, images })) { setText(''); setImages([]); }
     setSending(false);
   };
-  const answer = (from: 'lead' | 'partner' | 'planner') => (requestId: string) => async (allow: boolean, allowEdits?: boolean) => {
-    const target = from === 'lead' ? { sessionId, runId } : from === 'planner' ? { sessionId: table!.planner!.sessionId, runId: table!.planner!.runId } : { sessionId: table!.partner.sessionId, runId: table!.partner.runId };
-    if (!target.runId) return;
-    if (await act({ action: 'answer', sessionId: target.sessionId, runId: target.runId, requestId, allow, ...(allowEdits ? { allowEdits } : {}) })) chatAnswered(keyOf(target.sessionId), requestId, allow);
-  };
-  // Steady across renders, so a message that did not change is not drawn again (sameItem).
-  const answerLead = useSteady((requestId: string) => answer('lead')(requestId)); const answerPlanner = useSteady((requestId: string) => answer('planner')(requestId)); const answerPartner = useSteady((requestId: string) => answer('partner')(requestId));
+  // Steady across renders, so a message that did not change is not drawn again (sameItem); an approval goes to the run of the seat it came from.
+  const answerSeat = useSeatAnswers(async (seatId, requestId, allow, allowEdits) => {
+    const target = seatId === sessionId ? runId : table ? seatRun(table, seatId) : undefined; if (!target) return;
+    if (await act({ action: 'answer', sessionId: seatId, runId: target, requestId, allow, ...(allowEdits ? { allowEdits } : {}) })) chatAnswered(keyOf(seatId), requestId, allow);
+  });
   const stop = () => { if (!runId) return; void act(table ? { action: 'table-stop', sessionId, runId } : { action: 'interrupt', sessionId, runId }); };
   const attach = async (files: Blob[]) => { try { const read = await Promise.all(files.filter((item) => item.type.startsWith('image/')).map(readImage)); setImages((current) => [...current, ...read].slice(0, 10)); } catch (e) { setError((e as Error).message); } };
   const agent = AGENT[engine];
-  const workers = table ? [chat.busy ? (hierarchy ? 'The builder' : agent) : null, partner.busy ? AGENT[table.partner.engine] : null, planner.busy ? 'The planner' : null].filter(Boolean) : [agent];
+  const workers = table ? views.filter((view) => view.lead ? chat.busy : threads[hiddenIds.indexOf(view.id)]?.busy).map((view) => view.working) : [agent];
+  const everyone = views.length > 2 ? `all ${views.length} agents` : joinNames(views.map((view) => view.name));
   /** The message box's hint, then shorter forms for a narrow tile or the phone (useHint). */
-  const placeholder = useHint(input, !live ? ['Not running'] : hierarchy ? (table?.chain?.step === 'plan-review' ? ['Say what to change in the plan, or Approve plan', 'What to change in the plan', 'Plan changes'] : ['Give the Round Table a task', 'Give it a task']) : table ? [`Message ${agent} and ${AGENT[table.partner.engine]}`, 'Message both'] : [`Message ${agent}`]);
+  const placeholder = useHint(input, !live ? ['Not running'] : hierarchy ? (table?.chain?.step === 'plan-review' ? ['Say what to change in the plan, or Approve plan', 'What to change in the plan', 'Plan changes'] : ['Give the Round Table a task', 'Give it a task']) : table ? [`Message ${everyone}`, views.length > 2 ? 'Message all' : 'Message both'] : [`Message ${agent}`]);
 
   return <div className={`chat-view remote-chat ${className} ${table ? 'at-table' : ''}`}>
     {table && runId && hierarchy && <ChainBar table={table} busy={busy} plannerName="The planner" builderName="The builder" onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     {table && runId && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
-      {!items.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{live ? <><strong>No messages yet</strong><p>Ask {agent} anything. The conversation is the same one as on the computer.</p></> : <><strong>This chat is not running</strong><p>Start it to write to it.</p></>}</div>}
-      {items.map(({ item, from }) => from === 'lead'
-        ? <Item key={item.id} item={item} results={chat.results} agent={agent} author={table ? engine : undefined} role={table ? (hierarchy ? 'Builder' : table.driver === engine ? 'driver' : 'reviewer') : undefined} answer={answerLead} view={setViewing} />
-        : from === 'planner' ? <Item key={`planner-${item.id}`} item={item} results={planner.results} agent="Claude" author="claude" role="Planner" answer={answerPlanner} view={setViewing} />
-        : <Item key={`partner-${item.id}`} item={item} results={partner.results} agent={AGENT[table!.partner.engine]} author={table!.partner.engine} role={hierarchy ? 'Reviewer' : table!.driver === table!.partner.engine ? 'driver' : 'reviewer'} answer={answerPartner} view={setViewing} />)}
-      {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workers.join(' and ')} {workers.length > 1 ? 'are' : 'is'} working</p>}
+      {!entries.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{live ? <><strong>No messages yet</strong><p>Ask {agent} anything. The conversation is the same one as on the computer.</p></> : <><strong>This chat is not running</strong><p>Start it to write to it.</p></>}</div>}
+      <ThreadItems entries={entries} table={table !== null} answerFor={answerSeat} view={setViewing} />
+      {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workingText(workers)}</p>}
     </div>
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button type="button" aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
@@ -105,7 +100,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} />
         {busy && !text.trim()
-          ? <button type="button" className="chat-icon stop" aria-label={table ? 'Stop both agents' : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>
+          ? <button type="button" className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>
           : <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}
       </div>
     </form>

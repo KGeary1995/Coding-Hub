@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
-const { tileControl } = require('./lib/navigate.cjs');
+const { startTable, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 if (process.platform !== 'win32') { console.log('SKIP: paste smoke runs on Windows only (the system clipboard is set through Windows Forms).'); process.exit(0); }
@@ -77,7 +77,7 @@ const hex = (text) => Buffer.from(text).toString('hex');
     // + Channel has no Claude chat of its own: a Round Table's lead is the Claude chat. Without a project the table stops
     // at its start and leaves that chat, which is then given a folder and started alone (the same message box).
     const tiles = await page.locator('.session-tile').count();
-    await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: /^Round Table(?! \(hierarchy\))/ }).click();
+    await startTable(page, 'Round Table');
     await page.waitForFunction((count) => document.querySelectorAll('.session-tile').length === count + 1, tiles, { timeout: 15000 });
     // It tried to start without a folder, so it offers Retry (not Start) once it has one.
     const chatTile = page.locator('.session-tile').last(); await useFolder(chatTile);

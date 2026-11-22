@@ -180,7 +180,7 @@
 .remote-chat .phone-image img { flex: 1; min-height: 0; object-fit: contain; }
 /* The Round Table's review record and lists, each on its own line under the bar. */
 .table-findings, .chain-challenges { flex-basis: 100%; font: 400 12px/20px var(--tr-font-ui); }
-.table-findings summary, .chain-challenges summary, .chain-models summary { width: max-content; font: 500 12px/20px var(--tr-font-ui); }
+.table-findings summary, .chain-challenges summary { width: max-content; font: 500 12px/20px var(--tr-font-ui); }
 /* No list numbers: each finding and challenge shows its own id (F1, C1), on the phone as on the desktop. */
 .table-findings ol, .chain-challenges ol { list-style: none; }
 .table-findings ol { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; }
@@ -193,7 +193,6 @@
 .chain-steps li { height: 20px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-chip); color: var(--tr-fg-dim); }
 .chain-steps li.past { color: var(--tr-fg-muted); }
 .chain-steps li.current { border-color: var(--tr-accent-line); background: var(--tr-accent-soft); color: var(--tr-fg-strong); font-weight: 600; }
-.chain-models { font: 400 12px/16px var(--tr-font-ui); color: var(--tr-fg-muted); }
 /* Folded in a tile too short for it (ChainFold): one line of the dots, what is running and who sits at each level, the
    step's buttons and Close; the chevron opens the rest under the title. A message that waits to go stays in view on a
    line of its own under them: the summary does not name it, and Send now and Drop it are the person's to press. */
@@ -211,13 +210,7 @@
 .seat-text-planner { color: var(--tr-ch-planner); }
 .chain-fold-toggle svg { transition: transform var(--tr-d-fast) var(--tr-ease); }
 .chain-bar.open .chain-fold-toggle svg { transform: rotate(180deg); }
-/* Open, the fields take a line of their own under the bar's first line, so Close stays at its end. A details box lays
-   its content out as a block, whatever its own display, so the fields are spaced by margins, not by a gap. */
-.chain-models[open] { flex-basis: 100%; order: 1; }
 .chain-bar > :is(.chain-challenges, .table-waiting, .chain-seats, .table-findings) { order: 2; }
-.chain-models label { display: inline-flex; gap: 8px; align-items: center; margin: 8px 12px 0 0; }
-.chain-models input { width: 20ch; height: 24px; min-height: 24px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background: var(--tr-well); color: var(--tr-fg); font: 400 12px/16px var(--tr-font-mono); }
-.chain-models small { display: block; margin-top: 4px; color: var(--tr-fg-dim); }
 /* Who sits at a hierarchy table and what each is doing now. */
 .chain-seats { display: flex; flex-wrap: wrap; gap: 4px 16px; width: 100%; margin: 0; padding: 0; list-style: none; font: 400 12px/20px var(--tr-font-ui); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
 .chain-seats li { display: flex; align-items: center; gap: 8px; }
@@ -235,3 +228,33 @@
 .chain-next-tasks li button { margin-left: 8px; }
 [data-contrast="high"] :is(.table-status, .table-partner, .table-tokens, .chain-seats, .chain-steps li, .chat-thinking, .chat-notice:not(.error), .chat-working, .chat-tool-summary) { color: var(--tr-fg); }
 [data-contrast="high"] :is(.chat-tool, .chat-code, .chain-steps li) { border-color: var(--tr-line-strong); }
+
+/* The Round Table setup panel (TableSetup.tsx): a modal over the window, the preset and the seats, then Start or Apply. */
+.table-setup { width: min(720px, 94vw); max-height: 90vh; padding: 0; overflow: hidden; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); }
+.table-setup::backdrop { background: var(--tr-scrim); }
+.table-setup > form { display: flex; flex-direction: column; max-height: 90vh; }
+.table-setup header, .table-setup footer { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 16px; }
+.table-setup header { justify-content: space-between; border-bottom: 1px solid var(--tr-line); }
+.table-setup h2 { margin: 0; font: 600 14px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.table-setup footer { justify-content: flex-end; border-top: 1px solid var(--tr-line); }
+.table-setup-messages { flex: 1; min-width: 0; }
+.table-setup-messages p { margin: 0; font: 400 12px/16px var(--tr-font-ui); }
+.table-setup-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; }
+/* Nothing in the scrolling body is squeezed to fit: it scrolls, and the last control keeps its gap above the footer. */
+.table-setup-body > * { flex-shrink: 0; }
+.table-setup-body > .ui-hint { font-size: 12px; line-height: 16px; }
+.table-setup-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.table-setup-row > .ui-field { flex: 1 1 160px; }
+.table-setup-seats { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.table-setup-seats fieldset { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; margin: 0; padding: 8px 12px 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-card); }
+.table-setup-seats legend { padding: 0 4px; font: 600 12px/16px var(--tr-font-ui); color: var(--tr-fg-strong); }
+.table-setup-seats fieldset > :is(.ui-field, .table-setup-row) { align-self: stretch; }
+.table-setup-seats textarea { min-height: 64px; }
+.table-setup-seats .ui-hint.error-message { margin-top: -4px; }
+.table-setup-duties { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.table-setup-add { align-items: center; }
+.table-setup-rounds { max-width: 360px; }
+.table-setup-rounds select { align-self: flex-start; min-width: 80px; }
+.table-setup-presets { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--tr-line); }
+.table-setup-presets .ui-field { max-width: 360px; }
+@media (max-width: 520px) { .table-setup { width: 100vw; max-width: 100vw; max-height: 100vh; border-radius: 0; } .table-setup > form { max-height: 100vh; } }

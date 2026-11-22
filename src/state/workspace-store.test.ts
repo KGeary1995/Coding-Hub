@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { arrangeTiles, createSession, fitTiles, savedWorkspace, tableDirectory, useWorkspaceStore } from './workspace-store';
+import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, fitTiles, hiddenSeats, leadOf, savedWorkspace, seatsOf, tableDirectory, useWorkspaceStore } from './workspace-store';
 import { MAX_CHANNELS, savedWorkspaceSchema } from '../../shared/schemas';
 import type { CLIEngineConfig, CodexCLIEngineConfig } from '../../shared/types';
 import { workspace120 } from '../../shared/workspace-120.fixture';
@@ -358,5 +358,51 @@ describe('removing a Round Table\'s partner', () => {
       expect(useWorkspaceStore.getState().sessions.some((session) => session.id === seat.id)).toBe(false);
       if (findings.length) expect(kept.roundTable?.findings).toHaveLength(1); else expect(kept.roundTable).toBeUndefined();
     }
+  });
+});
+
+describe('a Round Table of four seats', () => {
+  /** A lead with three hidden seats, as a table saved from 1.26 names them (partner is the first other seat). */
+  function four() {
+    const [lead, a, b, c] = [createSession('claude'), createSession('codex'), createSession('claude'), createSession('codex')];
+    const led = { ...lead, roundTable: { partner: a.id, driver: 'claude' as const, rounds: 2, seats: [{ session: b.id, name: 'Middle' }, { session: lead.id }, { session: a.id }, { session: c.id }] } };
+    const shell = createSession('shell'); const sessions = [led, a, b, c, shell];
+    useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'columns') });
+    return { lead: led, a, b, c, shell, sessions };
+  }
+  it('hides every seat but the lead, finds the lead from any seat, and lists the seats lead first', () => {
+    const { lead, a, b, c, shell, sessions } = four();
+    expect(hiddenSeats(sessions, lead.id).map((seat) => seat.id)).toEqual([b.id, a.id, c.id]);
+    expect([a, b, c].map((seat) => leadOf(sessions, seat.id)?.id)).toEqual([lead.id, lead.id, lead.id]); expect(leadOf(sessions, lead.id)).toBeNull(); expect(leadOf(sessions, shell.id)).toBeNull();
+    expect(channelsOf(sessions).map((session) => session.id)).toEqual([lead.id, shell.id]);
+    expect(channelNumber(sessions, c.id)).toBe(1);
+    expect(seatsOf(sessions, lead.id).map(({ seat, session }) => [seat.session, session?.id])).toEqual([[lead.id, lead.id], [b.id, b.id], [a.id, a.id], [c.id, c.id]]);
+    expect(seatsOf(sessions, lead.id)[1].seat.name).toBe('Middle'); expect(seatsOf(sessions, shell.id)).toEqual([]);
+    expect(tableDirectory(sessions, lead)).toBeNull(); expect(channelsFullNote(sessions)).toBeNull();
+  });
+  it('fits tiles to the channels the person sees, and saves the table while any hidden seat remains', () => {
+    const { lead, a, b, c, sessions } = four();
+    expect(fitTiles(sessions, arrangeTiles([lead, a, b, c], 'columns'), 'columns').map((tile) => tile.sessionId)).toEqual([lead.id, sessions[4].id]);
+    expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true); expect(savedWorkspace().sessions[0].roundTable?.seats).toHaveLength(4);
+    useWorkspaceStore.setState({ sessions: sessions.filter((session) => session.id !== a.id && session.id !== b.id) }); expect(savedWorkspace().sessions[0].roundTable).toBeDefined();
+    useWorkspaceStore.setState({ sessions: sessions.filter((session) => ![a, b, c].some((seat) => seat.id === session.id)) }); expect(savedWorkspace().sessions[0].roundTable).toBeUndefined();
+  });
+  it('takes a stopped lead’s seats along when it is removed, and forgets the table', () => {
+    const { lead, sessions } = four();
+    useWorkspaceStore.getState().removeSession(lead.id); expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([sessions[4].id]);
+  });
+  it('keeps a seat that still runs as a channel of its own when its lead is removed', () => {
+    const { lead, c, sessions } = four();
+    useWorkspaceStore.setState({ sessions: sessions.map((session) => session.id === c.id ? { ...session, status: 'running' as const } : session) });
+    useWorkspaceStore.getState().removeSession(lead.id); expect(useWorkspaceStore.getState().sessions.map((session) => session.id)).toEqual([c.id, sessions[4].id]);
+  });
+  it('removing one seat’s channel closes the table that listed it', () => {
+    const { lead, b } = four();
+    useWorkspaceStore.getState().removeSession(b.id); expect(useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id)?.roundTable).toBeUndefined();
+  });
+  it('loads a four-seat table saved by 1.26 with its seats hidden', () => {
+    four(); const saved = savedWorkspace();
+    expect(savedWorkspaceSchema.safeParse(saved).success).toBe(true);
+    useWorkspaceStore.getState().hydrate(saved, { directory: '/data' } as never); expect(channelsOf(useWorkspaceStore.getState().sessions)).toHaveLength(2);
   });
 });

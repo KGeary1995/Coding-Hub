@@ -1,5 +1,28 @@
 ## What's new
 
+1.26.0 lets you choose who sits at a Round Table (update every computer and reload the phone app):
+
+- **A setup panel for every Round Table.** **+ Channel → Round Table** and **Round Table (hierarchy)**, and the people button in a chat, now open a panel instead of starting at once. Press **Start Round Table** to get the table as it was before, or change it first.
+- **Seats you choose.** Add and remove seats, and give each one its agent (Claude Code or Codex), its model, a name, and instructions of your own that Trace passes to that agent. Two Claude Code seats on different models, or three reviewers, are fine. Every seat is a running agent, so a table still counts toward the eight agents and terminals Trace runs at once.
+- **Discussion table.** Two or more agents in any mix. One seat edits files and the others review, read-only; you choose which in the panel and can change it on the table's bar. Your message goes to every seat, and each then sees what the others answered.
+- **Hierarchy table.** You decide who plans, who challenges the plan, who builds, who reviews and who gives the final review.
+  - There is always one planner and one builder. The builder is the channel that shows the table; it is the only seat that edits files, and it only builds.
+  - Add as many challengers and reviewers as you like. They take their step one after another, and a later one is shown what the earlier ones raised.
+  - The challenger, the reviewer and the final reviewer can be left out. Without a final reviewer, a task is done when the review rounds end.
+  - **Review rounds** (1 to 5) is on the table's bar. It was fixed at 2.
+  - Any seat can be Claude Code or Codex: a Codex builder with a Claude Code reviewer works.
+- **Your own tables.** **Save as preset** in the panel keeps a table under a name, to start again later. Trace's own two tables stay as they were. Presets are kept on this computer and are not synced to your others.
+- **Seats on an open table.** **Seats** on the table's bar opens the same panel: rename seats, change their instructions and models, add or remove agents. Trace refuses while the agents are working, and at a hierarchy table seats are added, removed or given other steps only between tasks. A new model restarts that one agent, and its conversation is resumed.
+- **Names, not agents, in the thread.** Messages are labelled with the seat's name. On Trace's own tables that reads "Claude Code" and "Codex" at a discussion table, and "Planner", "Builder" and "Reviewer" at a hierarchy (the model is on the table's bar).
+- **Tables from before** open and work as they did. A chat can sit at only one Round Table at a time.
+- **Phone and other computers** show any table and let you use it (messages, approvals from any seat). The phone still starts only the table of Claude Code with Codex, and seats are changed on the computer the table runs on.
+- **Project templates** keep a table's seats with their names, instructions and steps.
+- **The models field at a hierarchy table** moved into **Seats**.
+- **Links in terminal channels open.** Hold Ctrl (Cmd on a Mac) and click a web address in a terminal channel's output, and it opens in your browser. Before, clicking a link there did nothing. A plain click still only selects or focuses, as before. Links in chat channels already opened.
+- **Haiku for a read-only Claude Code seat:** type the full name, `claude-haiku-5-5`. Claude Code itself runs the short name `haiku` on Sonnet while a seat is read-only (its plan mode), so a reviewer or planner set to `haiku` works on Sonnet.
+- **Tried with the real Claude Code and Codex:** a discussion of three with a named seat and its instructions, a model changed on the open table (the agent restarted and still knew the conversation), and a hierarchy with a Codex planner and final reviewer, a Claude Code builder and two reviewers in turn.
+- **Not tried yet:** anything on a Mac, a real phone or another computer, and a table of eight seats.
+
 1.25.1 stops the console window that flashed on Windows, and fixes what an audit of 1.25.0 found (update every computer and reload the phone app):
 
 - **No console window from the usage check.** Since 1.25.0, with Gemini CLI installed, a console window flashed on Windows about every 20 minutes, over a full-screen game too. Trace's check of Gemini's plan limits made Gemini CLI start its own updater, and that updater opened the window. Trace's background questions to Gemini CLI no longer start its updater. Gemini CLI still updates itself when you use it in a channel, so starting a Gemini channel can still show the window once; that part is Gemini CLI's own.

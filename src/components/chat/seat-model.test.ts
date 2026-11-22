@@ -1,21 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import { applySeatModel } from './seat-model';
+import { describe, expect, it } from 'vitest';
+import { modelProblem } from './seat-model';
 
-describe('a hierarchy seat\'s model', () => {
-  const seat = { id: 's', config: { engine: 'claude', model: '' } } as unknown as Parameters<typeof applySeatModel>[0];
-  it('is saved when it is a model identifier or blank', () => {
-    const saved: string[] = []; const onModel = (_session: unknown, model: string) => { saved.push(model); };
-    expect(applySeatModel(seat, ' claude-opus-5-5 ', onModel)).toBe('');
-    expect(applySeatModel(seat, '', onModel)).toBe('');
-    expect(saved).toEqual(['claude-opus-5-5', '']);
+describe('a seat model field', () => {
+  it('takes a model identifier or blank', () => {
+    expect(modelProblem(' claude-opus-5-5 ')).toBe(''); expect(modelProblem('')).toBe(''); expect(modelProblem('   ')).toBe('');
   });
-  it('is not saved when it is a display name the workspace could not be saved with, and says why', () => {
-    const onModel = vi.fn();
-    expect(applySeatModel(seat, 'Opus 5.5', onModel)).toContain('not a model identifier');
-    expect(applySeatModel(seat, 'x'.repeat(200), onModel)).toContain('not a model identifier');
-    expect(onModel).not.toHaveBeenCalled();
+  it('refuses a display name the workspace could not be saved with, and says why', () => {
+    expect(modelProblem('Opus 5.5')).toContain('"Opus 5.5" is not a model identifier'); expect(modelProblem('x'.repeat(200))).toContain('not a model identifier');
   });
 });
 

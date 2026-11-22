@@ -41,7 +41,7 @@ export function scrollToTile(tile: { top: number; bottom: number }, view: { top:
  */
 export function jumpToChannel(id: string) {
   const state = useWorkspaceStore.getState();
-  // A Round Table's hidden partner is answered in its lead's tile.
+  // A Round Table's hidden seat is answered in its lead's tile.
   id = leadOf(state.sessions, id)?.id ?? id;
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
   if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);

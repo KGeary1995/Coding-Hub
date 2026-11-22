@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { startHierarchyTable, startRoundTable } from '../../runtime/round-table';
+import { seatRoom } from '../../runtime/round-table';
+import type { TableKind } from '../../../shared/table-seats';
+import { TableSetup } from '../chat/TableSetup';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, UsersRound, Workflow, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
@@ -56,6 +59,8 @@ function tableFailed(error: string) {
 }
 export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onToggleExplorer: () => void }) {
   const { activeView, setView, rootDirectory, sessions, layoutMode, arrange, addSession } = useWorkspaceStore(useShallow((s) => ({ activeView: s.activeView, setView: s.setView, rootDirectory: s.rootDirectory, sessions: s.sessions, layoutMode: s.layoutMode, arrange: s.arrange, addSession: s.addSession })));
+  /** The Round Table setup panel, opened by the two Round Table items; it outlives the menu that opened it. */
+  const [setup, setSetup] = useState<TableKind | null>(null);
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
@@ -68,8 +73,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const channelMenu: MenuItem[] = other
     ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
     : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
-      ...(sessions.length <= MAX_CHANNELS - 2 ? [channelItem('table', () => void startRoundTable().then((error) => { if (error) tableFailed(error); }))] : []),
-      ...(sessions.length <= MAX_CHANNELS - 3 ? [channelItem('hierarchy', () => void startHierarchyTable().then((error) => { if (error) tableFailed(error); }))] : [])];
+      // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
+      ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : [])];
   return <header className="tr-topbar">
     <Wordmark />
     {/* A secondary button with a folder mark; the chosen tab beside it takes the accent (shell.css). */}
@@ -93,6 +98,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <CommandMenu />
     <button className="tr-icon icon-button" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal size={16} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
+    {setup && <TableSetup mode={{ type: 'new', table: setup }} onFailure={tableFailed} onClose={() => { setSetup(null); document.querySelector<HTMLElement>('.tr-new-channel .tr-menu-button')?.focus(); }} />}
     <MenuButton className="tr-new-channel" buttonClassName="button primary" ariaLabel="New channel" title={!other && sessions.length >= MAX_CHANNELS ? channelsFullNote(sessions) ?? undefined : undefined} disabled={other ? !other.connected || other.channels.length >= MAX_CHANNELS : sessions.length >= MAX_CHANNELS} label={<><Plus size={16} aria-hidden="true" /><span className="tr-wide-label">Channel</span></>} items={channelMenu} />
   </header>;
 }

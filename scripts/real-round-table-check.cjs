@@ -8,6 +8,7 @@ const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
+const { startTable } = require('./lib/navigate.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-table'); fs.mkdirSync(out, { recursive: true });
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'trace-real-'))); const project = path.join(root, 'project'); fs.mkdirSync(project);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: project });
@@ -28,7 +29,7 @@ const taskColumn = async (page) => page.evaluate(() => { for (const section of d
   let { app, page } = await launch();
   try {
     await page.waitForSelector('.tr-empty, .session-tile'); await page.getByRole('button', { name: 'Open project', exact: true }).click(); await page.waitForSelector('.session-tile');
-    await page.getByRole('button', { name: 'New channel', exact: true }).click(); await page.getByRole('menuitem', { name: 'Round Table', exact: true }).click();
+    await startTable(page, 'Round Table');
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' }); await box.waitFor({ timeout: 180000 });
     await page.waitForFunction(() => document.querySelector('.table-bar')?.textContent?.includes('drives'), null, { timeout: 180000 });
     await page.getByRole('combobox', { name: 'Permissions' }).selectOption('ask').catch((e) => note('permissions-failed', { error: String(e) }));

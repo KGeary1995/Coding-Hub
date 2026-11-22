@@ -71,6 +71,16 @@ describe('durable workflow records and bounded search',()=>{
    expect(ids).not.toContain(reviewer.id);expect(table).toEqual({partner:ids[1],driver:'claude',rounds:2,kind:'hierarchy',planner:ids[2]});expect(applied.tiles.map((tile)=>tile.sessionId)).toEqual([ids[0]]);
   }finally{storage.close();}
  });
+ it('gives a template’s named seats (1.26) their new ids, so every seat stays hidden and the same seat edits',async()=>{
+  const data=root();const project=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>true);
+   const original=workspace(project);const [lead,second]=original.sessions;const third={...lead,id:randomUUID(),title:'Third'};original.sessions.push(third);original.tiles=[{...original.tiles[0],w:12}];
+   lead.roundTable={partner:second.id,driver:'claude',rounds:3,driverSeat:third.id,seats:[{session:lead.id},{session:second.id,name:'Tests',instructions:'Check the tests.'},{session:third.id}]};
+   const item=await service.execute({action:'flow-template-save',name:'Trio',description:'',workspace:original,includeRules:false,includeChecks:false}) as any;
+   const applied=await service.execute({action:'flow-template-apply',id:item.id,directory:target,applyRules:false,applyChecks:false}) as SavedWorkspace;
+   const ids=applied.sessions.map((session)=>session.id);expect(ids).not.toContain(third.id);
+   expect(applied.sessions[0].roundTable).toEqual({partner:ids[1],driver:'claude',rounds:3,driverSeat:ids[2],seats:[{session:ids[0]},{session:ids[1],name:'Tests',instructions:'Check the tests.'},{session:ids[2]}]});expect(applied.tiles.map((tile)=>tile.sessionId)).toEqual([ids[0]]);
+  }finally{storage.close();}
+ });
  it('refuses a template of Gemini chats only (1.20’s seats) before it writes any rules or checks',async()=>{
   const data=root();const target=root();const storage=new WorkspaceStorage(data);try{const rules=new RulesService(data);const checks=new Verification(data,async()=>true);let asked=false;const service=new Workflows(data,new NativeSessions(new ClaudeProfiles(data)),checks,rules,storage,async()=>{asked=true;return true;});
    const id=randomUUID();const at=new Date().toISOString();

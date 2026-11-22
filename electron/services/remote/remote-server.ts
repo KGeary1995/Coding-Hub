@@ -622,14 +622,15 @@ export class RemoteServer {
    */
   channels(kind: RemoteDeviceKind = 'phone'): RemoteChannel[] {
     const running = new Map(this.host.running().map((run) => [run.sessionId, run]));
-    // A Round Table is one channel: its partner is left out, and an approval it waits for shows on the lead.
+    // A Round Table is one channel: its other seats are left out, and an approval any of them waits for shows on the lead.
     const sessions = this.host.sessions();
     const local = sessions.filter((session) => !session.seatedAt).map((session, index): RemoteChannel => {
       const run = running.get(session.id); const own = this.attention.get(session.id);
-      const seat = sessions.find((item) => item.seatedAt === session.id); const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
+      const seats = sessions.filter((item) => item.seatedAt === session.id); const seat = seats.find((item) => { const seatRun = running.get(item.id); return seatRun && this.attention.get(item.id)?.runId === seatRun.runId; }) ?? seats[0];
+      const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
       const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seat && (seat.engine === 'claude' || seat.engine === 'codex') ? { table: seat.engine } : {}), ...(session.account ? { account: session.account } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seats[0] && (seats[0].engine === 'claude' || seats[0].engine === 'codex') ? { table: seats[0].engine } : {}), ...(session.account ? { account: session.account } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.
@@ -806,13 +807,17 @@ export class RemoteServer {
       const parsed = chatRequestSchema.safeParse(await this.body(request, CHAT_BODY)); if (!parsed.success) return this.send(response, 400, { error: 'Invalid chat request. Images must be PNG, JPEG, GIF or WebP, at most 10 per message.' });
       const now = this.current(device.id); if (!now) return this.send(response, 401, { error: 'This phone is not paired. Pair it again from Settings on the computer.' });
       const chat = parsed.data; const local = this.local(chat.sessionId);
-      // Seating a partner joins a second running agent to the conversation: that takes the same permission as starting one.
-      if (chat.action === 'table-open' && !this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
-      if (chat.action === 'table-open' && local && !this.local(chat.partner.sessionId)) return this.send(response, 400, { error: 'Unknown channel.' });
+      // Seating agents joins more running agents to the conversation: that takes the same permission as starting one.
+      const seating = chat.action === 'table-open' || chat.action === 'table-seats';
+      if (seating && !this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
+      // Every seat, as the partner and planner before 1.26, is a channel of this computer.
+      const seats = chat.action === 'table-open' ? [chat.partner, ...(chat.planner ? [chat.planner] : []), ...(chat.seats ?? [])] : chat.action === 'table-seats' ? chat.seats : [];
+      if (seating && local && !seats.every((seat) => this.local(seat.sessionId))) return this.send(response, 400, { error: 'Unknown channel.' });
       try {
         if (local) { if (!this.host.chat) return this.send(response, 409, { error: 'This computer cannot take chat messages from here right now.' }); this.host.chat(chat); }
         else if (kind === 'phone' && this.relay?.relayChat) {
           if (chat.action === 'table-open') return this.send(response, 403, { error: 'Open a Round Table on another computer’s channel from that computer.' });
+          if (chat.action === 'table-seats') return this.send(response, 403, { error: 'Change the seats of a Round Table on another computer from that computer.' });
           await this.relay.relayChat(chat);
         }
         else return this.send(response, 400, { error: 'Unknown channel.' });

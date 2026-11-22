@@ -154,7 +154,8 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
 /** When each quiet terminal task's reply was last read, and what it said: read again only when it may have changed. */
 const rechecked = new Map<string, { at: number; reply: string }>();
 /**
- * A hierarchy Round Table's verdict moves the task given to its channel: APPROVED by the planner sends it to Ready for
+ * A hierarchy Round Table's verdict moves the task given to its channel: APPROVED (the final review's, or the last review's
+ * when no seat gives a final one) sends it to Ready for
  * review; a table that needs the person, or was stopped, marks it so. The builder's own turn ends say nothing here.
  */
 export function chainTasks(leadId: string, table: RoundTableState) {

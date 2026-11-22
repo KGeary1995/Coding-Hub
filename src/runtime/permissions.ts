@@ -22,8 +22,7 @@ export function withPermissions<T extends CLIEngineConfig>(config: T, level: Per
 const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isAgentConfig(config);
 
 /**
- * Every channel at the Round Table a channel leads or sits at: the lead, its partner and (at a hierarchy) its hidden
- * planner. One table, one permission level; a channel at no table is alone.
+ * Every channel at the Round Table a channel leads or sits at: the lead and all its hidden seats. One table, one permission level; a channel at no table is alone.
  */
 export function tableSeats(sessions: Session[], id: string): Session[] {
   const lead = leadOf(sessions, id) ?? sessions.find((session) => session.id === id); if (!lead) return [];
@@ -44,9 +43,8 @@ export async function permissionsRefused(sessionId: string, runId: string, level
 }
 
 /**
- * Sets what a channel's agent may do without asking, and every other seat's at its Round Table too: the partner and,
- * at a hierarchy, the planner (one table, one setting). A
- * running chat changes at once (Codex from its next message); a terminal channel takes it at its next start. If a
+ * Sets what a channel's agent may do without asking, and every other seat's at its Round Table too (one table, one
+ * setting). A running chat changes at once (Codex from its next message); a terminal channel takes it at its next start. If a
  * running chat refuses, the channels go back to what they had, so the control never shows a level not in effect.
  * The error message, or null.
  */

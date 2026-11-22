@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEnvelope, ChatEvent, SavedChain } from '../../../shared/chat';
 import type { TableHost } from './round-table';
-import { ReviewChains } from './review-chain';
+import { legacySeats, ReviewChains } from './review-chain';
 
 const BUILDER = '11111111-1111-4111-8111-111111111111'; const REVIEWER = '22222222-2222-4222-8222-222222222222'; const PLANNER = '33333333-3333-4333-8333-333333333333';
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
@@ -30,7 +30,7 @@ const stoppedAtBuild: SavedChain = { step: 'stopped', stoppedAt: 'implementing',
 describe('a hierarchy table stopped and opened again', () => {
   it('stops the seats still at work when another seat ends', () => {
     const { chains, interrupted } = setup();
-    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: stoppedAtBuild }); chains.continue(BUILDER);
+    chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { chain: stoppedAtBuild }); chains.continue(BUILDER);
     // The planner's process ends while the builder builds: the table closes, and the builder is stopped with it.
     chains.ended(PLANNER);
     expect(interrupted).toEqual([BUILDER]); expect(chains.has(BUILDER)).toBe(false);
@@ -39,7 +39,7 @@ describe('a hierarchy table stopped and opened again', () => {
     const { chains, runs, sent, interrupted, reply, last } = setup();
     // Reopened while the builder is still working on the build it was given before.
     runs[BUILDER].busy = true;
-    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: stoppedAtBuild });
+    chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { chain: stoppedAtBuild });
     expect(interrupted).toEqual([BUILDER]);
     expect(last()).toMatchObject({ stopping: true, chain: { step: 'stopped', stoppedAt: 'implementing' } });
     expect(() => chains.continue(BUILDER)).toThrow(/still stopping/);
@@ -58,7 +58,7 @@ describe('a hierarchy table stopped and opened again', () => {
 describe('Stop and a full review record', () => {
   it('keeps a message sent before Stop, and it goes with the step when it continues', async () => {
     const { chains, sent, reply, last } = setup();
-    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: stoppedAtBuild }); chains.continue(BUILDER);
+    chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { chain: stoppedAtBuild }); chains.continue(BUILDER);
     chains.send(BUILDER, 'use the brand colours', []);
     chains.stop(BUILDER); await reply(BUILDER, '');
     expect(last()).toMatchObject({ waiting: 'use the brand colours', chain: { step: 'stopped' } });
@@ -69,7 +69,7 @@ describe('Stop and a full review record', () => {
     const { chains, sent, reply, last } = setup();
     const at = new Date().toISOString();
     const findings = Array.from({ length: 50 }, (_, i) => ({ id: `F${i + 1}`, severity: 'low' as const, evidence: '', text: `f${i + 1}`, status: 'open' as const, response: '', check: '', reviewedAt: null, changedAt: null, round: 1, at }));
-    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: { ...stoppedAtBuild, stoppedAt: 'reviewing', reviewRound: 1, report: 'Built.' }, findings });
+    chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { chain: { ...stoppedAtBuild, stoppedAt: 'reviewing', reviewRound: 1, report: 'Built.' }, findings });
     chains.continue(BUILDER);
     await reply(REVIEWER, 'FINDING high a.ts:1 — a real problem');
     expect(last().chain).toMatchObject({ step: 'needs-you' }); expect(last().chain!.note).toContain('1 new finding');
@@ -80,7 +80,7 @@ describe('Stop and a full review record', () => {
 describe('a message sent between two steps of a task', () => {
   it('waits for the next step instead of starting a new task', async () => {
     const { chains, sent, reply, last, holdState } = setup();
-    chains.open(1, BUILDER, REVIEWER, PLANNER, { chain: stoppedAtBuild }); chains.continue(BUILDER);
+    chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER), { chain: stoppedAtBuild }); chains.continue(BUILDER);
     await reply(BUILDER, 'Built the footer.');
     // The review ends with a finding; Trace records the files' state for it, and no seat is busy meanwhile.
     const release = holdState();

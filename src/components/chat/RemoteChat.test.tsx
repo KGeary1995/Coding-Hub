@@ -5,6 +5,7 @@ import type { RoundTableState } from '../../../shared/chat';
 let threads: Record<string, unknown> = {};
 vi.mock('../../state/chat-store', () => ({ EMPTY_THREAD: null, useChatStore: (select: (state: { threads: Record<string, unknown> }) => unknown) => select({ threads }), chatAnswered: () => {} }));
 const { RemoteChat } = await import('./RemoteChat');
+const { tableSeatIds } = await import('./seat-view');
 
 const table: RoundTableState = { kind: 'hierarchy', partner: { sessionId: 'rev', runId: 'r', engine: 'codex' }, planner: { sessionId: 'plan', runId: 'p', engine: 'claude' }, driver: 'claude', rounds: 2, round: 1, phase: 'answering', agreed: false,
   chain: { step: 'reviewing', task: 'Add a footer', plan: '1. Edit', report: '', reviewRound: 1, finalRound: 0, verdict: null, note: '' } };
@@ -39,3 +40,24 @@ describe('a hierarchy Round Table on the phone and other computers', () => {
   });
 });
 
+
+describe('a Round Table with several seats on the phone and other computers', () => {
+  const seat = (id: string, engine: 'claude' | 'codex', extra: object = {}) => ({ sessionId: id, runId: `run-${id}`, engine, ...extra });
+  const discussion: RoundTableState = { partner: { sessionId: 'b', runId: 'run-b', engine: 'codex' }, driver: 'claude', driverSeat: 'lead', rounds: 2, round: 1, phase: 'discussing', agreed: false, seats: [seat('lead', 'claude'), seat('b', 'codex'), seat('c', 'claude', { name: 'Tester' }), seat('d', 'codex')] };
+  it('merges every seat’s messages with its name, says all agents, and counts every busy seat as working', () => {
+    threads = {
+      lead: { runId: 'l', items: [said('l1', 1, 'I will edit.')], results: {}, busy: false, model: null, table: discussion },
+      b: { runId: 'b', items: [said('b1', 2, 'Looks fine.')], results: {}, busy: true, model: null },
+      c: { runId: 'c', items: [{ kind: 'user', id: 'u', order: 0, text: 'Trace prompt', images: [], at: '' }, said('c1', 3, 'Missing a test.')], results: {}, busy: true, model: null },
+      d: { runId: 'd', items: [{ kind: 'permission', id: 'ask', order: 4, toolName: 'Bash', description: '', input: { command: 'ls' }, canAllowEdits: false, answer: null }], results: {}, busy: false, model: null },
+    };
+    const html = renderToStaticMarkup(<RemoteChat sessionId="lead" runId="l" engine="claude" running send={async () => {}} follow={() => () => {}} />);
+    expect(html.indexOf('I will edit.')).toBeLessThan(html.indexOf('Looks fine.')); expect(html.indexOf('Looks fine.')).toBeLessThan(html.indexOf('Missing a test.'));
+    expect(html).toContain('Claude Code · Driver'); expect(html).toContain('Codex · Review'); expect(html).toContain('Tester · Review'); expect(html).toContain('Codex 2 wants to use Bash'); expect(html).not.toContain('Trace prompt');
+    expect(html).toContain('Codex and Tester are working'); expect(html).toContain('Stop all agents'); expect(html).toContain('Stop all'); expect(html).toContain('aria-label="Agent that edits files"'); expect(html).not.toContain('>Seats<');
+    expect(html).toContain('placeholder="Message all 4 agents"');
+  });
+  it('lists every other seat to follow, and none for a chat that leads no table', () => {
+    expect(tableSeatIds(discussion, 'lead')).toEqual(['b', 'c', 'd']); expect(tableSeatIds({ ...discussion, seats: undefined }, 'lead')).toEqual(['b']);
+  });
+});

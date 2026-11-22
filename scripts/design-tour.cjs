@@ -29,7 +29,7 @@ const { realpath, mkdtemp, mkdir, writeFile } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { openView, addChannel, startTable, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { makeProject, installFixtures } = require('./lib/tour-project.cjs');
 
@@ -161,8 +161,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
 
     await scene('03-chat', async () => {
       // A Round Table is the one + Channel entry that opens a chat: a Claude chat with Codex seated, both fixtures here.
-      await page.getByRole('button', { name: 'New channel', exact: true }).click();
-      await page.getByRole('menuitem', { name: 'Round Table', exact: true }).click();
+      await startTable(page, 'Round Table');
       const chat = tile(4); const box = chat.getByPlaceholder(/^Message /);
       await box.fill('What does greet() return for an empty name?', { timeout: 30_000 }); await page.keyboard.press('Enter');
       await chat.getByText('You said:', { exact: false }).first().waitFor({ timeout: 20_000 });

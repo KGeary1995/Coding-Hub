@@ -64,6 +64,8 @@ jobs:
       - run: npm run test:enterprise
       - run: npm run test:productivity
       - run: npm run test:models-stability
+      # Round Table seats with stand-in CLIs (the build above is current).
+      - run: node scripts/table-seats-smoke.cjs
       # Windows-only: Ctrl+V and Alt+V image/text paste against the real system clipboard (the build above is current).
       - run: node scripts/paste-smoke.cjs
       - run: npm run dist:win
