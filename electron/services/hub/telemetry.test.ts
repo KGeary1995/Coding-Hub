@@ -34,6 +34,14 @@ describe('price rates', () => {
     expect(rateFor('claude-opus-5-5-20261101[1m]', [{ ...rate, model: 'claude-opus-5-5[1m]' }])?.model).toBe('claude-opus-5-5[1m]');
     expect(rateFor('claude-opus-5', [rate])?.model).toBe('claude-opus-5'); expect(rateFor('<synthetic>', [{ ...rate, model: '---' }])).toBeUndefined();
   });
+  it('price Gemini CLI\'s models by the model, whatever effort, tier or trial its name carries', () => {
+    const record = { runId: 'r', sessionId: 's', engine: 'gemini', cwd: '/', model: 'gemini-4-neon', timestamp: new Date().toISOString(), input: 1000000, output: 1000000, cached: 1000000, cacheWrite: 0, reasoning: null, context: null, cost: null } satisfies UsageRecord;
+    // $3 input, $15 output (thinking included), $0.15 for input read from the cache.
+    expect(usageCost(record, [])).toBeCloseTo(18.15);
+    for (const model of ['gemini-4-neon-high', 'gemini-4-neon-xhigh']) expect(usageCost({ ...record, model }, [])).toBeCloseTo(18.15);
+    expect(rateFor('gemini-4-hydrogen-tiered-high', [])?.model).toBe('gemini-4-hydrogen'); expect(rateFor('gemini-4-argon-trial', [])?.model).toBe('gemini-4-argon'); expect(rateFor('gemini-3.5-flash-lite', [])?.input).toBe(0.3);
+    expect(rateFor('gemini-9-unknown-high', [])).toBeUndefined();
+  });
   it('use the published prices when no rate was entered, and an entered rate first', () => {
     const record = { runId: 'r', sessionId: 's', engine: 'claude', cwd: '/', model: 'claude-fable-5-2', timestamp: new Date().toISOString(), input: 1000000, output: 1000000, cached: 1000000, cacheWrite: 1000000, reasoning: null, context: null, cost: null } satisfies UsageRecord;
     // $8 input, $40 output, $0.20 cache reads, $16 for Claude Code's one-hour cache writes.

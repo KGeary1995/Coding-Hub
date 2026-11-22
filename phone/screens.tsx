@@ -48,12 +48,12 @@ function UsageScreen() {
   const [usage, error, reload] = useRoute<RemoteUsage>('/api/usage');
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!usage) return <p className="dim">Loading…</p>;
-  const total = usage.tokens.claude + usage.tokens.codex;
+  const gemini = usage.tokens.gemini ?? 0; const total = usage.tokens.claude + usage.tokens.codex + gemini;
   const budgetShare = usage.budget?.tokens ? total / usage.budget.tokens : usage.budget?.dollars && usage.cost !== null ? usage.cost / usage.budget.dollars : null;
   return <>
     <Section title="Σ Today">
       <div className="metrics"><p className="metric">{compact(total)} <small>tok</small></p>{usage.cost !== null && <span className="metric-side">${usage.cost.toFixed(2)}</span>}</div>
-      <p className="split"><span className="claude"><i />Claude {compact(usage.tokens.claude)}</span><span className="codex"><i />Codex {compact(usage.tokens.codex)}</span>{!usage.complete && <span className="dim">Still reading logs</span>}</p>
+      <p className="split"><span className="claude"><i />Claude {compact(usage.tokens.claude)}</span><span className="codex"><i />Codex {compact(usage.tokens.codex)}</span>{gemini > 0 && <span className="gemini"><i />Gemini {compact(gemini)}</span>}{!usage.complete && <span className="dim">Still reading logs</span>}</p>
       {budgetShare !== null && <div className="budget"><p className="measure"><span>Daily budget{usage.budget?.dollars ? ` of $${usage.budget.dollars}` : usage.budget?.tokens ? ` of ${compact(usage.budget.tokens)} tok` : ''}</span><b>{Math.round(budgetShare * 100)}%</b></p><Meter ratio={budgetShare} tone="accent" label={`Daily budget ${Math.round(budgetShare * 100)}% used`} /></div>}
     </Section>
     <Section title="Plan limits">

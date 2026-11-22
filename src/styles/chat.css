@@ -126,6 +126,7 @@
 .seat-you { --tone: var(--tr-you); }
 .seat-claude { --tone: var(--tr-ch-claude); }
 .seat-codex { --tone: var(--tr-ch-codex); }
+.seat-gemini { --tone: var(--tr-ch-gemini); }
 .seat-planner { --tone: var(--tr-ch-planner); }
 /* With its lists open (challenges, findings) the bar scrolls in itself past 60% of the chat, so the thread keeps its room in a small tile. */
 .table-bar { max-height: 60%; overflow-y: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
@@ -217,6 +218,7 @@
 .chain-seats strong { font-weight: 600; color: var(--tone, var(--tr-fg)); }
 .chain-seats .seat-claude + strong { --tone: var(--tr-ch-claude); }
 .chain-seats .seat-codex + strong { --tone: var(--tr-ch-codex); }
+.chain-seats .seat-gemini + strong { --tone: var(--tr-ch-gemini); }
 .chain-seats .seat-planner + strong { --tone: var(--tr-ch-planner); }
 .chain-seats .working { color: var(--tr-fg-strong); }
 /* Codex's challenges to the plan, with the planner's answers. */

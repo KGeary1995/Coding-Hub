@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_PRESETS, checkSeats, defaultSeatName, hiddenSeatIds, isBuiltInPreset, savedSeats, seatNames, type SeatSettings } from './table-seats';
+import { BUILT_IN_PRESETS, checkSeats, GEMINI_SEAT_RULE, defaultSeatName, hiddenSeatIds, isBuiltInPreset, savedSeats, seatNames, type SeatSettings } from './table-seats';
 import { chatRequestSchema, savedWorkspaceSchema, tablePresetSchema } from './schemas';
 
 const RUN = '11111111-1111-4111-8111-111111111111';
@@ -15,6 +15,17 @@ describe('Round Table seats', () => {
     expect(isBuiltInPreset('mine')).toBe(false);
   });
 
+  it('seats Gemini CLI as a seat that reviews or plans: never the lead, the seat that edits, or the builder', () => {
+    const claude = { engine: 'claude' as const }; const gemini = { engine: 'gemini' as const };
+    // A discussion: Gemini reviews beside the lead; it cannot lead, and cannot be the seat that edits.
+    expect(checkSeats('discussion', [claude, gemini], 0, 0)).toBeNull(); expect(checkSeats('discussion', [claude, gemini, gemini], 0, 0)).toBeNull();
+    expect(checkSeats('discussion', [gemini, claude], 0, 1)).toBe(GEMINI_SEAT_RULE); expect(checkSeats('discussion', [claude, gemini], 0, 1)).toBe(GEMINI_SEAT_RULE);
+    // A hierarchy: it may plan, challenge, review and give the final review; it does not build.
+    const builder = { engine: 'claude' as const, duties: ['build' as const] };
+    expect(checkSeats('hierarchy', [builder, { ...gemini, duties: ['plan', 'final'] }, { ...gemini, duties: ['challenge', 'review'] }], 0)).toBeNull();
+    expect(checkSeats('hierarchy', [{ ...gemini, duties: ['build'] }, { ...claude, duties: ['plan', 'final'] }], 0)).toBe(GEMINI_SEAT_RULE);
+    expect(defaultSeatName(gemini, 'discussion')).toBe('Gemini CLI'); expect(seatNames([claude, gemini, gemini], 'discussion')).toEqual(['Claude Code', 'Gemini CLI', 'Gemini CLI 2']);
+  });
   it('takes any number of discussion seats from two to eight', () => {
     const seats = (count: number): SeatSettings[] => Array.from({ length: count }, () => ({}));
     expect(checkSeats('discussion', seats(1))).toMatch(/at least two/);

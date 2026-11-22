@@ -9,8 +9,8 @@ import { USAGE_WINDOWS, axisMax, lastContext, dailySeries, delta, inWindow, logR
 import { refreshUsageDays, useDayUsage } from '../../state/day-usage-store';
 import { compact } from '../shell/StatusBar';
 
-type EngineFilter = 'all' | 'claude' | 'codex';
-const ENGINE_LABEL = { claude: 'Claude', codex: 'Codex' } as const;
+type EngineFilter = 'all' | 'claude' | 'codex' | 'gemini';
+const ENGINE_LABEL = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
 /** A channel's state as the tile's badge shows it; working takes the engine's colour (docs/design/midnight, section 5). */
 const STATE_TONE: Record<ChannelState, string> = { idle: 'neutral', starting: 'neutral', working: '', waiting: 'waiting', finished: 'success', failed: 'danger', limit: 'limit' };
 const time = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -39,10 +39,10 @@ export function UsageScreen() {
   const sessionTotals = usageTotals(current);
   const totals = { ...usageTotals(counted), sessions: sessionTotals.sessions, overContext: sessionTotals.overContext, unpriced: sessionTotals.unpriced }; const prior = usageTotals(inWindow(measured, days, now, 1));
   const series = useMemo(() => dailySeries(counted, days, now), [counted, days, now]);
-  const top = axisMax(Math.max(...series.map((day) => day.claude + day.codex)));
+  const top = axisMax(Math.max(...series.map((day) => day.claude + day.codex + day.gemini)));
   const focus = series[hovered ?? series.length - 1];
   const contexts = current.map(lastContext).filter((value): value is number => value !== null);
-  const byEngine = (['claude', 'codex'] as const).map((name) => { const records = counted.filter((record) => record.engine === name); const sum = usageTotals(records); return { name, tokens: sum.input + sum.output, cost: sum.cost, unpriced: sum.unpriced, runs: current.filter((record) => record.engine === name).length }; });
+  const byEngine = (['claude', 'codex', 'gemini'] as const).map((name) => { const records = counted.filter((record) => record.engine === name); const sum = usageTotals(records); return { name, tokens: sum.input + sum.output, cost: sum.cost, unpriced: sum.unpriced, runs: current.filter((record) => record.engine === name).length }; });
   const engineTotal = Math.max(1, byEngine.reduce((sum, item) => sum + item.tokens, 0));
   const windowLabel = days === 1 ? 'today' : `${days} d`;
   async function refresh() {
@@ -65,7 +65,7 @@ export function UsageScreen() {
       <div><h1>Usage</h1><p>From local CLI records, not provider billing · updated {time(updated)}</p></div>
       <div className="ui-page-actions">
         <div className="tr-seg" role="group" aria-label="Window">{USAGE_WINDOWS.map((item) => <button key={item.id} className={days === item.id ? 'active' : ''} aria-pressed={days === item.id} onClick={() => { setDays(item.id); setHovered(null); }}>{item.label}</button>)}</div>
-        <div className="tr-seg" role="group" aria-label="Engine">{(['all', 'claude', 'codex'] as const).map((item) => <button key={item} className={engine === item ? 'active' : ''} aria-pressed={engine === item} onClick={() => setEngine(item)}>{item !== 'all' && <i className={`tr-engine-square ${item}`} aria-hidden="true" />}{item === 'all' ? 'All engines' : ENGINE_LABEL[item]}</button>)}</div>
+        <div className="tr-seg" role="group" aria-label="Engine">{(['all', 'claude', 'codex', 'gemini'] as const).map((item) => <button key={item} className={engine === item ? 'active' : ''} aria-pressed={engine === item} onClick={() => setEngine(item)}>{item !== 'all' && <i className={`tr-engine-square ${item}`} aria-hidden="true" />}{item === 'all' ? 'All engines' : ENGINE_LABEL[item]}</button>)}</div>
         <button className="button secondary" onClick={() => void refresh()} disabled={busy}><RefreshCw className={busy ? 'spin' : ''} />Refresh</button>
       </div>
     </header>
@@ -75,16 +75,16 @@ export function UsageScreen() {
       <div className="tr-kpis" role="list" aria-label={`Totals for ${windowLabel}`}>{kpis.map((kpi) => <div key={kpi.label} role="listitem" className="ui-card ui-stat"><span>{kpi.label}</span><strong>{kpi.value}</strong><small>{kpi.sub}</small></div>)}</div>
       <article className="ui-card span-8 tr-chart" aria-label="Daily tokens">
         <div className="ui-card-head"><ChartColumn aria-hidden="true" /><h2>Daily tokens</h2><span className="ui-card-actions ui-caption">input + output · cache excluded</span></div>
-        <div className="tr-chart-readout"><strong>{focus.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong><span className="tnum">{compact(focus.claude + focus.codex)} tok</span>
-          <span className="tnum"><i className="tr-engine-square claude" aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square codex" aria-hidden="true" /> {compact(focus.codex)}</span>
+        <div className="tr-chart-readout"><strong>{focus.date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong><span className="tnum">{compact(focus.claude + focus.codex + focus.gemini)} tok</span>
+          <span className="tnum"><i className="tr-engine-square claude" aria-hidden="true" /> {compact(focus.claude)}</span><span className="tnum"><i className="tr-engine-square codex" aria-hidden="true" /> {compact(focus.codex)}</span>{focus.gemini > 0 && <span className="tnum"><i className="tr-engine-square gemini" aria-hidden="true" /> {compact(focus.gemini)}</span>}
           <span className="tnum">{dollars(focus.cost)}</span></div>
         <div className="tr-chart-plot">
           {/* A window with no tokens shows the empty state alone: axis lines behind it would cross its words. */}
-          {!series.some((day) => day.claude + day.codex > 0) ? <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code or Codex report their use.</p></div> : <>
+          {!series.some((day) => day.claude + day.codex + day.gemini > 0) ? <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code, Codex or Gemini CLI report their use.</p></div> : <>
           <div className="tr-chart-axis" aria-hidden="true">{[1, 0.5, 0].map((step) => <span key={step} style={{ bottom: `${step * 100}%` }}>{compact(top * step)}</span>)}</div>
           <div className="tr-chart-bars" onMouseLeave={() => setHovered(null)}>
-            {series.map((day, index) => { const total = day.claude + day.codex; return <button key={day.key} className={`tr-chart-col ${index === (hovered ?? series.length - 1) ? 'hot' : ''}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} aria-label={`${day.date.toLocaleDateString()}: ${total} tokens, Claude ${day.claude}, Codex ${day.codex}`}>
-              <span className="tr-chart-stack" style={{ height: `${total / top * 100}%` }}>{day.codex > 0 && <i className="codex" style={{ flexGrow: day.codex }} />}{day.claude > 0 && <i className="claude" style={{ flexGrow: day.claude }} />}</span>
+            {series.map((day, index) => { const total = day.claude + day.codex + day.gemini; return <button key={day.key} className={`tr-chart-col ${index === (hovered ?? series.length - 1) ? 'hot' : ''}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} aria-label={`${day.date.toLocaleDateString()}: ${total} tokens, Claude ${day.claude}, Codex ${day.codex}${day.gemini ? `, Gemini ${day.gemini}` : ''}`}>
+              <span className="tr-chart-stack" style={{ height: `${total / top * 100}%` }}>{day.gemini > 0 && <i className="gemini" style={{ flexGrow: day.gemini }} />}{day.codex > 0 && <i className="codex" style={{ flexGrow: day.codex }} />}{day.claude > 0 && <i className="claude" style={{ flexGrow: day.claude }} />}</span>
               <span className="tr-chart-x">{day.date.getDate()}</span>
             </button>; })}
           </div></>}

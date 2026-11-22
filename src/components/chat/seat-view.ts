@@ -6,10 +6,10 @@ import { defaultSeatName, seatNames, type SeatDuty } from '../../../shared/table
  * schemas). A table from a host before 1.26 has no `seats`: it is read as its lead and `partner` (and `planner`), named
  * as the code always did.
  */
-export type SeatColour = 'claude' | 'codex' | 'planner';
+export type SeatColour = 'claude' | 'codex' | 'gemini' | 'planner';
 export interface SeatView {
   /** The seat's session id (at the host that runs it). */
-  id: string; engine: 'claude' | 'codex'; lead: boolean;
+  id: string; engine: 'claude' | 'codex' | 'gemini'; lead: boolean;
   /** What labels its messages, and what the working line and the bar call it. */
   name: string; working: string;
   duties: SeatDuty[];
@@ -23,12 +23,12 @@ export interface SeatView {
 /** What a caller that knows models names a legacy hierarchy's builder and planner (a table before 1.26 has no seat names). */
 export interface LegacyNames { builder?: string; planner?: string; builderWorking?: string; plannerWorking?: string; plannerColour?: SeatColour }
 
-export const AGENT_NAME = { claude: 'Claude', codex: 'Codex' } as const;
+export const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
 const DUTY_SHORT: Record<SeatDuty, string> = { plan: 'plans', challenge: 'challenges', build: 'builds', review: 'reviews', final: 'final review' };
 /** "Plans, final review": what a hierarchy seat does, in a few words. */
 export const dutyText = (duties: readonly SeatDuty[]) => { const text = duties.map((duty) => DUTY_SHORT[duty]).join(', '); return text.charAt(0).toUpperCase() + text.slice(1); };
 /** A hierarchy seat's role: its duties, left out when they only repeat its default name ("Builder" builds). */
-function dutyRole(seat: { engine: 'claude' | 'codex'; duties: SeatDuty[] }, name: string) {
+function dutyRole(seat: { engine: 'claude' | 'codex' | 'gemini'; duties: SeatDuty[] }, name: string) {
   if (!seat.duties.length) return undefined;
   return seat.duties.length === 1 && defaultSeatName(seat, 'hierarchy') === name ? undefined : dutyText(seat.duties);
 }

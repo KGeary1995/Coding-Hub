@@ -26,6 +26,7 @@
 .tr-chart-stack i + i { border-top: 1px solid var(--tr-term); }
 .tr-chart-stack i.claude { background: var(--tr-ch-claude); }
 .tr-chart-stack i.codex { background: var(--tr-ch-codex); }
+.tr-chart-stack i.gemini { background: var(--tr-ch-gemini); }
 .tr-chart-x { position: absolute; left: 0; right: 0; bottom: -20px; text-align: center; font: 400 11px/14px var(--tr-font-ui); font-variant-numeric: tabular-nums; color: var(--tr-fg-faint); }
 .tr-usage-side { display: flex; flex-direction: column; gap: 12px; }
 .tr-usage-side .ui-card-head { margin-bottom: 0; }

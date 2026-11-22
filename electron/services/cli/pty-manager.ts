@@ -7,11 +7,11 @@ import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
-import { isAgentConfig, isChatEngineConfig } from '../../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
-import { buildLaunch, HubError, launchedLevel } from './engine-adapter';
+import { buildGeminiSeatLaunch, buildLaunch, HubError, launchedLevel } from './engine-adapter';
 import { discoverEngine, freshHostEnvironment } from './discovery';
 import { AUTH_TIMED_OUT } from './auth-status';
 import { geminiConversations } from './gemini-conversations';
@@ -19,6 +19,7 @@ import { cleanMessage, GeminiStatusReader, OscNotifications, type GeminiStatus }
 import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
+import { GeminiStream } from '../chat/gemini-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
 import { legacySeats, ReviewChains } from '../chat/review-chain';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
@@ -258,8 +259,8 @@ export class PtyManager {
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working folder does not exist or is not accessible.'); }
       const baseEnvironment = await this.environment();
       let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
-      // A chat run: Claude Code or Codex in structured mode.
-      const chat = isChatEngineConfig(request.config) && request.config.chat === true;
+      // A chat run: Claude Code or Codex in structured mode, or a Round Table's Gemini seat (agy's agent protocol server).
+      const chat = isChatRun(request.config);
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
@@ -277,15 +278,15 @@ export class PtyManager {
         if (profileId && engine.info.available && engine.info.authentication?.state !== 'authenticated') throw new HubError('PROFILE_LOGIN_REQUIRED', engine.info.authentication?.message === AUTH_TIMED_OUT ? 'Claude Code did not report this profile’s sign-in in time, so the channel did not start. Start it again; if this keeps happening, run the Claude CLI in a terminal to check it.' : 'Connect this Claude profile in Accounts & connections before starting. If its login status is unverified, update the Claude CLI and reconnect.');
         await ready;
         // A Codex chat is the app server; its model, reasoning and resumed thread go in its protocol, not on the command line.
-        const codexChat = chat && request.config.engine === 'codex';
-        const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : buildLaunch(request.config, engine.info);
+        const codexChat = chat && request.config.engine === 'codex'; const geminiSeat = chat && request.config.engine === 'gemini';
+        const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : geminiSeat ? buildGeminiSeatLaunch(engine.info) : buildLaunch(request.config, engine.info);
         if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
         const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
         prepared = agent; this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(codexChat ? ['app-server'] : chat ? CHAT_ARGS : []), ...launch.args];
+        file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(codexChat ? ['app-server'] : geminiSeat ? [] : chat ? CHAT_ARGS : []), ...launch.args];
       }
       let pty: IPty;
       try {
@@ -294,9 +295,9 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
       this.runs.set(request.sessionId, run); prepared = null;
-      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : {}, level);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model } } : {}, level);
       else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
@@ -327,7 +328,7 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions }, permissions: PermissionLevel) {
+  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string; model: string } }, permissions: PermissionLevel) {
     const { sessionId, runId } = run.session;
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
@@ -345,7 +346,7 @@ export class PtyManager {
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') { try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } try { this.chains.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } }
     };
-    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : new ClaudeStream(write, emit, permissions);
+    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { ...protocol.gemini, permissions }) : new ClaudeStream(write, emit, permissions);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.

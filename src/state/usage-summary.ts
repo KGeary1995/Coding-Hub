@@ -45,13 +45,13 @@ export function usageTotals(records: UsageRecord[]): UsageTotals {
 /** Change against the previous window, as a whole percentage; null when there is nothing to compare with. */
 export const delta = (current: number, previous: number) => previous > 0 ? Math.round((current - previous) / previous * 100) : null;
 
-export interface UsageDay { key: string; date: Date; claude: number; codex: number; cost: number | null }
+export interface UsageDay { key: string; date: Date; claude: number; codex: number; gemini: number; cost: number | null }
 
 /** One entry per local day in the window, oldest first, with input + output tokens (cache excluded) per engine. */
 export function dailySeries(records: UsageRecord[], days: number, now = new Date()): UsageDay[] {
   const series: UsageDay[] = [];
   const start = windowStart(days, now);
-  for (let offset = 0; offset < days; offset++) { const date = new Date(start); date.setDate(start.getDate() + offset); series.push({ key: dayKey(date), date, claude: 0, codex: 0, cost: null }); }
+  for (let offset = 0; offset < days; offset++) { const date = new Date(start); date.setDate(start.getDate() + offset); series.push({ key: dayKey(date), date, claude: 0, codex: 0, gemini: 0, cost: null }); }
   const byKey = new Map(series.map((day) => [day.key, day]));
   for (const record of records) {
     // A run that reports usage by day adds to each day it was used on (as the status bar's "Σ today" does); older
@@ -86,7 +86,7 @@ export function median(values: number[]) {
  * Codex's input keeps its cached input inside it, as its run records do.
  */
 export function logRecords(logs: LogUsage): UsageRecord[] {
-  return Object.entries(logs.days).flatMap(([day, engines]) => (['claude', 'codex'] as const).flatMap((engine) => {
+  return Object.entries(logs.days).flatMap(([day, engines]) => (['claude', 'codex', 'gemini'] as const).flatMap((engine) => {
     const used = engines[engine]; if (!used) return [];
     const [year, month, date] = day.split('-').map(Number);
     return [{ runId: `log:${day}:${engine}`, sessionId: '', engine, model: '', cwd: '', timestamp: new Date(year, month - 1, date, 12).toISOString(), input: engine === 'codex' ? used.input + used.cached : used.input, output: used.output, cached: used.cached, cacheWrite: used.cacheWrite, reasoning: null, context: null, cost: used.cost, days: { [day]: { tokens: used.input + (engine === 'claude' ? used.cacheWrite : 0) + used.output, cost: used.cost } }, source: 'cli-logs' as const }];

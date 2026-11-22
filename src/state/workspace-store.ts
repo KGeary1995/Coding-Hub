@@ -178,7 +178,7 @@ function applied(session: Session, event: Exclude<SessionEvent, { type: 'data' }
   if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
   if (event.type === 'error') return session.error === event.message ? session : { ...session, error: event.message };
   // A terminal run writes to another conversation (Claude after /clear or /resume), or Gemini CLI said which one as it ended.
-  if (event.type === 'conversation') return (session.config.engine === 'gemini' || (session.config.engine === 'claude' && !session.config.chat)) && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
+  if (event.type === 'conversation') return ((session.config.engine === 'gemini' && !session.config.chat) || (session.config.engine === 'claude' && !session.config.chat)) && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
   return session;
 }
 

@@ -4,7 +4,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { workbench } from './workbench';
 import type { Session } from '../../shared/types';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
@@ -265,7 +265,7 @@ export function routeTerminalEvent(event: SessionEvent) {
   if (!session || session.runId !== event.runId) { if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length); return; }
   // A chat channel (and a Round Table's hidden seats) draws no terminal: none is made for it, with its 5,000 lines of
   // scrollback. Its run still starts clean.
-  if (isChatEngineConfig(session.config) && session.config.chat) {
+  if (isChatRun(session.config)) {
     if (event.type === 'started') { forgetActivity(event.sessionId); clearPastedImages(event.sessionId); clearTerminalTitle(event.sessionId); }
     if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length);
     return;

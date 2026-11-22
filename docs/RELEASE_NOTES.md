@@ -1,5 +1,19 @@
 ## What's new
 
+1.28.0 brings Gemini CLI to the Round Table and counts its usage (update every computer; the phone app reloads itself):
+
+- **Gemini CLI seats at both Round Tables.** In the setup panel a seat's agent can now be **Gemini CLI**, with its model chosen by name from what Gemini CLI lists for your account.
+  - A Gemini CLI seat reviews or plans. At a discussion table it reviews beside the seat that edits. At a hierarchy it can plan, challenge the plan, review and give the final review.
+  - It cannot lead a table, be the seat that edits, or build. The panel does not offer those, and Trace declines any file change it asks for. A command it wants to run shows as an approval.
+  - It is text only (no images), and has no shared memory or tasks.
+- **Gemini CLI usage is counted.** Trace reads Gemini CLI's tokens from its own conversation files, for terminal channels and Round Table seats alike. They are in today's total, on the Usage screen (with a Gemini filter and its own colour in the chart) and on the phone, by the day they were used, back to the last 60 days.
+  - A Gemini channel's tile still shows no count of its own.
+  - Gemini CLI does not document those files. Trace's reading was checked against the numbers Gemini CLI itself reports; if a later Gemini CLI changes the files, the count can read low until Trace is updated.
+- **Gemini prices are built in**, from Google's published prices, like Claude's and GPT's. On a subscription Gemini CLI is not billed by the token, so the cost shown is what the same use would cost through the API. Gemini 4 Argon's price doubles on December 1, 2026, as Google announced, and Trace follows that date.
+- **Tried with the real Gemini CLI (1.5.14) and Claude Code:** a discussion table with Claude Code leading and Gemini CLI reviewing, and a hierarchy with Gemini CLI challenging the plan and reviewing the work, through to the planner's approval.
+- **Not tried:** a Gemini CLI seat that plans or gives the final review, a table with Codex and Gemini together, a Mac, a real phone and the installed version.
+- **The release steps** now wait for the Windows check in one job and then publish (1.27.0's second step had to be started by hand). This release is its first full run.
+
 1.27.0 fixes the phone app's settings and Screen, usage that did not pass between computers, and model choices that had to be typed (update every computer and reload the phone app):
 
 - **Channel settings on the phone.** A channel's header on the phone has a settings button (on a phone with **Can start and stop agents** on, for that computer's own channels). It changes the channel's name, its permissions (Ask, Allow edits, Full access), its model and, for Codex, its reasoning effort. Models are chosen by name. Permissions reach a running chat at once; the model is saved while the channel is stopped, as on the computer. The Claude account, folder and budgets are still changed on the computer.

@@ -1,7 +1,7 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ChatImage, RoundTableState } from '../../shared/chat';
 import type { ChatEngine, Session } from '../../shared/types';
-import { BUILT_IN_PRESETS, checkSeats, MAX_SEATS, savedSeats, type SavedSeat, type SeatReference, type SeatSettings, type TablePreset, type TablePresetSeat } from '../../shared/table-seats';
+import { BUILT_IN_PRESETS, checkSeats, GEMINI_SEAT_RULE, MAX_SEATS, savedSeats, type SavedSeat, type SeatReference, type SeatSettings, type TablePreset, type TablePresetSeat } from '../../shared/table-seats';
 import { createSession, fitTiles, hiddenSeats, seatsOf, useWorkspaceStore } from '../state/workspace-store';
 import { tableOpenFailed } from '../state/hierarchy-state';
 export { hierarchyDetached, tableDetached } from '../state/hierarchy-state';
@@ -11,9 +11,9 @@ import { hubCall } from '../state/hub-store';
 import { itemTitle } from '../../shared/memory-items';
 import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
-import { isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
-const NAME = { claude: 'Claude Code', codex: 'Codex' } as const;
+const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
 export const DEFAULT_ROUNDS = 2;
 /** The person sees one channel for a Round Table, but each seat is a CLI process of its own, so each counts toward the eight. */
@@ -36,7 +36,9 @@ const seatReference = (seat: SavedSeat, session: Session): SeatReference => ({ s
 /** A hidden seat's chat: this agent and model, in the lead's folder, with the lead's permissions and memory project (one table, one setting). */
 function seatSession(lead: Session, seat: TablePresetSeat, cwd: string): Session {
   const added = createSession(seat.engine, { mode: 'independent', cwd }); const from = lead.config;
-  if (added.config.engine === 'gemini' || !('model' in added.config)) return added;
+  // A Gemini CLI seat: its agent protocol server, in plan mode, with its own model; it has no shared memory, and what it may do is the table's to decline.
+  if (added.config.engine === 'gemini') { added.config = { engine: 'gemini', chat: true, model: seat.model ?? '' }; return added; }
+  if (!('model' in added.config)) return added;
   const shared = { chat: true, ...(seat.model ? { model: seat.model } : {}), ...('permissions' in from && from.permissions ? { permissions: from.permissions } : {}), ...('memoryKey' in from && from.memoryKey ? { memoryKey: from.memoryKey } : {}) };
   // A Claude seat uses the lead's account when the lead is Claude, as the hierarchy's always did.
   added.config = { ...added.config, ...shared, ...(added.config.engine === 'claude' && from.engine === 'claude' && from.accountProfileId ? { accountProfileId: from.accountProfileId } : {}) };
@@ -244,6 +246,7 @@ export async function startTable(preset: TablePreset): Promise<string | null> {
   const refused = checkPreset(preset); if (refused) return refused;
   if (before.size + preset.seats.length > MAX_CHANNELS) return tableFull(preset.seats.length);
   const seat = preset.seats[Math.max(0, leadIndex(preset))];
+  if (seat.engine === 'gemini') return GEMINI_SEAT_RULE;
   useWorkspaceStore.getState().addChatSession(seat.engine);
   const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!lead || lead.config.engine !== seat.engine) return 'The Round Table could not be added.';
@@ -281,10 +284,10 @@ export type EditableSeat = TablePresetSeat & { session: string; lead: boolean; d
 /** The seats of the table a channel leads, the lead first, as the person set them (the saved table) with each seat's agent and model from its channel. */
 export function tableSeats(leadId: string): EditableSeat[] {
   const sessions = useWorkspaceStore.getState().sessions; const table = sessions.find((session) => session.id === leadId)?.roundTable; if (!table) return [];
-  const seats = seatsOf(sessions, leadId).flatMap(({ seat, session }) => session && isChatEngineConfig(session.config) ? [{ seat, session, model: session.config.model }] : []);
+  const seats = seatsOf(sessions, leadId).flatMap(({ seat, session }) => session && isAgentConfig(session.config) ? [{ seat, session, model: session.config.model }] : []);
   // A table saved before seats were named has no driverSeat: the seat of the driver's agent.
   const driverId = table.kind === 'hierarchy' ? undefined : table.driverSeat ?? seats.find(({ session }) => session.config.engine === table.driver)?.seat.session;
-  return seats.map(({ seat, session, model }) => ({ engine: engineOf(session), model, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
+  return seats.map(({ seat, session, model }) => ({ engine: session.config.engine === 'gemini' ? 'gemini' as const : engineOf(session), model, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
 }
 
 /** A plan for the seats of a table that is already open or saved: `session` names a seat that stays (with what the person now set), none a seat to add; seats not listed go. */
@@ -309,7 +312,7 @@ export async function changeSeats(leadId: string, plan: SeatPlan): Promise<strin
   const named = seats.flatMap((seat) => seat.session ? [seat.session] : []);
   if (new Set(named).size !== named.length || named.some((id) => !known.get(id))) return 'A seat in this change is not at the Round Table.';
   for (const seat of seats) { const session = seat.session ? known.get(seat.session) : null; if (session && session.config.engine !== seat.engine) return 'A seat keeps its agent. Take it away and add another to change it.'; }
-  const why = checkSeats(kind, seats, 0); if (why) return why;
+  const why = checkSeats(kind, seats, 0, !hierarchy && plan.driver !== undefined ? order.indexOf(plan.driver) : undefined); if (why) return why;
   if (!hierarchy && plan.driver !== undefined && !plan.seats[plan.driver]) return 'The seat that edits is not at the table.';
   if (plan.rounds !== undefined && (!Number.isInteger(plan.rounds) || plan.rounds < (hierarchy ? 1 : 0) || plan.rounds > 5)) return hierarchy ? 'A hierarchy Round Table reviews between 1 and 5 rounds.' : 'A Round Table discusses between 0 and 5 rounds.';
   const fresh = seats.filter((seat) => !seat.session); const removed = current.filter(({ seat }) => seat.session !== leadId && !named.includes(seat.session)).map(({ seat }) => seat.session);
@@ -364,7 +367,7 @@ export async function changeSeats(leadId: string, plan: SeatPlan): Promise<strin
       if (!problem && driverId && driverId !== previousDriver) problem = await tableRequest(leadId, { action: 'table-driver', driver: next.driver!, seat: driverId });
     }
     // A seat whose model changed starts again with it, last: the table closes for the moment, and restoreTables seats it again.
-    const restart = seats.flatMap((seat) => { const session = seat.session ? known.get(seat.session) : null; return session && isChatEngineConfig(session.config) && session.config.model !== seat.model ? [{ session, model: seat.model }] : []; });
+    const restart = seats.flatMap((seat) => { const session = seat.session ? known.get(seat.session) : null; return session && isAgentConfig(session.config) && session.config.model !== seat.model ? [{ session, model: seat.model }] : []; });
     if (!problem && restart.length) problem = await restartWithModels(leadId, restart);
     return problem;
   } finally { if (added.length) { opening.delete(leadId); restoreTables(); } }
@@ -377,7 +380,7 @@ async function restartWithModels(leadId: string, changes: { session: Session; mo
     const now = () => useWorkspaceStore.getState().sessions.find((item) => item.id === session.id);
     if (live(now())) { await settled([session.id], 'starting'); await stopSession(session.id); await settled([session.id]); }
     const stopped = now(); if (!stopped || live(stopped)) return 'A seat would not stop, so its model was not changed.';
-    if (isChatEngineConfig(stopped.config)) useWorkspaceStore.getState().updateConfig(session.id, { ...stopped.config, model });
+    if (isAgentConfig(stopped.config)) useWorkspaceStore.getState().updateConfig(session.id, { ...stopped.config, model });
     await startSession(session.id);
   }
   const failed = useWorkspaceStore.getState().sessions.find((item) => changes.some(({ session }) => session.id === item.id) && !live(item));

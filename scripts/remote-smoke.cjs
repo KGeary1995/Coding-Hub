@@ -148,7 +148,8 @@ ${terminalFixture}
     // The computer is used while the phone lies untouched: after ten seconds the computer's size comes back, without
     // typing in that channel, and touching the channel on the phone takes it again.
     await computerIdle(0);
-    for (let i = 0; i < 200 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ten seconds after the phone's last request (a late size request of its own starts that again), checked every two: up to 40 s here.
+    for (let i = 0; i < 400 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) > 60, 'using the computer gives it the size back from a phone left untouched');
     await computerIdle(600); await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));

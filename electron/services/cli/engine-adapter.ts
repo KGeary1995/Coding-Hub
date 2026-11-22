@@ -7,6 +7,15 @@ export class HubError extends Error {
 }
 
 /** Fixed flags + argument arrays; normal CLI approval/authentication behavior is inherited. */
+/**
+ * A Round Table's Gemini seat: agy's agent protocol server, with no flags. Its model and plan mode are set in the
+ * protocol (GeminiStream). Never --dangerously-skip-permissions: Trace answers each request itself.
+ */
+export function buildGeminiSeatLaunch(engine: EngineInfo): { args: string[]; env: Record<string, string> } {
+  if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'Gemini CLI is unavailable.');
+  if (engine.engine !== 'gemini') throw new HubError('ENGINE_MISMATCH', 'Engine configuration does not match the installed CLI.');
+  return { args: ['acp'], env: {} };
+}
 export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args: string[]; env: Record<string, string> } {
   if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'CLI is unavailable.');
   if (engine.engine !== config.engine) throw new HubError('ENGINE_MISMATCH', 'Engine configuration does not match the installed CLI.');
