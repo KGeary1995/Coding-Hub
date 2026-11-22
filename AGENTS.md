@@ -78,7 +78,7 @@ Before you call a change done, run `typecheck`, `test` and the smoke test neares
 
 ## Releasing (summary)
 
-Merging a PR that raises `package.json`'s version releases it: `auto-release.yml` starts **Windows release candidate** once CI passes on `main`, and **Release** (publish) once the candidate passes on the same commit. By hand, the same steps are:
+Merging a PR that raises `package.json`'s version releases it: `auto-release.yml` starts **Windows release candidate** once CI passes on `main`, waits for it (rerunning a failed job once), and then starts **Release** (publish) on the same commit. With 1.27.0 only the first half ran (the release was tagged by hand); the one-job form has not run yet, so watch the next release. By hand, the same steps are:
 
 1. `npm version <x.y.z> --no-git-tag-version`, and rewrite `docs/RELEASE_NOTES.md`. It becomes the public release description.
 2. Merge to `main` through a PR, wait for **CI**, then start **Windows release candidate** by hand (`gh workflow run windows-release.yml --ref main`; it otherwise runs only nightly, or on PRs labeled `windows`) and wait for it to pass on the merge commit. Release's publish job refuses a commit it has not passed on. Windows runners sometimes time out in heavy tests: rerun the failed job once (`gh run rerun <id> --failed`), and investigate if it fails again.
