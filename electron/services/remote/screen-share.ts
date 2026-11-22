@@ -4,17 +4,17 @@ import os from 'node:os';
 import { app } from 'electron';
 import { HubError } from '../cli/engine-adapter';
 import { save } from '../workbench/local-store';
-import { SCREEN_SERVICE_PATH, SCREEN_SERVICE_PORT, type ScreenShareStatus } from '../../../shared/screen';
+import { SCREEN_INPUT_PORT, SCREEN_SERVICE_PATH, SCREEN_SERVICE_PORT, type ScreenShareStatus } from '../../../shared/screen';
 import { localScreenToken, SHARE_FILE, shareSetting } from './screen-service-server';
 import type { RunTailscale } from './tailscale';
 
 /** The name of the sign-in entry (Settings → Apps → Startup lists it). */
 const LOGIN_NAME = 'Trace screen sharing';
-/** The scheduled task that starts the service as administrator at sign-in (Task Scheduler lists it). */
+/** The scheduled task that starts the service's administrator side at sign-in (Task Scheduler lists it). */
 export const TASK_NAME = 'Trace screen sharing (administrator)';
 /** How often Trace, while open, checks that the service it shares the screen with is still running. */
 const WATCH_MS = 60_000;
-/** How long a service of the other kind (administrator or not) may take to see the switch and quit (it looks every 3 s). */
+/** How long a service that is no longer wanted may take to see the switch and quit (it looks every 3 s). */
 const GIVE_WAY_MS = 8000;
 
 /** Runs a program; resolves with its exit code and what it wrote (for tests, a stand-in). */
@@ -59,13 +59,15 @@ export function elevatedScript(script: string) {
  * Settings → Other computers → Share this screen, on Windows: starts the screen service (Trace with --screen-service),
  * registers it to start at sign-in, and has `tailscale serve` pass https://<name>.ts.net/api/screen to it. Off undoes
  * all three (the service sees the switch and quits).
- * With **Also control apps running as administrator**, a scheduled task starts it as administrator instead (Windows
- * lets only a program running as administrator control those); registering and removing the task asks Windows'
- * permission once each, and starting it does not.
+ * With **Also control apps running as administrator**, a scheduled task also starts the service's administrator side
+ * (input-relay.ts: Windows lets only a program running as administrator control those apps), which presses the keys
+ * and moves the mouse for the service; registering and removing the task asks Windows' permission once each, and
+ * starting it does not. Up to 1.28.0 the task ran the whole service as administrator, which Windows refuses the screen
+ * capture, so nothing could be viewed with the option on.
  */
 export class ScreenShare {
   /** `outdated`: whether a service that reports this version (none, before 1.27) is not this Trace's. Only an installed Trace says so: a source run beside it must not replace its service. */
-  constructor(private root: string, private name: () => string, private runTailscale: RunTailscale, private port = SCREEN_SERVICE_PORT, private run: RunProgram = runProgram, private outdated: (version: string | undefined) => boolean = (version) => app.isPackaged && version !== app.getVersion()) {}
+  constructor(private root: string, private name: () => string, private runTailscale: RunTailscale, private port = SCREEN_SERVICE_PORT, private run: RunProgram = runProgram, private outdated: (version: string | undefined) => boolean = (version) => app.isPackaged && version !== app.getVersion(), private inputPort = SCREEN_INPUT_PORT) {}
   /** Why the service could not capture the screen when last asked (`verify`); told once per reason through `onProblem`. */
   private problem: string | null = null; onProblem: (message: string) => void = () => {};
   /** Versions of a service already replaced once, so one that comes back the same is not ended every minute. */
@@ -84,10 +86,11 @@ export class ScreenShare {
     if (enabled) await this.serve();
     // The task first: if Windows' permission is refused, nothing else changes.
     if (admin !== (before.elevated === true)) await this.elevate(admin ? registerTaskScript(process.execPath, this.args(true), this.user()) : removeTaskScript(), admin);
-    save(this.root, SHARE_FILE, { enabled, ...(admin ? { elevated: true } : {}) }); this.login(enabled && !admin);
-    if (enabled) { if (admin !== (before.elevated === true)) await this.gone(); await this.start(); }
+    save(this.root, SHARE_FILE, { enabled, ...(admin ? { elevated: true } : {}) }); this.login(enabled);
+    // An administrator service from before 1.28.1 holds the screen port: with its option off it quits by itself, and the ordinary one can start.
+    if (enabled) { if (!admin && before.elevated === true && this.outdated((await this.health())?.version)) await this.gone(); await this.start(); }
     else await this.runTailscale(['serve', '--https=443', `--set-path=${SCREEN_SERVICE_PATH}`, 'off']).catch(() => {});
-    // Turned on, or switched between the administrator service and the ordinary one: does this one capture?
+    // Turned on, or the administrator option changed: does it capture, and is the administrator side there?
     await this.verify();
     return this.status();
   }
@@ -95,12 +98,13 @@ export class ScreenShare {
   /** When Trace starts: the service runs again (an update closes it), and the Tailscale path is put back if it went. */
   async ensure() {
     const setting = shareSetting(this.root); if (!this.supported || !setting.enabled) return;
-    this.login(!setting.elevated); await this.serve().catch(() => {}); await this.start(); await this.verify();
+    this.login(true); await this.serve().catch(() => {}); await this.start(); await this.verify();
   }
 
   /**
    * Asks the running service to capture the screen once (nobody is shown as watching) and keeps why it could not. A
-   * service from before 1.27 has no such check: nothing is known, and nothing is reported.
+   * service from before 1.27 has no such check: nothing is known, and nothing is reported. With the administrator
+   * option on, a screen that is captured but whose administrator side is not running is a problem too.
    */
   async verify(): Promise<string | null> {
     const setting = shareSetting(this.root); const token = localScreenToken(this.root); if (!this.supported || !setting.enabled || !token) return this.problem = null;
@@ -112,7 +116,8 @@ export class ScreenShare {
       request.on('error', () => resolve(null)); request.on('timeout', () => { request.destroy(); resolve(null); }); request.end();
     });
     const before = this.problem;
-    this.problem = answer && answer.ok === false ? `This computer’s screen cannot be shared: ${typeof answer.error === 'string' && answer.error ? answer.error.slice(0, 300) : 'the screen could not be captured'}.${setting.elevated ? ' It is shared as administrator: turn off “Also control apps running as administrator” under Settings → Other computers, which shares it without that.' : ' Turn “Share this screen” off and on again under Settings → Other computers.'}` : null;
+    this.problem = answer && answer.ok === false ? `This computer’s screen cannot be shared: ${typeof answer.error === 'string' && answer.error ? answer.error.slice(0, 300) : 'the screen could not be captured'}. Turn “Share this screen” off and on again under Settings → Other computers.`
+      : setting.elevated && !(await this.health(this.inputPort)) ? 'This computer’s screen is shared, but apps running as administrator cannot be controlled: the part of Trace that runs as administrator is not running. Turn “Also control apps running as administrator” off and on again under Settings → Other computers.' : null;
     if (this.problem && this.problem !== before) try { this.onProblem(this.problem); } catch { /* Telling the person must not stop the check. */ }
     return this.problem;
   }
@@ -130,10 +135,10 @@ export class ScreenShare {
     timer.unref?.(); return () => clearInterval(timer);
   }
 
-  /** The service's answer to /health (`version` from 1.27), or null when none answers. */
-  private health() {
+  /** The service's answer to /health (`version` from 1.27), or its administrator side's, or null when none answers. */
+  private health(port = this.port) {
     return new Promise<{ version?: string } | null>((resolve) => {
-      const request = http.get({ host: '127.0.0.1', port: this.port, path: '/health', timeout: 1500 }, (response) => {
+      const request = http.get({ host: '127.0.0.1', port, path: '/health', timeout: 1500 }, (response) => {
         let body = ''; response.setEncoding('utf8'); response.on('data', (chunk: string) => { if (body.length < 4096) body += chunk; });
         response.on('end', () => { if (response.statusCode !== 200) { resolve(null); return; } try { const version = (JSON.parse(body) as { version?: unknown }).version; resolve(typeof version === 'string' ? { version } : {}); } catch { resolve({}); } });
       });
@@ -141,26 +146,35 @@ export class ScreenShare {
     });
   }
   private async running() { return (await this.health()) !== null; }
-  /** Waits for a service of the other kind to see the switch and quit. */
-  private async gone() { for (let waited = 0; waited < GIVE_WAY_MS && await this.running(); waited += 250) await new Promise((resolve) => setTimeout(resolve, 250)); }
+  /** Waits for whatever answers on a port to quit (it saw the switch, or its task was ended). */
+  private async gone(port = this.port) { for (let waited = 0; waited < GIVE_WAY_MS && await this.health(port); waited += 250) await new Promise((resolve) => setTimeout(resolve, 250)); }
   private async start() {
-    const health = await this.health();
-    if (health) {
-      // A service from another version of Trace: an update replaced Trace's files under it (it cannot close the
-      // administrator one), and it can no longer capture the screen though it still answers. The administrator one's
-      // task is ended (this user may end their own task without Windows asking) and run again below; the ordinary one
-      // is closed by the update, and from 1.27 makes way by itself.
-      const version = health.version ?? '';
-      if (!this.outdated(health.version) || this.replaced.has(version) || !shareSetting(this.root).elevated) return;
-      this.replaced.add(version); await this.run('schtasks.exe', ['/End', '/TN', TASK_NAME]); await this.gone();
-      if (await this.running()) return;
+    const elevated = shareSetting(this.root).elevated === true; const health = await this.health();
+    // A service from another version of Trace: an update replaced Trace's files under it, and it can no longer capture
+    // the screen though it still answers. The ordinary one is closed by the update, and from 1.27 makes way by itself.
+    // One started by the task (up to 1.28.0 the whole service ran as administrator, on this port) is not closed by an
+    // update: its task is ended (this user may end their own task without Windows asking), once for each version.
+    if (health && elevated && this.outdated(health.version) && !this.replaced.has(health.version ?? '')) { this.replaced.add(health.version ?? ''); await this.run('schtasks.exe', ['/End', '/TN', TASK_NAME]); await this.gone(); }
+    if (!(health && await this.running())) {
+      spawn(process.execPath, this.args(false), { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      for (let i = 0; i < 40 && !(await this.running()); i++) await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    // As administrator: the task starts it (no prompt; the task was registered with permission). Otherwise directly.
-    if (shareSetting(this.root).elevated) {
-      const result = await this.run('schtasks.exe', ['/Run', '/TN', TASK_NAME]);
-      if (result.code !== 0) throw new HubError('SCREEN_TASK', `The administrator screen service could not be started (${result.output.trim() || `schtasks ${result.code}`}). Turn “Also control apps running as administrator” off and on again.`);
-    } else spawn(process.execPath, this.args(false), { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-    for (let i = 0; i < 40 && !(await this.running()); i++) await new Promise((resolve) => setTimeout(resolve, 250));
+    if (elevated) await this.startInput();
+  }
+  /**
+   * The administrator side: its task starts it (no prompt; the task was registered with permission) when it is not
+   * answering. One an update left behind is ended first, once for each version, as above.
+   */
+  private async startInput() {
+    const health = await this.health(this.inputPort);
+    if (health) {
+      const version = `input ${health.version ?? ''}`; if (!this.outdated(health.version) || this.replaced.has(version)) return;
+      this.replaced.add(version); await this.run('schtasks.exe', ['/End', '/TN', TASK_NAME]); await this.gone(this.inputPort);
+      if (await this.health(this.inputPort)) return;
+    }
+    const result = await this.run('schtasks.exe', ['/Run', '/TN', TASK_NAME]);
+    if (result.code !== 0) throw new HubError('SCREEN_TASK', `The part of Trace that controls apps running as administrator could not be started (${result.output.trim() || `schtasks ${result.code}`}). Turn “Also control apps running as administrator” off and on again.`);
+    for (let i = 0; i < 40 && !(await this.health(this.inputPort)); i++) await new Promise((resolve) => setTimeout(resolve, 250));
   }
   private async elevate(script: string, adding: boolean) {
     const result = await this.run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encode(elevatedScript(script))]);
@@ -173,7 +187,7 @@ export class ScreenShare {
   /** This Windows user, as the task names them (DOMAIN\name), so it runs for them even if another account approved it. */
   private user() { const name = os.userInfo().username; return process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${name}` : name; }
   private args(elevated: boolean) { return [...(app.isPackaged ? [] : [app.getAppPath()]), '--screen-service', `--storage=${this.root}`, `--name=${this.name()}`, ...(elevated ? ['--elevated'] : [])]; }
-  /** The sign-in entry starts the ordinary service; as administrator, the task does instead. */
+  /** The sign-in entry starts the service; the task starts its administrator side beside it. */
   private login(enabled: boolean) { app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: this.args(false), name: LOGIN_NAME }); }
   private async serve() {
     try { await this.runTailscale(['serve', '--bg', '--https=443', `--set-path=${SCREEN_SERVICE_PATH}`, `http://127.0.0.1:${this.port}`]); }

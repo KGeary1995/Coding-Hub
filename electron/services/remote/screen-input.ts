@@ -1,4 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import { keyAction } from './keysyms';
 import type { ScreenInput } from './rfb-server';
 import { WHOLE_DESKTOP, type PictureRegion } from './screen-layout';
@@ -42,6 +44,42 @@ public static class TraceInput {
 const SCRIPT = `$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition @'\n${HELPER}\n'@; [TraceInput]::Run()`;
 /** How the helper is started (exported so a Windows test can check that it compiles). */
 export const helperArguments = () => ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SCRIPT, 'utf16le').toString('base64')];
+/** What WindowsInput needs of its helper: the PowerShell process, or a stand-in for it (relayHelper, tests). */
+export interface InputHelper {
+  stdin: { write(line: string): unknown; end(): unknown; on(event: 'error', listener: () => void): unknown };
+  stdout: { resume(): unknown }; stderr: { resume(): unknown };
+  on(event: 'error' | 'exit', listener: () => void): unknown;
+}
+/** The helper as a process of this one: it presses with this process's rights. */
+export const localHelper = (): InputHelper => spawn('powershell.exe', helperArguments(), { windowsHide: true });
+/**
+ * The helper on the administrator side (input-relay.ts), so the input also reaches apps running as administrator: the
+ * same lines, sent to it on this computer with Trace's own key. Lines written while it connects wait, in order. When
+ * it is not there (its task has not started yet, or was ended) or refuses, `local` presses instead, so everything but
+ * those apps is still controlled. When the connection ends it reports an exit, and the next input connects again.
+ */
+export function relayHelper(port: number, token: string, local: () => InputHelper = localHelper): InputHelper {
+  const events = new EventEmitter(); let waiting: string[] | null = []; let ended = false;
+  let target: { write(line: string): unknown; end(): unknown } | null = null;
+  const use = (next: NonNullable<typeof target>) => { if (target) return; target = next; for (const line of waiting ?? []) next.write(line); waiting = null; if (ended) next.end(); };
+  const fallback = () => {
+    if (target) return; const helper = local();
+    helper.on('error', () => events.emit('exit')); helper.on('exit', () => events.emit('exit')); helper.stdout.resume(); helper.stderr.resume(); helper.stdin.on('error', () => {});
+    use(helper.stdin);
+  };
+  const request = http.request({ host: '127.0.0.1', port, path: '/input', timeout: 3000, headers: { Connection: 'Upgrade', Upgrade: 'trace-input', Authorization: `Bearer ${token}` } });
+  request.on('upgrade', (_response, socket) => {
+    // The connect timeout must not end a quiet session.
+    socket.setTimeout(0); socket.on('error', () => {}); socket.on('close', () => events.emit('exit')); socket.resume();
+    if (target) socket.destroy(); else use({ write: (line) => socket.write(line), end: () => socket.end() });
+  });
+  request.on('response', (response) => { response.resume(); fallback(); }); request.on('error', fallback); request.on('timeout', () => request.destroy(new Error('timeout')));
+  request.end();
+  return {
+    stdin: { write: (line) => (target ? target.write(line) : waiting?.push(line)), end: () => { ended = true; target?.end(); }, on: () => {} },
+    stdout: { resume: () => {} }, stderr: { resume: () => {} }, on: (event, listener) => events.on(event, listener),
+  };
+}
 /** ABSOLUTE with VIRTUALDESK: 0–65535 spans every display, matching the shared picture (screen-layout.ts). */
 const MOVE = 0x0001; const ABSOLUTE = 0x8000 | 0x4000; const WHEEL = 0x0800; const HWHEEL = 0x1000;
 /** VNC button bit → [down flag, up flag]: left, middle, right. */
@@ -67,11 +105,12 @@ export function keyCommand(keysym: number, down: boolean): string | null {
 
 /**
  * Input for one viewer. Keys still held when the viewer leaves are released, so nothing stays pressed here.
- * Windows refuses input to windows running as administrator (and the sign-in screen) from a normal app.
+ * Windows refuses input to windows running as administrator (and the sign-in screen) from a normal app; relayHelper
+ * sends it through the administrator side instead.
  */
 export class WindowsInput implements ScreenInput {
-  private helper: ChildProcessWithoutNullStreams | null = null; private buttons = 0; private held = new Set<number>();
-  constructor(private width: number, private height: number, private setClipboard: (text: string) => void | Promise<void>, private spawnHelper = () => spawn('powershell.exe', helperArguments(), { windowsHide: true }), private region: PictureRegion = WHOLE_DESKTOP) { this.start(); }
+  private helper: InputHelper | null = null; private buttons = 0; private held = new Set<number>();
+  constructor(private width: number, private height: number, private setClipboard: (text: string) => void | Promise<void>, private spawnHelper: () => InputHelper = localHelper, private region: PictureRegion = WHOLE_DESKTOP) { this.start(); }
 
   pointer(x: number, y: number, buttons: number) { for (const command of pointerCommands(x, y, buttons, this.buttons, this.width, this.height, this.region)) this.send(command); this.buttons = buttons; }
   key(keysym: number, down: boolean) {
