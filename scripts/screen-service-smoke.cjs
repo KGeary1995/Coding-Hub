@@ -25,10 +25,10 @@ const healthy = () => fetch(`http://127.0.0.1:${PORT}/health`).then((response) =
   await fs.writeFile(path.join(viewerRoot, 'linked-computers.json'), JSON.stringify([{ id: PC, name: 'Test-PC', url: `http://127.0.0.1:${PORT}/`, token: TOKEN, linkedAt: new Date().toISOString() }]));
   const log = path.join(root, 'input.log'); const crash = path.join(root, 'crash');
   const base = { ...process.env, ...NO_DRIVE }; delete base.ELECTRON_RUN_AS_NODE;
-  // The administrator kind (started by its scheduled task) gives way when the setting does not ask for it: it quits at once.
+  // The administrator side (started by its scheduled task) quits at once when its option is off, and never takes the service's port.
   const wrongKind = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'wrong-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC', '--elevated'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT) }, stdio: 'ignore' });
   const quit = await new Promise((resolve) => { const timer = setTimeout(() => resolve(false), 20000); wrongKind.once('exit', () => { clearTimeout(timer); resolve(true); }); });
-  if (!quit) wrongKind.kill(); assert.ok(quit && !(await healthy()), 'A service of the kind the setting does not ask for quits without listening');
+  if (!quit) wrongKind.kill(); assert.ok(quit && !(await healthy()), 'The administrator side quits without listening when its option is off');
   const service = spawn(require('electron'), ['--user-data-dir=' + path.join(root, 'service-profile'), path.resolve(__dirname, '..'), '--screen-service', `--storage=${serviceRoot}`, '--name=Test-PC'], { env: { ...base, CODING_HUB_TEST_SCREEN_SERVICE_PORT: String(PORT), CODING_HUB_TEST_SCREEN_INPUT_LOG: log, CODING_HUB_TEST_RELAUNCH_AFTER: '1000', CODING_HUB_TEST_SCREEN_SERVICE_CRASH: crash }, stdio: 'ignore' });
   let app;
   try {

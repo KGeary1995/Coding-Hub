@@ -1,5 +1,14 @@
 ## What's new
 
+1.28.1 fixes viewing a Windows screen with **Also control apps running as administrator** on:
+
+- **The screen can be viewed again with the administrator option on.** With it on, every viewer was refused with "could not capture its screen: Could not start video source", from a linked computer and from the phone.
+  - **Cause:** the option ran the whole screen service as administrator, and Windows refuses a program like Trace its screen capture when it runs as administrator (Windows 11 24H2 and later).
+  - **Fix:** the service now always captures with your own rights, and only a small part that presses the keys and moves the mouse runs as administrator. It uses the scheduled task you already approved, so updating asks no permission.
+  - If that part is not running, the screen is still shared and everything but apps running as administrator is still controlled; Trace says so under **Share this screen**.
+- **Checked on Windows 11:** with the option on, the service captured both displays and a key pressed by a viewer arrived through the new part. That run was without administrator rights (Windows' permission prompt was declined during testing), so pressing keys into an app that runs as administrator is not yet confirmed in this version. Please try it after updating: open **Screen** from the phone or another computer and type into an app running as administrator.
+- After updating, open Trace once on the Windows computer: it replaces the old administrator service and starts both parts.
+
 1.28.0 brings Gemini CLI to the Round Table and counts its usage (update every computer; the phone app reloads itself):
 
 - **Gemini CLI seats at both Round Tables.** In the setup panel a seat's agent can now be **Gemini CLI**, with its model chosen by name from what Gemini CLI lists for your account.

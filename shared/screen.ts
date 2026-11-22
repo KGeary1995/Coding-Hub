@@ -8,6 +8,8 @@ export const SCREEN_PORT = 5900;
 /** Where the Windows screen service listens, on this computer only. */
 export const SCREEN_SERVICE_PORT = 47822;
 export const SCREEN_SERVICE_PATH = '/api/screen';
+/** Where the administrator input helper listens, on this computer only (electron/services/remote/input-relay.ts). */
+export const SCREEN_INPUT_PORT = 47823;
 /** `trace`: Trace's own screen server on that computer (Windows). `system`: that computer's own (macOS Screen Sharing). */
 export type ScreenKind = 'trace' | 'system';
 /** The sign-in a Mac asks for: its user name and password, saved encrypted on this computer when the person asks. */
