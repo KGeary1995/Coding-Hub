@@ -2,7 +2,8 @@
 // your own logins, in the built app, on a scratch project and scratch Trace data. Uses a little of both plans (the
 // Claude seat runs Haiku). A discussion table of two: Claude Code leads and edits, Gemini CLI reviews. It checks that
 // the Gemini seat answers under its own name, is refused as the seat that edits, and that its usage is counted.
-// Usage: npm run build && node scripts/real-gemini-seat-check.cjs <outDir>
+// Usage: npm run build && node scripts/real-gemini-seat-check.cjs <outDir> [--hierarchy | --full]
+// --full: instead, the table is set to Full access and each seat is asked to run a command; no approval may appear.
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
@@ -41,6 +42,18 @@ const thread = (page) => page.locator('.chat-view.at-table .chat-thread').last()
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' }); await box.waitFor({ timeout: 240000 });
     await page.waitForFunction(() => document.querySelector('.table-bar')?.textContent?.includes('drives'), null, { timeout: 240000 });
     note('table-open', { bar: (await page.locator('.table-bar').innerText()).replace(/\s+/g, ' ') });
+    if (process.argv.includes('--full')) {
+      // Full access, set on the open table: it must reach the Gemini CLI seat, whose commands then run without an approval card. Nothing here clicks Allow.
+      await page.getByLabel('Permissions', { exact: true }).last().selectOption('full'); await page.waitForTimeout(1500);
+      const head = git('rev-parse', '--short', 'HEAD').toString().trim();
+      await box.fill('Change no file. Each of you: run the command "git rev-parse --short HEAD" yourself and reply with only its output.'); await box.press('Enter');
+      const until = Date.now() + 8 * 60000; let now = ''; let cards = 0;
+      while (Date.now() < until) { cards = Math.max(cards, await page.locator('button.button.primary', { hasText: /^Allow$/ }).count()); const next = (await page.locator('.table-bar .table-status').last().innerText().catch(() => '')).trim(); if (next !== now) { now = next; note('status', { status: now }); } if (/Your turn/i.test(now) || cards) break; await page.waitForTimeout(1500); }
+      const all = await thread(page); await shot(page, '02-full'); const gemini = all.split(/Gemini CLI\s*·\s*Review/).slice(1).join(' ');
+      note('full', { head, cards, geminiSaysHead: gemini.includes(head), tail: all.slice(-900) });
+      failed = cards ? 'An approval card appeared at Full access.' : !/Your turn/i.test(now) ? 'The table did not finish in time.' : !gemini.includes(head) ? 'The Gemini CLI seat did not report what the command printed.' : null;
+      return;
+    }
     await box.fill('Do not change any file. In one sentence each: what is this project about, going by README.md?'); await box.press('Enter');
     const end = Date.now() + 8 * 60000; let status = '';
     while (Date.now() < end) { await allowAll(page); const now = (await page.locator('.table-bar .table-status').last().innerText().catch(() => '')).trim(); if (now !== status) { status = now; note('status', { status }); } if (/Your turn/i.test(status)) break; await page.waitForTimeout(3000); }

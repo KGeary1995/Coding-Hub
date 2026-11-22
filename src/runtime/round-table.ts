@@ -37,7 +37,9 @@ const seatReference = (seat: SavedSeat, session: Session): SeatReference => ({ s
 function seatSession(lead: Session, seat: TablePresetSeat, cwd: string): Session {
   const added = createSession(seat.engine, { mode: 'independent', cwd }); const from = lead.config;
   // A Gemini CLI seat: its agent protocol server, in plan mode, with its own model; it has no shared memory, and what it may do is the table's to decline.
-  if (added.config.engine === 'gemini') { added.config = { engine: 'gemini', chat: true, model: seat.model ?? '' }; return added; }
+  // It takes the lead's permissions like every seat: at Full access the table answers its commands for it. Up to 1.29.0
+  // it was seated without them, so it asked before every command whatever the table was set to.
+  if (added.config.engine === 'gemini') { added.config = { engine: 'gemini', chat: true, model: seat.model ?? '', ...('permissions' in from && from.permissions ? { permissions: from.permissions } : {}) }; return added; }
   if (!('model' in added.config)) return added;
   const shared = { chat: true, ...(seat.model ? { model: seat.model } : {}), ...('permissions' in from && from.permissions ? { permissions: from.permissions } : {}), ...('memoryKey' in from && from.memoryKey ? { memoryKey: from.memoryKey } : {}) };
   // A Claude seat uses the lead's account when the lead is Claude, as the hierarchy's always did.

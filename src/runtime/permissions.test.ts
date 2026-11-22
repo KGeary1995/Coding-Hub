@@ -41,6 +41,16 @@ describe('channel permissions', () => {
     expect([level(lead.id), level(partner.id)]).toEqual(['ask', 'ask']);
     expect(chat.mock.calls.at(-1)![0]).toMatchObject({ sessionId: lead.id, level: 'ask' });
   });
+  it('reaches a Gemini CLI seat too, running or not', async () => {
+    const { lead, partner, chat, level } = table();
+    const gemini: Session = { ...createSession('gemini'), status: 'running', runId: '44444444-4444-4444-8444-444444444444', config: { engine: 'gemini', chat: true, model: '', permissions: 'ask' } };
+    useWorkspaceStore.setState((state) => ({ sessions: [{ ...state.sessions[0], roundTable: { ...state.sessions[0].roundTable!, seats: [{ session: lead.id }, { session: partner.id }, { session: gemini.id }] } }, state.sessions[1], gemini] }));
+    expect(await setPermissions(lead.id, 'full')).toBeNull();
+    expect(level(gemini.id)).toBe('full'); expect(chat.mock.calls.map(([request]) => [request.sessionId, request.level])).toContainEqual([gemini.id, 'full']);
+    // One seat refusing later sets the Gemini seat back with the rest.
+    chat.mockClear(); await permissionsRefused(lead.id, RUN_A, 'ask');
+    expect(level(gemini.id)).toBe('ask'); expect(chat.mock.calls.map(([request]) => request.sessionId)).toContain(gemini.id);
+  });
   it('sets the other agent back too when one refuses later, so one control never stands for two levels', async () => {
     const { lead, partner, chat, level } = table();
     await setPermissions(lead.id, 'edits'); chat.mockClear();
