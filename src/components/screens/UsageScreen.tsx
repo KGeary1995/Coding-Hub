@@ -57,7 +57,7 @@ export function UsageScreen() {
     { label: 'Output tokens', value: compact(totals.output), sub: totals.reasoning ? `incl. ${compact(totals.reasoning)} reasoning` : change(totals.output, prior.output) },
     { label: 'Cache reads', value: compact(totals.cached), sub: 'not counted in totals' },
     { label: 'Sessions', value: String(totals.sessions), sub: `${totals.overContext} at 80%+ context` },
-    { label: 'Estimated cost', value: dollars(totals.cost), sub: totals.unpriced ? `${totals.unpriced} unpriced · configured rates` : 'configured rates' },
+    { label: 'Estimated cost', value: dollars(totals.cost), sub: totals.unpriced ? `${totals.unpriced} unpriced · published prices` : 'published prices' },
   ];
   return <section className="ui-page wide tr-usage">
     <header className="ui-page-head">

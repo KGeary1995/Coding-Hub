@@ -127,7 +127,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const action = state === 'idle' ? <button className="tr-action start" aria-label="Start channel" title="Start channel (Enter on the tile)" onClick={start}><Play size={12} aria-hidden="true" />Start<kbd aria-hidden="true">⏎</kbd></button>
     : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
     : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
-    : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out" onClick={() => setView('memory')}>Write handoff</button>
+    : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out. With automatic memory on, Trace also asks the agent to save one when its turn ends." onClick={() => setView('memory')}>Write handoff</button>
     : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
   const facts = [

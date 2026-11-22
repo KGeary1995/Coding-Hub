@@ -78,6 +78,8 @@ Before you call a change done, run `typecheck`, `test` and the smoke test neares
 
 ## Releasing (summary)
 
+Merging a PR that raises `package.json`'s version releases it: `auto-release.yml` starts **Windows release candidate** once CI passes on `main`, and **Release** (publish) once the candidate passes on the same commit. By hand, the same steps are:
+
 1. `npm version <x.y.z> --no-git-tag-version`, and rewrite `docs/RELEASE_NOTES.md`. It becomes the public release description.
 2. Merge to `main` through a PR, wait for **CI**, then start **Windows release candidate** by hand (`gh workflow run windows-release.yml --ref main`; it otherwise runs only nightly, or on PRs labeled `windows`) and wait for it to pass on the merge commit. Release's publish job refuses a commit it has not passed on. Windows runners sometimes time out in heavy tests: rerun the failed job once (`gh run rerun <id> --failed`), and investigate if it fails again.
 3. Push the tag on the exact commit that passed: `git tag v<x.y.z> <sha> && git push origin v<x.y.z>`. That starts **Release**, which builds Windows and both Mac disk images and publishes them all to `trace-releases` as `Trace-<x.y.z>-…`. A manual run (`gh workflow run release.yml --ref main -f publish=true`) also works, but it builds whatever `main` holds when it starts, so don't merge anything else in between. A published version is never replaced.

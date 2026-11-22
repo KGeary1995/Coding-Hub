@@ -69,6 +69,7 @@ ${terminalFixture}
     assert.match(await phone.evaluate(async () => (await navigator.serviceWorker.ready).active.scriptURL), /\/sw\.js$/);
     // Tapping an alert opens the app at its channel (the service worker's /#channel= link) once the channel list arrives.
     const codexId = await page.evaluate(async () => (await window.codingHub.loadWorkspace()).value.workspace.sessions[1].id);
+    const claudeId = await page.evaluate(async () => (await window.codingHub.loadWorkspace()).value.workspace.sessions[0].id);
     await phone.evaluate((id) => { location.hash = 'channel=' + encodeURIComponent(id); location.reload(); }, codexId);
     await phone.locator('#channel-title').filter({ hasText: 'CH2' }).waitFor();
     assert.equal(new URL(phone.url()).hash, '', 'the alert link is cleared once used');
@@ -88,6 +89,9 @@ ${terminalFixture}
     const fitButton = () => phone.locator('#fit-phone').textContent();
     assert.equal(await textSize(), '13px', 'a channel opens with its text at the chosen size');
     assert.equal(await fitButton(), 'Desktop size', 'a channel opens at the phone\'s size');
+    // From here the computer counts as unused, so the phone keeps the size it took; one step below uses it again.
+    const computerIdle = (seconds) => app.evaluate((_electron, value) => { process.env.CODING_HUB_TEST_DESKTOP_IDLE = value; }, String(seconds));
+    await computerIdle(600);
     const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
     const reported = () => phone.evaluate(() => Number([...document.getElementById('output').textContent.matchAll(/SIZE:(\d+)x/g)].at(-1)?.[1]));
     for (let i = 0; i < 50 && (await reported()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
@@ -141,6 +145,14 @@ ${terminalFixture}
     await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) <= 60, 'touching the channel on the phone draws it at the phone\'s size again');
+    // The computer is used while the phone lies untouched: after ten seconds the computer's size comes back, without
+    // typing in that channel, and touching the channel on the phone takes it again.
+    await computerIdle(0);
+    for (let i = 0; i < 200 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'using the computer gives it the size back from a phone left untouched');
+    await computerIdle(600); await phone.locator('#output').click();
+    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) <= 60, 'touching the channel again draws it at the phone\'s size');
     // A locked phone (or one showing another app) gives it back; coming back takes it again.
     const visibility = (state) => phone.evaluate((value) => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value }); document.dispatchEvent(new Event('visibilitychange')); }, state);
     await visibility('hidden');
@@ -229,6 +241,18 @@ else if (args.startsWith('serve --bg --https=443')) {
     for (let i = 0; i < 100 && !(await allow.isChecked()); i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(await allow.isChecked(), 'the phone is allowed to start agents');
     await phone.locator('#add-channel').waitFor({ state: 'visible' });
+    // Channel settings on the phone: the name, permissions and model of a stopped Claude Code channel, chosen by name.
+    await phone.locator('#channel-list button').filter({ hasText: 'CH1' }).click();
+    await phone.getByRole('button', { name: 'Settings for CH1' }).click();
+    const sheet = phone.getByRole('dialog', { name: 'Channel settings' }); await sheet.getByLabel('Channel name').waitFor();
+    assert.deepEqual(await sheet.getByLabel('Model').locator('option').allTextContents(), ['Claude Code’s default', 'Fable 5.2', 'Opus 5.5', 'Sonnet 5.5', 'Haiku 5.5'], 'Claude Code\'s models by name');
+    await sheet.getByLabel('Channel name').fill('From the phone'); await sheet.getByLabel('Permissions').selectOption('ask'); await sheet.getByLabel('Model').selectOption('claude-haiku-5-5');
+    await sheet.getByRole('button', { name: 'Save', exact: true }).click(); await sheet.waitFor({ state: 'detached' });
+    await phone.locator('#channel-title').filter({ hasText: 'From the phone' }).waitFor();
+    // The computer has them, as its own settings now hold them (its window shows Settings here, not the tiles).
+    const saved = await phone.evaluate(async (id) => (await fetch('/api/channel-settings?sessionId=' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json(), claudeId);
+    assert.deepEqual([saved.title, saved.permissions, saved.model], ['From the phone', 'ask', 'claude-haiku-5-5'], 'the settings changed on the phone are saved on the computer');
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
     // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
     // the same request (linked computers and older phone apps send it), so the chat checks below use that.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();

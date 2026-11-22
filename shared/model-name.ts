@@ -13,3 +13,9 @@ export function modelLabel(id: string): string {
   const alias = /^(opus|sonnet|haiku|fable)(\[1m\])?$/i.exec(value); if (alias) return `${capital(alias[1].toLowerCase())}${alias[2] ? ' (1M)' : ''}`;
   return value;
 }
+
+/**
+ * Claude Code's current models, most capable first, for pickers: chosen by name, never typed. The full IDs, not the
+ * aliases: Claude Code runs the alias `haiku` on Sonnet in plan mode.
+ */
+export const CLAUDE_MODELS = ['claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const;

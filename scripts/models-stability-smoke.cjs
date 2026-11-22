@@ -3,7 +3,7 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {_electron}=require('playwright-core');
-const { openView, addChannel, tileControl } = require('./lib/navigate.cjs');
+const { openView, addChannel, tileControl, setCodexModel } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async()=>{
@@ -24,9 +24,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
   let page=await launch();await page.evaluate(()=>{window.events=[];window.codingHub.onSessionEvent(event=>window.events.push(event));});
   await app.evaluate(({dialog},project)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[project]});},project);await page.getByRole('button',{name:'Open project',exact:true}).click();
   const tile=page.locator('.session-tile').nth(1);await (await tileControl(page, 'Engine settings for channel 2')).click();
-  await page.waitForFunction(()=>[...document.querySelectorAll('datalist option')].some(option=>option.value==='fixture-hidden-model'));
-  const options=await tile.locator('datalist option').evaluateAll(nodes=>nodes.map(node=>node.value));assert.deepEqual(options,['fixture-current-model','fixture-extra-model','fixture-hidden-model']);assert.ok(!options.some(value=>value.startsWith('picker-')));
-  await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('none');await tile.getByLabel('codex model',{exact:true}).fill('fixture-hidden-model');assert.equal(await tile.getByLabel('Reasoning effort',{exact:true}).inputValue(),'');assert.ok((await tile.textContent()).includes('reasoning has been reset') || (await tile.textContent()).includes('Reasoning has been reset'));await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('ultra');
+  // The models Codex lists, chosen by name: its default first, "Another model…" last.
+  await page.waitForFunction(()=>[...document.querySelectorAll('select[aria-label="codex model"] option')].some(option=>option.value==='fixture-hidden-model'));
+  const options=(await tile.locator('select[aria-label="codex model"] option').evaluateAll(nodes=>nodes.map(node=>node.value))).filter(value=>value&&value!=='other');assert.deepEqual(options,['fixture-current-model','fixture-extra-model','fixture-hidden-model']);assert.ok(!options.some(value=>value.startsWith('picker-')));
+  await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('none');await setCodexModel(tile,'fixture-hidden-model');assert.equal(await tile.getByLabel('Reasoning effort',{exact:true}).inputValue(),'');assert.ok((await tile.textContent()).includes('reasoning has been reset') || (await tile.textContent()).includes('Reasoning has been reset'));await tile.getByLabel('Reasoning effort',{exact:true}).selectOption('ultra');
   await (await tileControl(page, 'Engine settings for channel 2')).click();await tile.getByRole('button',{name:'Start channel',exact:true}).click();
   await page.waitForFunction(()=>window.events.some(event=>event.data?.includes('MODEL_OVERRIDE:fixture-hidden-model')));await (await tileControl(tile, 'Stop')).click();
   await openView(page, 'Settings');await page.locator('summary').filter({hasText:'Application stability & crash diagnostics'}).click();await page.getByLabel('Application lifecycle report',{exact:true}).waitFor();assert.equal(await page.getByLabel('Enable terminal WebGL acceleration',{exact:true}).isChecked(),false);

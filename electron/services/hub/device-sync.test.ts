@@ -34,6 +34,24 @@ const templates = (root: string) => load(root, 'project-templates.json', z.array
 const record = (runId: string): UsageRecord => ({ runId, sessionId: 's', engine: 'claude', model: 'm', cwd: '/p', timestamp: new Date().toISOString(), input: 10, output: 5, cached: 0, cacheWrite: 0, reasoning: null, context: null, cost: null });
 
 describe('device sync', () => {
+  it('moves the computer on the less used folder of the same Drive to the others by itself, once, and tells the others meanwhile', () => {
+    const drive = temporary(); const inner = path.join(drive, 'Coding Hub'); fs.mkdirSync(inner);
+    const desk = computer(drive, 'desk', [record('d1')]); const laptop = computer(drive, 'laptop', [record('l1')]); const mac = computer(inner, 'mac', [record('m1')]);
+    const joined: unknown[] = []; mac.sync.onJoined = (moved) => joined.push(moved);
+    expect(desk.sync.sync(true).elsewhere ?? null).toBeNull();
+    laptop.sync.sync(true);
+    // Before the Mac has looked: the others are told it syncs elsewhere, and are not moved (two computers use their folder).
+    fs.mkdirSync(path.join(inner, SYNC_FOLDER, 'usage'), { recursive: true }); fs.writeFileSync(path.join(inner, SYNC_FOLDER, 'usage', mac.sync.machine.id + '.json'), '{}');
+    expect(desk.sync.sync(true).elsewhere).toMatchObject({ directory: fs.realpathSync(inner), switchHere: false }); expect(desk.preferences.driveDirectory).toBe(drive);
+    // The Mac moves itself to the folder two computers use, says so, and from then on shares its usage.
+    mac.sync.sync(true); expect(mac.preferences.driveDirectory).toBe(fs.realpathSync(drive));
+    expect(joined).toEqual([expect.objectContaining({ from: inner, to: fs.realpathSync(drive), computers: expect.arrayContaining(['desk', 'laptop']) })]);
+    expect(mac.sync.sync(true)).toMatchObject({ elsewhere: null, joined: { directory: fs.realpathSync(drive), from: inner } });
+    expect(desk.sync.sync(true).elsewhere ?? null).toBeNull(); expect(desk.sync.otherUsage().map((item) => item.runId).sort()).toEqual(['l1', 'm1']);
+    // Moved back by the person: it is told, with the button, and not moved again.
+    mac.preferences = { ...mac.preferences, driveDirectory: inner };
+    const back = mac.sync.sync(true); expect(mac.preferences.driveDirectory).toBe(inner); expect(back.elsewhere).toMatchObject({ switchHere: true }); expect(back.joined ?? null).toBeNull(); expect(joined).toHaveLength(1);
+  });
   it('does nothing until it is switched on and the Drive folder exists', () => {
     const drive = temporary(); const a = computer(drive, 'desk');
     a.preferences = { ...a.preferences, syncDevices: false }; a.sync.sync();

@@ -57,6 +57,8 @@ const stateSchema = z.object({
   templates: z.array(z.uuid()).max(500), usage: z.string().nullable(), lastSync: z.iso.datetime().nullable(),
   pending: z.object({ settings: settingsDocument.optional(), rules: rulesDocument.optional() }).strict(),
   rulesFrom: z.object({ name: z.string().max(100), at: z.iso.datetime() }).strict().nullable(),
+  /** The Drive folder Trace moved this computer to by itself, and the one it left: it moves to a folder once, so moving back stays. */
+  moved: z.object({ from: z.string().max(4096), to: z.string().max(4096), computers: z.array(z.string().max(100)).max(50), at: z.iso.datetime() }).strict().optional(),
 }).strict();
 type State = z.infer<typeof stateSchema>;
 const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, folder: null, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
@@ -88,6 +90,8 @@ export class DeviceSync {
   private syncing = false; private error: string | null = null; private identityError: string | null = null;
   /** The sync folder whose sub-folders were last made, and when (and for which folder) this computer's usage was last gathered. */
   private prepared: string | null = null; private usageChecked = { at: 0, folder: '' };
+  /** Another sync folder of the same Drive that other computers use instead of this one (see `lookElsewhere`). */
+  private elsewhere: NonNullable<DeviceSyncStatus['elsewhere']> | null = null; private elsewhereChecked = { at: 0, folder: '' };
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
   private addresses = new Map<string, { id: string; name: string; url: string | null }>();
@@ -206,6 +210,44 @@ export class DeviceSync {
     for (const id of this.remoteUsage.keys()) if (!present.has(id)) this.remoteUsage.delete(id);
   }
   /**
+   * Two computers set to different folders of the same Drive each sync into their own `AI-Coding-Hub-Sync`, and nothing
+   * says so: each sees the other's old files and its own new ones (a PC on `My Drive` and a Mac on `My Drive/Coding Hub`
+   * shared no usage for three weeks, 2026-11-22). So the folder above this Drive folder and the folders in it are looked
+   * at, every few minutes: a computer whose newest usage file is in one of those, not here, syncs there.
+   */
+  private lookElsewhere(folder: string, now: boolean, state: State) {
+    if (!now && this.elsewhereChecked.folder === folder && Date.now() - this.elsewhereChecked.at < USAGE_EVERY) return;
+    this.elsewhereChecked = { at: Date.now(), folder }; this.elsewhere = null;
+    const drive = path.dirname(folder); const outer = path.join(path.dirname(drive), SYNC_FOLDER); const candidates = outer === folder ? [] : [outer];
+    try { for (const entry of fs.readdirSync(drive, { withFileTypes: true })) if (candidates.length < 50 && entry.isDirectory() && entry.name !== SYNC_FOLDER) candidates.push(path.join(drive, entry.name, SYNC_FOLDER)); } catch { /* Only the folder above is looked at. */ }
+    /** When each computer last published its usage into a sync folder. */
+    const published = (sync: string) => {
+      const found = new Map<string, number>(); let names: string[] = []; try { names = fs.readdirSync(path.join(sync, 'usage')); } catch { return found; }
+      for (const name of names) { const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match) continue; try { const stat = fs.lstatSync(path.join(sync, 'usage', name)); if (stat.isFile()) found.set(match[1], stat.mtimeMs); } catch { /* Gone meanwhile. */ } }
+      return found;
+    };
+    const here = published(folder);
+    for (const other of candidates) {
+      const there = published(other); const moved = [...there].filter(([id, at]) => id !== this.machine.id && at > (here.get(id) ?? 0)).map(([id]) => id); if (!moved.length) continue;
+      const stayed = [...here].filter(([id, at]) => id === this.machine.id || at >= (there.get(id) ?? 0)).length;
+      const computers = moved.map((id) => { try { return readJson(path.join(other, 'computers', id + '.json'), addressDocument)?.machine.name ?? 'Another computer'; } catch { return 'Another computer'; } });
+      // More computers there than here: this one moves. As many: the one in the inner folder moves, so both agree.
+      const found = { directory: path.dirname(other), computers, switchHere: moved.length > stayed || (moved.length === stayed && other === outer) };
+      if (!this.elsewhere || computers.length > this.elsewhere.computers.length) this.elsewhere = found;
+    }
+    // The computer that should move does, by itself, and says so (the person's choice, 2026-11-22: before, a button).
+    // Once per folder: a person who moves back is not moved again, and two computers that each moved cannot keep swapping.
+    const target = this.elsewhere;
+    if (target?.switchHere && state.moved?.to !== target.directory) {
+      const preferences = this.preferences(); const from = preferences.driveDirectory;
+      this.savePreferences({ ...preferences, driveDirectory: target.directory });
+      state.moved = { from, to: target.directory, computers: target.computers, at: new Date().toISOString() }; this.elsewhere = null; this.elsewhereChecked = { at: 0, folder: '' };
+      try { this.onJoined(state.moved); } catch { /* Telling the person must not stop the sync. */ }
+    }
+  }
+  /** Told when this computer's Drive folder was moved to join the others. */
+  onJoined: (moved: { from: string; to: string; computers: string[]; at: string }) => void = () => {};
+  /**
    * Each computer writes where its phone remote can be reached (an address on the person's tailnet, never a key) and
    * reads where the others can, so Settings → Other computers can offer to link them.
    */
@@ -240,7 +282,7 @@ export class DeviceSync {
     try {
       const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
-      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder)]) {
+      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder), () => this.lookElsewhere(folder, now, state)]) {
         try { step(); } catch (error) { this.prepared = null; this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);
@@ -268,6 +310,8 @@ export class DeviceSync {
     let state: State; try { state = this.state(); } catch (error) { state = structuredClone(EMPTY); this.error ??= (error as Error).message; }
     const problem = preferences.syncDevices ? driveFolderProblem(preferences.driveDirectory) : null; const connected = Boolean(preferences.syncDevices) && !problem;
     const conflicts = (['settings', 'rules'] as const).flatMap((document) => { const held = state.pending[document]; return held ? [{ document, from: held.machine.name, at: held.updatedAt }] : []; });
-    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: problem ?? this.error ?? (preferences.syncDevices ? this.identityError : null), computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom };
+    return { enabled: Boolean(preferences.syncDevices), connected, machine: this.machine, lastSync: state.lastSync, error: problem ?? this.error ?? (preferences.syncDevices ? this.identityError : null), computers: [...this.computers.values()].sort((a, b) => a.name.localeCompare(b.name)), conflicts, rulesFrom: state.rulesFrom, elsewhere: connected ? this.elsewhere : null,
+      // Shown while this computer is still on the folder it was moved to.
+      joined: state.moved && state.moved.to === preferences.driveDirectory ? { directory: state.moved.to, from: state.moved.from, computers: state.moved.computers, at: state.moved.at } : null };
   }
 }

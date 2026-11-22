@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const login: { openAtLogin: boolean; args: string[] }[] = [];
-vi.mock('electron', () => ({ app: { isPackaged: true, getAppPath: () => '', setLoginItemSettings: (settings: { openAtLogin: boolean; args: string[] }) => login.push(settings) } }));
+vi.mock('electron', () => ({ app: { isPackaged: true, getVersion: () => '1.27.0', getAppPath: () => '', setLoginItemSettings: (settings: { openAtLogin: boolean; args: string[] }) => login.push(settings) } }));
 const { commandLine, elevatedScript, registerTaskScript, removeTaskScript, ScreenShare, TASK_NAME } = await import('./screen-share');
 const { SHARE_FILE } = await import('./screen-service-server');
 
@@ -17,21 +17,62 @@ const decode = (args: string[]) => Buffer.from(args.at(-1)!, 'base64').toString(
 const freePort = () => new Promise<number>((resolve) => { const server = net.createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address() as net.AddressInfo; server.close(() => resolve(port)); }); });
 
 /** A ScreenShare on Windows terms, with PowerShell and schtasks stood in for: schtasks /Run starts a "service" (a health page). */
-async function share(options: { refuse?: boolean } = {}) {
+/** `left`: a service an update left running, answering with that version ("" for one from before it told its version). */
+async function share(options: { refuse?: boolean; left?: string } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-share-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
   const port = await freePort(); const calls: { file: string; args: string[] }[] = []; let service: http.Server | null = null;
   const run = async (file: string, args: string[]) => {
     calls.push({ file, args });
     if (file === 'powershell.exe' && options.refuse) return { code: 1, output: 'Start-Process : This command cannot be run due to the error: The operation was canceled by the user.' };
-    if (file === 'schtasks.exe' && !service) { service = http.createServer((_request, response) => { response.writeHead(200); response.end('{}'); }); await new Promise<void>((resolve) => service!.listen(port, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => service!.close(() => resolve()))); }
+    if (file === 'schtasks.exe' && args[0] === '/End' && service) { const ended = service; service = null; await new Promise<void>((resolve) => { ended.close(() => resolve()); ended.closeAllConnections(); }); }
+    if (file === 'schtasks.exe' && args[0] === '/Run' && !service) await serve('1.27.0');
     return { code: 0, output: '' };
   };
+  const serve = async (version: string) => {
+    const started = http.createServer((_request, response) => { response.writeHead(200); response.end(JSON.stringify(version ? { ok: true, version } : { ok: true })); }); service = started;
+    await new Promise<void>((resolve) => started.listen(port, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { started.close(() => resolve()); started.closeAllConnections(); }));
+  };
+  if (options.left !== undefined) await serve(options.left);
   const screen = new ScreenShare(root, () => 'Obsidian-Halo', async () => '', port, run);
   Object.defineProperty(screen, 'supported', { get: () => true });
   return { screen, root, calls, setting: () => JSON.parse(fs.readFileSync(path.join(root, SHARE_FILE), 'utf8')) };
 }
 
 describe('sharing the screen as administrator', () => {
+  it('asks the service whether it can capture, and says once why it cannot', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-share-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const port = await freePort(); let answer: unknown = { ok: false, error: 'Could not start video source' }; const asked: (string | undefined)[] = [];
+    const server = http.createServer((request, response) => { if (request.url === '/check') asked.push(request.headers.authorization); response.writeHead(200); response.end(JSON.stringify(request.url === '/check' ? answer : { ok: true, version: '1.27.0' })); });
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve)); cleanup.push(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
+    fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true, elevated: true })); fs.writeFileSync(path.join(root, 'screen-service-local.json'), JSON.stringify({ token: 't'.repeat(43) }));
+    const screen = new ScreenShare(root, () => 'Obsidian-Halo', async () => '', port, async () => ({ code: 0, output: '' })); Object.defineProperty(screen, 'supported', { get: () => true });
+    const told: string[] = []; screen.onProblem = (message) => told.push(message);
+    await screen.ensure();
+    // Trace's own key is what it asks with; the reason names the setting that shares the screen without administrator rights.
+    expect(asked).toEqual([`Bearer ${'t'.repeat(43)}`]);
+    expect(told).toHaveLength(1); expect(told[0]).toContain('Could not start video source'); expect(told[0]).toContain('Also control apps running as administrator');
+    expect((await screen.status()).problem).toBe(told[0]);
+    // The same reason again is not said again; once it captures, the problem is gone.
+    await screen.verify(); expect(told).toHaveLength(1);
+    answer = { ok: true }; expect(await screen.verify()).toBeNull(); expect((await screen.status()).problem).toBeNull();
+  });
+
+  it('replaces an administrator service an update left behind, once, and leaves this version\'s alone', async () => {
+    for (const left of ['1.24.2', '']) {
+      const { screen, root, calls } = await share({ left }); fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true, elevated: true }));
+      await screen.ensure();
+      // The old one's task is ended and run again; no permission is asked (no PowerShell).
+      expect(calls.filter((call) => call.file === 'schtasks.exe').map((call) => call.args[0])).toEqual(['/End', '/Run']); expect(calls.some((call) => call.file === 'powershell.exe')).toBe(false);
+      expect((await screen.status()).running).toBe(true);
+      await screen.ensure(); expect(calls.filter((call) => call.file === 'schtasks.exe')).toHaveLength(2);
+    }
+    const current = await share({ left: '1.27.0' }); fs.writeFileSync(path.join(current.root, SHARE_FILE), JSON.stringify({ enabled: true, elevated: true }));
+    await current.screen.ensure(); expect(current.calls.filter((call) => call.file === 'schtasks.exe')).toEqual([]);
+    // The ordinary service is closed by the update itself; Trace has no task to end for it.
+    const ordinary = await share({ left: '1.24.2' }); fs.writeFileSync(path.join(ordinary.root, SHARE_FILE), JSON.stringify({ enabled: true }));
+    await ordinary.screen.ensure(); expect(ordinary.calls.filter((call) => call.file === 'schtasks.exe')).toEqual([]);
+  });
+
   it('registers a task for this user, with their highest rights, never stopped for running long', () => {
     const script = registerTaskScript('C:\\Program Files\\Trace\\Trace.exe', ['--screen-service', '--storage=C:\\Users\\o\'neil\\data', '--elevated'], 'PC\\o\'neil');
     expect(script).toContain("-Execute 'C:\\Program Files\\Trace\\Trace.exe'");

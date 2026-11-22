@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import type { ChannelControl, RemoteResumeRequest } from '../../shared/remote';
+import type { ChannelControl, RemoteChannelChange, RemoteResumeRequest } from '../../shared/remote';
+import { permissionLevel } from '../../shared/schemas';
 import type { ChannelEngine, Session } from '../../shared/types';
 import { HIERARCHY_MODELS, RETIRED_REVIEWER_MODELS } from '../../shared/chat';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
@@ -20,6 +21,8 @@ import { useChatStore } from '../state/chat-store';
  * is done (the reviewer's turn ending says nothing about the work).
  */
 function chatTurnDone(sessionId: string, failed: boolean) {
+  // Near its context limit, the agent is asked to save a handoff itself (a seat at a Round Table is not).
+  if (!failed) void askForHandoff(sessionId).catch(() => {});
   const sessions = useWorkspaceStore.getState().sessions; const lead = leadOf(sessions, sessionId) ?? sessions.find((session) => session.id === sessionId);
   const table = lead ? useChatStore.getState().threads[lead.id]?.table : null; const seat = sessions.find((session) => session.id === sessionId);
   // A hierarchy's task is done on the planner's APPROVED (chainTasks), never when a seat's turn ends.
@@ -28,7 +31,9 @@ function chatTurnDone(sessionId: string, failed: boolean) {
   if (lead && table && seat && (table.driverSeat ? sessionId !== table.driverSeat : seat.config.engine !== table.driver)) return;
   void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
 }
-import { permissionsRefused } from './permissions';
+import { permissionsRefused, setPermissions } from './permissions';
+import { askForHandoff } from './auto-handoff';
+import { hiddenSeatIds } from '../../shared/table-seats';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
@@ -70,6 +75,7 @@ export function useNativeHost() {
     });
     void hubCall<UsageRecord[]>({ action: 'usage' }).then((usage) => { if (!cancelled) { const live = useHubStore.getState().usage; useHubStore.getState().setUsage([...live, ...usage.filter((u) => !live.some((l) => l.runId === u.runId))]); } }).catch(() => {});
     void hubCall<HubPreferences>({ action: 'preferences' }).then((preferences) => { if (!cancelled) useHubStore.getState().setPreferences(preferences); }).catch(() => {});
+    void hubCall<{ asOf: string; claudeModels: string[] }>({ action: 'catalog' }).then((catalog) => { if (!cancelled) useHubStore.setState({ catalog }); }).catch(() => { /* The built-in list. */ });
     // Settings and usage from other computers arrive through the background sync; pick them up once a minute.
     const syncTimer = setInterval(() => { if (useHubStore.getState().preferences.syncDevices) void refreshSynced().catch(() => { /* Tried again next minute. */ }); }, 60000);
     const unsubscribeChat = host.onChatEvent((envelope) => {
@@ -83,8 +89,11 @@ export function useNativeHost() {
     // A saved Round Table is opened again once both of its chats run (after a restart).
     const unsubscribeTables = useWorkspaceStore.subscribe(restoreTables);
     const stopTasks = startTaskAutomation();
+    // A closed Round Table's findings that could not be written to shared memory stay with its channel (Needs you lists
+    // them, with Save to memory): they are tried again every few minutes, so a Drive folder that came back needs no click.
+    const findingsTimer = setInterval(() => { const sessions = useWorkspaceStore.getState().sessions; for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) void forgetTable(session.id); } }, 5 * 60000);
     const unsubscribe = host.onSessionEvent((event) => {
-      if (event.type === 'answered' && event.finished) taskTurnDone(event.sessionId);
+      if (event.type === 'answered' && event.finished) { taskTurnDone(event.sessionId); void askForHandoff(event.sessionId).catch(() => {}); }
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       // A chat's thread: Claude Code's or Codex's.
@@ -101,11 +110,11 @@ export function useNativeHost() {
     const unsubscribeLinkedChat = host.onLinkedChatEvent((event) => { const keyOf = linkedChatKey(event.id); if (event.type === 'chat') receiveChat(event.envelope, keyOf); else receiveReplay(event.replay, keyOf); });
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
     // A clicked desktop notification opens what it is about.
-    const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView('usage'); });
+    const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView(target.view); });
     // A phone resumed a conversation from its History: a channel for it here, as Session history's Resume makes.
     const unsubscribeResume = host.onRemoteResume((request) => { const error = remoteResume(request); host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) }); });
     const unsubscribeControl = host.onRemoteControl((request) => {
-      void ('add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like)) : remoteControl(request.sessionId, request.control))
+      void ('settings' in request ? remoteSettings(request.settings) : 'add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
     });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
@@ -140,7 +149,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
@@ -251,6 +260,27 @@ export function remoteResume(request: RemoteResumeRequest): string | undefined {
   // In the layout the desktop already uses: the person is elsewhere.
   const sessions = [...state.sessions, session];
   useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, state.layoutMode) });
+  return undefined;
+}
+/**
+ * A phone's channel settings: the name, and for an agent what it may do without asking, its model and (Codex) its
+ * reasoning effort, changed as the channel's own settings change them. Permissions also reach a running chat (and
+ * every seat at its Round Table); the model and effort are saved only while the channel is stopped, like on its tile.
+ * Returns why something could not be changed.
+ */
+export async function remoteSettings(change: RemoteChannelChange): Promise<string | undefined> {
+  const find = () => useWorkspaceStore.getState().sessions.find((item) => item.id === change.sessionId);
+  const session = find(); if (!session) return 'That channel is no longer on this computer.';
+  if (change.title !== undefined && change.title !== session.title) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === session.id ? { ...item, title: change.title! } : item) }));
+  const agentChange = change.permissions !== undefined || change.model !== undefined || change.effort !== undefined;
+  if (!isAgentConfig(session.config)) return agentChange ? 'A terminal channel has no agent settings.' : undefined;
+  if (change.permissions !== undefined && change.permissions !== permissionLevel(session.config)) { const error = await setPermissions(session.id, change.permissions); if (error) return error; }
+  const now = find(); if (!now || !isAgentConfig(now.config)) return 'That channel is no longer on this computer.';
+  const config = now.config; const model = change.model ?? config.model;
+  const effort = config.engine === 'codex' ? (change.effort !== undefined ? change.effort : config.reasoningEffort) : null;
+  if (model === config.model && (config.engine !== 'codex' || effort === config.reasoningEffort)) return undefined;
+  if (now.status === 'running' || now.status === 'starting') return `The ${config.engine === 'codex' ? 'model and reasoning effort change' : 'model changes'} only while the channel is stopped. Stop it, then choose again.`;
+  useWorkspaceStore.getState().updateConfig(now.id, config.engine === 'codex' ? { ...config, model, reasoningEffort: effort } : { ...config, model });
   return undefined;
 }
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */

@@ -1,15 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MemoryProject } from '../../shared/hub';
-import { hubCall } from '../state/hub-store';
+import { hubCall, useHubStore } from '../state/hub-store';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
 import type { ChatEngineConfig, ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, withPermissions } from '../runtime/permissions';
 import { CodexModelPicker } from './CodexModelPicker';
 import { GeminiModelPicker } from './GeminiModelPicker';
 import { MAX_MODEL_LENGTH, MAX_TOKEN_SETTING, modelValue, permissionLevel } from '../../shared/schemas';
+import { modelLabel } from '../../shared/model-name';
 
-// Claude Code aliases follow the current models; the listed IDs are current releases.
-export const claudeModels = ['opus', 'sonnet', 'haiku', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+/** Claude Code's model, chosen by name; "Another model" takes an exact ID or alias for one not listed. */
+function ClaudeModelControl({ config, onChange }: { config: ClaudeCLIEngineConfig; onChange: (config: CLIEngineConfig) => void }) {
+  const models = useHubStore((state) => state.catalog.claudeModels); const listed = config.model === '' || models.includes(config.model); const [other, setOther] = useState(false);
+  return <label className="model-control ui-field">Model
+    <select aria-label="claude model" value={listed && !other ? config.model : 'other'} onChange={(event) => { const value = event.target.value; setOther(value === 'other'); if (value !== 'other') onChange({ ...config, model: value }); }}>
+      <option value="">Claude Code’s default</option>
+      {models.map((model) => <option key={model} value={model}>{modelLabel(model)}</option>)}
+      <option value="other">Another model…</option>
+    </select>
+    {(other || !listed) && <input aria-label="claude model ID" placeholder="Model ID or alias" maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />}
+    <small className="ui-hint">Applies when the channel starts.</small>
+  </label>;
+}
 
 function tokenValue(value: string): number | null {
   if (value === '') return null;
@@ -66,10 +78,7 @@ export function EngineControls({ id, config, directory = null, onChange }: { id:
         <small className="ui-hint">{permissionHelp(config.engine, permissions)} {config.engine !== 'gemini' && config.chat ? 'A running chat can also change this from its message box.' : 'Applies when the channel starts.'}</small>
       </label>
       {config.engine === 'gemini' ? <GeminiModelPicker id={id} config={config} onChange={onChange} /> : <MemoryProjectControl config={config} directory={directory} onChange={onChange} />}
-      {config.engine === 'claude' && <label className="model-control ui-field">Model
-        <input aria-label={`${config.engine} model`} placeholder="CLI default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />
-        <datalist id={`models-${id}`}>{claudeModels.map((model) => <option key={model} value={model} />)}</datalist>
-      </label>}
+      {config.engine === 'claude' && <ClaudeModelControl config={config} onChange={onChange} />}
       {config.engine === 'claude' ? <>
         <label className="model-control ui-field">Claude account profile
           <select aria-label="Claude account profile" value={config.accountProfileId ?? ''} onChange={(event) => onChange(withProfile(config, event.target.value, kept.current))}><option value="">Default · existing CLI login</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}{config.accountProfileId && !profiles.some((p) => p.id === config.accountProfileId) && <option value={config.accountProfileId}>Saved profile · unavailable</option>}</select>

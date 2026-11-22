@@ -26,6 +26,8 @@ export type HubRequest =
   | { action: 'memory-entries'; directory: string }
   | { action: 'memory-use-auto-key'; directory: string }
   | { action: 'usage' }
+  /** The price list's date and Claude Code's model names in use: built in, or newer from the downloads page. */
+  | { action: 'catalog' }
   | { action: 'preferences' }
   | { action: 'save-preferences'; preferences: HubPreferences }
   | { action: 'drive-connect' }
@@ -43,6 +45,8 @@ export interface UsageRecord { machine?: string; conversationId?: string; incomp
   /** New tokens and cost by the local day they were used on (`localDay`), for runs that span midnight. */
   days?: Record<string, { tokens: number; cost: number | null }> }
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
+/** The published prices and Claude Code's models (IDs, most capable first), as of `asOf` (a date). */
+export interface PublishedCatalog { asOf: string; prices: PriceRate[]; claudeModels: string[] }
 export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; syncDevices?: boolean;
   /** Desktop notifications (on unless false); daily budgets for this computer (null or absent: none); the plan-limit share to warn at. */
   alerts?: boolean; dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number;
@@ -50,7 +54,15 @@ export interface HubPreferences { folderId: string; driveDirectory: string; pric
   tablePresets?: import('./table-seats').TablePreset[] }
 export type SyncedDocument = 'settings' | 'rules';
 export interface SyncedComputer { id: string; name: string; updatedAt: string }
-export interface DeviceSyncStatus { enabled: boolean; connected: boolean; machine: { id: string; name: string }; lastSync: string | null; error: string | null; computers: SyncedComputer[]; conflicts: { document: SyncedDocument; from: string; at: string }[]; rulesFrom: { name: string; at: string } | null }
+export interface DeviceSyncStatus { enabled: boolean; connected: boolean; machine: { id: string; name: string }; lastSync: string | null; error: string | null; computers: SyncedComputer[]; conflicts: { document: SyncedDocument; from: string; at: string }[]; rulesFrom: { name: string; at: string } | null;
+  /**
+   * Other computers sync through another folder of the same Drive (`directory` is the Drive folder to set here to join
+   * them), so nothing reaches them from here or the other way. `switchHere`: this computer is the one to change, as
+   * more computers use that folder (each computer works this out the same way, so only one side is asked to move).
+   */
+  elsewhere?: { directory: string; computers: string[]; switchHere: boolean } | null;
+  /** Trace moved this computer's Drive folder by itself to join the others (once per folder; `from` is what it used before, to move back). */
+  joined?: { directory: string; from: string; computers: string[]; at: string } | null }
 /** `problem` says why the Drive folder cannot be used, in words a person can act on; null when it can. */
 export interface DriveStatus { connected: boolean; clientConfigured: boolean; persistent: boolean; folderId: string; problem?: string | null }
 export interface RulesTargetReference { directory: string; claudeHash: string; codexHash: string }
@@ -63,7 +75,7 @@ export interface SharedRules { content: string; revision: string; directories: s
 export interface MemoryEntry { engine: CLIEngine; file: string; key: string | null; root: string | null; current: boolean }
 /** A memory project on this computer (memory-projects). */
 export interface MemoryProject { key: string; notes: number; latest: string }
-export type HubResponse = import('./commit-refs').CommitStatus | MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
+export type HubResponse = Pick<PublishedCatalog, 'asOf' | 'claudeModels'> | import('./commit-refs').CommitStatus | MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
 export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };
 

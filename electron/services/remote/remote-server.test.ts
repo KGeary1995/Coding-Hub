@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
-import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
+import { eventJSON, RemoteServer, type RemoteHost, PHONE_QUIET_MS } from './remote-server';
 import { HubError } from '../cli/engine-adapter';
 import { localScreenToken, ScreenService, SHARE_FILE } from './screen-service-server';
 import { openTraceScreen } from './screen-sharing';
@@ -281,6 +281,46 @@ describe('phone remote', () => {
     inner.releaseOrphans(); const watching = { device: id, kind: 'phone', sessionId: 'far' }; inner.streams.add(watching); inner.releaseOrphans(Date.now() + 60000); expect(relayed).toHaveLength(1);
     inner.streams.delete(watching); inner.releaseOrphans(Date.now() + 60000); await new Promise((resolve) => setImmediate(resolve));
     expect(relayed).toEqual([['far', { cols: 40, rows: 20 }], ['far', null]]);
+  });
+
+  it('gives a size a phone insisted on back once the phone has gone quiet and the computer is used', async () => {
+    const { server, running } = await remote(); const resizes: number[][] = []; let idle = 0;
+    Object.assign(running[0], { cols: 120, rows: 40 }); const host = (server as unknown as { host: RemoteHost }).host;
+    host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); }; host.idleSeconds = () => idle;
+    await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const holds = (server as unknown as { phoneSizes: Map<string, { at: number }> }).phoneSizes;
+    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20, force: true }) });
+    // The computer is in use, and the phone asked a moment ago: the phone keeps its size.
+    server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
+    // The phone has asked for nothing for longer than PHONE_QUIET_MS, but typed just now: still the phone's.
+    holds.get('s1')!.at = Date.now() - PHONE_QUIET_MS - 1000;
+    await fetch(base(server) + '/api/input', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', data: 'y' }) });
+    server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
+    // Quiet that long with the computer idle: the phone is the only one there.
+    holds.get('s1')!.at = Date.now() - PHONE_QUIET_MS - 1000; idle = 60; server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
+    // Quiet and the computer in use: the computer's size comes back, and is not taken again by itself.
+    idle = 0; server.checkDesktop(); expect(resizes).toEqual([[40, 20], [120, 40]]);
+    idle = 600; server.checkDesktop(); expect(resizes).toHaveLength(2);
+  });
+
+  it('lets a phone that may start agents read and change a channel\'s settings, and no other phone', async () => {
+    const { server } = await remote(); const changes: unknown[] = []; const host = (server as unknown as { host: RemoteHost }).host;
+    host.channelSettings = async (sessionId) => ({ sessionId, title: 'One', engine: 'claude', chat: false, running: false, permissions: 'edits', model: 'claude-opus-5-5', models: [{ id: 'claude-opus-5-5', name: 'Opus 5.5' }] });
+    host.changeChannel = async (change) => { if (change.model === 'refused') throw new HubError('REMOTE_CONTROL', 'The model changes only while the channel is stopped.'); changes.push(change); };
+    await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const read = () => fetch(base(server) + '/api/channel-settings?sessionId=s1', { headers }); const change = (body: unknown) => fetch(base(server) + '/api/channel-settings', { method: 'POST', headers, body: JSON.stringify(body) });
+    // Off until the person allows it for that phone.
+    expect((await read()).status).toBe(403); expect((await change({ sessionId: 's1', title: 'New' })).status).toBe(403); expect(changes).toEqual([]);
+    server.setCanRun(server.status().devices[0].id, true);
+    expect(await (await read()).json()).toMatchObject({ title: 'One', permissions: 'edits', model: 'claude-opus-5-5', models: [{ id: 'claude-opus-5-5', name: 'Opus 5.5' }] });
+    expect((await fetch(base(server) + '/api/channel-settings?sessionId=nope', { headers })).status).toBe(400);
+    expect((await change({ sessionId: 's1', title: 'New name', permissions: 'ask', model: 'claude-fable-5-2' })).status).toBe(200);
+    expect(changes).toEqual([{ sessionId: 's1', title: 'New name', permissions: 'ask', model: 'claude-fable-5-2' }]);
+    // What the window would not store is refused here: an unknown channel, a level or field it does not have, a model that is no ID.
+    for (const bad of [{ sessionId: 'nope', title: 'x' }, { sessionId: 's1', permissions: 'everything' }, { sessionId: 's1', model: 'a model; rm -rf' }, { sessionId: 's1', account: 'work' }, { sessionId: 's1', title: '' }]) expect((await change(bad)).status, JSON.stringify(bad)).toBe(400);
+    expect(changes).toHaveLength(1);
+    // Why the window refused reaches the phone.
+    const refused = await change({ sessionId: 's1', model: 'refused' }); expect(refused.status).toBe(409); expect((await refused.json() as { error: string }).error).toContain('only while the channel is stopped');
   });
 
   it("keeps a phone's size when an old stream of it closes while a newer one follows the channel", async () => {

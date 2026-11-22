@@ -18,7 +18,7 @@ The Claude Design handoff in this folder (`README.md`, `design/`, `tokens.css`) 
 - **Templates:** has a form, so it moves to Projects rather than into the command menu.
 - **Revert hunk / Discard…:** new destructive actions that the app does not have today. They are left out of the redesign.
 - **Context percentage:** only Codex reports its context window. Claude tiles show `ctx —`, and "limit" for Claude comes from session budgets.
-- **Price table version:** prices are user-configured, so the Usage cost cell cites "configured rates" instead of a version.
+- **Price table version:** from 1.27 prices are the providers' published ones (`shared/model-prices.ts`), with the person's own rates first, so the Usage cost cell cites "published prices"; the date they were checked is in Settings → Model pricing. (Before, prices were user-configured and the cell cited "configured rates".)
 - **Phase 1 type scale:** the existing 13–14 px scale is kept until each view is rebuilt with the Trace type scale in later phases.
 
 ## How "waiting" is detected (phase 2)

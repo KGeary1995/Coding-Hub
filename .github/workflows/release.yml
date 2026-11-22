@@ -47,6 +47,8 @@ jobs:
           # Signed builds name their publisher, so installed copies check who signed each update before running it.
           # Only with a certificate: an unsigned installer checked against a publisher name would never install.
           WINDOWS_PUBLISHER_NAME: ${{ secrets.WINDOWS_CERTIFICATE != '' && vars.WINDOWS_PUBLISHER_NAME || '' }}
+      # The price list and model names this version was built with, for installed copies to refresh from between releases.
+      - run: node scripts/make-catalog.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-windows
@@ -56,6 +58,7 @@ jobs:
             release/*-Setup.exe.blockmap
             release/*-Portable.exe
             release/latest.yml
+            release/catalog.json
   mac:
     runs-on: macos-latest
     # Notarizing two disk images waits on Apple, so this one gets longer.

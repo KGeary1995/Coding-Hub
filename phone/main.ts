@@ -17,8 +17,9 @@ import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from '../src/runtime/ter
 import { unlockKeys, type KeyStroke } from '../src/runtime/screen-channel';
 import type RFB from '@novnc/novnc';
 import type { ChannelEngine } from '../shared/types';
-import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteMe, type RemoteTask } from '../shared/remote';
-import { addChannel, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
+import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteChannelChange, type RemoteMe, type RemoteTask } from '../shared/remote';
+import { modelLabel } from '../shared/model-name';
+import { addChannel, changeChannel, channelSettings, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 import { atPhoneSize, FIT_KEY, fitsOnOpen, takenBack } from './size';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
@@ -114,6 +115,25 @@ function header(back?: () => void, title?: Node, ...tools: Node[]) {
     h('span', { className: `link ${connected ? 'on' : ''}`, aria: { live: 'polite' } }, linkText()));
 }
 
+/** The version this app was built with (vite.phone.config.ts); '' in a build that does not say. */
+declare const __TRACE_VERSION__: string | undefined;
+const OWN_VERSION = typeof __TRACE_VERSION__ === 'string' ? __TRACE_VERSION__ : '';
+const RELOADED_KEY = 'trace-remote-reloaded';
+/**
+ * The computer that served this app runs another version of Trace than the app was built with: after an update there,
+ * the phone still runs the app it had saved, until reloaded (every release said "reload the phone app"). It reloads
+ * itself once nothing is open (a channel, the screen, a sheet, an unsent message), and once per version, so a phone
+ * that cannot get the new app is not reloaded over and over.
+ */
+let newer: string | null = null;
+function computerVersion(version: string) {
+  if (!OWN_VERSION || activeTarget().id || version === OWN_VERSION || sessionStorage.getItem(RELOADED_KEY) === version) return;
+  newer = version; reloadWhenIdle();
+}
+function reloadWhenIdle() {
+  if (!newer || current || viewer || drafts.size || document.querySelector('.copy-sheet')) return false;
+  sessionStorage.setItem(RELOADED_KEY, newer); newer = null; location.reload(); return true;
+}
 /** A link's encoded part; a mistyped or cut-off link gives '' rather than a blank page. */
 function decoded(value: string) { try { return decodeURIComponent(value); } catch { return ''; } }
 
@@ -164,9 +184,68 @@ function channelControls(channel: RemoteChannel): Node[] {
   };
   // Restart and Stop are icons with their names, leaving the channel's name room beside them in the header. Fixed markup, not data.
   const iconButton = (className: string, value: ChannelControl, label: string, paths: string) => { const button = h('button', { className: `small icon-only ${className}`, type: 'button', title: label, onclick: press(value), aria: { label: `${label} CH${channel.channel}` } }); button.innerHTML = iconSvg(paths); return button; };
-  return channel.running
+  // Fixed markup: lucide's Settings2.
+  const settings = h('button', { className: 'small icon-only', type: 'button', title: 'Channel settings', onclick: () => void showSettings(channel), aria: { label: `Settings for CH${channel.channel}` } }); settings.innerHTML = iconSvg('<path d="M14 17H5"/><path d="M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>');
+  return [settings, ...startStop()];
+  function startStop() { return channel.running
     ? [iconButton('', 'restart', 'Restart', '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'), iconButton('stop', 'stop', 'Stop', '<rect width="14" height="14" x="5" y="5" rx="2"/>')]
-    : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')];
+    : [h('button', { className: 'primary small', type: 'button', onclick: press('start'), aria: { label: `Start CH${channel.channel}` } }, 'Start')]; }
+}
+
+const PERMISSIONS = [['ask', 'Ask'], ['edits', 'Allow edits'], ['full', 'Full access']] as const;
+/** What a permission level lets the agent do, in a line (the computer's settings say more). */
+const PERMISSION_NOTE = { ask: 'The agent asks before edits and commands.', edits: 'The agent edits files in the project without asking.', full: 'The agent never asks: any command, any file. Use it only for work you trust.' } as const;
+/**
+ * A channel's settings, as on its tile on the computer: its name and, for an agent, what it may do without asking, its
+ * model (chosen by name from what its CLI lists) and Codex's reasoning effort. Saved on the computer, which applies
+ * them as its own settings would: permissions reach a running chat at once, a model waits for the channel to be stopped.
+ */
+async function showSettings(channel: RemoteChannel) {
+  const status = h('span', { className: 'dim', aria: { live: 'polite' } }, 'Reading…'); const body = h('form', { className: 'settings-form' });
+  const close = () => sheet.remove();
+  const sheet = h('div', { className: 'copy-sheet settings-sheet', aria: { role: 'dialog', modal: 'true', label: 'Channel settings' } },
+    h('div', { className: 'copy-bar' }, h('strong', {}, `CH${channel.channel} settings`), status, h('button', { className: 'icon small', type: 'button', onclick: close }, 'Done')), body);
+  document.body.append(sheet);
+  try {
+    const now = await channelSettings(channel.sessionId); status.textContent = '';
+    const name = h('input', { value: now.title, maxLength: 100, autocomplete: 'off', aria: { label: 'Channel name' } });
+    const fields: Node[] = [h('label', { className: 'field' }, 'Name', name)];
+    const agent = now.engine !== 'shell';
+    const note = h('small', { className: 'dim' }, now.permissions ? PERMISSION_NOTE[now.permissions] : '');
+    const permissions = h('select', { aria: { label: 'Permissions' }, onchange: () => { note.textContent = PERMISSION_NOTE[permissions.value as keyof typeof PERMISSION_NOTE]; } }, ...PERMISSIONS.map(([value, label]) => h('option', { value, selected: value === now.permissions }, label)));
+    const cli = ENGINE[now.engine]; const listed = now.models.some((item) => item.id === now.model);
+    const model = h('select', { aria: { label: 'Model' }, disabled: now.running, onchange: () => fillEfforts() },
+      h('option', { value: '', selected: !now.model }, `${cli}’s default`), ...now.models.map((item) => h('option', { value: item.id, selected: item.id === now.model }, item.name)),
+      now.model && !listed ? h('option', { value: now.model, selected: true }, `${modelLabel(now.model)} · saved`) : null);
+    const effort = h('select', { aria: { label: 'Reasoning effort' }, disabled: now.running });
+    /** The levels the chosen Codex model lists (the usual five when it lists none); one saved that it does not list is kept. */
+    const fillEfforts = () => {
+      const levels = now.models.find((item) => item.id === model.value)?.efforts ?? ['none', 'low', 'medium', 'high', 'xhigh']; const chosen = effort.options.length ? effort.value : now.effort ?? '';
+      effort.replaceChildren(h('option', { value: '' }, `${cli}’s default`), ...levels.map((level) => h('option', { value: level }, level)), ...(chosen && !levels.includes(chosen) ? [h('option', { value: chosen }, `${chosen} · saved`)] : [])); effort.value = chosen;
+    };
+    if (agent) {
+      fields.push(h('label', { className: 'field' }, 'Permissions', permissions, note));
+      // No list (the CLI did not answer in time, or is signed out): the model stays as it is, and the computer can change it.
+      fields.push(now.models.length ? h('label', { className: 'field' }, 'Model', model) : h('p', { className: 'dim' }, `${cli} did not list its models, so the model stays ${now.model ? modelLabel(now.model) : 'its default'}. Try again in a moment, or change it on the computer.`));
+      if (now.engine === 'codex') { fillEfforts(); fields.push(h('label', { className: 'field' }, 'Reasoning effort', effort)); }
+      if (now.running) fields.push(h('p', { className: 'dim' }, `The model${now.engine === 'codex' ? ' and reasoning effort change' : ' changes'} only while the channel is stopped.${now.chat ? ' Permissions change at once.' : ' Permissions apply when it next starts.'}`));
+    }
+    const problem = h('p', { className: 'error', aria: { role: 'alert' } }); const save = h('button', { className: 'primary', type: 'submit' }, 'Save');
+    body.replaceChildren(...fields, problem, save);
+    body.onsubmit = async (event) => {
+      event.preventDefault(); problem.textContent = '';
+      // Only what was changed is sent, so a setting changed on the computer meanwhile is not put back.
+      const change: RemoteChannelChange = { sessionId: now.sessionId };
+      if (name.value.trim() && name.value.trim() !== now.title) change.title = name.value.trim();
+      if (agent && permissions.value !== now.permissions) change.permissions = permissions.value as RemoteChannelChange['permissions'];
+      if (agent && now.models.length && !now.running && model.value !== (now.model ?? '')) change.model = model.value;
+      if (now.engine === 'codex' && !now.running && (effort.value || null) !== (now.effort ?? null)) change.effort = effort.value || null;
+      if (Object.keys(change).length === 1) { close(); return; }
+      save.disabled = true; status.textContent = 'Saving…';
+      try { await changeChannel(change); status.textContent = 'Saved.'; setTimeout(close, 600); }
+      catch (error) { status.textContent = ''; problem.textContent = (error as Error).message; save.disabled = false; }
+    };
+  } catch (error) { status.textContent = ''; body.replaceChildren(h('p', { className: 'error', aria: { role: 'alert' } }, (error as Error).message)); }
 }
 /** Waits until `find` returns something from the channel list as the computer updates it; null after `ms`. */
 async function channelWhere<T>(find: () => T | undefined | null, ms: number): Promise<T | null> {
@@ -220,6 +299,7 @@ function directNotice() {
 }
 function showList() {
   leaveScreen(); leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
+  if (reloadWhenIdle()) return;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
   const list = h('ul', { id: 'channel-list', className: 'channels' });
   const remove = h('button', { className: 'quiet', onclick: async () => { if (!confirm('Remove this phone from all your computers? You will need a new pairing code to use it again.')) return; await unpair().catch(() => {}); showPair(); } }, 'Remove this phone');
@@ -263,13 +343,17 @@ async function showScreen() {
     const origin = activeTarget().base || location.origin;
     const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/phone-screen?ticket=${encodeURIComponent(ticket)}`, { shared: true }); viewer = client;
     client.scaleViewport = true; client.showDotCursor = true; client.background = 'transparent';
-    client.addEventListener('connect', () => { status.textContent = ''; signin.hidden = true; });
+    let shown = false;
+    client.addEventListener('connect', () => { shown = true; status.textContent = ''; signin.hidden = true; });
     client.addEventListener('credentialsrequired', () => { status.textContent = 'Sign in with this computer\'s user name and password.'; signin.hidden = false; user.focus(); });
     signin.onsubmit = (event) => { event.preventDefault(); client.sendCredentials({ username: user.value, password: password.value }); password.value = ''; status.textContent = 'Signing in…'; };
     client.addEventListener('securityfailure', () => { status.textContent = 'That user name and password were not accepted.'; });
     client.addEventListener('disconnect', () => {
       if (viewer !== client) return; viewer = null; signin.hidden = true;
-      status.replaceChildren('The screen connection closed. ', h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen() }, 'Reconnect'));
+      const again = h('button', { className: 'quiet', type: 'button', onclick: () => void showScreen() }, 'Reconnect');
+      status.replaceChildren('The screen connection closed. ', again);
+      // Never connected: the computer says why (its screen service refused, or could not capture the screen). An older Trace has no answer.
+      if (!shown) void api('/api/phone-screen-problem').then((response) => response.json()).then((value: { error?: string | null }) => { if (value.error && status.contains(again)) status.replaceChildren(`${value.error} `, again); }).catch(() => {});
     });
   } catch (error) { status.textContent = (error as Error).message; }
 }
@@ -355,7 +439,8 @@ function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
  *
  * Opening a terminal channel takes it at the phone's size at once, even while the computer is in use, as "Fit to
  * phone" does (phone/size.ts): every request carries `force`. The phone holds that size only while it is in use: it
- * is given back when the phone is locked or the app is in the background, and once the desktop has taken it back the
+ * is given back when the phone is locked or the app is in the background, or when the computer is used after the phone
+ * has gone untouched for ten seconds, and once the desktop has taken it back the
  * phone asks again only when the person uses the phone (opens the channel, touches it, types or changes the text
  * size), not when it merely reconnects, wakes or its screen changes. "Desktop size" is remembered on the phone: the
  * next channel opens at the desktop's size, and the phone asks for nothing until "Fit to phone".
@@ -372,7 +457,15 @@ let holding = false; let asked: { cols: number; rows: number } | null = null; le
  */
 let granted = false; let askAgain = false; let shownAtPhone = false;
 /** The person is using the phone: the channel is drawn at the phone's size again, unless they chose "Desktop size". */
-function useChannel() { if (!fitsOnOpen(chosenSize) || (holding && sentSize)) return; holding = true; sentSize = ''; requestSize(); }
+function useChannel() {
+  if (!fitsOnOpen(chosenSize)) return;
+  // Already at the phone's size: tell the computer the phone is still in use (at most every few seconds), since a
+  // computer in use takes the channel back from a phone that has gone quiet (PHONE_QUIET_MS there).
+  if (holding && sentSize) { if (granted && Date.now() - touched > 4000) { touched = Date.now(); askAgain = true; requestSize(0); } return; }
+  holding = true; sentSize = ''; requestSize();
+}
+/** When a touch last told the computer the phone is in use. */
+let touched = 0;
 /** `wait` gathers a burst of screen changes into one request; a channel's fresh screen asks at once. */
 function requestSize(wait = 200) {
   if (!holding || document.visibilityState !== 'visible') return;
@@ -688,6 +781,7 @@ function onEvent(event: StreamEvent) {
   if (event.type === 'chat') { receiveChat(event.data); return; }
   if (event.type === 'chat-replay') { receiveReplay(event.data); return; }
   if (event.type === 'me') { me = event.data; renderList(); if (current) showChannel(current); return; }
+  if (event.type === 'version') { computerVersion(event.data); return; }
   if (event.type === 'channels') {
     channels = event.data; renderList(); renderChannel();
     // A chat shown here that started, stopped or restarted is drawn again for its new run.
