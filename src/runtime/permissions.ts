@@ -1,7 +1,7 @@
 import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store';
 import type { Session } from '../../shared/types';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatRun } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
@@ -18,7 +18,7 @@ export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: Per
 
 /** The config with this level, always written out: no setting means the default (Allow edits), not Ask. */
 export function withPermissions<T extends CLIEngineConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
-/** A channel whose level a table's control sets: Claude Code or Codex. */
+/** A channel whose level a table's control sets: Claude Code, Codex or a Gemini CLI seat. */
 const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isAgentConfig(config);
 
 /**
@@ -39,7 +39,7 @@ export async function permissionsRefused(sessionId: string, runId: string, level
   const others = tableSeats(sessions, sessionId).filter((seat) => seat.id !== sessionId);
   const ids = new Set([sessionId, ...others.map((seat) => seat.id)]);
   useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => ids.has(session.id) && tableChat(session.config) ? { ...session, config: withPermissions(session.config, level) } : session) }));
-  for (const other of others) if (isChatEngineConfig(other.config) && other.config.chat && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
+  for (const other of others) if (isChatRun(other.config) && other.status === 'running' && other.runId) await window.codingHub?.chat({ action: 'permissions', sessionId: other.id, runId: other.runId, level }).catch(() => null);
 }
 
 /**
@@ -57,7 +57,8 @@ export async function setPermissions(sessionId: string, level: PermissionLevel):
   apply((id) => { const config = before.get(id); return config && tableChat(config) ? withPermissions(config, level) : undefined; });
   const changed: { id: string; runId: string; old: PermissionLevel }[] = [];
   for (const session of useWorkspaceStore.getState().sessions) {
-    if (!ids.has(session.id) || !isChatEngineConfig(session.config) || !session.config.chat || session.status !== 'running' || !session.runId || !window.codingHub) continue;
+    // Every run driven through its protocol, a Gemini CLI seat among them (it was passed over up to 1.29.0, and kept its old level).
+    if (!ids.has(session.id) || !isChatRun(session.config) || session.status !== 'running' || !session.runId || !window.codingHub) continue;
     const result = await window.codingHub.chat({ action: 'permissions', sessionId: session.id, runId: session.runId, level }).catch(() => null);
     const old = before.get(session.id); const oldLevel = old && tableChat(old) ? old.permissions ?? 'edits' : 'edits';
     if (!result?.ok) {

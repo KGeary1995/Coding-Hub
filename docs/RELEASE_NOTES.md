@@ -1,5 +1,13 @@
 ## What's new
 
+1.29.1 fixes Full access for a Gemini CLI seat at a Round Table:
+
+- **Full access now reaches a Gemini CLI seat.** At a table set to Full access, a Gemini CLI seat still asked before every command.
+  - **Cause:** the seat was created without the table's permission level, and a change of level on an open table passed it over. Both were mistakes in 1.28.0, which added the seat.
+  - **Fix:** it takes the table's level like every other seat, when the table starts and when the level changes. At Full access Trace allows its commands at once. It still cannot change files: it reviews or plans.
+- **Tried with the real Gemini CLI and Claude Code:** on a table set to Full access, the Gemini CLI seat ran a command and reported what it printed, with no approval card. The same run used 1.29.0's new discussion order with a Gemini CLI seat.
+- **For a table that is already open:** set the permissions once more (to another level and back), or close and start the table again, so the seat takes the level.
+
 1.29.0 changes how a discussion Round Table works, so the seats talk first and the driver acts on what was said:
 
 - **Discuss first, then the driver makes the changes.** Your message goes to every seat to discuss: each says how it would handle it, and nobody changes files yet. Each then sees the others' answers and replies, for the number of rounds you set or until they all agree. Then the driver alone gets a turn to make the changes, with the whole discussion in view. The bar shows this as **making the changes**.

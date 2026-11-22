@@ -325,6 +325,13 @@ describe('Round Tables of any number of seats', () => {
     expect(codingHub.startSession).toHaveBeenCalledTimes(3);
     expect(tableSeats(lead.id).map((seat) => [seat.lead, seat.driver, seat.model])).toEqual([[true, false, ''], [false, true, 'gpt-x'], [false, false, 'opus-y']]);
   });
+  it('seats a Gemini CLI seat with the lead’s permissions, like every other seat', async () => {
+    host(); const lead = await runningLead();
+    useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === lead.id ? { ...session, config: { ...session.config, permissions: 'full' } as Session['config'] } : session) }));
+    expect(await openTable(lead.id, { id: 'g', name: 'With Gemini', kind: 'discussion', rounds: 1, driver: 0, seats: [{ engine: 'claude', model: '' }, { engine: 'codex', model: '' }, { engine: 'gemini', model: 'gemini-4-neon-high' }] })).toBeNull();
+    const hidden = useWorkspaceStore.getState().sessions.filter((session) => session.id !== lead.id);
+    expect(hidden.map((session) => [session.config.engine, (session.config as { permissions?: string }).permissions])).toEqual([['codex', 'full'], ['gemini', 'full']]);
+  });
   it('opens a hierarchy without a final reviewer: the planner and the extra seats named, the builder the lead', async () => {
     const { chats } = host(); const lead = await runningLead(); expect(await openTable(lead.id, hierarchy)).toBeNull();
     const hidden = useWorkspaceStore.getState().sessions.filter((session) => session.id !== lead.id); const request = lastOpen(chats);
