@@ -54,18 +54,44 @@ export class ScreenService {
   private server: http.Server | null = null;
   /** `keyHash`: the linked computer's key (null for a phone Trace let in), looked up again by `recheck`. */
   private viewer: { name: string; keyHash: string | null; socket: Duplex; session: RfbSession | null; capture: ScreenCaptureSession | null } | null = null;
+  /** The Trace version this service runs, told in /health so Trace can replace a service an update left behind (ScreenShare.start). */
+  version: string | null = null;
+  /** Someone is viewing, or connecting. */
+  get busy() { return this.viewer !== null; }
   constructor(private root: string, private name: () => string, private host: ScreenServiceHost, private openTimeout = OPEN_TIMEOUT) {}
 
   async listen(port: number) {
     const server = http.createServer((request, response) => {
+      if (request.method === 'POST' && request.url?.endsWith('/check')) { void this.check(request, response); return; }
       const ok = request.method === 'GET' && (request.url === '/health' || request.url?.endsWith('/health'));
-      response.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(ok ? { ok: true } : { error: 'Not found.' }));
+      response.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(ok ? { ok: true, ...(this.version ? { version: this.version } : {}) } : { error: 'Not found.' }));
     });
     server.on('upgrade', (request, socket, head) => void this.upgrade(request, socket, head).catch(() => socket.destroy()));
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
     // Trace's own key, for phones it lets in, is made here once if there is none yet.
     try { ensureLocalScreenToken(this.root); } catch { /* Then only linked computers get in. */ }
     this.server = server; return (server.address() as AddressInfo).port;
+  }
+  private checking: Promise<string | null> | null = null;
+  /**
+   * Trace asking, with its own key, whether the screen can be captured at all: a capture is started as for a viewer and
+   * stopped at once, with nobody shown as watching. /health only says the service runs; one that ran but could capture
+   * nothing refused every viewer for days unnoticed (2026-11-22). While someone watches, the capture plainly works.
+   */
+  private async check(request: http.IncomingMessage, response: http.ServerResponse) {
+    const answer = (status: number, body: unknown) => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(body)); };
+    request.resume();
+    const header = request.headers.authorization; const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : ''; const local = localScreenToken(this.root);
+    if (request.headers['tailscale-funnel-request'] !== undefined || !local || !/^[A-Za-z0-9_-]{43}$/.test(token) || !same(token, local)) return answer(401, { error: 'Only Trace on this computer checks its screen service.' });
+    if (this.viewer) return answer(200, { ok: true });
+    this.checking ??= (async () => {
+      const opening = this.host.open(0); let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('the capture did not start in time')), this.openTimeout); });
+      // Whenever it starts, it is closed again: nobody is watching.
+      void opening.then((capture) => { capture.input.close(); capture.stop(); }, () => {});
+      try { await Promise.race([opening, late]); return null; } catch (error) { return (error as Error).message || 'the screen could not be captured'; } finally { clearTimeout(timer); }
+    })().finally(() => { this.checking = null; });
+    const problem = await this.checking; answer(200, problem ? { ok: false, error: problem } : { ok: true });
   }
   async close() { this.disconnect(); const server = this.server; this.server = null; if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }); }
   get watching() { return this.viewer?.name ?? null; }

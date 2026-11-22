@@ -1,4 +1,4 @@
-import type { ChannelControl, ChatReplay, RemoteChannel, RemoteMe } from '../shared/remote';
+import type { ChannelControl, ChatReplay, RemoteChannel, RemoteChannelChange, RemoteChannelSettings, RemoteMe } from '../shared/remote';
 import type { ChatEnvelope, ChatRequest } from '../shared/chat';
 import type { ChannelEngine } from '../shared/types';
 
@@ -87,7 +87,8 @@ export const sizeChannel = async (sessionId: string, runId: string, cols: number
   // Computers from before this change apply every request.
   return (await response.json().catch(() => ({})) as { held?: boolean }).held !== false;
 };
-export const releaseChannel = (sessionId: string) => api('/api/size', { method: 'DELETE', body: JSON.stringify({ sessionId }) });
+/** `keepalive`: sent as the phone is locked or the app put away, when a browser drops an ordinary request and the computer would keep the phone's size. */
+export const releaseChannel = (sessionId: string) => api('/api/size', { method: 'DELETE', body: JSON.stringify({ sessionId }), keepalive: true });
 
 /** Removes this phone from its computer and from every other computer it could reach directly. */
 export const unpair = async () => {
@@ -142,7 +143,9 @@ export type StreamEvent =
   /** A chat channel's recent events, sent once as the phone starts following it. */
   | { type: 'chat-replay'; data: ChatReplay }
   /** This phone's own permissions changed on the computer. */
-  | { type: 'me'; data: RemoteMe };
+  | { type: 'me'; data: RemoteMe }
+  /** The Trace version of the computer the stream is from, sent as it opens (from 1.27). */
+  | { type: 'version'; data: string };
 
 /** Who this phone is to the computer, and whether it may start and stop agents. */
 export const whoAmI = async () => await (await api('/api/me')).json() as RemoteMe;
@@ -150,6 +153,9 @@ export const whoAmI = async () => await (await api('/api/me')).json() as RemoteM
 export const chat = async (request: ChatRequest) => { await api('/api/chat', { method: 'POST', body: JSON.stringify(request) }); };
 /** Start, stop, restart or close a channel on this computer (the phone needs Can start and stop agents). */
 export const control = async (sessionId: string, value: ChannelControl) => { await api('/api/control', { method: 'POST', body: JSON.stringify({ sessionId, control: value }) }); };
+/** A channel's name, permissions, model and effort on this computer, and changing them (the phone needs Can start and stop agents). */
+export const channelSettings = async (sessionId: string) => await (await api(`/api/channel-settings?sessionId=${encodeURIComponent(sessionId)}`)).json() as RemoteChannelSettings;
+export const changeChannel = async (change: RemoteChannelChange) => await (await api('/api/channel-settings', { method: 'POST', body: JSON.stringify(change) })).json() as RemoteChannelSettings;
 /** Adds a channel on this computer: a terminal channel, or Claude chat / Codex chat with `chat`. */
 export const addChannel = async (engine: ChannelEngine, chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
 

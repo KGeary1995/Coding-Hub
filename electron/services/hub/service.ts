@@ -11,6 +11,7 @@ import { HubError } from '../cli/engine-adapter';
 import { repriced, type TelemetryService } from './telemetry';
 import { RulesService } from './rules';
 import { defaultDriveDirectory, preferencesSchema } from './preferences';
+import { PublishedCatalogService } from './catalog';
 import { DeviceSync } from './device-sync';
 import { timed } from '../storage/host-health';
 const dir = z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder.'); const id = z.uuid(); const name = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value), 'Choose another server name.');
@@ -37,7 +38,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('memory-install'), project: projectSchema.optional(), directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
   z.object({ action: z.literal('device-sync-resolve'), document: z.enum(['settings', 'rules']), keep: z.enum(['local', 'remote']) }).strict(),
-  ...(['usage', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
+  ...(['usage', 'catalog', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
   z.object({ action: z.literal('drive-sync'), project: projectSchema }).strict(),
 ]);
 export class HubService {
@@ -61,9 +62,10 @@ export class HubService {
   async drain(limit: number) { await Promise.race([Promise.allSettled([...this.pending]), new Promise((resolve) => setTimeout(resolve, limit).unref?.())]); }
   private interval: ReturnType<typeof setInterval>;
   telemetry: TelemetryService | null = null;
+  readonly catalog: PublishedCatalogService;
   constructor(root: string) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.preferencesPath = path.join(root, 'preferences.json');
-    this.rules = new RulesService(root);
+    this.rules = new RulesService(root); this.catalog = new PublishedCatalogService(root);
     this.memory = new MemoryService(path.join(root, 'memory')); this.drive = new DriveMirror(this.memory, () => this.preferences());
     this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules, () => this.telemetry?.list() ?? []);
     this.interval = setInterval(() => void this.tick(), 30000);
@@ -132,6 +134,7 @@ export class HubService {
         if (path.resolve(request.directory) !== root) throw new HubError('MEMORY_ROOT', `Install memory in the repository's top folder, ${root}. CLIs read project MCP settings from there.`);
         this.memory.install(request.directory, request.project ?? projectMemoryKey(request.directory), path.join(__dirname, 'memory-server.js'), process.execPath); return null;
       }
+      case 'catalog': { const { asOf, claudeModels } = this.catalog.current(); return { asOf, claudeModels }; }
       case 'preferences': return this.preferences();
       case 'save-preferences': updateConfig(this.preferencesPath, null, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, request.preferences); }); return null;
       case 'usage': {

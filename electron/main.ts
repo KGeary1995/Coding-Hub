@@ -16,7 +16,8 @@ import { LiveCoach } from './services/coaching/live';
 import { HandoffImport } from './services/design/handoff';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
-import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteResumeRequest } from '../shared/remote';
+import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type RemoteResumeRequest } from '../shared/remote';
+import { CLAUDE_MODELS, modelLabel } from '../shared/model-name';
 import type { NativeResume } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
@@ -41,7 +42,7 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownSt
 import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
-import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
+import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, permissionLevel, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
 import { RepositoryFiles } from './services/repository/filesystem';
 import { RepositoryGit } from './services/repository/git';
@@ -55,6 +56,7 @@ import { ScreenShare } from './services/remote/screen-share';
 import { MAX_DISPLAYS, SCREEN_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { PlanLimitsService } from './services/hub/plan-limits';
 import { DayUsage } from './services/hub/day-usage';
+import { load, save } from './services/workbench/local-store';
 import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
@@ -375,6 +377,27 @@ function transcriptSource(sessionId: string) {
 }
 /** A linked computer asked to start, stop, restart or close one of this computer's channels; the desktop window does it. */
 function controlChannel(sessionId: string, control: ChannelControl): Promise<void> { return askWindow({ sessionId, control }); }
+/**
+ * A channel's settings for a phone: what is saved for it, and the models to choose from by name. Codex and Gemini CLI
+ * list their own (each starts that CLI for a moment, so a slow one is not waited for past 8 s); none listed leaves the
+ * phone the model as it is.
+ */
+async function channelSettings(sessionId: string): Promise<RemoteChannelSettings | null> {
+  const saved = storage?.load(); const session = saved?.sessions.find((item) => item.id === sessionId); if (!saved || !session) return null;
+  const config = session.config; const running = manager.running().find((run) => run.sessionId === sessionId);
+  const title = workspaceChannels().find((channel) => channel.id === sessionId)?.title ?? session.title;
+  const base = { sessionId, title, engine: config.engine, chat: isChatEngineConfig(config) && config.chat === true, running: Boolean(running) };
+  if (!isAgentConfig(config)) return { ...base, models: [] };
+  const within = <T>(work: Promise<T>): Promise<T | null> => Promise.race([work.catch(() => null), new Promise<null>((resolve) => { setTimeout(() => resolve(null), 8000).unref(); })]);
+  let models: RemoteChannelSettings['models'] = [];
+  if (config.engine === 'claude') models = (hub?.catalog.current().claudeModels ?? [...CLAUDE_MODELS]).map((id) => ({ id, name: modelLabel(id) }));
+  else if (config.engine === 'codex') {
+    const cwd = running?.cwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved.rootDirectory);
+    const catalog = await within(Promise.resolve().then(() => modelCatalog.execute({ action: 'codex-models', directory: cwd ?? null })));
+    models = (catalog?.models ?? []).filter((item) => !item.hidden || item.model === config.model).map((item) => ({ id: item.model, name: item.displayName || modelLabel(item.model), ...(item.reasoningEfforts.length ? { efforts: item.reasoningEfforts } : {}) }));
+  } else models = ((await within(geminiModels()))?.models ?? []).map((item) => ({ id: item.model, name: item.displayName }));
+  return { ...base, permissions: permissionLevel(config), model: config.model, ...(config.engine === 'codex' ? { effort: config.reasoningEffort } : {}), models };
+}
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
 function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && (engine === 'claude' || engine === 'codex') ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
 /**
@@ -386,7 +409,7 @@ async function resumeConversation(key: string): Promise<void> {
   const label = workflows?.labels().find((item) => item.key === conversation.key)?.name;
   return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || `${({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const)[conversation.engine]} · resumed` }, IPC_CHANNELS.remoteResume);
 }
-function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | Omit<RemoteResumeRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | { settings: RemoteChannelChange } | Omit<RemoteResumeRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
@@ -572,6 +595,8 @@ else app.whenReady().then(() => {
   catch (error) { if (error instanceof HubError) storageFailure = error.message; }
   try {
     hub = new HubService(storageRoot);
+    // A newer price list and model names from the downloads page, once a day (an installed Trace only: tests and source runs keep what they were built with).
+    if (app.isPackaged) { const catalog = hub.catalog; void catalog.refresh(); setInterval(() => void catalog.refresh(), 6 * 60 * 60 * 1000).unref(); }
     hub.telemetry = new TelemetryService(path.join(path.dirname(hub.preferencesPath), 'telemetry'), () => hub!.preferences().prices, (usage) => {
       sendToRenderer(IPC_CHANNELS.usage, usage);
     }, (run) => {
@@ -645,6 +670,8 @@ else app.whenReady().then(() => {
   const workflowReady = () => { if (manager.hasSessions || projectChecks?.running || verification?.running || workflows?.running || updateRestart || scriptUpdate || backups?.busy) throw new HubError('WORKFLOW_BUSY', 'Stop running channels and verification before changing repositories or applying templates.'); };
   delivery = new Delivery(confirmWorkflow, workflowReady);
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
+  // CODING_HUB_TEST_SCREEN_SERVICE_PORT (source runs only): the phone Screen smoke test's own screen service, so it never reaches an installed Trace's.
+  const testServicePort = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_SERVICE_PORT) : null;
   // Phone remote: off until turned on in Settings. It listens on loopback only; Tailscale carries it to the phone.
   remote = new RemoteServer(storageRoot, {
     // Channels still called by their engine's name are named after their folder, as on the desktop.
@@ -652,6 +679,7 @@ else app.whenReady().then(() => {
     running: () => manager.running(),
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
+    channelSettings, changeChannel: (change) => askWindow({ settings: change }),
     add: (engine, chat, like) => addChannel(engine, chat, like),
     chat: (request) => manager.chatRemote(request),
     // Claude Code and Codex take an image from this computer's clipboard when they get their image key (Alt+V on
@@ -678,7 +706,7 @@ else app.whenReady().then(() => {
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     ...(process.platform === 'win32' ? {
       screenService: () => shareEnabled(storageRoot),
-      openScreenService: (viewer: string) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${SCREEN_SERVICE_PORT}/`, token, undefined, 0, { 'X-Trace-Viewer': viewer }); },
+      openScreenService: (viewer: string) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${testServicePort ?? SCREEN_SERVICE_PORT}/`, token, undefined, 0, { 'X-Trace-Viewer': viewer }); },
     } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
     // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
@@ -698,13 +726,19 @@ else app.whenReady().then(() => {
     writeMemory: (project, title, content) => { if (!hub) throw new HubError('HUB_STORAGE', 'Memory storage is unavailable on this computer.'); hub.execute({ action: 'memory-write', project, title, content, author: 'human' }); },
   // CODING_HUB_TEST_REMOTE_PORT (source runs only): smoke tests listen elsewhere, so they run while an installed Trace is open.
   }, !app.isPackaged && process.env.CODING_HUB_TEST_REMOTE_PORT ? Number(process.env.CODING_HUB_TEST_REMOTE_PORT) : undefined, path.join(__dirname, '../../dist/phone'));
+  remote.version = app.getVersion();
   const runTailscale = tailscaleRunner(); const phone = remote; let serveConsent = false;
   // This Windows computer's screen, for linked computers, from a service that also runs while Trace is closed.
-  screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale);
-  void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed')); screenShare.watch();
+  screenShare = new ScreenShare(storageRoot, () => hub?.devices.machine.name ?? os.hostname(), runTailscale, testServicePort ?? undefined);
+  // The smoke test starts its own service: this copy must not add a sign-in entry or a Tailscale path for it.
+  // A service that runs but cannot capture is said at once, here and as a notification: nothing else would show it until someone tried Screen.
+  screenShare.onProblem = (message) => { hostHealth?.record('screen-capture-failed'); reportStorageError(message); desktopAlert({ title: 'Screen sharing is not working', body: message, target: { view: 'settings' } }, true); };
+  if (!testServicePort) { void screenShare.ensure().catch(() => hostHealth?.record('screen-service-start-failed')); screenShare.watch(); }
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
+    // This computer's Drive folder was moved to the one its other computers use: said here and as a notification.
+    devices.onJoined = (moved) => { hostHealth?.record('sync-folder-joined'); desktopAlert({ title: 'Trace now syncs with your other computers', body: `This computer’s Drive folder was changed to ${moved.to}, which ${moved.computers.join(', ')} ${moved.computers.length === 1 ? 'uses' : 'use'}. Settings → Sync between computers can move it back.`, target: { view: 'settings' } }, true); };
     // Auto-link needs no code, so the person is always told, even with Trace in front; clicking opens that computer's tab.
     // The window's banner shows it too, and host health records it, so it is not lost when desktop alerts are off.
     phone.onAutoLinked = (name, machineId) => {
@@ -726,6 +760,22 @@ else app.whenReady().then(() => {
     phone.setRelay(linked); linked.peers = () => isolatedTest ? Promise.resolve([]) : tailscalePeers(runTailscale); linked.tailnet = ownTailnet;
     // An unreadable linked-computers.json must not keep the window from opening.
     try { linked.start(); } catch { hostHealth?.record('linked-computers-unreadable'); }
+    // After this computer updated, its linked computers are asked to update too (the person's choice, 2026-11-22;
+    // before: Update on each computer's tab). Each one refuses while anything runs there, so it is asked again every
+    // half hour, for six hours. A copy that never ran before, or was not updated, asks nobody.
+    if (app.isPackaged && !isolatedTest) {
+      const versionFile = 'last-version.json'; const versionSchema = z.object({ version: z.string().max(40) }).strict().nullable();
+      let before: string | null = null; try { before = load(storageRoot, versionFile, versionSchema, null)?.version ?? null; } catch { /* Unreadable: as if never run. */ }
+      try { if (before !== app.getVersion()) save(storageRoot, versionFile, { version: app.getVersion() }); } catch { hostHealth?.record('last-version-unsaved'); }
+      if (before && isNewerVersion(app.getVersion(), before)) {
+        const updated = new Set<string>(); let tries = 0; const computers = linked;
+        const ask = () => {
+          for (const computer of computers.status()) if (computer.linked && computer.connected && !updated.has(computer.id)) void computers.update(computer.id).then(() => { updated.add(computer.id); }, () => { /* Busy, older than 1.15 or unreachable: asked again. */ });
+          if (++tries < 12) setTimeout(ask, 30 * 60000).unref();
+        };
+        setTimeout(ask, 90000).unref();
+      }
+    }
     // Only a linked computer's Tailscale name is ever connected to; the window names the computer, never the address.
     // The screen smoke test serves a stand-in screen on loopback (source runs only).
     const testScreen = !app.isPackaged && process.env.CODING_HUB_TEST_SCREEN_PORT ? Number(process.env.CODING_HUB_TEST_SCREEN_PORT) : null;

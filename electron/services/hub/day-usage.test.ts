@@ -25,7 +25,7 @@ describe("today's usage from the CLIs' own logs", () => {
     // A resumed conversation's copy of an earlier reply does not count again.
     fs.writeFileSync(path.join(project, 'other.jsonl'), reply('a', now, 10, 100));
     // A Codex session from yesterday that went on today: 1,000 new input (300 of it cached) and 40 output today.
-    fs.writeFileSync(path.join(sessions, 'rollout-1.jsonl'), JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5' } }) + '\n' + total(earlier, 2000, 1000, 100) + total(now, 3000, 1300, 140));
+    fs.writeFileSync(path.join(sessions, 'rollout-1.jsonl'), JSON.stringify({ type: 'turn_context', payload: { model: 'a-model-with-no-price' } }) + '\n' + total(earlier, 2000, 1000, 100) + total(now, 3000, 1300, 140));
     const usage = new DayUsage(() => [{ engine: 'claude', root: claude }, { engine: 'codex', root: codex }], () => [{ model: 'claude-opus', input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }], () => now);
     await usage.refresh(); expect(usage.totals()).toEqual({ day: '2026-11-02', claude: 168, codex: 740, cost: 168 / 1000000, complete: true });
     // More is written: only that is read.

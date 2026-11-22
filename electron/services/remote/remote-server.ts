@@ -6,9 +6,9 @@ import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
 import type { AccountLabel } from '../../../shared/accounts';
-import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type ChatReplay, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteMe, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
+import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type ChatReplay, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteMe, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import type { ChatEnvelope, ChatRequest } from '../../../shared/chat';
-import { chatRequestSchema } from '../../../shared/schemas';
+import { chatRequestSchema, modelValue } from '../../../shared/schemas';
 import { ChatReplayBuffer, forFollowers } from './chat-replay';
 import { exitNotice, isPersonInput } from '../../../shared/terminal-input';
 import { sessionTopic } from '../../../shared/channel-name';
@@ -38,6 +38,9 @@ export interface RemoteHost {
   /** Adds a channel to this computer's workspace (a linked computer's + Channel); `chat` makes it a chat channel. */
   /** `like`: a channel on this computer whose folder the new one works in (a Round Table's partner). */
   add?(engine: ChannelEngine, chat?: boolean, like?: string): Promise<void>;
+  /** A channel's settings for a phone, and changing them through the window, as its engine settings do; null for a channel that is gone. */
+  channelSettings?(sessionId: string): Promise<RemoteChannelSettings | null>;
+  changeChannel?(change: RemoteChannelChange): Promise<void>;
   /** A chat request (ChatRequest, validated again there) for a run on this computer, as if its window sent it. */
   chat?(request: ChatRequest): void;
   /** An image a linked computer pasted into a channel here: onto this clipboard, then the CLI's image key. */
@@ -83,6 +86,12 @@ export interface RemoteHost {
 const SCREEN_TICKET_MS = 30000; const MAX_SCREENS = 2;
 /** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
 export const DESKTOP_IDLE_SECONDS = 120;
+/**
+ * A phone keeps the size it insisted on while it is the device in use: once it has asked for nothing and typed nothing
+ * for this long and the computer is being used, the computer's size comes back. Before, only typing in that very
+ * channel on the computer gave it back, so a phone left open on a channel kept its tile squeezed (2026-11-22).
+ */
+export const PHONE_QUIET_MS = 10000;
 /** Channels running on linked computers, which this computer passes on to its phones. */
 export interface RemoteRelay {
   /** Each with `computer` set. */
@@ -157,11 +166,15 @@ const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 const DROP_MAX = 64 * 1024 * 1024;
 /** A Windows computer's screen (Trace's screen service) asks no password of its own, so a phone needs the same setting as starting agents. */
 const SCREEN_REFUSED = 'This phone can’t see or control this computer’s screen. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
+const SETTINGS_REFUSED = 'This phone can’t change channel settings. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const RUN_REFUSED = 'This phone can’t start or stop agents. On the computer, turn on Settings → Phone access → Can start and stop agents for it.';
 const taskStatusSchema = z.object({ id: z.uuid(), status: z.enum(['todo', 'working', 'review', 'done']) }).strict();
 const resumeSchema = z.object({ key: z.string().min(1).max(200) }).strict();
 /** The same limits as the desktop's Memory (memory-write); a project must be one of this computer's channels'. */
 const handoffSchema = z.object({ project: z.string().min(1).max(80), title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000) }).strict();
+/** The limits the window's own fields have (a name of 100 characters, a model ID of 160 in its characters). */
+const channelChangeSchema = z.object({ sessionId: z.string().min(1).max(100), title: z.string().trim().min(1).max(100).optional(), permissions: z.enum(['ask', 'edits', 'full']).optional(),
+  model: z.string().max(160).refine((value) => modelValue(value) !== null).optional(), effort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable().optional() }).strict();
 const controlSchema = z.object({ sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict();
 /** A pasted image (PNG or JPEG, base64), at most 15 MB. */
 const IMAGE_LIMIT = 15 * 1024 * 1024;
@@ -195,6 +208,8 @@ export class RemoteServer {
    * service: removing the phone closes all of its own, and taking its setting away closes those from the service.
    */
   private screenOwners = new Map<Duplex, { device: string; service: boolean }>();
+  /** Why Trace's screen service last refused each phone, until it next lets that phone in. */
+  private screenProblems = new Map<string, string>();
   private replay = new Map<string, ScreenMirror>();
   /** Chat channels' recent events, kept whether or not phone access is on, so a phone opening a chat sees its thread. */
   private chats = new ChatReplayBuffer();
@@ -203,6 +218,8 @@ export class RemoteServer {
   private failures = new Map<string, string>();
   private pairing: { code: string; expires: number; attempts: number; kind: RemoteDeviceKind } | null = null;
   private relay: RemoteRelay | null = null;
+  /** This Trace's version, told to each phone as its stream opens, so the phone app reloads itself after an update (it is saved on the phone and would otherwise stay the old one until reloaded by hand). */
+  version: string | null = null;
   /** This computer's sync identity, given to a computer that links to it so it can recognise this one in Drive. */
   identity: { id: string; name: string } | null = null;
   /**
@@ -383,8 +400,9 @@ export class RemoteServer {
     if (service) {
       const phone = this.devices().find((device) => device.id === ticket.device)?.name ?? 'A phone';
       // Taken away (or the phone gone) while the service was answering: nothing is passed on.
-      try { const opened = await service(phone); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } pipe(opened.socket, opened.head); }
-      catch { this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
+      try { const opened = await service(phone); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } this.screenProblems.delete(ticket.device); pipe(opened.socket, opened.head); }
+      // A browser is told nothing about a refused WebSocket, so why is kept for the phone to ask (GET /api/phone-screen-problem).
+      catch (error) { this.screenProblems.set(ticket.device, error instanceof Error && error.message ? error.message.slice(0, 500) : 'The screen service did not answer.'); this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
       return;
     }
     const server = net.connect(target!.port, target!.host);
@@ -550,7 +568,8 @@ export class RemoteServer {
    * A phone asking to draw a channel at its own size. The desktop wins while the person is using this computer: the
    * request is kept and applied once the computer has gone unused for DESKTOP_IDLE_SECONDS, and given back as soon as it
    * is used again (`checkDesktop`). `force` (the phone app, whenever it asks: opening a channel, "Fit to phone") applies
-   * it at once, until the person types in that channel on the desktop. Returns whether the phone now has its size.
+   * it at once, until the person types in that channel on the desktop, or uses the computer after the phone has gone
+   * quiet (PHONE_QUIET_MS). Returns whether the phone now has its size.
    */
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
@@ -585,9 +604,15 @@ export class RemoteServer {
   /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
   checkDesktop() {
     if (this.idle() === undefined) return;
-    for (const [sessionId, hold] of [...this.phoneSizes]) if (!hold.forced && this.idle(hold.device)! < 3) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows, at: hold.at }); this.release(sessionId, hold.device, true); }
+    for (const [sessionId, hold] of [...this.phoneSizes]) {
+      if (this.idle(hold.device)! >= 3) continue;
+      // An automatic size goes back at once and is applied again when the computer is idle; one the phone insisted on
+      // goes back when the phone has gone quiet, and the phone asks again when it is next used.
+      if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows, at: hold.at }); this.release(sessionId, hold.device, true); }
+      else if (Date.now() - hold.at > PHONE_QUIET_MS) this.release(sessionId, hold.device);
+    }
     for (const [sessionId, want] of [...this.wants]) if (this.idle(want.device)! >= DESKTOP_IDLE_SECONDS) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
-    if (!this.wants.size && ![...this.phoneSizes.values()].some((hold) => !hold.forced) && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
+    if (!this.wants.size && !this.phoneSizes.size && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
   }
   /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
   private release(sessionId: string, device: string, keepWant = false) {
@@ -841,6 +866,7 @@ export class RemoteServer {
       });
       // What was last broadcast is no longer what every stream has: the next change is sent even if it matches that.
       this.sentChannels = '';
+      if (this.version && kind === 'phone') this.opening(stream, `event: version\ndata: ${eventJSON(this.version)}\n\n`);
       this.opening(stream, `event: channels\ndata: ${eventJSON(this.channels(kind))}\n\n`);
       // A chat's recent thread, ahead of its live events (written now, before any screen replay holds the stream back).
       for (const replay of all ? this.chats.sessionIds().filter((id) => this.local(id)).map((id) => this.chats.take(id)) : sessionId ? [this.chatReplay(sessionId, kind)] : [])
@@ -866,6 +892,8 @@ export class RemoteServer {
         else this.host.write({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, parsed.data.data);
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
+      // Typing on the phone is using it: the size it holds on that channel stays (see PHONE_QUIET_MS).
+      const hold = this.phoneSizes.get(parsed.data.sessionId); if (hold?.device === device.id) hold.at = Date.now();
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-key/revoke') {
@@ -913,6 +941,7 @@ export class RemoteServer {
       const ticket = randomBytes(24).toString('base64url'); this.screenTickets.set(ticket, { device: device.id, expires: Date.now() + SCREEN_TICKET_MS });
       return this.send(response, 200, { ticket });
     }
+    if (request.method === 'GET' && url.pathname === '/api/phone-screen-problem') return this.send(response, 200, { error: this.screenProblems.get(device.id) ?? null });
     if (request.method === 'GET' && url.pathname === '/api/transcript') {
       const sessionId = url.searchParams.get('sessionId') ?? '';
       if (this.local(sessionId)) return this.send(response, 200, { transcript: this.host.transcript?.(sessionId) ?? null });
@@ -982,6 +1011,22 @@ export class RemoteServer {
       try { await this.host.control(parsed.data.sessionId, parsed.data.control); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be changed.' }); }
       return this.send(response, 200, { ok: true });
+    }
+    // A channel's settings (name, permissions, model, effort), for a phone that may start and stop agents: the same
+    // permission, since they decide how an agent runs. This computer's own channels only.
+    if (url.pathname === '/api/channel-settings' && (request.method === 'GET' || request.method === 'POST')) {
+      if (!this.me(device).canRun) return this.send(response, 403, { error: SETTINGS_REFUSED });
+      if (!this.host.channelSettings || !this.host.changeChannel) return this.send(response, 409, { error: 'This computer cannot change channel settings right now.' });
+      if (request.method === 'GET') {
+        const sessionId = url.searchParams.get('sessionId') ?? ''; if (!this.local(sessionId)) return this.send(response, 400, { error: 'Unknown channel.' });
+        const settings = await this.host.channelSettings(sessionId); return settings ? this.send(response, 200, settings) : this.send(response, 400, { error: 'Unknown channel.' });
+      }
+      const parsed = channelChangeSchema.safeParse(await this.body(request)); if (!parsed.success || !this.local(parsed.data.sessionId)) return this.send(response, 400, { error: 'Those settings could not be read.' });
+      const now = this.current(device.id); if (!now) return this.send(response, 401, { error: kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.' });
+      if (!this.me(now).canRun) return this.send(response, 403, { error: SETTINGS_REFUSED });
+      try { await this.host.changeChannel(parsed.data); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The settings could not be changed.' }); }
+      return this.send(response, 200, (await this.host.channelSettings(parsed.data.sessionId)) ?? { ok: true });
     }
     // Usage, tasks, CLI history and memory cover this computer only; a phone asks each linked computer directly for its own.
     const unpaired = kind === 'computer' ? 'This computer is no longer linked.' : 'This phone is not paired. Pair it again from Settings on the computer.';

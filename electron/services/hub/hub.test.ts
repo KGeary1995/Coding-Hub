@@ -99,8 +99,10 @@ describe('structured telemetry', () => {
     const base = { model: 'Claude-Opus-5-5', input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 };
     expect(usageCost(record, [base])).toBe(5);
     expect(usageCost(record, [base, { ...base, model: 'claude-opus-5-5-20261101', input: 7 }])).toBe(7);
-    expect(usageCost({ ...record, model: 'claude-opus-5-5[1m]' }, [base])).toBeNull();
-    expect(usageCost({ ...record, model: 'claude-sonnet-5-5' }, [base])).toBeNull();
+    // Models with no entered rate get the published price ([1m] costs what the model does); an unknown one stays unpriced.
+    expect(usageCost({ ...record, model: 'claude-opus-5-5[1m]' }, [base])).toBe(4);
+    expect(usageCost({ ...record, model: 'claude-sonnet-5-5' }, [base])).toBe(2);
+    expect(usageCost({ ...record, model: 'a-model-with-no-price' }, [base])).toBeNull();
   });
   it('reads the whole rest of a usage log when a run ends, however much is left', async () => {
     const { root } = setup(); const home = path.join(root, 'claude'); const dir = path.join(home, 'projects', '-project'); fs.mkdirSync(dir, { recursive: true }); const file = path.join(dir, run.runId + '.jsonl');
@@ -196,6 +198,12 @@ describe('structured telemetry', () => {
       const count = published.length; telemetry.setContextWindow(run.runId, 1_000_000);
       expect(published).toHaveLength(count + 1); expect(published.at(-1)?.context).toEqual({ used: 110, limit: 1_000_000 });
       telemetry.setContextWindow(run.runId, 1_000_000); telemetry.setContextWindow(run.runId, 12); expect(published).toHaveLength(count + 1);
+      // Compacting the conversation: the context is what was kept, at once, with the run's tokens as they were. A subagent's own compaction is not the channel's.
+      const boundary = (uuid: string, postTokens: number) => JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, compactMetadata: { trigger: 'manual', preTokens: 110, postTokens } }) + '\n';
+      fs.appendFileSync(path.join(subagents, 'agent-a1.jsonl'), boundary('sub-compact', 7)); fs.appendFileSync(file, boundary('main-compact', 30));
+      vi.advanceTimersByTime(750); expect(published.at(-1)?.context).toEqual({ used: 30, limit: 1_000_000 }); expect(published.at(-1)).toMatchObject({ input: 5111, output: 332 });
+      // The next reply reports the context again.
+      fs.appendFileSync(file, usage('after', 40, 5)); vi.advanceTimersByTime(750); expect(published.at(-1)?.context).toEqual({ used: 45, limit: 1_000_000 });
     } finally { telemetry.close(); vi.useRealTimers(); }
   });
   it('does not count a resumed conversation’s earlier subagent usage again, and counts a reply once across runs', async () => {
@@ -479,6 +487,14 @@ describe('Drive sync regressions', () => {
 });
 
 describe('Claude context in use', () => {
+  it('takes what a compaction kept as the context, not the last reply before it', () => {
+    const kept = parseUsage('claude', { type: 'system', subtype: 'compact_boundary', uuid: 'c1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'manual', preTokens: 836587, postTokens: 34597 } }, 'm')!;
+    expect(kept).toMatchObject({ key: 'compact:c1', compacted: true, input: 0, output: 0, context: { used: 34597, limit: 0 } });
+    // An older Claude Code does not say how much was kept: the context is unknown until the next reply, not the old size.
+    expect(parseUsage('claude', { type: 'system', subtype: 'compact_boundary', uuid: 'c2', compactMetadata: { trigger: 'auto', preTokens: 627114 } }, 'm')).toMatchObject({ compacted: true, context: null });
+    expect(parseUsage('claude', { type: 'system', subtype: 'turn_duration', uuid: 'x' }, 'm')).toBeNull();
+  });
+
   it('counts the whole prompt and the reply, without inventing a window size', () => {
     const event = parseUsage('claude', { type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', usage: { input_tokens: 5, cache_read_input_tokens: 200000, cache_creation_input_tokens: 40000, output_tokens: 761 } } }, 'fallback')!;
     expect(event.context).toEqual({ used: 240766, limit: 0 });

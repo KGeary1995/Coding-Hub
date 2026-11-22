@@ -28,10 +28,21 @@ describe('price rates', () => {
     expect(usageCost(record, [rate])).toBe(5);
   });
   it('keep context-size variants and other models apart', () => {
-    expect(rateFor('claude-opus-5-5[1m]', [rate])).toBeUndefined();
+    // A rate entered for the plain model does not price its [1m] variant: the published price does.
+    expect(rateFor('claude-opus-5-5[1m]', [rate])).toMatchObject({ model: 'claude-opus-5-5', input: 4 });
     expect(rateFor('claude-opus-5-5[1m]', [{ ...rate, model: 'Claude Opus 5.5 [1m]' }])?.model).toBe('Claude Opus 5.5 [1m]');
     expect(rateFor('claude-opus-5-5-20261101[1m]', [{ ...rate, model: 'claude-opus-5-5[1m]' }])?.model).toBe('claude-opus-5-5[1m]');
-    expect(rateFor('claude-opus-5', [rate])).toBeUndefined(); expect(rateFor('<synthetic>', [{ ...rate, model: '---' }])).toBeUndefined();
+    expect(rateFor('claude-opus-5', [rate])?.model).toBe('claude-opus-5'); expect(rateFor('<synthetic>', [{ ...rate, model: '---' }])).toBeUndefined();
+  });
+  it('use the published prices when no rate was entered, and an entered rate first', () => {
+    const record = { runId: 'r', sessionId: 's', engine: 'claude', cwd: '/', model: 'claude-fable-5-2', timestamp: new Date().toISOString(), input: 1000000, output: 1000000, cached: 1000000, cacheWrite: 1000000, reasoning: null, context: null, cost: null } satisfies UsageRecord;
+    // $8 input, $40 output, $0.20 cache reads, $16 for Claude Code's one-hour cache writes.
+    expect(usageCost(record, [])).toBeCloseTo(64.2);
+    expect(usageCost({ ...record, model: 'claude-fable-5-2-20261101' }, [])).toBeCloseTo(64.2);
+    expect(usageCost(record, [{ model: 'Claude Fable 5.2', input: 1, output: 1, cacheRead: 1, cacheWrite: 1 }])).toBe(4);
+    // Codex counts cached input inside its input: 2M input of which 1M cached, at $2 and $0.10, and $10 output.
+    expect(usageCost({ ...record, engine: 'codex', model: 'gpt-6.1-sol', input: 2000000, cacheWrite: 0 }, [])).toBeCloseTo(12.1);
+    expect(usageCost({ ...record, model: 'a-model-nobody-lists' }, [])).toBeNull();
   });
 });
 

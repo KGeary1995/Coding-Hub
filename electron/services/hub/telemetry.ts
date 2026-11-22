@@ -6,11 +6,14 @@ import type { CLIEngineConfig } from '../../../shared/types';
 import { timed } from '../storage/host-health';
 import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
 import { localDay, newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
+import { baseModel, builtInRate } from '../../../shared/model-prices';
 
 type Json = Record<string, any>;
 interface Snapshot { key: string; model: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: UsageRecord['context'];
   /** The local day the event was logged on. Codex reports a running total, so a Codex run counts on its latest day. */
-  day?: string }
+  day?: string;
+  /** Claude Code compacted the conversation here: no tokens of its own, only what the context holds afterwards (null when it did not say). */
+  compacted?: true }
 const reported = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
 const number = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0;
 export function parseUsage(engine: 'claude' | 'codex', raw: Json, fallbackModel: string): Snapshot | null {
@@ -20,6 +23,10 @@ export function parseUsage(engine: 'claude' | 'codex', raw: Json, fallbackModel:
 }
 function parseSnapshot(engine: 'claude' | 'codex', raw: Json, fallbackModel: string): Snapshot | null {
   if (engine === 'claude') {
+    // A compaction (/compact, or Claude Code's own when the context fills) writes a boundary with the tokens kept. The
+    // last reply before it carried the whole old context, so without this a channel read as near its limit until the
+    // agent next answered: "near limit, write a handoff" right after compacting (2026-11-22).
+    if (raw.type === 'system' && raw.subtype === 'compact_boundary' && typeof raw.uuid === 'string') { const kept = number(raw.compactMetadata?.postTokens); return { key: `compact:${raw.uuid.slice(0, 100)}`, model: fallbackModel, input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: null, context: kept > 0 ? { used: kept, limit: 0 } : null, compacted: true }; }
     if (raw.type !== 'assistant' || !raw.message?.id || !raw.message?.usage) return null;
     const u = raw.message.usage;
     if (!reported(u.input_tokens) || !reported(u.output_tokens)) return null;
@@ -80,19 +87,14 @@ function subagentSizes(file: string) {
   return sizes;
 }
 /**
- * A model name in one form for comparison: without case, a release date (`claude-x-20261101` is `claude-x`) or
- * punctuation, so a rate named as people write it ("Claude Opus 5.5") matches the CLI's ID (`claude-opus-5-5`). A
- * context-size variant such as `[1m]` stays in the name (`claude-opus-5-5-1m`), since it can be priced differently.
- */
-const baseModel = (model: string) => model.trim().toLowerCase().replace(/-\d{8}(?=$|\[)/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-/**
- * The rate for a model: an exact match first, else the rate whose name is the same model written another way (case,
- * spaces or dots for dashes, a release date), so a rate entered as "Claude Opus 5.5" also prices `claude-opus-5-5` and
- * its dated IDs. Context-size variants such as `[1m]` are not merged, since they can be priced differently.
+ * The rate for a model: one the person entered in Settings first (an exact match, else the same model written another
+ * way: case, spaces or dots for dashes, a release date, so "Claude Opus 5.5" also prices `claude-opus-5-5` and its dated
+ * IDs), else the provider's published price (shared/model-prices.ts). A rate entered for a context-size variant such as
+ * `[1m]` prices only that variant.
  */
 export function rateFor(model: string, rates: PriceRate[]): PriceRate | undefined {
   const base = baseModel(model);
-  return rates.find((r) => r.model === model) ?? (base ? rates.find((r) => baseModel(r.model) === base) : undefined);
+  return rates.find((r) => r.model === model) ?? (base ? rates.find((r) => baseModel(r.model) === base) : undefined) ?? builtInRate(model);
 }
 export function usageCost(usage: UsageRecord, rates: PriceRate[]): number | null {
   const rate = rateFor(usage.model, rates); if (!rate) return null;
@@ -280,7 +282,7 @@ export class TelemetryService {
       for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
         if (end - start <= 2 * 1024 * 1024) try {
           const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
-          const parsed = w.run.engine === 'gemini' ? null : parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) parsed.context = null;
+          let parsed = w.run.engine === 'gemini' ? null : parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) { if (parsed.compacted) parsed = null; else parsed.context = null; }
           if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.select.get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
             this.upsert.run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
           }
@@ -308,6 +310,8 @@ export class TelemetryService {
     const totals: RunTotals | null = rows.length ? { meta: JSON.parse(String(meta.value)), groups: new Map(), model: null, reasoning: null, context: null, events: rows.length } : null;
     if (totals) { const started = localDay(new Date(totals.meta.timestamp));
       for (const row of rows) { const snapshot = JSON.parse(String(row.snapshot)) as Snapshot;
+        // A compaction: the context is what it kept (unknown when it did not say), until the next reply reports its own.
+        if (snapshot.compacted) { totals.context = snapshot.context; continue; }
         // Claude writes zero-usage `<synthetic>` entries for API errors; they cost nothing and are not the run's model.
         if (!snapshot.input && !snapshot.output && !snapshot.cached && !snapshot.cacheWrite && !snapshot.reasoning) continue;
         // Cost and new tokens are sums over a run's replies (Codex has one running total), so summing by model and day first gives the same.

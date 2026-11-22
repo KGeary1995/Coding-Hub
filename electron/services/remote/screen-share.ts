@@ -5,7 +5,7 @@ import { app } from 'electron';
 import { HubError } from '../cli/engine-adapter';
 import { save } from '../workbench/local-store';
 import { SCREEN_SERVICE_PATH, SCREEN_SERVICE_PORT, type ScreenShareStatus } from '../../../shared/screen';
-import { SHARE_FILE, shareSetting } from './screen-service-server';
+import { localScreenToken, SHARE_FILE, shareSetting } from './screen-service-server';
 import type { RunTailscale } from './tailscale';
 
 /** The name of the sign-in entry (Settings → Apps → Startup lists it). */
@@ -64,12 +64,17 @@ export function elevatedScript(script: string) {
  * permission once each, and starting it does not.
  */
 export class ScreenShare {
-  constructor(private root: string, private name: () => string, private runTailscale: RunTailscale, private port = SCREEN_SERVICE_PORT, private run: RunProgram = runProgram) {}
+  /** `outdated`: whether a service that reports this version (none, before 1.27) is not this Trace's. Only an installed Trace says so: a source run beside it must not replace its service. */
+  constructor(private root: string, private name: () => string, private runTailscale: RunTailscale, private port = SCREEN_SERVICE_PORT, private run: RunProgram = runProgram, private outdated: (version: string | undefined) => boolean = (version) => app.isPackaged && version !== app.getVersion()) {}
+  /** Why the service could not capture the screen when last asked (`verify`); told once per reason through `onProblem`. */
+  private problem: string | null = null; onProblem: (message: string) => void = () => {};
+  /** Versions of a service already replaced once, so one that comes back the same is not ended every minute. */
+  private replaced = new Set<string>();
   get supported() { return process.platform === 'win32'; }
 
   async status(): Promise<ScreenShareStatus> {
     const setting = shareSetting(this.root);
-    return { supported: this.supported, enabled: this.supported && setting.enabled, elevated: this.supported && setting.elevated === true, running: this.supported && await this.running() };
+    return { supported: this.supported, enabled: this.supported && setting.enabled, elevated: this.supported && setting.elevated === true, running: this.supported && await this.running(), problem: this.supported && setting.enabled ? this.problem : null };
   }
 
   /** `elevated` left out keeps what it was. */
@@ -82,13 +87,34 @@ export class ScreenShare {
     save(this.root, SHARE_FILE, { enabled, ...(admin ? { elevated: true } : {}) }); this.login(enabled && !admin);
     if (enabled) { if (admin !== (before.elevated === true)) await this.gone(); await this.start(); }
     else await this.runTailscale(['serve', '--https=443', `--set-path=${SCREEN_SERVICE_PATH}`, 'off']).catch(() => {});
+    // Turned on, or switched between the administrator service and the ordinary one: does this one capture?
+    await this.verify();
     return this.status();
   }
 
   /** When Trace starts: the service runs again (an update closes it), and the Tailscale path is put back if it went. */
   async ensure() {
     const setting = shareSetting(this.root); if (!this.supported || !setting.enabled) return;
-    this.login(!setting.elevated); await this.serve().catch(() => {}); await this.start();
+    this.login(!setting.elevated); await this.serve().catch(() => {}); await this.start(); await this.verify();
+  }
+
+  /**
+   * Asks the running service to capture the screen once (nobody is shown as watching) and keeps why it could not. A
+   * service from before 1.27 has no such check: nothing is known, and nothing is reported.
+   */
+  async verify(): Promise<string | null> {
+    const setting = shareSetting(this.root); const token = localScreenToken(this.root); if (!this.supported || !setting.enabled || !token) return this.problem = null;
+    const answer = await new Promise<{ ok?: unknown; error?: unknown } | null>((resolve) => {
+      const request = http.request({ host: '127.0.0.1', port: this.port, path: '/check', method: 'POST', timeout: 30000, headers: { Authorization: `Bearer ${token}` } }, (response) => {
+        let body = ''; response.setEncoding('utf8'); response.on('data', (chunk: string) => { if (body.length < 4096) body += chunk; });
+        response.on('end', () => { if (response.statusCode !== 200) { resolve(null); return; } try { resolve(JSON.parse(body) as { ok?: unknown; error?: unknown }); } catch { resolve(null); } });
+      });
+      request.on('error', () => resolve(null)); request.on('timeout', () => { request.destroy(); resolve(null); }); request.end();
+    });
+    const before = this.problem;
+    this.problem = answer && answer.ok === false ? `This computer’s screen cannot be shared: ${typeof answer.error === 'string' && answer.error ? answer.error.slice(0, 300) : 'the screen could not be captured'}.${setting.elevated ? ' It is shared as administrator: turn off “Also control apps running as administrator” under Settings → Other computers, which shares it without that.' : ' Turn “Share this screen” off and on again under Settings → Other computers.'}` : null;
+    if (this.problem && this.problem !== before) try { this.onProblem(this.problem); } catch { /* Telling the person must not stop the check. */ }
+    return this.problem;
   }
 
   /**
@@ -104,16 +130,31 @@ export class ScreenShare {
     timer.unref?.(); return () => clearInterval(timer);
   }
 
-  private running() {
-    return new Promise<boolean>((resolve) => {
-      const request = http.get({ host: '127.0.0.1', port: this.port, path: '/health', timeout: 1500 }, (response) => { response.resume(); resolve(response.statusCode === 200); });
-      request.on('error', () => resolve(false)); request.on('timeout', () => { request.destroy(); resolve(false); });
+  /** The service's answer to /health (`version` from 1.27), or null when none answers. */
+  private health() {
+    return new Promise<{ version?: string } | null>((resolve) => {
+      const request = http.get({ host: '127.0.0.1', port: this.port, path: '/health', timeout: 1500 }, (response) => {
+        let body = ''; response.setEncoding('utf8'); response.on('data', (chunk: string) => { if (body.length < 4096) body += chunk; });
+        response.on('end', () => { if (response.statusCode !== 200) { resolve(null); return; } try { const version = (JSON.parse(body) as { version?: unknown }).version; resolve(typeof version === 'string' ? { version } : {}); } catch { resolve({}); } });
+      });
+      request.on('error', () => resolve(null)); request.on('timeout', () => { request.destroy(); resolve(null); });
     });
   }
+  private async running() { return (await this.health()) !== null; }
   /** Waits for a service of the other kind to see the switch and quit. */
   private async gone() { for (let waited = 0; waited < GIVE_WAY_MS && await this.running(); waited += 250) await new Promise((resolve) => setTimeout(resolve, 250)); }
   private async start() {
-    if (await this.running()) return;
+    const health = await this.health();
+    if (health) {
+      // A service from another version of Trace: an update replaced Trace's files under it (it cannot close the
+      // administrator one), and it can no longer capture the screen though it still answers. The administrator one's
+      // task is ended (this user may end their own task without Windows asking) and run again below; the ordinary one
+      // is closed by the update, and from 1.27 makes way by itself.
+      const version = health.version ?? '';
+      if (!this.outdated(health.version) || this.replaced.has(version) || !shareSetting(this.root).elevated) return;
+      this.replaced.add(version); await this.run('schtasks.exe', ['/End', '/TN', TASK_NAME]); await this.gone();
+      if (await this.running()) return;
+    }
     // As administrator: the task starts it (no prompt; the task was registered with permission). Otherwise directly.
     if (shareSetting(this.root).elevated) {
       const result = await this.run('schtasks.exe', ['/Run', '/TN', TASK_NAME]);

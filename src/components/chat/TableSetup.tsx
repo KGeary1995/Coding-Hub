@@ -8,7 +8,8 @@ import { openTable, seatRoom, changeSeats, startTable, tableSeats } from '../../
 import { workbench } from '../../runtime/workbench';
 import { deletePreset, savePreset, useTablePresets } from '../../state/table-presets';
 import { useWorkspaceStore } from '../../state/workspace-store';
-import { claudeModels } from '../EngineControls';
+import { modelLabel } from '../../../shared/model-name';
+import { useHubStore } from '../../state/hub-store';
 import { ConfirmStep } from '../ConfirmStep';
 import { modelProblem } from './seat-model';
 import { addSeat, draftFromPreset, draftFromTable, draftProblem, patchSeat, pickPreset, placeholders, removePreset, removeSeat, roomNote, roundsRange, runSetup, saveAsPreset, setDriver, setDuty, updatePreset, withKind, type Draft, type SetupDeps, type SetupMode } from './table-setup-model';
@@ -18,11 +19,28 @@ const AGENTS = [{ engine: 'claude' as const, label: 'Claude Code' }, { engine: '
 const KIND_LABEL: Record<TableKind, string> = { discussion: 'Discussion: agents answer each other', hierarchy: 'Hierarchy: plan, build, review' };
 
 /** The models Codex lists, for the model fields' suggestions; none when it cannot be asked (any text can still be typed). */
+interface NamedModel { id: string; name: string }
+/**
+ * A seat's model, chosen by name from its agent's models (the list follows the seat's agent); "Another model…", or a
+ * saved model the agent does not list, takes an exact ID. A typed field with suggestions offered nothing once it held
+ * a model, and kept the other agent's model when the agent was changed (2026-11-22).
+ */
+function SeatModel({ label, describedBy, invalid, model, models, disabled, onChange }: { label: string; describedBy: string; invalid: boolean; model: string; models: NamedModel[]; disabled: boolean; onChange: (model: string) => void }) {
+  const [other, setOther] = useState(false); const custom = other || Boolean(model && !models.some((item) => item.id === model));
+  return <>
+    <select aria-label={`${label} model`} aria-invalid={invalid && !custom ? true : undefined} aria-describedby={describedBy} value={custom ? 'other' : model} disabled={disabled} onChange={(event) => { const value = event.target.value; setOther(value === 'other'); if (value !== 'other') onChange(value); }}>
+      <option value="">CLI default</option>
+      {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      <option value="other">Another model…</option>
+    </select>
+    {custom && <input aria-label={`${label} model ID`} aria-invalid={invalid ? true : undefined} aria-describedby={describedBy} placeholder="Model ID" maxLength={MAX_MODEL_LENGTH} value={model} disabled={disabled} spellCheck={false} onChange={(event) => onChange(event.target.value)} />}
+  </>;
+}
 function useCodexModels(wanted: boolean, directory: string | null) {
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<NamedModel[]>([]);
   useEffect(() => {
     if (!wanted || !window.codingHub) return; let live = true;
-    void workbench<CodexModelCatalog>({ action: 'codex-models', directory }).then((catalog) => { if (live) setModels(catalog.models.map((item) => item.model)); }).catch(() => {});
+    void workbench<CodexModelCatalog>({ action: 'codex-models', directory }).then((catalog) => { if (live) setModels(catalog.models.filter((item) => !item.hidden).map((item) => ({ id: item.model, name: item.displayName || modelLabel(item.model) }))); }).catch(() => {});
     return () => { live = false; };
   }, [wanted, directory]);
   return models;
@@ -47,6 +65,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   const [error, setError] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [deleting, setDeleting] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const directory = lead?.runningCwd ?? rootDirectory;
+  const claudeIds = useHubStore((state) => state.catalog.claudeModels); const claudeSeatModels = useMemo<NamedModel[]>(() => claudeIds.map((id) => ({ id, name: modelLabel(id) })), [claudeIds]);
   const codexModels = useCodexModels(draft.seats.some((seat) => seat.engine === 'codex'), directory);
   useEffect(() => {
     // Modal: focus moves in (the first field), Escape closes, and focus goes back to what opened it.
@@ -88,13 +107,12 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
         {mode.type === 'chat' && <p className="ui-hint">This chat leads the table with its own agent and model{hierarchy ? ', as the builder' : ''}.</p>}
 
         <ol className="table-setup-seats" aria-label="Seats">
-          {draft.seats.map((seat, index) => { const base = `${id}-${seat.key}`; const label = `Seat ${index + 1}`; const why = modelProblem(seat.model); const list = seat.engine === 'codex' ? codexModels : claudeModels;
+          {draft.seats.map((seat, index) => { const base = `${id}-${seat.key}`; const label = `Seat ${index + 1}`; const why = modelProblem(seat.model); const list = seat.engine === 'codex' ? codexModels : claudeSeatModels;
             return <li key={seat.key}><fieldset>
               <legend>{label}{seat.lead ? ' · leads the table' : ''}{seat.status && seat.status !== 'running' ? ` · ${seat.status}` : ''}</legend>
               <div className="table-setup-row">
-                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={seat.engine} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { engine: event.target.value === 'codex' ? 'codex' : 'claude' }))}>{AGENTS.map((agent) => <option key={agent.engine} value={agent.engine}>{agent.label}</option>)}</select></label>
-                <label className="ui-field">Model<input aria-label={`${label} model`} aria-invalid={why ? true : undefined} aria-describedby={`${base}-model`} list={`${base}-models`} placeholder="CLI default" maxLength={MAX_MODEL_LENGTH} value={seat.model} disabled={seat.keepsModel} spellCheck={false} onChange={(event) => change(patchSeat(draft, index, { model: event.target.value }))} />
-                  <datalist id={`${base}-models`}>{list.map((model) => <option key={model} value={model} />)}</datalist></label>
+                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={seat.engine} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { engine: event.target.value === 'codex' ? 'codex' : 'claude', model: '' }))}>{AGENTS.map((agent) => <option key={agent.engine} value={agent.engine}>{agent.label}</option>)}</select></label>
+                <label className="ui-field">Model<SeatModel key={seat.engine} label={label} describedBy={`${base}-model`} invalid={Boolean(why)} model={seat.model} models={list} disabled={Boolean(seat.keepsModel)} onChange={(model) => change(patchSeat(draft, index, { model }))} /></label>
                 <label className="ui-field">Name<input aria-label={`${label} name`} placeholder={names[index]} maxLength={MAX_SEAT_NAME} value={seat.name} onChange={(event) => change(patchSeat(draft, index, { name: event.target.value }))} /></label>
               </div>
               <small id={`${base}-model`} className={`ui-hint ${why ? 'error-message' : ''}`} role={why ? 'alert' : undefined}>{why || (seat.keepsModel ? 'This chat keeps its model; change it in the channel\'s settings.' : editing && seat.session ? 'Changing the model restarts this agent; its conversation is resumed.' : 'Blank is the CLI\'s default model.')}</small>

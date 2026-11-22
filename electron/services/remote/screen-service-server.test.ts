@@ -26,6 +26,21 @@ async function service(enabled = true, options: { open?: () => Promise<never | {
 }
 
 describe('the Windows screen service', () => {
+  it('tells Trace, and only Trace, whether the screen can be captured, without showing anyone as watching', async () => {
+    const working = await service(); const local = JSON.parse(fs.readFileSync(path.join(working.root, 'screen-service-local.json'), 'utf8')).token as string;
+    const check = (url: string, token: string) => fetch(url + 'check', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    const ok = await check(working.url, local); expect(ok.status).toBe(200); expect(await ok.json()).toEqual({ ok: true });
+    // The capture was started and stopped again, and nobody was named by the clock.
+    await until(() => working.counts().stopped === 1, 'the check\'s capture to stop'); expect(working.counts()).toEqual({ opened: 1, stopped: 1 }); expect(working.viewers).toEqual([]);
+    // A linked computer's key, a phone's, or none: this is not theirs to ask.
+    for (const token of [COMPUTER, PHONE, '']) expect((await check(working.url, token)).status).toBe(401);
+    expect(working.counts().opened).toBe(1);
+    // A service that runs but cannot capture says why.
+    const broken = await service(true, { open: async () => { throw new Error('Could not start video source'); } });
+    const brokenToken = JSON.parse(fs.readFileSync(path.join(broken.root, 'screen-service-local.json'), 'utf8')).token as string;
+    expect(await (await check(broken.url, brokenToken)).json()).toEqual({ ok: false, error: 'Could not start video source' });
+  });
+
   it('lets a linked computer in with its link key, and speaks VNC from there', async () => {
     const { url, viewers } = await service();
     const { socket, head } = await openTraceScreen('Obsidian-Halo', url, COMPUTER); cleanup.push(() => { socket.destroy(); });

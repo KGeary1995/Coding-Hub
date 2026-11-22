@@ -48,7 +48,11 @@ describe('the Round Table setup panel', () => {
     const lead = chat('codex', 'gpt-5'); put([lead]);
     const html = draw({ type: 'chat', leadId: lead.id });
     expect(html).toContain('Round Table on this chat'); expect(html).toContain('This chat leads the table with its own agent and model');
-    expect(html).toMatch(/<select aria-label="Seat 1 agent" disabled=""[^>]*><option value="claude">Claude Code<\/option><option value="codex" selected="">Codex<\/option>/); const model = html.match(/<input aria-label="Seat 1 model"[^>]*>/)![0]; expect(model).toContain('value="gpt-5"'); expect(model).toContain('disabled=""');
+    expect(html).toMatch(/<select aria-label="Seat 1 agent" disabled=""[^>]*><option value="claude">Claude Code<\/option><option value="codex" selected="">Codex<\/option>/); // A model its agent does not list (here Codex has listed none yet) shows as its ID under "Another model…", both kept as they are.
+    expect(html.match(/<select aria-label="Seat 1 model"[^>]*>/)![0]).toContain('disabled=""'); const model = html.match(/<input aria-label="Seat 1 model ID"[^>]*>/)![0]; expect(model).toContain('value="gpt-5"'); expect(model).toContain('disabled=""');
+    // A new table's Claude Code seat: its models by name, the CLI's default first, and no ID field until "Another model…" is chosen.
+    const fresh = draw({ type: 'new', table: 'discussion' });
+    expect(fresh).toMatch(/<select aria-label="Seat 1 model"[^>]*><option value="" selected="">CLI default<\/option><option value="claude-fable-5-2">Fable 5\.2<\/option><option value="claude-opus-5-5">Opus 5\.5<\/option><option value="claude-sonnet-5-5">Sonnet 5\.5<\/option><option value="claude-haiku-5-5">Haiku 5\.5<\/option><option value="other">Another model…<\/option><\/select>/); expect(fresh).not.toContain('aria-label="Seat 1 model ID"');
     expect(html).toContain('This chat keeps its model; change it in the channel&#x27;s settings.'); expect(html).toMatch(/aria-label="Seat 2 agent"(?![^>]*disabled)/);
   });
   it('says no more seats fit when the eight agents and terminals leave no room, and disables Add seat and Start', () => {

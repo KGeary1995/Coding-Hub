@@ -60,7 +60,18 @@ else {
         if (Notification.isSupported()) new Notification({ title: 'Trace', body: `${name} is viewing and controlling this screen. Disconnect from the Trace icon by the clock.` }).show();
       },
     });
+    service.version = app.getVersion();
     try { await service.listen(port); } catch { app.exit(0); return; }
+    /**
+     * An update replaces Trace's files while this service runs (the administrator one is not closed by it), and the
+     * service then cannot open its capture window: every viewer was refused, for days, while /health still answered
+     * (2026-11-22). So once the installed version has differed from this one for half a minute (an update takes a
+     * moment to finish) and nobody is viewing, it makes way: the ordinary service starts itself again, and the
+     * administrator one quits for its task to be run again by Trace (it starts with the update, and checks every minute).
+     */
+    let outdated = 0;
+    const installed = () => { try { return String((JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as { version?: unknown }).version ?? ''); } catch { return ''; } };
+    if (app.isPackaged) setInterval(() => { const version = installed(); outdated = version && version !== app.getVersion() ? outdated + 1 : 0; if (outdated >= 10 && !service.busy) { if (!elevatedRun) app.relaunch(); void service.close().finally(() => app.exit(0)); } }, 3000);
     // The file goes first, so the service started again does not fail at once too.
     if (crashFile) setInterval(() => { if (fs.existsSync(crashFile)) { fs.rmSync(crashFile, { force: true }); setTimeout(() => { throw new Error('Failing on purpose for the smoke test.'); }); } }, 200);
     // Turned off in Trace's settings (or the setting is gone), or the other kind (administrator or not) is wanted: quit.

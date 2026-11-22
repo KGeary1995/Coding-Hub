@@ -14,7 +14,8 @@ export type ScreenKind = 'trace' | 'system';
 export interface ScreenCredentials { username: string; password: string }
 /** Whether this computer serves its screen to linked computers (Windows), and whether the service is running now. */
 /** `elevated`: the service runs as administrator, so it can also control apps that do. */
-export interface ScreenShareStatus { supported: boolean; enabled: boolean; elevated: boolean; running: boolean }
+/** `problem`: why the service, asked to capture the screen, could not (checked when Trace starts and after it starts the service); null when it could or was not asked. */
+export interface ScreenShareStatus { supported: boolean; enabled: boolean; elevated: boolean; running: boolean; problem?: string | null }
 export type ScreenRequest =
   /**
    * Connects to that computer's screen; bytes then flow with `screen-send` and `ScreenEvent`. The window names the

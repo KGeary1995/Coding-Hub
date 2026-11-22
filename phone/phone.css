@@ -226,6 +226,12 @@ footer { padding: 0 16px 16px; text-align: center; }
 .copy-bar .dim { font: var(--tr-t-small); }
 .copy-bar .icon.small { padding: 0 12px; }
 .copy-sheet > p { font: var(--tr-t-small); }
+/* Channel settings: the computer's engine settings as a short form. */
+.settings-form { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding-top: 8px; }
+.settings-form .field > input, .settings-form .field > select { width: 100%; min-height: 44px; }
+.settings-form .field > small { font: var(--tr-t-small); }
+.settings-form > .dim { margin: 0 0 12px; font: var(--tr-t-small); }
+.settings-form > button { align-self: flex-start; min-width: 120px; }
 .copy-text { flex: 1; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-tile); background: var(--tr-term); color: var(--tr-fg); font: 400 12px/16px var(--tr-font-mono); white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .conversation { white-space: normal; font: var(--tr-t-body); }
 .conversation .said { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

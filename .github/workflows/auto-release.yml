@@ -1,0 +1,50 @@
+name: Release a new version on main
+# Merging a pull request that raises package.json's version is the decision to release it; the steps after that were
+# done by hand (start the Windows release candidate, wait, tag). This does them:
+# - CI passes on main's newest commit, and that version is not on the downloads page yet: starts Windows release candidate.
+# - Windows release candidate passes on main's newest commit, same condition: starts Release with publish, which builds,
+#   refuses a commit the candidate has not passed on, and never replaces a published version.
+# A merge that does not raise the version starts nothing. If main moves on meanwhile, nothing is published for the older
+# commit; the newer one goes through the same steps. Doing the steps by hand still works (docs/windows-releases.md).
+on:
+  workflow_run:
+    workflows: [CI, Windows release candidate]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+jobs:
+  next:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Start the next release step for a version not published yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          FINISHED: ${{ github.event.workflow_run.name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" != "$SHA" ]; then echo "main has moved on from $SHA; its newest commit goes through these steps itself."; exit 0; fi
+          if gh release view "v$version" --repo KGeary1995/trace-releases >/dev/null 2>&1; then echo "Trace $version is already on the downloads page: nothing to release."; exit 0; fi
+          if [ "$(gh run list --workflow release.yml --commit "$SHA" --json status --jq '[.[] | select(.status != "completed")] | length')" != 0 ]; then echo "Release is already running on $SHA."; exit 0; fi
+          passed=$(gh run list --workflow windows-release.yml --commit "$SHA" --status success --limit 1 --json databaseId --jq 'length')
+          if [ "$passed" = 1 ]; then
+            echo "The Windows release candidate passed on $SHA: starting Release for Trace $version."
+            gh workflow run release.yml --ref main -f publish=true
+          elif [ "$FINISHED" = "CI" ]; then
+            echo "CI passed on $SHA and Trace $version is not published: starting the Windows release candidate."
+            gh workflow run windows-release.yml --ref main
+          else
+            echo "No Windows release candidate has passed on $SHA yet."
+          fi

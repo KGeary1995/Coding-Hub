@@ -3,7 +3,7 @@ import { CircleAlert, MonitorSmartphone, RefreshCw } from 'lucide-react';
 import type { DeviceSyncStatus, SyncedComputer, SyncedDocument } from '../../shared/hub';
 import type { LinkedComputer } from '../../shared/remote';
 import { useLinkedStore } from '../state/linked-store';
-import { hubCall } from '../state/hub-store';
+import { hubCall, useHubStore } from '../state/hub-store';
 import { refreshSynced } from '../runtime/use-native-host';
 
 const DOCUMENT_LABEL: Record<SyncedDocument, string> = { settings: 'Settings', rules: 'Shared rules' };
@@ -26,6 +26,15 @@ export function DeviceSyncCard() {
   const run = async (request: Parameters<typeof hubCall>[0]) => {
     setBusy(true); setError('');
     try { setStatus(await hubCall<DeviceSyncStatus>(request)); await refreshSynced(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  /** Joins the computers that sync through another Drive folder: this computer's Drive folder becomes theirs, and a sync runs at once. */
+  const useFolder = async (directory: string) => {
+    setBusy(true); setError('');
+    try {
+      const preferences = { ...useHubStore.getState().preferences, driveDirectory: directory };
+      await hubCall({ action: 'save-preferences', preferences }); useHubStore.getState().setPreferences(preferences);
+      setStatus(await hubCall<DeviceSyncStatus>({ action: 'device-sync-now' })); await refreshSynced();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   // The sync also runs in the background every 30 seconds; follow it so connection, conflicts and errors stay current.
   useEffect(() => {
@@ -53,6 +62,14 @@ export function DeviceSyncCard() {
           <button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-resolve', document: conflict.document, keep: 'remote' })}>Use {conflict.from}’s</button>
         </div>
       </div>)}
+      {status.joined && <div className="ui-banner device-sync-conflict" role="status">
+        <p><strong>Trace moved this computer’s sync to <code>{status.joined.directory}</code></strong> on {when(status.joined.at)}, to join {status.joined.computers.join(', ')}. It used <code>{status.joined.from || 'no folder'}</code> before; nothing was removed there.</p>
+        {status.joined.from && <div className="ui-actions"><button className="button secondary small" disabled={busy} onClick={() => void useFolder(status.joined!.from)}>Move back</button></div>}
+      </div>}
+      {status.elsewhere && <div className="ui-banner warning device-sync-conflict" role="alert">
+        <p><strong>{status.elsewhere.computers.join(', ')} {status.elsewhere.computers.length === 1 ? 'syncs' : 'sync'} through another Drive folder</strong> (<code>{status.elsewhere.directory}</code>), so usage, settings, rules and memory notes do not pass between {status.elsewhere.computers.length === 1 ? 'it' : 'them'} and this computer. {status.elsewhere.switchHere ? 'Use that folder here to join them; this computer’s notes and usage are added to it.' : `Trace on ${status.elsewhere.computers.length === 1 ? 'that computer' : 'those computers'} moves to this folder by itself once it is updated and open; or use that folder here.`}</p>
+        <div className="ui-actions"><button className={`button ${status.elsewhere.switchHere ? 'primary' : 'secondary'}`} disabled={busy} onClick={() => void useFolder(status.elsewhere!.directory)}>{status.elsewhere.switchHere ? 'Use the same folder' : 'Use that folder here'}</button></div>
+      </div>}
       {outside.length > 0 && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{outside.map((item) => item.name).join(', ')} {outside.length === 1 ? 'is' : 'are'} on your tailnet but not in this sync folder. Check that sync is on there and that both computers use the same Google Drive folder.</span></p>}
       {status.error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{status.error}</span></p>}
       <div className="ui-actions"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>

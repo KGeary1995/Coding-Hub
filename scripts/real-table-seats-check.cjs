@@ -42,9 +42,9 @@ async function until(page, bar, test, minutes, label) {
 
     // 1. A discussion of three, the Claude seats on Haiku; the third seat has a name and instructions of its own.
     await startTable(page, 'Round Table', async (panel) => {
-      await panel.getByLabel('Seat 1 model', { exact: true }).fill('haiku');
+      await panel.getByLabel('Seat 1 model', { exact: true }).selectOption('claude-haiku-5-5');
       await panel.getByRole('button', { name: 'Add seat', exact: true }).click();
-      await panel.getByLabel('Seat 3 agent', { exact: true }).selectOption('claude'); await panel.getByLabel('Seat 3 model', { exact: true }).fill('haiku');
+      await panel.getByLabel('Seat 3 agent', { exact: true }).selectOption('claude'); await panel.getByLabel('Seat 3 model', { exact: true }).selectOption('claude-haiku-5-5');
       await panel.getByLabel('Seat 3 name', { exact: true }).fill('Tests');
       await panel.getByLabel('Seat 3 instructions', { exact: true }).fill('Begin every reply with the single word PINEAPPLE on its own line.');
       await panel.getByLabel('Rounds', { exact: true }).selectOption('1'); await shot(page, '01-setup');
@@ -88,11 +88,11 @@ async function until(page, bar, test, minutes, label) {
 
     // 3. A hierarchy: Codex plans and gives the final review, Claude Code (Haiku) builds, Codex then Claude Code (Haiku) review.
     await startTable(page, 'Round Table (hierarchy)', async (panel) => {
-      await panel.getByLabel('Seat 1 model', { exact: true }).fill('haiku');
-      await panel.getByLabel('Seat 2 agent', { exact: true }).selectOption('codex'); await panel.getByLabel('Seat 2 model', { exact: true }).fill('');
-      await panel.getByLabel('Seat 3 model', { exact: true }).fill('');
+      await panel.getByLabel('Seat 1 model', { exact: true }).selectOption('claude-haiku-5-5');
+      await panel.getByLabel('Seat 2 agent', { exact: true }).selectOption('codex'); await panel.getByLabel('Seat 2 model', { exact: true }).selectOption('');
+      await panel.getByLabel('Seat 3 model', { exact: true }).selectOption('');
       await panel.getByRole('button', { name: 'Add seat', exact: true }).click();
-      await panel.getByLabel('Seat 4 agent', { exact: true }).selectOption('claude'); await panel.getByLabel('Seat 4 model', { exact: true }).fill('haiku');
+      await panel.getByLabel('Seat 4 agent', { exact: true }).selectOption('claude'); await panel.getByLabel('Seat 4 model', { exact: true }).selectOption('claude-haiku-5-5');
       const duties = panel.getByRole('group', { name: 'Seat 4 duties', exact: true });
       for (const duty of ['Plans', 'Challenges the plan', 'Final review']) if (await duties.getByLabel(duty, { exact: true }).isChecked()) await duties.getByLabel(duty, { exact: true }).uncheck();
       if (!await duties.getByLabel('Reviews', { exact: true }).isChecked()) await duties.getByLabel('Reviews', { exact: true }).check();

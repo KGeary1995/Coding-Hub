@@ -49,4 +49,15 @@ async function tileControl(scope, name) {
   return button;
 }
 
-module.exports = { openView, addChannel, startTable, tileControl };
+/**
+ * Sets a Codex channel's model in its engine settings (open on `tile`). Once Codex has listed its models the field is a
+ * list chosen by name, with "Another model…" for an exact ID; until then it is the ID field alone.
+ */
+async function setCodexModel(tile, model) {
+  await tile.locator('.ui-hint').filter({ hasText: 'Loading models from your local Codex CLI' }).waitFor({ state: 'detached' });
+  const field = tile.getByLabel('codex model', { exact: true });
+  if (await field.evaluate((element) => element.tagName !== 'SELECT')) { await field.fill(model); return; }
+  if (await field.locator(`option[value="${model}"]`).count()) { await field.selectOption(model); return; }
+  await field.selectOption('other'); await tile.getByLabel('codex model ID', { exact: true }).fill(model);
+}
+module.exports = { setCodexModel, openView, addChannel, startTable, tileControl };

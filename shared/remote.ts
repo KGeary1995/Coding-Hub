@@ -41,7 +41,20 @@ export type RemoteDeviceKind = 'phone' | 'computer';
 export type ChannelControl = 'start' | 'stop' | 'restart' | 'close';
 /** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
 /** `chat` asks for a chat channel (Claude Code or Codex) rather than a terminal one. */
-export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true; like?: string };
+/** `settings` changes a channel's name, permissions, model or effort (a phone's channel settings). */
+export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true; like?: string } | { requestId: string; settings: RemoteChannelChange };
+/**
+ * One of this computer's channels' settings, as a phone that may start and stop agents sees them (GET
+ * /api/channel-settings): its name and, for an agent, what it may do without asking, its model and (Codex) its
+ * reasoning effort. `models` are the ones to choose from, by name: Claude Code's current ones, or what Codex or Gemini
+ * CLI lists for the signed-in account (empty when that CLI could not list them; the model then stays as it is).
+ * `efforts`: the levels the chosen Codex model lists. The account, folder and budgets are changed on the computer.
+ */
+export interface RemoteChannelSettings { sessionId: string; title: string; engine: RemoteEngine; chat: boolean; running: boolean;
+  permissions?: import('./types').PermissionLevel; model?: string; effort?: string | null;
+  models: { id: string; name: string; efforts?: string[] }[] }
+/** What a phone changes (POST /api/channel-settings); a field left out stays as it is. `model` '' and `effort` null are the CLI's own default. */
+export interface RemoteChannelChange { sessionId: string; title?: string; permissions?: import('./types').PermissionLevel; model?: string; effort?: string | null }
 export interface TailscaleState {
   /** The tailscale CLI was found. */
   installed: boolean;
