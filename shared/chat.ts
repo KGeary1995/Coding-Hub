@@ -110,7 +110,8 @@ export interface RoundTableState {
   partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' | 'gemini' };
   driver: 'claude' | 'codex'; rounds: number; round: number;
   /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */
-  phase: 'joining' | 'answering' | 'discussing' | 'idle';
+  /** `acting`: the discussion is over and the driver is carrying out what the person asked (from 1.29). */
+  phase: 'joining' | 'answering' | 'discussing' | 'acting' | 'idle';
   /** The last discussion ended with both agents agreeing. */
   agreed: boolean;
   /** The review record: what the reviewer reported and what became of each (shared/findings.ts). Missing from Trace before 1.17. */

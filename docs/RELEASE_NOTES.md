@@ -1,5 +1,16 @@
 ## What's new
 
+1.29.0 changes how a discussion Round Table works, so the seats talk first and the driver acts on what was said:
+
+- **Discuss first, then the driver makes the changes.** Your message goes to every seat to discuss: each says how it would handle it, and nobody changes files yet. Each then sees the others' answers and replies, for the number of rounds you set or until they all agree. Then the driver alone gets a turn to make the changes, with the whole discussion in view. The bar shows this as **making the changes**.
+  - **What was wrong:** the driver was told to start work on your message at once, beside the other seats and before it had heard them. Nothing told it to act on the discussion afterwards, and it never saw the others' last replies.
+  - While they discuss, every seat is read-only, the driver included; Trace declines an edit asked for then.
+  - Stop, a failed turn, or a new message from you ends the discussion without the driver's turn.
+  - With **Rounds** at 0 there is no discussion: the driver starts at once, as before.
+- **A hierarchy table is unchanged.** It already works in order: plan, challenge, build, review, final review.
+- **Tried with the real Claude Code and Codex:** a table of three discussed for two rounds with no file touched, then the driver wrote the file with a line from every seat. The check is `scripts/real-discussion-check.cjs`.
+- **Not tried:** a Gemini CLI seat at the new flow, a table that agrees early with real agents, a Mac, a real phone and the installed version.
+
 1.28.1 fixes viewing a Windows screen with **Also control apps running as administrator** on:
 
 - **The screen can be viewed again with the administrator option on.** With it on, every viewer was refused with "could not capture its screen: Could not start video source", from a linked computer and from the phone.

@@ -31,11 +31,13 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
 
 describe('Round Table', () => {
   it('sends the person’s message to both, then each the other’s answer, for the set number of rounds', () => {
-    const { tables, sent, say, done, last } = setup();
+    const { tables, sent, modes, say, done, last } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 1);
     tables.send(CLAUDE, 'How should phones start channels?', []);
     expect(sent.map((item) => item.runId)).toEqual([CLAUDE, CODEX]);
     expect(sent[0].text).toContain('You are the driver'); expect(sent[1].text).toContain('You are the reviewer'); expect(sent[1].text).toContain('How should phones start channels?');
+    // Nobody edits while they discuss, the driver included; both are told so with the message.
+    expect(modes).toEqual({ [CLAUDE]: true, [CODEX]: true }); for (const item of sent) expect(item.text).toContain('Discuss this first'); expect(sent[1].text).toContain('Claude Code carries it out');
     say(CLAUDE, 'A per-phone switch.'); done(CLAUDE);
     expect(sent).toHaveLength(2); expect(last().table).toMatchObject({ phase: 'answering', round: 0 });
     say(CODEX, 'Agree, plus Face ID.'); done(CODEX);
@@ -46,8 +48,44 @@ describe('Round Table', () => {
     ]);
     expect(sent[2].text).not.toContain('You are the driver'); expect(last().table).toMatchObject({ phase: 'discussing', round: 1 });
     say(CLAUDE, 'Fine.'); done(CLAUDE); say(CODEX, 'Fine too.'); done(CODEX);
-    // Rounds used up: no third exchange.
-    expect(sent).toHaveLength(4); expect(last().table).toMatchObject({ phase: 'idle', agreed: false });
+    // Rounds used up: no third exchange. The driver alone goes on: it may edit again, is shown what the reviewer said
+    // last (it had not seen that), and is told to do the work.
+    expect(sent).toHaveLength(5); expect(sent[4].runId).toBe(CLAUDE); expect(last().table).toMatchObject({ phase: 'acting', agreed: false });
+    expect(sent[4].text).toContain('[Trace Round Table · the discussion is over: after 1 of 1 round] Codex answered:\n\nFine too.'); expect(sent[4].text).toContain('Now carry out what the person asked');
+    expect(modes).toEqual({ [CLAUDE]: false, [CODEX]: true });
+    say(CLAUDE, 'Added the switch.'); done(CLAUDE);
+    expect(sent).toHaveLength(5); expect(last().table).toMatchObject({ phase: 'idle', agreed: false });
+  });
+
+  it('declines the driver’s edits while they discuss, and lets them through once the discussion is over', () => {
+    const { tables, answers, say, done, runs } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    const edit = (requestId: string) => tables.observe({ sessionId: runs[CLAUDE].sessionId, runId: CLAUDE, event: { type: 'permission', requestId, toolName: 'Edit', input: {} } as ChatEvent });
+    tables.send(CLAUDE, 'Rename the flag.', []);
+    expect(edit('r1')).toContain('files change once the discussion is over'); expect(answers).toEqual([{ runId: CLAUDE, requestId: 'r1', allow: false }]);
+    say(CLAUDE, 'I would rename it.'); done(CLAUDE); say(CODEX, 'Yes.'); done(CODEX); say(CLAUDE, 'AGREE'); done(CLAUDE); say(CODEX, 'AGREE'); done(CODEX);
+    // Its turn to do the work: the edit is the person's to approve, as in any chat.
+    expect(edit('r2')).toBeNull(); expect(answers).toHaveLength(1);
+  });
+
+  it('with no rounds there is no discussion: the driver starts at once', () => {
+    const { tables, sent, modes, say, done, last } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 0);
+    tables.send(CLAUDE, 'Fix the typo.', []);
+    expect(modes).toEqual({ [CLAUDE]: false, [CODEX]: true }); for (const item of sent) expect(item.text).not.toContain('Discuss this first');
+    say(CLAUDE, 'Fixed.'); done(CLAUDE); say(CODEX, 'Looks right.'); done(CODEX);
+    expect(sent).toHaveLength(2); expect(last().table).toMatchObject({ phase: 'idle' });
+  });
+
+  it('does not start the work after Stop, a failed turn, or a new message from the person', () => {
+    const stopped = setup(); stopped.tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    stopped.tables.send(CLAUDE, 'Go', []); stopped.say(CLAUDE, 'Plan'); stopped.tables.stop(CLAUDE); stopped.done(CLAUDE); stopped.done(CODEX);
+    expect(stopped.sent).toHaveLength(2); expect(stopped.last().table).toMatchObject({ phase: 'idle' }); expect(stopped.modes[CLAUDE]).toBe(false);
+    const failed = setup(); failed.tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    failed.tables.send(CLAUDE, 'Go', []); failed.say(CLAUDE, 'Plan'); failed.done(CLAUDE); failed.observe(CODEX, 'usage limit');
+    expect(failed.sent).toHaveLength(2); expect(failed.last().table).toMatchObject({ phase: 'idle' });
+    // A new message while they discuss takes the place of the rest, the work included: it is discussed from the start.
+    const again = setup(); again.tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    again.tables.send(CLAUDE, 'Go', []); again.say(CLAUDE, 'Plan'); again.done(CLAUDE); again.tables.send(CLAUDE, 'No, the other file', []); again.say(CODEX, 'Ok'); again.done(CODEX);
+    expect(again.sent.slice(2).map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(again.sent[2].text).toContain('No, the other file'); expect(again.last().table).toMatchObject({ phase: 'answering' });
   });
 
   it('ends the discussion early when both agents agree', () => {
@@ -55,7 +93,10 @@ describe('Round Table', () => {
     tables.open(1, CLAUDE, CODEX, 'claude', 3);
     tables.send(CLAUDE, 'Plan?', []); say(CLAUDE, 'Plan A'); done(CLAUDE); say(CODEX, 'Plan A too'); done(CODEX);
     say(CLAUDE, 'AGREE'); done(CLAUDE); say(CODEX, '**AGREE**.'); done(CODEX);
-    expect(sent).toHaveLength(4); expect(last().table).toMatchObject({ phase: 'idle', agreed: true, round: 1 });
+    // No further round: the driver does the work, with nothing more to be shown (the other only agreed).
+    expect(sent).toHaveLength(5); expect(sent[4].runId).toBe(CLAUDE); expect(sent[4].text).toContain('the discussion is over: you both agree] Now carry out'); expect(last().table).toMatchObject({ phase: 'acting', agreed: true, round: 1 });
+    say(CLAUDE, 'Done as planned.'); done(CLAUDE);
+    expect(sent).toHaveLength(5); expect(last().table).toMatchObject({ phase: 'idle', agreed: true, round: 1 });
   });
 
   it('allows the reviewer’s commands at Full access only, still declines its edits, and leaves the driver’s to the person', () => {
@@ -92,7 +133,7 @@ describe('Round Table', () => {
     expect(interrupted).toEqual([]); expect(sent).toHaveLength(2);
     say(CODEX, 'Still working'); done(CODEX);
     // The waiting messages go next, in place of a discussion round.
-    expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Actually, second\n\nAnd third'], [CODEX, 'Actually, second\n\nAnd third']]);
+    expect(sent.slice(2).map((item) => [item.runId, item.text.split('\n\n[Trace Round Table]')[0]])).toEqual([[CLAUDE, 'Actually, second\n\nAnd third'], [CODEX, 'Actually, second\n\nAnd third']]);
   });
 
   it('refuses a waiting message that would take the images past ten, instead of dropping them', () => {
@@ -117,7 +158,7 @@ describe('Round Table', () => {
     tables.stop(CLAUDE);
     expect(last().table!.waiting).toBe('Also this');
     done(CLAUDE); done(CODEX);
-    expect(sent.slice(2).map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'Also this'], [CODEX, 'Also this']]);
+    expect(sent.slice(2).map((item) => [item.runId, item.text.split('\n\n[Trace Round Table]')[0]])).toEqual([[CLAUDE, 'Also this'], [CODEX, 'Also this']]);
   });
 
   it('seated again after a restart: no joining summary, and no new brief', () => {
@@ -127,7 +168,8 @@ describe('Round Table', () => {
     tables.open(1, CLAUDE, CODEX, 'claude', 2, { rejoin: true });
     expect(last().table!.phase).toBe('idle'); expect(sent).toHaveLength(0);
     tables.send(CLAUDE, 'Go on', []);
-    expect(sent.map((item) => item.text)).toEqual(['Go on', 'Go on']);
+    // Only the line that says to discuss first comes with it.
+    expect(sent.map((item) => item.text.split('\n\n')[0])).toEqual(['Go on', 'Go on']); for (const item of sent) expect(item.text.split('\n\n')[1]).toMatch(/^\[Trace Round Table\] Discuss this first/);
   });
 
   it('waits for an agent still in a turn from before, and never takes that turn for an answer', () => {
@@ -140,7 +182,7 @@ describe('Round Table', () => {
     expect(sent).toHaveLength(0); expect(last().table!.waiting).toBe('What now?');
     // The old turn ends: not an answer; the waiting message goes to both.
     say(CLAUDE, 'Half of an old reply.'); done(CLAUDE);
-    expect(sent.map((item) => [item.runId, item.text])).toEqual([[CLAUDE, 'What now?'], [CODEX, 'What now?']]);
+    expect(sent.map((item) => [item.runId, item.text.split('\n\n[Trace Round Table]')[0]])).toEqual([[CLAUDE, 'What now?'], [CODEX, 'What now?']]);
     say(CLAUDE, 'Answer.'); done(CLAUDE); say(CODEX, 'AGREE'); done(CODEX);
     expect(sent[2]).toMatchObject({ runId: CLAUDE }); expect(sent[2].text).toContain('AGREE');
     expect(sent[3].text).toContain('Answer.'); expect(sent[3].text).not.toContain('Half of an old reply.');
