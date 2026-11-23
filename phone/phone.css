@@ -7,6 +7,8 @@ html, body { height: 100%; }
 body { margin: 0; background: var(--tr-window); color: var(--tr-fg); font: var(--tr-t-body); -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
 /* No top inset here: the top bar takes it, so the strip under an iPhone's status bar is the bar's colour (and the page's
    theme-color, index.html), not the window's, with no seam between them. */
+/* Native parts (select menus, scroll bars, date pickers) drawn dark, as the page is (1.31.4). */
+:root { color-scheme: dark; }
 #app { display: flex; flex-direction: column; min-width: 0; min-height: 100dvh; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 /* A channel and a computer's screen fit the window: a terminal still at the desktop's size scrolls in its well, not the page. */
 #app:has(> .channel-view, > main.screen) { height: 100dvh; }
@@ -71,7 +73,7 @@ details[open] > summary:where(:not(:has(> svg:first-child), .note > summary))::b
 .avatar { --tone: var(--tr-accent); flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-tile); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); }
 .avatar svg { width: 20px; height: 20px; }
 .avatar.small { width: 28px; height: 28px; border-radius: var(--tr-r-control); } .avatar.small svg { width: 16px; height: 16px; }
-.meter { --tone: var(--tr-accent); height: 6px; margin: 8px 0 0; border-radius: var(--tr-r-chip); background: var(--tr-well); box-shadow: inset 0 0 0 1px var(--tr-line-faint); overflow: hidden; }
+.meter { --tone: var(--tr-accent); height: 6px; margin: 8px 0 0; border-radius: var(--tr-r-chip); background: var(--tr-raised); box-shadow: inset 0 0 0 1px var(--tr-line-faint); overflow: hidden; }
 .meter > i { display: block; height: 100%; border-radius: inherit; background: var(--tone); }
 .banner { --tone: var(--tr-accent); display: flex; align-items: flex-start; gap: 8px; margin: 0 0 16px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-control); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); overflow-wrap: anywhere; }
 /* The dot sits on the first line of text: an 8 px circle drawn in the middle of a 20 px line. */
@@ -97,6 +99,8 @@ details[open] > summary:where(:not(:has(> svg:first-child), .note > summary))::b
 .bar .title { flex: 1; display: grid; gap: 4px; min-width: 72px; overflow: hidden; white-space: nowrap; font: 600 15px/20px var(--tr-font-ui); color: var(--tr-fg-strong); }
 .bar .title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .bar .title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A channel's buttons are redrawn as one box, which takes no room of its own. */
+.bar > .channel-controls { display: contents; }
 .bar .icon.small { width: auto; padding: 0 12px; font: 600 13px/16px var(--tr-font-ui); }
 /* The link: a dot and a word; beside a channel's own buttons, the dot alone (the word stays for screen readers). */
 .link { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); white-space: nowrap; }
@@ -254,6 +258,8 @@ main.screen { flex: 1; min-width: 0; min-height: 0; display: flex; flex-directio
 .phone-chat .chat-composer { padding: 8px 16px 16px; }
 /* 16 px, off the size list on purpose: below 16 px, iPhone Safari zooms the page into a field when it is tapped. */
 .phone-chat .chat-input-row textarea { font-size: 16px; }
+/* iOS zooms the page into a field under 16 px when it is tapped: the Round Table's selects are 16 px here (1.31.4). */
+.phone-chat .table-rounds select { height: 32px; min-height: 32px; font-size: 16px; }
 .phone-chat .chat-icon { min-width: 44px; min-height: 44px; }
 .phone-chat .table-bar { gap: 8px 12px; padding: 8px 16px; }
 .phone-chat .table-bar :is(.quiet-button, .button) { position: relative; min-height: 36px; padding: 0 8px; }

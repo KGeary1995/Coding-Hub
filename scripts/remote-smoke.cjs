@@ -254,6 +254,10 @@ else if (args.startsWith('serve --bg --https=443')) {
     const saved = await phone.evaluate(async (id) => (await fetch('/api/channel-settings?sessionId=' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json(), claudeId);
     assert.deepEqual([saved.title, saved.permissions, saved.model], ['From the phone', 'ask', 'claude-haiku-5-5'], 'the settings changed on the phone are saved on the computer');
     await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    // A terminal channel's buttons follow it (1.31.4; they stayed as first drawn): stopped, Start; started, Stop.
+    await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click(); await phone.getByRole('button', { name: 'Stop CH2', exact: true }).click();
+    await phone.getByRole('button', { name: 'Start CH2', exact: true }).click(); await phone.getByRole('button', { name: 'Stop CH2', exact: true }).waitFor();
+    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
     // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
     // the same request (linked computers and older phone apps send it), so the chat checks below use that.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
