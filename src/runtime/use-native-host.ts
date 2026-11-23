@@ -125,6 +125,7 @@ export function useNativeHost() {
       if (!result.ok) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: result.error.message }); return; }
       useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info, result.value.removedChannels, result.value.rootDirectory);
       loaded = true;
+      if (result.value.resume) void resumeChannels(result.value.resume);
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
       // What the saved workspace is made of: when none of these changed (a status line, a view), nothing is serialized.
@@ -152,6 +153,22 @@ export function useNativeHost() {
     return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
+}
+
+/**
+ * Starts again the channels that were running when Trace quit (1.32.0): an agent on the conversation it saved (one with
+ * none would start a new one, so it is left stopped), a shell afresh. Round Table seats too, so the table opens again
+ * (restoreTables). One at a time, after the tiles have drawn, so each starts at its own size.
+ */
+export async function resumeChannels(ids: string[]) {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const chosen = useWorkspaceStore.getState().sessions.filter((session) => ids.includes(session.id) && session.status === 'idle' && (!isAgentConfig(session.config) || Boolean(session.config.resumeId)));
+  for (const session of chosen) await startSession(session.id);
+  const started = chosen.filter((session) => useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.status === 'running').length;
+  const shown = channelsOf(useWorkspaceStore.getState().sessions).filter((session) => chosen.some((item) => item.id === session.id)).length;
+  if (!started) return;
+  const line = `${shown === 1 ? 'A channel' : `${shown} channels`} running when Trace closed ${shown === 1 ? 'was' : 'were'} started again on ${shown === 1 ? 'its' : 'their'} conversations${started < chosen.length ? ', and some could not be' : ''}. Settings → Preferences can turn this off.`;
+  useWorkspaceStore.setState((state) => ({ loadNotice: state.loadNotice ? `${state.loadNotice} ${line}` : line }));
 }
 
 export async function startSession(id: string) {

@@ -406,6 +406,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // Deliberately close immediately after a layout change; the host requests a final snapshot.
     await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click();
     assert.deepEqual(errors, []);
+    // With Start channels again when Trace opens off (1.32.0), every channel comes back stopped, as before it. The
+    // productivity smoke test checks it on.
+    const off = await page.evaluate(async () => { const current = await window.codingHub.hub({ action: 'preferences' }); return window.codingHub.hub({ action: 'save-preferences', preferences: { ...current.value, resumeOnStart: false } }); });
+    assert.equal(off.ok, true);
     await app.close();
     for (const pid of pids) assert.throws(() => process.kill(pid, 0));
     app = await _electron.launch({ executablePath: require('electron'), args, env });
