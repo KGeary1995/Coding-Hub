@@ -4,7 +4,7 @@ import { seatRoom } from '../../runtime/round-table';
 import type { TableKind } from '../../../shared/table-seats';
 import { TableSetup } from '../chat/TableSetup';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
-import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, UsersRound, Workflow, type LucideIcon } from 'lucide-react';
+import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
@@ -16,7 +16,7 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
 /** `icon` is the view's own: its menu entry shows it, and its page heading should show the same one. */
 export const INSIGHT_VIEWS: { view: NavigationView; label: string; icon: LucideIcon }[] = [
-  { view: 'usage', label: 'Usage', icon: ChartColumn }, { view: 'history', label: 'Session history', icon: History }, { view: 'files', label: 'Files', icon: Files }, { view: 'tools', label: 'More tools', icon: LayoutGrid },
+  { view: 'usage', label: 'Usage', icon: ChartColumn }, { view: 'history', label: 'Session history', icon: History }, { view: 'files', label: 'Files', icon: Files }, { view: 'search', label: 'Search', icon: Search }, { view: 'tools', label: 'More tools', icon: LayoutGrid },
 ];
 /** Rarely used tools, listed on the More tools page instead of in the menus. */
 export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
@@ -25,7 +25,7 @@ export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIcon }[] = [
   { view: 'accounts', label: 'Accounts & connections', icon: CircleUserRound }, { view: 'memory', label: 'Shared memory', icon: BookOpen }, { view: 'rules', label: 'Shared rules', icon: ShieldCheck }, { view: 'connectors', label: 'MCP servers', icon: Cable },
-  { view: 'skills', label: 'Skills & plugins', icon: Sparkles }, { view: 'settings', label: 'Settings', icon: Settings2 }, { view: 'workflow', label: 'Workflow center', icon: Workflow },
+  { view: 'skills', label: 'Skills & plugins', icon: Sparkles }, { view: 'settings', label: 'Settings', icon: Settings2 },
 ];
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
 const CHANNEL_KINDS = {

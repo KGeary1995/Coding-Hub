@@ -84,7 +84,7 @@ describe('whether the window shows a channel’s tile, so that its notice is not
     expect(shows({ isolated: 'ch2' })).toBe('shown');
   });
   it('hides it while another page is shown', () => {
-    for (const view of ['diff', 'tasks', 'projects', 'usage', 'settings', 'files', 'history', 'memory', 'workflow', 'help'] as const) expect(shows({ view })).toBe('hidden');
+    for (const view of ['diff', 'tasks', 'projects', 'usage', 'settings', 'files', 'history', 'memory', 'search', 'help'] as const) expect(shows({ view })).toBe('hidden');
   });
   it('hides it while another computer’s tab is shown', () => {
     expect(shows({ view: 'computer' })).toBe('hidden');

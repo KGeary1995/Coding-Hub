@@ -1,3 +1,4 @@
+import { Templates } from './WorkflowCenter';
 import { useState } from 'react';
 import { CircleAlert, FolderOpen, FolderPlus, Github, Info, Plus, RefreshCw, CircleUserRound, SearchX } from 'lucide-react';
 import type { GitHubRepository, ProjectRequest, ProjectResponse } from '../../shared/projects';
@@ -26,6 +27,8 @@ export function ProjectsPanel() {
         {loaded && !repos.length && <div className="ui-empty"><Github aria-hidden="true" /><h3>No repositories returned</h3><p>Check the owner and account permissions, or clone by name below.</p></div>}
         {repos.length > 0 && !shown.length && <div className="ui-empty"><SearchX aria-hidden="true" /><h3>No repositories match</h3><p>Nothing in the {repos.length} loaded matches “{query.trim()}”.</p><button className="button secondary" onClick={() => setQuery('')}>Clear filter</button></div>}
         <CloneByName disabled={busy || !parent} clone={(repository) => run(async () => { const result = await call({ action: 'github-clone', repository, parent }) as { directory: string }; open(result.directory); })} /></article>
-    </div></section>;
+    </div>
+    {/* Project templates (until 1.31 in the Workflow center): save this workspace's setup, or apply one. */}
+    <div className="workbench-page tr-project-templates"><Templates /></div></section>;
 }
 function CloneByName({ disabled, clone }: { disabled: boolean; clone: (repository: string) => Promise<void> }) { const [repository, setRepository] = useState(''); return <form className="hub-toolbar" onSubmit={(e) => { e.preventDefault(); void clone(repository.trim()); }}><label className="ui-field">GitHub owner/repository<input aria-label="GitHub owner/repository" required value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="owner/repository" /></label><button className="button secondary" disabled={disabled || !repository}>Clone by name</button></form>; }

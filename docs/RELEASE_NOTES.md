@@ -1,5 +1,14 @@
 ## What's new
 
+1.31.0 retires the Workflow center. Its four tools now sit where you would look for them:
+
+- **Failed runs** is part of **Session history** (a **Failed runs** button beside **View native CLI conversations**). **Open log** on a failed channel, or its notice, goes there, with that channel chosen. The command menu's **Recover a failed channel** does too.
+- **Search** is a page of its own, in the **Insight** menu. **Ctrl+Shift+F** (Cmd+Shift+F on a Mac) and the command menu's **Search local workspace** open it. The command menu still finds files and memory notes as you type.
+- **Project templates** is part of **Projects**, below opening, creating and cloning a project.
+- **Export a support report** and **Release integrity** are part of **Settings → This app**.
+- **Agent setup** no longer lists **Workflow center**. Nothing about the tools changed except where they are.
+- **Tried:** the unit tests, and the productivity smoke test, which now reaches each tool in its new place (Open log, Ctrl+Shift+F, Projects, Settings); the desktop, design and workbench smoke tests; screenshots of the four places.
+
 1.30.3 fixes six more problems found in the review of the interface, and one that 1.30.2 missed:
 
 - **Codex's and Gemini CLI's commands are shown whole on their approval cards.** 1.30.2 said every command's card showed the whole command, but Codex and Gemini CLI name their commands Shell, which it did not cover: their cards cut the command at 120 characters. Codex's file-change approvals now also list the files with their folders.

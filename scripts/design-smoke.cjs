@@ -88,7 +88,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.locator('.session-tile').first().waitFor();
     // Occasional tools live on More tools, not in the Insight menu, and each one leads back there.
     await page.getByRole('button', { name: 'Insight views', exact: true }).click();
-    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'More tools']);
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'Search', 'More tools']);
     await page.getByRole('menuitem', { name: 'More tools', exact: true }).click();
     // Tasks moved to the top bar in 1.17; More tools keeps the occasional ones.
     assert.deepEqual(await page.locator('.more-tools h2').allTextContents(), ['AI coaching', 'Verification profiles']);
