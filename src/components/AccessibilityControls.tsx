@@ -19,7 +19,7 @@ export function useAccessibility() {
           event.preventDefault(); event.stopPropagation(); jumpToChannel(session.id);
         }
       }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.setState({ workflowTab: 'search' }); useWorkspaceStore.getState().setView('workflow'); }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.getState().setView('search'); }
       if (event.key === 'F1') { event.preventDefault(); event.stopPropagation(); useWorkspaceStore.getState().setView('help'); }
     };
     window.addEventListener('keydown', handler, true); return () => window.removeEventListener('keydown', handler, true);

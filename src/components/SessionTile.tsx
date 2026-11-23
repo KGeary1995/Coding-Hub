@@ -121,7 +121,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // Over a terminal channel's terminal rather than above it: in the flow it would shrink the terminal, and the CLI would
   // be resized and redraw as each approval prompt appears and again when it is answered.
   const attention = session.status === 'running' && session.attention ? <div className={`session-attention ${chat ? '' : 'over-terminal'}`} role="alert"><span aria-hidden="true">◆</span><span>{session.attention.message}</span></div> : null;
-  const openLog = () => { useWorkspaceStore.setState({ workflowTab: 'recovery', recoverySessionId: session.id }); setView('workflow'); };
+  const openLog = () => { useWorkspaceStore.setState({ historyMode: 'failed', recoverySessionId: session.id }); setView('history'); };
   // The tile is a focus target: Enter starts an idle channel, otherwise moves into its terminal.
   const onTileKey = (event: KeyboardEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget || event.key !== 'Enter') return;

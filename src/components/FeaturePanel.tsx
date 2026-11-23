@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-const WorkflowCenter = lazy(() => import('./WorkflowCenter').then((module) => ({ default: module.WorkflowCenter })));
+const SearchPage = lazy(() => import('./WorkflowCenter').then((module) => ({ default: module.SearchPage })));
 import { useWorkspaceStore } from '../state/workspace-store';
 // Screens load when first opened, keeping the window's start-up bundle to the workspace itself. Once the window has
 // settled they are fetched in the background (preloadScreens), so opening one is still instant.
@@ -29,7 +29,7 @@ export function FeaturePanel() {
 function Panel() {
   const view = useWorkspaceStore((s) => s.activeView);
   if (view === 'tools') return <MoreTools />;
-  if (view === 'workflow') return <Suspense fallback={<p className="control-note">Opening workflow tools…</p>}><WorkflowCenter /></Suspense>;
+  if (view === 'search') return <SearchPage />;
   if (view === 'tasks') return <TasksPanel />;
   if (view === 'verification') return <VerificationPanel />;
   if (view === 'coaching') return <CoachingPanel />;

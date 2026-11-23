@@ -7,7 +7,7 @@ import { DEFAULT_TITLES } from '../../shared/channel-name';
 import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
 import { hiddenSeatIds, savedSeats, type SavedSeat } from '../../shared/table-seats';
 
-export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'workflow' | 'tools';
+export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'search' | 'tools';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 /** A channel's settings for resuming a CLI's own conversation (from Session history, here or on a phone). */
@@ -133,7 +133,8 @@ interface WorkspaceState {
   focusedSessionId: string | null;
   activeView: NavigationView;
   helpTopicId: string;
-  workflowTab: 'recovery' | 'search' | 'templates' | 'support';
+  /** What Session history shows: its runs, the CLIs' own conversations, or failed runs (Recovery, until 1.31 in the Workflow center). */
+  historyMode: 'runs' | 'native' | 'failed';
   recoverySessionId: string | null;
   /** The linked computer whose channels the 'computer' view shows. */
   computerId: string | null;
@@ -212,7 +213,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  workflowTab: 'recovery', recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
+  historyMode: 'runs', recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
   engines: [],
   discovering: false,
   discoveryError: null,

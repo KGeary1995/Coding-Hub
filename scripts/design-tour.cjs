@@ -281,9 +281,10 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       if (label === 'Usage') { await page.getByRole('button', { name: 'Refresh', exact: true }).first().click(); await page.waitForTimeout(1000); }
       await longShot(name);
     });
-    await view(['31-workflow-recovery', '32-workflow-search', '33-workflow-templates', '34-workflow-support'], async () => {
-      await open('Workflow center');
-      for (const [name, tab] of [['31-workflow-recovery', 'Recovery'], ['32-workflow-search', 'Search'], ['33-workflow-templates', 'Templates'], ['34-workflow-support', 'Support & releases']]) { await page.getByRole('tab', { name: tab, exact: true }).click(); await longShot(name); }
+    // The Workflow center's tools in their homes (1.31): Failed runs in Session history, Search, Templates in Projects, Support in Settings.
+    await view(['31-failed-runs', '32-search'], async () => {
+      await open('Session history'); await page.getByRole('button', { name: 'Failed runs', exact: true }).click(); await page.getByRole('heading', { name: 'Failed runs', exact: true }).waitFor(); await longShot('31-failed-runs');
+      await open('Search'); await page.getByRole('heading', { name: 'Search', exact: true }).waitFor(); await longShot('32-search');
     });
     await view('38-help-topic', async () => {
       await open('Help & AI guide');
