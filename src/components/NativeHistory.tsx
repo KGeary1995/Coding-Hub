@@ -6,6 +6,7 @@ import type { NativeConversation, NativeResume } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { createSession, arrangeTiles, resumeConfig, RESUMED_TITLE, useWorkspaceStore } from '../state/workspace-store';
 import { MAX_CHANNELS } from '../../shared/schemas';
+const AGENT_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
 export function NativeHistory({ onBack }: { onBack: () => void }) {
   const [labels, setLabels] = useState<ConversationLabel[]>([]);
   const [items, setItems] = useState<NativeConversation[]>([]); const [search, setSearch] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(true); /* The list is read on opening, so the page starts out looking, not empty. */
@@ -22,7 +23,8 @@ export function NativeHistory({ onBack }: { onBack: () => void }) {
       const state = useWorkspaceStore.getState(); if (state.sessions.length >= MAX_CHANNELS) throw new Error('The workspace is now full. Close an idle channel.'); const sessions = [...state.sessions, session]; useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid'), activeView: 'workspace', layoutMode: 'grid', focusedSessionId: null });
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  const shown = items.filter((item) => `${labels.find((label) => label.key === item.key)?.name ?? item.title} ${item.directory} ${item.id}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => Number(labels.find((label) => label.key === b.key)?.pinned ?? false) - Number(labels.find((label) => label.key === a.key)?.pinned ?? false));
+  // The agent's name is searched too ("codex" finds Codex's conversations).
+  const shown = items.filter((item) => `${labels.find((label) => label.key === item.key)?.name ?? item.title} ${item.directory} ${item.id} ${AGENT_NAME[item.engine]}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => Number(labels.find((label) => label.key === b.key)?.pinned ?? false) - Number(labels.find((label) => label.key === a.key)?.pinned ?? false));
   return <section className="ui-page wide native-history">
     <header className="ui-page-head"><span className="ui-page-icon" aria-hidden="true"><History /></span><div><h1>CLI conversation history</h1><p>Conversations Claude Code and Codex saved on this computer, named profiles included.</p></div>
       <div className="ui-page-actions"><button className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh native conversations</button><button className="quiet-button" onClick={onBack}>Back to recorded output</button></div></header>

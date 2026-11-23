@@ -1,5 +1,17 @@
 ## What's new
 
+1.30.3 fixes six more problems found in the review of the interface, and one that 1.30.2 missed:
+
+- **Codex's and Gemini CLI's commands are shown whole on their approval cards.** 1.30.2 said every command's card showed the whole command, but Codex and Gemini CLI name their commands Shell, which it did not cover: their cards cut the command at 120 characters. Codex's file-change approvals now also list the files with their folders.
+- **A renamed Codex seat gets Codex's approval buttons.** At a Round Table the card chose its buttons by the seat's name, so a Codex seat named "Reviewer" was offered Claude's **Allow edits this run**. It now goes by the seat's agent.
+- **Refresh changes refreshes the Delivery card.** In a Git repository, **Refresh changes** updated the file list and the diff but not the Delivery card, which kept the files it had read before; a step taken on it then failed as out of date. It now reads the card again, and clears an error that stayed on it after a check that worked.
+- **The budget fields can be typed into.** **Warn at this share** turned the first digit of 75 into 50, and **Daily cost budget** turned the 0 of 0.5 into 0.01. Both are now kept to their ranges when you leave the field or save.
+- **Enter sends on another computer's tab.** The chat there had no Enter-to-send and its box did not grow; both now work as on this computer. On a phone Enter stays a new line, as the Send button is beside it.
+- **The folded hierarchy bar no longer measures the window on every keystroke.** It measured the layout each time anything in the channel was drawn, typing included. It now does so when the tile or the conversation is resized or the bar's content changes.
+- **Searching CLI conversation history finds the agent's name** ("codex" finds Codex's conversations).
+- **Tried:** the unit tests, and the desktop, remote, workbench, design and table smoke tests. The desktop smoke now checks the Delivery card after **Refresh changes**; it fails with 1.30.2's code. The table smoke now checks the hierarchy bar folds in a short window, stays folded while typing and unfolds with room.
+- **Not tried:** real Codex and Gemini CLI approvals, a real linked computer's tab, and a phone.
+
 1.30.2 makes four fixes found in a review of the interface:
 
 - **One alert in the status bar.** **Needs you** and a second chip naming the first waiting channel both showed, with different lists: the chip also had other computers' channels, **Needs you** also had tasks. The chip is gone and **Needs you** lists everything, other computers' channels that wait or failed included (**Answer** opens that computer's tab). Hover the chip to see what it holds.

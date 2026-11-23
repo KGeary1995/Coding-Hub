@@ -33,9 +33,11 @@ export function GitDeliveryPanel({ directory, revision, onChanged }: { directory
     if (!answer.ok) { if (answer.error.code !== 'NOT_A_REPOSITORY') { setNotRepository(false); throw new Error(answer.error.message); } setNotRepository(true); setState(null); return; }
     const value = answer.value as DeliveryStatus; setNotRepository(false); setState(value); setRemote((current) => value.remotes.includes(current) ? current : value.remotes[0] ?? ''); setPaths([]);
   }
-  useEffect(() => { void refresh().catch((e) => setError((e as Error).message)); }, [directory]);
-  // Hidden, the card has no Refresh of its own: the page's Refresh checks again, so a folder that has just become a repository gets it back.
-  useEffect(() => { if (notRepository) void refresh().catch((e) => setError((e as Error).message)); }, [revision]);
+  /** Checks again, and clears an error a check before left (it stayed on screen after one that worked, before 1.30.3). */
+  const reload = () => { setError(''); void refresh().catch((e) => setError((e as Error).message)); };
+  // The page's Refresh (revision) checks again too: before 1.30.3 it did so only while the card was hidden (not a
+  // repository), so in a repository the card kept what it had read before, and an action on it then failed as stale.
+  useEffect(reload, [directory, revision]);
   async function execute(action: 'stage' | 'unstage' | 'commit' | 'push' | 'pr') {
     if (!state) return; setBusy(true); setError(''); setResult(null);
     try {
@@ -49,7 +51,7 @@ export function GitDeliveryPanel({ directory, revision, onChanged }: { directory
   const clean = Boolean(state && !state.staged.length && !state.unstaged.length);
   if (notRepository) return null;
   return <aside className="delivery-panel tr-delivery ui-card" aria-label="Git delivery">
-    <header className="ui-card-head"><GitPullRequestArrow size={16} /><h2>Delivery</h2><div className="ui-card-actions"><button className="icon-button" aria-label="Refresh delivery state" title="Refresh delivery state" disabled={busy} onClick={() => void refresh().catch((e) => setError((e as Error).message))}><RefreshCw size={16} /></button></div></header>
+    <header className="ui-card-head"><GitPullRequestArrow size={16} /><h2>Delivery</h2><div className="ui-card-actions"><button className="icon-button" aria-label="Refresh delivery state" title="Refresh delivery state" disabled={busy} onClick={reload}><RefreshCw size={16} /></button></div></header>
     {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     {/* Only the steps scroll. The head, an error, the last step's output and the closing note stay in sight. */}
     <div className="tr-delivery-scroll">

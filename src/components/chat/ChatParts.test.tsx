@@ -83,6 +83,23 @@ describe('what a tool call does, in full', () => {
   });
 });
 
+describe('a command or file change from Codex or Gemini CLI', () => {
+  const asking = (toolName: string, input: Record<string, unknown>): ChatItem => ({ kind: 'permission', id: 'p', toolName, description: 'Run it', input, canAllowEdits: true, answer: null });
+  it('a Shell approval shows its whole command, and a file-change approval the files with their folders', () => {
+    const command = 'npm run build && node scripts/remote-smoke.cjs && node scripts/workbench-smoke.cjs && node scripts/design-smoke.cjs --long';
+    expect(command.length).toBeGreaterThan(120);
+    expect(renderToStaticMarkup(<Item {...props(asking('Shell', { command }))} />)).toContain(`<pre>${command.replace(/&/g, '&amp;')}</pre>`);
+    expect(renderToStaticMarkup(<Item {...props(asking('File changes', { files: ['/p/src/a.ts', '/p/docs/b.md'] }))} />)).toContain('<pre>/p/src/a.ts\n/p/docs/b.md</pre>');
+  });
+  it('offers Codex’s session-wide allow to a Codex seat whatever its name, and Claude’s to a Claude seat named Codex', () => {
+    const draw = (agent: string, engine: 'claude' | 'codex') => renderToStaticMarkup(<Item {...props(asking('Shell', { command: 'ls' }))} agent={agent} engine={engine} />);
+    expect(draw('Reviewer', 'codex')).toContain('Allow for this session'); expect(draw('Reviewer', 'codex')).not.toContain('Allow edits this run');
+    expect(draw('Codex', 'claude')).toContain('Allow edits this run');
+    // Without a seat (an older caller), the name decides as before.
+    expect(renderToStaticMarkup(<Item {...props(asking('Shell', { command: 'ls' }))} agent="Codex" />)).toContain('Allow for this session');
+  });
+});
+
 describe('answering an approval', () => {
   it('asks for the handler when the person answers, not when the card is drawn', () => {
     const sent: string[] = []; let run = 'first';
