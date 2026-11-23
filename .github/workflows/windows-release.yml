@@ -11,8 +11,11 @@ on:
   pull_request:
     types: [labeled, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+# Per branch and per way of starting: a newer push to a PR still replaces its older run, but the nightly run no longer
+# cancels the run Auto release started on main (on 1.31.7 a late nightly run cancelled it after it had passed, and
+# Auto release, which cannot rerun a cancelled run, stopped).
 concurrency:
-  group: windows-release-${{ github.ref }}
+  group: windows-release-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 permissions:
   contents: read
