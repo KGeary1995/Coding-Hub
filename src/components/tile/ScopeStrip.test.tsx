@@ -35,10 +35,15 @@ describe('a channel’s footer', () => {
     const html = strip({ chat: true, limit: 0.13, tokens: 105 });
     expect(html).not.toContain('tr-scope-plot'); expect(html).not.toContain('chars/s'); expect(html).toContain('tok today');
   });
-  it('gives a Terminal or Gemini channel only the output trace and its rate', () => {
-    for (const engine of ['shell', 'gemini'] as const) {
-      const html = strip({ engine, limit: 0.5, tokens: 900 });
-      expect(html).not.toContain('tr-foot-item'); expect(html).toContain('tr-scope-trace'); expect(html).toContain('0 chars/s');
-    }
+  it('gives a Terminal channel only the output trace and its rate', () => {
+    const html = strip({ engine: 'shell', limit: 0.5, tokens: 900 });
+    expect(html).not.toContain('tr-foot-item'); expect(html).toContain('tr-scope-trace'); expect(html).toContain('0 chars/s');
+  });
+  it('shows a Gemini CLI channel’s tokens today, a dash until they are measured, and no context: it reports no window', () => {
+    const measured = strip({ engine: 'gemini', tokens: 525_509 });
+    expect(measured).toContain('<b class="tr-foot-value">525.5k</b> tok today'); expect(measured).not.toContain('Context'); expect(measured).not.toContain('ui-meter'); expect(measured).toContain('tr-scope-trace');
+    // Not measured is a dash; a counted zero is 0.
+    expect(strip({ engine: 'gemini', tokens: null })).toContain('<b class="tr-foot-value">—</b> tok today');
+    expect(strip({ engine: 'gemini', tokens: 0 })).toContain('<b class="tr-foot-value">0</b> tok today');
   });
 });

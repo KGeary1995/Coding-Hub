@@ -62,6 +62,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // A Round Table is one channel running several agents: its tokens are every agent's, as in the status bar.
   const atTable = useWorkspaceStore((s) => hiddenSeats(s.sessions, session.id).length > 0);
   const today = { tokens: useHubStore((s) => channelTokensToday(useWorkspaceStore.getState().sessions, session.id, s.usage)) };
+  /** Whether anything is recorded for this channel: a Gemini CLI channel has nothing until its conversation's first request is read. */
+  const measured = useHubStore((s) => s.usage.some((record) => record.sessionId === session.id));
   const reportedModel = session.status === 'running' && usage?.model && usage.model !== 'CLI default' ? usage.model : null;
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
@@ -199,8 +201,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
-      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={today.tokens} contextUsed={contextUsed}
-        tokensTitle={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
+        tokensTitle={engine === 'gemini' && !measured ? 'Not measured yet. Gemini CLI records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}
