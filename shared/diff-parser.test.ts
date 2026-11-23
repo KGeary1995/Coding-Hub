@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDiff } from './diff-parser';
+import { parseDiff, splitRows } from './diff-parser';
 
 describe('visual diff rows', () => {
   it('numbers both sides of multiple hunks and counts changes without counting headers', () => {
@@ -20,5 +20,21 @@ describe('visual diff rows', () => {
     expect(parsed.combined).toBe(true); expect(parsed.additions).toBe(0);
     expect(parsed.rows.every((row) => row.oldLine === null && row.newLine === null)).toBe(true);
     expect(parseDiff('')).toMatchObject({ rows: [], additions: 0, deletions: 0 });
+  });
+});
+
+describe('a diff side by side', () => {
+  it('puts each removed line beside the line that took its place, and context on both sides', () => {
+    const { rows } = parseDiff('@@ -1,4 +1,4 @@\n same\n-old one\n-old two\n+new one\n end\n');
+    const pairs = splitRows(rows);
+    expect(pairs[0]).toMatchObject({ full: { kind: 'hunk' } });
+    expect(pairs[1]).toMatchObject({ left: { text: 'same' }, right: { text: 'same' } });
+    expect(pairs[2]).toMatchObject({ left: { kind: 'deletion', text: 'old one', oldLine: 2 }, right: { kind: 'addition', text: 'new one', newLine: 2 } });
+    expect(pairs[3]).toMatchObject({ left: { kind: 'deletion', text: 'old two' }, right: null });
+    expect(pairs[4]).toMatchObject({ left: { text: 'end' }, right: { text: 'end' } });
+  });
+  it('starts a new run when a line is removed after one was added', () => {
+    const { rows } = parseDiff('@@ -1,2 +1,2 @@\n+a\n-b\n');
+    expect(splitRows(rows).slice(1)).toMatchObject([{ left: null, right: { text: 'a' } }, { left: { text: 'b' }, right: null }]);
   });
 });

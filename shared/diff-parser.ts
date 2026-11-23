@@ -35,3 +35,19 @@ export function parseDiff(patch: string): { rows: DiffRow[]; additions: number; 
   }
   return { rows, additions, deletions, combined };
 }
+
+/**
+ * A unified diff's rows side by side (Changes' Split, 1.31.3): a context line on both sides, and in each run of
+ * changes, the removed lines on the left beside the added lines that took their place, in order. Hunk, meta and
+ * notice rows span both sides.
+ */
+export function splitRows(rows: DiffRow[]): ({ full: DiffRow } | { left: DiffRow | null; right: DiffRow | null })[] {
+  const out: ({ full: DiffRow } | { left: DiffRow | null; right: DiffRow | null })[] = []; let removed: DiffRow[] = []; let added: DiffRow[] = [];
+  const flush = () => { for (let index = 0; index < Math.max(removed.length, added.length); index++) out.push({ left: removed[index] ?? null, right: added[index] ?? null }); removed = []; added = []; };
+  for (const row of rows) {
+    if (row.kind === 'deletion') { if (added.length) flush(); removed.push(row); continue; }
+    if (row.kind === 'addition') { added.push(row); continue; }
+    flush(); out.push(row.kind === 'context' ? { left: row, right: row } : { full: row });
+  }
+  flush(); return out;
+}

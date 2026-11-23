@@ -207,8 +207,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await writeFile(path.join(projects[0], 'later.md'), 'Added while the view was open.\n');
     await page.getByRole('button', { name: 'Refresh changes', exact: true }).click();
     await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
-    // The page's Refresh reaches the Delivery card too (before 1.30.3 it kept the files it had read before).
-    await page.getByRole('complementary', { name: 'Git delivery' }).getByText('later.md', { exact: true }).waitFor({ timeout: 15000 });
+    // The page's Refresh reaches the delivery reading too (before 1.30.3 it kept the files it had read before): the list offers to stage the new file.
+    await page.getByRole('button', { name: 'Stage later.md', exact: true }).waitFor({ timeout: 15000 });
     // A file opened from the command menu shows in the Files tree, its folder opened to it (1.31.1).
     await page.keyboard.press('Control+Shift+P'); await page.getByLabel('Search commands', { exact: true }).fill('/working desktop edit');
     await page.getByRole('option').filter({ hasText: 'main.ts' }).first().click();
