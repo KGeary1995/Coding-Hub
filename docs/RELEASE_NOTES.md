@@ -1,5 +1,12 @@
 ## What's new
 
+1.33.0 is the fourth idea from herdr, whose agents can start, prompt and wait for each other:
+
+- **Agents can see and message other channels, if you turn it on.** Settings → Preferences → **Let agents see and message other channels**, off by default. Claude Code and Codex channels started afterwards get four tools: list this computer's channels, read another channel's last replies, send another channel a message, and wait for its turn to end (or an approval, or a stop). So one agent can hand work to another and pick up the result.
+- **Limits:** a message is marked as coming from the other channel's agent, not from you. An agent cannot message its own channel, a stopped one, or one waiting for you to answer an approval. The CLI asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access. Turning the setting off stops the tools at once, even in running channels.
+- **Not covered:** Gemini CLI channels (agy takes MCP servers only from its own global settings), and Codex chats, which have no prompt for the permission and so refuse the tools. A message to a Round Table reaches its lead only.
+- **Tried:** the unit tests (the tools' rules: the caller's own channel, stopped and waiting channels, marked messages, waiting for a turn end, an approval or a stop, the secret address, turning off); a smoke test of the MCP server as a CLI starts it (Linux CI runs it with the memory server's); and the desktop smoke test, where the Codex channel's agent lists the channels and messages the Claude Code channel through Trace. The enterprise, remote, workbench, profiles and memory smoke tests pass.
+
 1.32.2 is the third idea from herdr, whose most-used add-ons include reviewing an agent's diff and sending comments back:
 
 - **Comment on a line of a diff in Changes and send the comments to the agent.** In Unified view, the button at the start of a line opens a comment on it. Comments stay under their lines while Changes is open. The bar above the diff sends them all as one message to an agent channel running in that repository, typed in as you would: each with its file, line and code. **Send to** picks the channel when there are several.

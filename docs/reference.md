@@ -299,6 +299,17 @@ Every Claude Code and Codex channel started in Trace gets shared project memory 
 - **A channel's memory project:** **Shared memory project** in a channel's settings picks another project's notes; a Round Table uses the leading chat's. A channel started in the home folder without one raises a notice.
 - Applies only to channels started in Trace. For CLIs run from other terminals, or for teammates who clone the repository, use the project installation below. When a project already has `coding-hub-memory` installed, channels use that server instead of adding a second copy. If that entry points at a program that no longer exists (for example after an update moved the app), Trace updates its paths to the current install and says so. If it uses a different memory key from the folder's automatic key, Trace warns, because those channels read and write the other key's notes.
 
+## Channel tools
+
+**Settings → Preferences → Let agents see and message other channels** (from 1.33.0, off by default, per computer). When on, each Claude Code and Codex channel started afterwards gets four tools from Trace's `trace-channels` MCP server:
+
+- **list_channels**: this computer's channels (a Round Table counts as its lead's channel): number, name, CLI, whether it runs, the approval it waits for, its folder, and which one is the caller's.
+- **read_channel**: another channel's last replies (1 to 20, from its CLI's own conversation; none for terminals or Gemini CLI).
+- **send_to_channel**: types a message into another channel as you would, starting *[Message from CHn (name): an agent, not the person]*. Refused for the caller's own channel, a stopped one, and one waiting for you to answer an approval (its Enter would answer it). A chat gets it as a chat message (at a Round Table, the lead's only), a terminal as a line.
+- **wait_for_channel**: waits until another channel's turn ends (Claude Code's end-of-turn hook, or a chat turn), it asks for an approval, or it stops, up to 30 minutes; says which.
+
+The CLI asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access; in a Codex chat, which has no such prompt, the tools are refused. Turning the setting off stops them at once, even in running channels. Each run reaches Trace through its own secret address on 127.0.0.1, which also tells Trace which channel is asking. Gemini CLI channels get no tools (agy takes MCP servers only from its global settings).
+
 ## Shared Google Drive memory
 
 On Windows the default shared folder is **`G:\My Drive\Coding Hub`**; on a Mac there is no default, so choose the folder Google Drive for desktop keeps there. The `CODING_HUB_DEFAULT_DRIVE_DIR` environment variable, set before Trace starts, replaces that default on Windows and on a Mac (an empty value means no folder) until preferences are first saved (`preferences.json`). Saving preferences stores the folder the Settings field shows, and the variable is not read after that. Trace's own tests set it so they never write into a real Drive folder. When the folder can't be used (none chosen, not a full path on this computer, or missing), Memory and Settings → Sync between computers say why, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Trace.

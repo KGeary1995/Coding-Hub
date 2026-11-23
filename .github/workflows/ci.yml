@@ -40,4 +40,5 @@ jobs:
       - name: Memory server and real PTY checks
         run: |
           node scripts/memory-smoke.cjs
+          node scripts/channel-tools-smoke.cjs
           node scripts/run-pty-smoke.cjs

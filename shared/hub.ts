@@ -47,7 +47,7 @@ export interface UsageRecord { machine?: string; conversationId?: string; incomp
 export interface PriceRate { model: string; input: number; output: number; cacheRead: number; cacheWrite: number }
 /** The published prices and Claude Code's models (IDs, most capable first), as of `asOf` (a date). */
 export interface PublishedCatalog { asOf: string; prices: PriceRate[]; claudeModels: string[] }
-export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; /** Start again the channels running when Trace quit (1.32.0; on unless false). */ resumeOnStart?: boolean; syncDevices?: boolean;
+export interface HubPreferences { folderId: string; driveDirectory: string; prices: PriceRate[]; terminalFontSize: number; terminalWebGL?: boolean; automaticMemory?: boolean; /** Start again the channels running when Trace quit (1.32.0; on unless false). */ resumeOnStart?: boolean; /** Agents may list, read, message and wait for other channels (1.33.0; off unless true). */ channelTools?: boolean; syncDevices?: boolean;
   /** Desktop notifications (on unless false); daily budgets for this computer (null or absent: none); the plan-limit share to warn at. */
   alerts?: boolean; dailyTokens?: number | null; dailyCost?: number | null; limitWarning?: number;
   /** The person's own Round Table presets (shared/table-seats.ts); the two built in are not kept here. */

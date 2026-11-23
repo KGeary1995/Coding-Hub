@@ -104,6 +104,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await second.getByLabel('Repository path', { exact: true }).fill(projects[1]);
     await setCodexModel(second, 'fixture-model');
     await (await tileControl(page, 'Engine settings for channel 2')).click();
+    // Channel tools on (1.33.0, off by default) for the channels started next; checked below from CH2.
+    const tools = await page.evaluate(async () => { const current = await window.codingHub.hub({ action: 'preferences' }); return window.codingHub.hub({ action: 'save-preferences', preferences: { ...current.value, channelTools: true } }); });
+    assert.equal(tools.ok, true);
     await page.locator('.session-tile').nth(0).getByRole('button', { name: 'Start channel', exact: true }).click();
     await second.getByRole('button', { name: 'Start channel', exact: true }).click();
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'started').length === 2);
@@ -130,6 +133,14 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await clipboardText(), 'first line\nsecond line');
     await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
+    // An agent in CH2 lists the channels and messages CH1 through Trace's channel tools (1.33.0), marked as from CH2.
+    const typed = () => page.evaluate(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''));
+    await second.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('channel-list'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => /TOOL:\{"channels"/.test(window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('')));
+    const listed = JSON.parse(/TOOL:(\{"channels".*?\})\s*$/m.exec((await typed()).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''))[1]);
+    assert.deepEqual(listed.channels.map((channel) => [channel.channel, channel.running, channel.you]), [[1, true, false], [2, true, true]]);
+    await page.keyboard.type('channel-send 1 Hello from the other channel'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => { const data = window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''); return data.includes('ECHO:[Message from CH2') && data.includes('ECHO:Hello from the other channel'); });
     // A turn that ends while the person is in another channel shows Done until they look at it (1.32.1).
     const turns = () => page.evaluate(() => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length);
     await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('end-turn-later'); await page.keyboard.press('Enter');
