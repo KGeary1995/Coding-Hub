@@ -13,7 +13,7 @@ import { compact } from '../shell/StatusBar';
 type EngineFilter = 'all' | 'claude' | 'codex' | 'gemini';
 const ENGINE_LABEL = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
 /** A channel's state as the tile's badge shows it; working takes the engine's colour (docs/design/midnight, section 5). */
-const STATE_TONE: Record<ChannelState, string> = { idle: 'neutral', starting: 'neutral', working: '', waiting: 'waiting', finished: 'success', failed: 'danger', limit: 'limit' };
+const STATE_TONE: Record<ChannelState, string> = { idle: 'neutral', starting: 'neutral', working: '', waiting: 'waiting', done: 'accent', finished: 'success', failed: 'danger', limit: 'limit' };
 const time = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`;
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;

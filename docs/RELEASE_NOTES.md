@@ -1,5 +1,11 @@
 ## What's new
 
+1.32.1 is the second idea from herdr:
+
+- **A channel says Done when its agent finishes while you are elsewhere.** The tile's badge and the status bar show **Done** in blue, and **Needs you** lists it last as *CHn finished its turn*, with **Open channel**. Clicking the tile or moving into its terminal clears it. A turn that ends while you are in that channel, with Trace in front, is not marked. Before, a running channel showed Working whether or not its agent was still busy.
+- **Where it comes from:** Claude Code terminals (Claude Code's own end-of-turn hook), chat channels, and Round Tables (when the driver's reply ends; at a hierarchy table, the planner's approval already says so). **Not yet** Codex or Gemini CLI terminals: Codex's own end-of-turn notice carries the reply's first words rather than a fixed text, so Trace cannot yet tell it from an approval request.
+- **Tried:** the unit tests (Done after a turn, a waiting approval still first; Needs you lists it last and not once the channel asks something or stops), and the desktop smoke test with a stand-in Claude Code that ends its turn the way Claude Code does: the tile and Needs you show Done while another channel has the keyboard, clicking into it clears it, and a turn watched to its end is not marked. The workbench, design, productivity, table seats and remote smoke tests pass.
+
 1.32.0 starts on ideas from herdr, an open-source terminal tool for coding agents:
 
 - **Channels running when Trace closes start again when it opens.** Each agent continues its saved conversation and each shell starts afresh; a Round Table's seats start too, so the table opens again. Before, every channel came back stopped until you pressed Start on each. A notice says how many were started. Channels you had stopped stay stopped, and so does an agent channel with no saved conversation, since starting it would begin a new one. The programs that were running inside the channels do not come back.

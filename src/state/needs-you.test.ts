@@ -18,6 +18,12 @@ describe('Needs you', () => {
     expect(items[1]).toMatchObject({ detail: 'codex exited with code 1 · task: Ship docs', action: 'retry' });
     expect(items.filter((item) => item.title.includes('Ship docs'))).toHaveLength(0);
   });
+  it('lists a channel whose turn ended unseen last, as Done, and not once it asks something or has stopped', () => {
+    const done = running({ unseen: true }); const asking = running({ unseen: true, attention: { message: 'Allow?', at: '2026-11-10T01:00:00.000Z' } }); const stopped = { ...running({ unseen: true }), status: 'exited' as const };
+    const items = needsYou([done, asking, stopped], [], [task({ title: 'Ready', status: 'review' })]);
+    expect(items.map((item) => item.kind)).toEqual(['approval', 'task-review', 'done']);
+    expect(items[2]).toMatchObject({ title: 'CH1 finished its turn', sessionId: done.id, action: 'open' });
+  });
   it('lists a Round Table message kept from before a restart, but not one simply waiting for the agents', () => {
     const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
     expect(needsYou([], [], [], { lead: { ...table, waiting: 'Also update the docs.', waitingKept: true }, other: { ...table, waiting: 'In flight' } })).toMatchObject([{ kind: 'table-waiting', sessionId: 'lead', detail: 'Also update the docs.', action: 'answer' }]);

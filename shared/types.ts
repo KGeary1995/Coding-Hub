@@ -108,6 +108,8 @@ export interface Session {
   logFile: string | null;
   /** Set while the CLI waits for the person (for example a permission prompt); cleared by their next input. Never saved. */
   attention?: { message: string; at: string } | null;
+  /** Its agent finished a turn while the person was not looking at it, and they have not looked since (1.32.1). Never saved. */
+  unseen?: boolean;
 }
 
 export interface GridTile {

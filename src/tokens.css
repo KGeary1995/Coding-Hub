@@ -50,6 +50,7 @@
   --tr-st-idle: var(--tr-fg-dim);
   --tr-st-starting: var(--tr-fg);
   --tr-st-finished: var(--tr-success);
+  --tr-st-done: var(--tr-accent);    /* a turn ended while the person looked elsewhere */
   --tr-st-failed: var(--tr-danger);
   --tr-on-waiting: var(--tr-on-light);
 

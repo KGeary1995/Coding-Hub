@@ -159,6 +159,7 @@ The state badge is a dot and a word, in the state's colour:
 | starting | Starting (pulses) | — |
 | working | Working (in the engine's colour) | — |
 | waiting | Needs you (frame turns magenta) | **Answer** jumps to the terminal |
+| done | Done (blue, from 1.32.1): the agent finished its turn while you were elsewhere; it is still running. Also listed last in **Needs you** as *CHn finished its turn*. Clicking the tile or moving into its terminal clears it. Set by Claude Code terminals (its Stop hook) and by chat channels and Round Tables (the driver's reply); not yet by Codex or Gemini CLI terminals | **Open channel** in Needs you |
 | finished | Finished | **Review changes** (G C) |
 | failed | Failed (frame turns red) | **Retry** and **Open log** |
 | limit | Near limit (context or budget ≥ 80%) | **Write handoff** opens Shared memory |

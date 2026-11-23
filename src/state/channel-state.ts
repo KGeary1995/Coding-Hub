@@ -4,7 +4,7 @@ import { seatNames } from '../../shared/table-seats';
 import { channelsOf, hiddenSeats, leadOf, seatsOf } from './workspace-store';
 
 /** What a session is doing, as the Midnight design shows it (docs/design/midnight/README.md, section 5). */
-export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'finished' | 'failed' | 'limit';
+export type ChannelState = 'idle' | 'starting' | 'working' | 'waiting' | 'done' | 'finished' | 'failed' | 'limit';
 
 /**
  * Each state has a plain word and a colour (the tile's badge), and a glyph for places with no room for the word (the
@@ -15,6 +15,8 @@ export const CHANNEL_STATES: Record<ChannelState, { glyph: string; word: string;
   starting: { glyph: '◌', word: 'Starting', color: 'var(--tr-st-starting)' },
   working: { glyph: '●', word: 'Working', color: 'engine' },
   waiting: { glyph: '◆', word: 'Needs you', color: 'var(--tr-st-waiting)' },
+  /** The agent finished its turn while the person looked elsewhere (1.32.1): still running, ready for them. */
+  done: { glyph: '◇', word: 'Done', color: 'var(--tr-st-done)' },
   finished: { glyph: '✓', word: 'Finished', color: 'var(--tr-st-finished)' },
   failed: { glyph: '✕', word: 'Failed', color: 'var(--tr-st-failed)' },
   limit: { glyph: '▲', word: 'Near limit', color: 'var(--tr-st-limit)' },
@@ -45,6 +47,7 @@ export function channelState(session: Session, usage?: UsageRecord): ChannelStat
   if (session.status === 'idle') return 'idle';
   if (session.status === 'starting') return 'starting';
   if (session.attention) return 'waiting';
+  if (session.unseen) return 'done';
   return limitRatio(session, usage) >= LIMIT_THRESHOLD ? 'limit' : 'working';
 }
 

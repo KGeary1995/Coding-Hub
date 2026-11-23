@@ -167,16 +167,19 @@ interface WorkspaceState {
   setTiles: (tiles: GridTile[]) => void;
   arrange: (mode: LayoutMode) => void;
   toggleFocus: (id: string) => void;
+  /** A turn ended in a channel the person is not looking at: it shows Done until they do (`seen`). */
+  markDone: (id: string) => void;
+  markSeen: (id: string) => void;
 }
 
 /** A session after one of its events; the same object when the event changes nothing. */
 function applied(session: Session, event: Exclude<SessionEvent, { type: 'data' }>): Session {
   if (session.id !== event.sessionId) return session;
-  if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null } : session;
+  if (event.type === 'started') return session.status === 'starting' ? { ...session, status: 'running', runId: event.runId, pid: event.pid, runningCwd: event.cwd, error: null, attention: null, unseen: false } : session;
   if (event.runId !== session.runId) return session;
   if (event.type === 'answered') return session.attention && session.attention.at <= event.at ? { ...session, attention: null } : session;
   if (event.type === 'attention') return session.status === 'running' ? { ...session, attention: { message: event.message, at: event.at } } : session;
-  if (event.type === 'exit') return { ...session, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
+  if (event.type === 'exit') return { ...session, unseen: false, status: 'exited', pid: null, /* An input error from while it ran (a write that failed) does not make a stopped channel a failed one. */ error: event.diagnostic ?? null, exitCode: event.exitCode, endedAt: new Date().toISOString(), attention: null };
   if (event.type === 'error') return session.error === event.message ? session : { ...session, error: event.message };
   // A terminal run writes to another conversation (Claude after /clear or /resume), or Gemini CLI said which one as it ended.
   if (event.type === 'conversation') return ((session.config.engine === 'gemini' && !session.config.chat) || (session.config.engine === 'claude' && !session.config.chat)) && session.config.resumeId !== event.conversationId ? { ...session, config: { ...session.config, resumeId: event.conversationId } } : session;
@@ -277,6 +280,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setTiles: (tiles) => set({ tiles }),
   arrange: (layoutMode) => set((state) => ({ layoutMode, tiles: arrangeTiles(state.sessions, layoutMode) })),
   toggleFocus: (id) => set((state) => ({ focusedSessionId: state.focusedSessionId === id ? null : id })),
+  markDone: (id) => set((state) => state.sessions.some((session) => session.id === id && session.status === 'running' && !session.unseen) ? { sessions: state.sessions.map((session) => session.id === id ? { ...session, unseen: true } : session) } : state),
+  markSeen: (id) => set((state) => state.sessions.some((session) => session.id === id && session.unseen) ? { sessions: state.sessions.map((session) => session.id === id ? { ...session, unseen: false } : session) } : state),
 }));
 
 export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorkspace {

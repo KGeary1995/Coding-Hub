@@ -68,6 +68,7 @@
 .tr-tile.state-working .tr-state-chip { --tone: var(--ch); }
 .tr-tile.state-waiting .tr-state-chip { --tone: var(--tr-st-waiting); }
 .tr-tile.state-finished .tr-state-chip { --tone: var(--tr-st-finished); }
+.tr-tile.state-done .tr-state-chip { --tone: var(--tr-st-done); }
 .tr-tile.state-failed .tr-state-chip { --tone: var(--tr-st-failed); }
 .tr-tile.state-limit .tr-state-chip { --tone: var(--tr-st-limit); }
 .state-waiting .tr-state-chip, .state-failed .tr-state-chip { animation: tr-blink3 .4s steps(1) 3; }
@@ -217,6 +218,7 @@
 .tr-tile-foot.state-working { --trace: var(--ch); }
 .tr-tile-foot.state-waiting { --trace: var(--tr-st-waiting); }
 .tr-tile-foot.state-finished { --trace: var(--tr-st-finished); }
+.tr-tile-foot.state-done { --trace: var(--tr-st-done); }
 .tr-tile-foot.state-failed { --trace: var(--tr-st-failed); }
 .tr-tile-foot.state-limit { --trace: var(--tr-st-limit); }
 .tr-foot-item { flex: none; display: inline-flex; align-items: center; gap: 6px; }
