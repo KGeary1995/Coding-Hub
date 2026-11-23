@@ -1,4 +1,4 @@
-import { GitDeliveryPanel } from './GitDeliveryPanel';
+import { GitDeliveryPanel, useDelivery } from './GitDeliveryPanel';
 import { useEffect, useState } from 'react';
 import { CircleAlert, Files, FolderOpen, GitCompareArrows, LoaderCircle, MonitorOff, RefreshCw } from 'lucide-react';
 import type { RepositoryContext } from '../../shared/types';
@@ -38,12 +38,14 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
     try { const selected = await window.codingHub?.pickDirectory(); if (selected) { setRootDirectory(selected); setSelection('workspace'); setConnectionRevision((value) => value + 1); } }
     catch { setError('The folder picker could not open.'); }
   }
+  // One reading of the repository for staging and shipping, shared by the file list and the Ship column (1.31.3).
+  const delivery = useDelivery(mode === 'diff' && repository ? repository.directory : '', revision, () => setRevision((value) => value + 1));
   const Icon = mode === 'files' ? Files : GitCompareArrows;
   const body = !window.codingHub ? <div className="repository-empty repository-message ui-card ui-empty"><MonitorOff size={34} /><h2>Desktop host required</h2><p>Run Trace with npm to browse local files and Git changes.</p></div>
     : error ? <div className="repository-empty repository-message ui-card ui-empty danger" role="alert"><CircleAlert size={34} /><h2>Project unavailable</h2><p className="error-message">{error}</p></div>
     : !directory ? <div className="repository-empty repository-message ui-card ui-empty"><FolderOpen size={34} /><h2>Choose a project</h2><p>Open a project, or pick a channel with its own repository folder.</p></div>
     : !repository ? <div className="repository-empty repository-message ui-card ui-empty" role="status"><LoaderCircle size={34} className="spin" /><p>Opening project…</p></div>
-    : mode === 'files' ? <FileBrowser key={repository.id} repository={repository} revision={revision} /> : <DiffViewer key={repository.id} repository={repository} revision={revision} />;
+    : mode === 'files' ? <FileBrowser key={repository.id} repository={repository} revision={revision} /> : <DiffViewer key={repository.id} repository={repository} revision={revision} delivery={delivery} />;
   const shown = repository?.directory ?? directory;
   // The shared page heading (title, folder, context, actions), then the files or the diff beside the delivery stepper.
   return <section className={`repository-panel tr-repo ${mode === 'diff' ? 'tr-changes' : 'tr-files'}`}>
@@ -57,6 +59,6 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
         <button className="quiet-button" onClick={() => setView('workspace')}>Back to channels</button>
       </div>
     </header>
-    {mode === 'diff' ? <div className="tr-changes-grid"><div className="tr-changes-main">{body}</div>{repository && <GitDeliveryPanel key={repository.id + '-delivery'} directory={repository.directory} revision={revision} onChanged={() => setRevision((value) => value + 1)} />}</div> : body}
+    {mode === 'diff' ? <div className="tr-changes-grid"><div className="tr-changes-main">{body}</div>{repository && <GitDeliveryPanel key={repository.id + '-delivery'} directory={repository.directory} delivery={delivery} />}</div> : body}
   </section>;
 }

@@ -7,7 +7,9 @@ export interface ConversationLabel { key: string; name: string; pinned: boolean 
 export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules'; noteId?: string }
 export interface SearchResults { hits: SearchHit[]; limited: boolean }
 export interface ProjectTemplate { id: string; name: string; description: string; workspace: SavedWorkspace; rules: string; checks: Pick<VerificationProfile, 'name' | 'steps' | 'timeoutSeconds'>[]; createdAt: string }
-export interface DeliveryStatus { directory: string; branch: string | null; head: string | null; revision: string; renames: Record<string,string>; staged: string[]; unstaged: string[]; remotes: string[] }
+export interface DeliveryStatus { directory: string; branch: string | null; head: string | null; revision: string; renames: Record<string,string>; staged: string[]; unstaged: string[]; remotes: string[];
+  /** The upstream branch and the commits ahead of and behind it, when the branch has one (1.31.3). */
+  upstream?: string; ahead?: number; behind?: number }
 export interface DeliveryResult { output: string; url: string | null }
 export type WorkflowRequest =
  | { action: 'flow-conversations' } | { action: 'flow-conversation-save'; key: string; name: string; pinned: boolean }

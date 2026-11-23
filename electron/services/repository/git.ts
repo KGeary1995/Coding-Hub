@@ -34,6 +34,8 @@ export function parseStatus(output: Buffer, root: string): GitStatus {
     const record = records[index];
     if (record.startsWith('# branch.oid ')) { const oid = record.slice(13); result.head = oid === '(initial)' ? null : oid; continue; }
     if (record.startsWith('# branch.head ')) { const branch = record.slice(14); result.branch = branch === '(detached)' ? null : branch; continue; }
+    if (record.startsWith('# branch.upstream ')) { result.upstream = record.slice(18); continue; }
+    if (record.startsWith('# branch.ab ')) { const counts = /^\+(\d+) -(\d+)$/.exec(record.slice(12)); if (counts) { result.ahead = Number(counts[1]); result.behind = Number(counts[2]); } continue; }
     let change: GitChange | null = null;
     if (record.startsWith('? ')) change = { path: record.slice(2), originalPath: null, indexStatus: '?', worktreeStatus: '?', untracked: true, conflicted: false, submodule: false };
     else if (/^[12u] /.test(record)) {

@@ -255,6 +255,8 @@ export interface GitStatus {
   root: string;
   branch: string | null;
   head: string | null;
+  /** The branch it pushes to and how far apart they are (Git's own count, as of the last fetch); absent with no upstream (1.31.3). */
+  upstream?: string; ahead?: number; behind?: number;
   changes: GitChange[];
   limited: boolean;
 }

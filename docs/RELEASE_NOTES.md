@@ -1,5 +1,13 @@
 ## What's new
 
+1.31.3 rebuilds Changes in the three columns you chose:
+
+- **One file list, which also stages.** Each file has **+** (stage) or **−** (unstage) at its end, and each group has **Stage all** or **Unstage all**. **Filter files** narrows the list. Before, a second list of check boxes in the Delivery card did the staging, apart from the list beside the diff, and picking a staged and an unstaged file at once disabled both buttons.
+- **Ship** (the Delivery card) now holds only **Commit**, **Push** and **Pull request**, each ticked once done. Steps 2 to 4 used to stay unticked whatever happened. Push says how many commits are left to push and is ticked once there are none. The commit message and the pull request's title and description clear once used.
+- **The diff** can be shown **Split**, old and new side by side, and **Wrap** wraps long lines.
+- **Tried:** the unit tests, and the productivity smoke test, which stages and unstages a file from the list, opens Split and checks that Push is ticked after a push. The desktop smoke test and screenshots at 1440 and 1100 px wide.
+- **Not tried:** a real repository with an upstream, a branch behind its remote, and a pull request (the smoke test makes one only on macOS and Linux).
+
 1.31.2 makes the chat and the Round Table easier to follow (the review's Phase 1):
 
 - **Stop stays while you write the next message.** While an agent works, the Stop button used to give way to Send as soon as you typed. Both are now there. A message of images only can be sent too.
