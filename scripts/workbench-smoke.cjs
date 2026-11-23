@@ -92,20 +92,22 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await tile.getByRole('status', { name: 'Channel 3 needs you', exact: true }).textContent(), 'Needs you');
     assert.equal(await tile.getAttribute('data-state'), 'waiting');
     const toast = page.locator('.tr-toast.waiting');
-    // Its tile is on screen and says so itself (the strip, the badge), so no notice is drawn; the status bar always says it.
-    assert.match(await page.locator('.tr-sb-alert').textContent(), /CH3 needs approval/);
+    // Its tile is on screen and says so itself (the strip, the badge), so no notice is drawn; the status bar always says it,
+    // in Needs you, its only alert (the chip's tooltip names what waits).
+    assert.match(await page.locator('.needs-you-cell').getAttribute('title'), /CH3 needs approval/);
+    assert.equal(await page.locator('.tr-sb-alert').count(), 0, 'The status bar has one alert, Needs you');
     assert.equal(await toast.count(), 0, 'A channel whose tile is on screen raises no notice');
     // On another page its tile is not on screen: the notice is drawn there, and leaves again back on the workspace.
     await page.getByRole('button', { name: 'Changes', exact: true }).click();
     assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await tile.locator('.session-attention').waitFor(); await toast.waitFor({ state: 'detached' });
-    // With another channel isolated, the status-bar alert reveals the waiting channel and focuses its terminal.
+    // With another channel isolated, Needs you's Answer reveals the waiting channel and focuses its terminal.
     await (await tileControl(page, 'Isolate channel 1')).click();
     await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
     // Hidden behind the isolated channel, CH3 has its notice.
     assert.match(await toast.textContent(), /CH3 needs approval.*Approval requested: npm test/);
-    await page.locator('.tr-sb-alert').click();
+    await page.locator('.needs-you-cell').click(); await page.locator('.needs-you-list li', { hasText: 'CH3 needs approval' }).getByRole('button', { name: 'Answer', exact: true }).click();
     await page.locator('.session-tile .session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile')?.textContent.includes('Approval requested'));
     // Its tile is on screen again, so the notice has left.

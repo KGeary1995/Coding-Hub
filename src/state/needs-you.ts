@@ -3,16 +3,18 @@ import type { UsageRecord } from '../../shared/hub';
 import type { Task } from '../../shared/workbench';
 import { waitingImageCount, type RoundTableState } from '../../shared/chat';
 import { hiddenSeatIds } from '../../shared/table-seats';
+import type { LinkedComputer } from '../../shared/remote';
 import { channelAlerts } from './channel-state';
 
 /**
  * Everything waiting for the person, in one list: channels waiting for an approval (with the exact request and since
  * when), channels that failed, and tasks that stopped, went quiet or are ready for review. Each says what to do next.
+ * A linked computer's channel that waits or failed is listed too, with that computer's id (it opens on its tab).
  */
-export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved' | 'plan-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings' }
+export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved' | 'plan-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings'; computerId?: string }
 const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8, 'findings-unsaved': 4, 'plan-review': 1 };
 
-export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}): NeedsYouItem[] {
+export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}, computers: LinkedComputer[] = []): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   // Findings of a closed table that could not be saved to shared memory: kept with the channel until saved.
   for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) items.push({ key: `s:${session.id}`, kind: 'findings-unsaved', title: 'Round Table findings not saved yet', detail: `${record.findings.length} ${record.findings.length === 1 ? 'finding' : 'findings'} from a closed table could not be written to shared memory.`, since: null, sessionId: session.id, taskId: null, action: 'save-findings' }); }
@@ -36,6 +38,11 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
     else if (task.status === 'active' && task.outcome === 'unconfirmed') items.push({ key: `t:${task.id}`, kind: 'task-unconfirmed', title: `Task not confirmed done: ${task.title}`, detail: 'The agent ended its turn without TASK COMPLETE. It may have asked you something.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'answer' });
     else if (task.status === 'active' && task.outcome === 'quiet') items.push({ key: `t:${task.id}`, kind: 'task-quiet', title: `Task gone quiet: ${task.title}`, detail: 'Its channel has drawn nothing for 45 seconds. Look whether the agent finished or is waiting.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
     else if (task.status === 'review') items.push({ key: `t:${task.id}`, kind: 'task-review', title: `Ready for review: ${task.title}`, detail: 'The agent said TASK COMPLETE. Check the changes, then mark it done.', since: task.sentAt ?? null, sessionId: task.sessionId, taskId: task.id, action: 'tasks' });
+  }
+  for (const computer of computers) if (computer.linked && computer.connected) for (const channel of computer.channels) {
+    const base = { since: null, sessionId: channel.sessionId, taskId: null, computerId: computer.id };
+    if (channel.running && channel.attention) items.push({ ...base, key: `la:${computer.id}:${channel.sessionId}`, kind: 'approval', title: `${computer.name} CH${channel.channel} needs approval`, detail: channel.attention, action: 'answer' });
+    else if (!channel.running && channel.failed) items.push({ ...base, key: `lf:${computer.id}:${channel.sessionId}`, kind: 'failed', title: `${computer.name} CH${channel.channel} failed`, detail: channel.failed, action: 'retry' });
   }
   return items.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || (a.since ?? '').localeCompare(b.since ?? ''));
 }

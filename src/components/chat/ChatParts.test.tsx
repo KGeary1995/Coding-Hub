@@ -59,6 +59,30 @@ describe('a message that does not match this version still draws', () => {
   });
 });
 
+describe('what a tool call does, in full', () => {
+  const asking = (toolName: string, input: Record<string, unknown>, answer: 'allowed' | null = null): ChatItem => ({ kind: 'permission', id: 'p', toolName, description: '', input, canAllowEdits: true, answer });
+  it('an approval for an edit shows what it removes and adds, each edit of a MultiEdit, and a new file’s content', () => {
+    const edit = renderToStaticMarkup(<Item {...props(asking('Edit', { file_path: '/p/src/a.ts', old_string: 'const a = 1;', new_string: 'const a = 2;' }))} />);
+    expect(edit).toContain('<pre>p/src/a.ts</pre>'); expect(edit).toContain('<pre class="removed">const a = 1;</pre><pre class="added">const a = 2;</pre>');
+    const many = renderToStaticMarkup(<Item {...props(asking('MultiEdit', { file_path: '/p/b.ts', edits: [{ old_string: 'x', new_string: 'y' }, { old_string: 'm', new_string: 'n' }] }))} />);
+    expect(many.match(/class="chat-diff"/g)).toHaveLength(2);
+    // Shown under another name (Claude's display name): the input decides.
+    const write = renderToStaticMarkup(<Item {...props(asking('Create file', { file_path: '/p/new.md', content: '# New\n' }))} />);
+    expect(write).toContain('<pre class="added"># New\n</pre>'); expect(write).not.toContain('class="removed"');
+  });
+  it('a command or a list of file names adds nothing more; the changes fold away once answered', () => {
+    expect(renderToStaticMarkup(<Item {...props(asking('Bash', { command: 'npm test' }))} />)).not.toContain('chat-permission-changes');
+    expect(renderToStaticMarkup(<Item {...props(asking('File changes', { files: ['a.ts'] }))} />)).not.toContain('chat-permission-changes');
+    expect(renderToStaticMarkup(<Item {...props(asking('Edit', { old_string: 'a', new_string: 'b' }, 'allowed'))} />)).toMatch(/class="chat-permission allowed"[\s\S]*chat-permission-changes/);
+  });
+  it('a Bash card shows its whole command when opened, as its one-line summary cuts it short', () => {
+    const command = 'npm run build && node scripts/desktop-smoke.cjs --long-flag value '.repeat(4);
+    const call: ChatItem = { kind: 'assistant', id: 'b', blocks: [{ type: 'tool', id: 't', name: 'Bash', input: { command } }], streaming: '' };
+    const html = renderToStaticMarkup(<Item {...props(call)} />);
+    expect(html).toContain(`<pre class="chat-tool-input">${command.replace(/&/g, '&amp;')}</pre>`);
+  });
+});
+
 describe('answering an approval', () => {
   it('asks for the handler when the person answers, not when the card is drawn', () => {
     const sent: string[] = []; let run = 'first';

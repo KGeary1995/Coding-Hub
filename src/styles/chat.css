@@ -76,6 +76,10 @@
 .chat-permission p { margin: 0 0 8px; }
 .chat-permission p strong { color: var(--tr-fg-strong); }
 .chat-permission pre { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 12px/18px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What an edit changes, scrolled within the card when long so its buttons stay near; answered, it folds away. */
+.chat-permission-changes { max-height: 320px; margin: 0 0 12px; overflow: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); }
+.chat-permission-changes pre { margin: 0; border: 0; border-radius: 0; }
+:is(.chat-permission.allowed, .chat-permission.denied, .chat-permission.closed) .chat-permission-changes { display: none; }
 .chat-permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .chat-permission.allowed, .chat-permission.denied, .chat-permission.closed { border-color: var(--tr-line); box-shadow: var(--tr-shadow-card); }
 .chat-permission-answer { color: var(--tr-fg-dim); font: 500 12px/16px var(--tr-font-ui); }
@@ -100,6 +104,9 @@
 .chat-attachments button { position: absolute; top: -8px; right: -8px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-strong); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-muted); }
 .chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
 /* What the agent may do without asking; full access stands out, since nothing is asked then. */
+/* Full access asks once more, above the message box. */
+.chat-confirm { margin-bottom: 8px; }
+.chat-confirm p { margin: 0 0 8px; }
 .chat-permissions { flex-shrink: 0; height: 40px; max-width: 132px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background-color: var(--tr-well); color: var(--tr-fg-muted); font: 500 13px/16px var(--tr-font-ui); }
 .chat-permissions.edits { color: var(--tr-fg); }
 .chat-permissions.full { color: var(--tr-st-limit); border-color: var(--tr-st-limit); }

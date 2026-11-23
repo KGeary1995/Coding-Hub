@@ -103,24 +103,24 @@
 .tr-command-footer span { display: inline-flex; align-items: center; gap: 8px; }
 
 /* ---------- Status bar ---------- */
-/* One line of items 16 px apart. What can be pressed is a chip (a channel, a plan's limits, Needs you, an alert): 20 px
+/* One line of items 16 px apart. What can be pressed is a chip (a channel, a plan's limits, Needs you): 20 px
    tall on the card's surface with a faint frame, 6 px from the next chip. What only informs (the project, the saved
    state, today's total) is a 12 px mark and its words, with no frame. */
 .app-statusbar.tr-statusbar { height: var(--tr-statusbar-h); flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; border-top: 1px solid var(--tr-line); background: var(--tr-panel); color: var(--tr-fg-dim); font: var(--tr-t-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tr-sb-cell { flex: none; height: 20px; display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; border-radius: var(--tr-r-small); background: none; color: inherit; font: inherit; white-space: nowrap; }
 button.tr-sb-cell { --tone: var(--tr-line); padding: 0 8px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: var(--tr-surface); transition: background var(--tr-d-fast) var(--tr-ease), border-color var(--tr-d-fast) var(--tr-ease); }
 /* Needs you is a chip in a box of its own (its list opens from it), so it is named beside the buttons: it too stands
-   6 px from the chip before it and from the alert after it. */
+   6 px from the chip before it. */
 button.tr-sb-cell + button.tr-sb-cell, button.tr-sb-cell + .needs-you, .needs-you + button.tr-sb-cell, .tr-sb-today:not(.gone) + button.tr-sb-cell, .tr-sb-today:not(.gone) + .needs-you { margin-left: -10px; }
 button.tr-sb-cell:hover { border-color: var(--tr-line-control); background: var(--tr-hover); }
-/* Needs you and an alert keep their state's colour under the pointer: brightened like the rest, they read as plain chips. */
-button.tr-sb-cell:not(.needs-you-cell, .tr-sb-alert, :is(.warning, .critical) > .tr-sb-today-button):hover { color: var(--tr-fg); }
+/* Needs you keeps its state's colour under the pointer: brightened like the rest, they read as plain chips. */
+button.tr-sb-cell:not(.needs-you-cell, :is(.warning, .critical) > .tr-sb-today-button):hover { color: var(--tr-fg); }
 /* A chip that asks for the person is tinted with what it asks: a channel that waits, failed or is near its limit. */
-.tr-sb-channel:has(.tr-state.waiting), .needs-you-cell, .tr-sb-alert.waiting { --tone: var(--tr-st-waiting); }
-.tr-sb-channel:has(.tr-state.failed), .tr-sb-alert.failed { --tone: var(--tr-st-failed); }
-.tr-sb-channel:has(.tr-state.limit), .tr-sb-alert.limit { --tone: var(--tr-st-limit); }
-button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, .failed, .limit))), button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, var(--tr-panel)); }
-button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: var(--tone); }
+.tr-sb-channel:has(.tr-state.waiting), .needs-you-cell { --tone: var(--tr-st-waiting); }
+.tr-sb-channel:has(.tr-state.failed) { --tone: var(--tr-st-failed); }
+.tr-sb-channel:has(.tr-state.limit) { --tone: var(--tr-st-limit); }
+button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))), button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, var(--tr-panel)); }
+button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: var(--tone); }
 /* A mark and its words leave the bar together (tr-sb-drop wraps each of an item's children by itself). */
 .tr-sb-inner { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .tr-sb-inner > svg { flex: none; color: var(--tr-fg-faint); }
@@ -163,7 +163,7 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
 .tr-sb-channel { font-weight: 500; }
 .tr-sb-state { display: inline-flex; }
 .tr-sb-tokens { font-weight: 400; color: var(--tr-fg-faint); }
-/* Only a very long project name or list of alerts is shortened, with an ellipsis. */
+/* Only a very long project name is shortened, with an ellipsis. */
 .tr-statusbar .tr-sb-text { min-width: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .tr-sb-window small, .tr-statusbar .storage-status { color: var(--tr-fg-faint); }
 .tr-sb-window { color: var(--tr-fg); font-weight: 500; }
@@ -180,9 +180,6 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
 .needs-you-cell { color: var(--tr-st-waiting); font-weight: 600; }
 /* Read out, not drawn: the count pill stands where " · " is typed. */
 .needs-you-sep { width: 0; margin-right: -6px; overflow: hidden; }
-.tr-sb-alert.waiting { color: var(--tr-st-waiting); }
-.tr-sb-alert.failed { color: var(--tr-st-failed); }
-.tr-sb-alert.limit { color: var(--tr-st-limit); }
 .tr-statusbar .storage-status { font: inherit; }
 .tr-statusbar .storage-status.error { color: var(--tr-danger); }
 
@@ -197,7 +194,7 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
    2. A part inside an item cannot shrink before other items, so it is given the width the bar must have for it, added
       up from what the bar holds: 116 px a channel with its state word (--sb-channels, set by StatusBar), 56 for its
       tokens, 132 a plan with its engine's mark and its fullest limit's short name, 84 for its second limit and 56 for its two meters, 186 for today's total as a chip, 136 for the
-      project, and what :has() finds of Needs you and alerts. clamp() turns "the bar is at least that wide" into 1px or 0px, which the part multiplies
+      project, and what :has() finds of Needs you. clamp() turns "the bar is at least that wide" into 1px or 0px, which the part multiplies
       into its width or none. The sums are of typical words: where they fall short, an item of means 1 leaves instead. */
 .tr-sb-drop { flex: 0 1 auto; min-width: 0; margin-left: -16px; flex-wrap: wrap; align-content: flex-start; overflow: clip; }
 /* The space before the words is an item of its own, so the words are never first on their line, which could not wrap. */
@@ -205,10 +202,8 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
 .tr-statusbar .storage-status { flex-shrink: 1e18; }
 .tr-sb-project { flex-shrink: 1e12; }
 .tr-sb-today { flex-shrink: 1e6; }
-/* The last resort, after all of those: a list of alerts is shortened with an ellipsis. */
-.tr-sb-alert { flex: 0 1 auto; min-width: 112px; }
-.tr-statusbar { --sb-plans: 0; --sb-needs: 0px; --sb-alert: 0px;
-  --sb-need: calc(24px + 186px + var(--sb-channels) * 116px + var(--sb-plans) * 132px + var(--sb-needs) + var(--sb-alert));
+.tr-statusbar { --sb-plans: 0; --sb-needs: 0px;
+  --sb-need: calc(24px + 186px + var(--sb-channels) * 116px + var(--sb-plans) * 132px + var(--sb-needs));
   --sb-words: clamp(0px, (100cqw - var(--sb-need)) * 99, 1px);
   --sb-detail: clamp(0px, (100cqw - var(--sb-need) - 136px - var(--sb-plans) * 84px) * 99, 1px);
   --sb-tokens: clamp(0px, (100cqw - var(--sb-need) - 136px - var(--sb-plans) * 84px - var(--sb-channels) * 56px) * 99, 1px);
@@ -217,9 +212,8 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
 .tr-statusbar:has(.tr-sb-plan ~ .tr-sb-plan) { --sb-plans: 2; }
 .tr-statusbar:has(.tr-sb-plan ~ .tr-sb-plan ~ .tr-sb-plan) { --sb-plans: 3; }
 .tr-statusbar:has(.needs-you) { --sb-needs: 124px; }
-.tr-statusbar:has(.tr-sb-alert) { --sb-alert: 164px; }
 /* The state glyphs come from one font, so they are one size. */
-.tr-sb-glyph, .tr-sb-alert > [aria-hidden], .tr-toast header > [aria-hidden] { font-family: var(--tr-font-mono); }
+.tr-sb-glyph, .tr-toast header > [aria-hidden] { font-family: var(--tr-font-mono); }
 :is(.tr-sb-word, .tr-sb-glyph, .tr-sb-tokens, .tr-sb-plan-name, .tr-sb-window, .tr-sb-window small) { overflow: hidden; }
 .tr-sb-window { align-items: center; }
 /* A limit's meter is the first thing to leave, and the 4 px beside it closes with it (while the limits' own gaps stand:
@@ -244,16 +238,15 @@ button.tr-sb-cell:is(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, 
 /* A storage failure is not a detail: it never leaves the bar, whatever else gives way. */
 .tr-statusbar .storage-status.error { flex-shrink: 0; max-width: none; }
 /* The last step, when even the glyph forms do not fit beside what asks for the person (eight channels in the narrowest
-   window with Needs you, an alert and a storage failure): --sb-tight is 1px, and each channel's chip keeps its dot, its
-   number and its state glyph ("CH" and half its padding leave), the alert may shorten to 40 px, and a storage failure
-   keeps its mark (its words are its tooltip). So Needs you, the alert and the failure are always in view. */
-.tr-statusbar { --sb-error: 0px; --sb-tight: clamp(0px, (24px + var(--sb-channels) * 76px + var(--sb-needs) + var(--sb-alert) + var(--sb-error) + 48px - 100cqw) * 99, 1px); }
+   window with Needs you and a storage failure): --sb-tight is 1px, and each channel's chip keeps its dot, its number
+   and its state glyph ("CH" and half its padding leave), and a storage failure keeps its mark (its words are its
+   tooltip). So Needs you and the failure are always in view. */
+.tr-statusbar { --sb-error: 0px; --sb-tight: clamp(0px, (24px + var(--sb-channels) * 76px + var(--sb-needs) + var(--sb-error) + 48px - 100cqw) * 99, 1px); }
 .tr-statusbar:has(.storage-status.error) { --sb-error: 190px; }
 /* "CH" and the number are one item, so the chip's 6 px gap does not part them. */
 .tr-sb-number { display: inline-flex; }
 .tr-sb-ch, .tr-sb-error-words { overflow: hidden; max-width: calc((1px - var(--sb-tight)) * 999); }
 button.tr-sb-channel { padding: 0 calc(8px - var(--sb-tight) * 4); }
-.tr-sb-alert { min-width: calc(112px - var(--sb-tight) * 72); }
 .tr-statusbar .storage-status.error .tr-sb-inner { gap: calc(6px - var(--sb-tight) * 6); }
 .tr-sb-project { max-width: calc(var(--sb-words) * 9999); }
 /* Seven or eight channels in a narrow window: the plan limits go too (Usage shows them). */
@@ -331,5 +324,5 @@ button.tr-sb-channel { padding: 0 calc(8px - var(--sb-tight) * 4); }
 /* Higher contrast (Settings > Display): the bars' edges and their quietest words come up. */
 [data-contrast="high"] :is(.tr-topbar, .tr-statusbar, .tr-toast) { border-color: var(--tr-line-strong); }
 [data-contrast="high"] :is(.tr-statusbar, .tr-sb-tokens, .tr-sb-window small, .tr-statusbar .storage-status, .tr-sb-inner > svg, .command-trigger) { color: var(--tr-fg); }
-[data-contrast="high"] button.tr-sb-cell:not(.needs-you-cell, .tr-sb-alert, :has(.tr-state:is(.waiting, .failed, .limit)), :is(.warning, .critical) > .tr-sb-today-button) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] button.tr-sb-cell:not(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit)), :is(.warning, .critical) > .tr-sb-today-button) { border-color: var(--tr-line-strong); }
 [data-contrast="high"] :is(.tr-tabs > button, .tr-menu-button:not(.button)) { color: var(--tr-fg-strong); }

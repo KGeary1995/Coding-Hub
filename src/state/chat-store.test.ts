@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyChatEvent, chatAnswered, chatEnded, chatNotice, chatSent, chatStarted, flushChatDeltas, forgetChatsExcept, forgetLinkedChatsExcept, useChatStore } from './chat-store';
+import { applyChatEvent, chatAnswered, chatEnded, chatNotice, chatSent, chatStarted, chatDrafts, flushChatDeltas, forgetChatsExcept, forgetLinkedChatsExcept, useChatStore } from './chat-store';
 
 const items = () => useChatStore.getState().threads.s.items;
 const event = (value: Parameters<typeof applyChatEvent>[0]['event']) => applyChatEvent({ sessionId: 's', runId: 'r', event: value });
@@ -66,6 +66,10 @@ describe('chat threads', () => {
   it('frees the conversations of channels removed from the workspace', () => {
     chatStarted('gone', 'r2', false); chatSent('gone', 'hi', [{ mediaType: 'image/png', data: 'AAAA' }]);
     forgetChatsExcept(['s']); expect(Object.keys(useChatStore.getState().threads)).toEqual(['s']);
+  });
+  it('frees the unsent message of a channel removed, and keeps the others’', () => {
+    chatDrafts.set('s', { text: 'still writing', images: [] }); chatDrafts.set('gone', { text: 'never sent', images: [] });
+    forgetChatsExcept(['s']); expect([...chatDrafts.keys()]).toEqual(['s']); chatDrafts.clear();
   });
   it('keeps a linked computer’s threads when this computer’s channels change, and frees them once that computer goes', () => {
     chatStarted('pc-2:remote', 'r9', false); chatNotice('pc-2:remote', 'from the other computer');

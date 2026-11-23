@@ -271,7 +271,20 @@ else if (args.startsWith('serve --bg --https=443')) {
     await phone.locator('.phone-chat .chat-user-text').filter({ hasText: 'hello from the phone' }).waitFor();
     await openView(page, 'Workspace');
     await page.locator('[data-chat-session]').filter({ hasText: 'hello from the phone' }).filter({ hasText: 'You said: hello from the phone' }).waitFor();
+    // A message being written on the computer outlives its view: maximising the tile, restoring it, another page.
+    const draft = page.getByRole('textbox', { name: 'Message to Claude', exact: true }); await draft.fill('kept while I look elsewhere');
+    await (await tileControl(page, 'Isolate channel 3')).click(); assert.equal(await draft.inputValue(), 'kept while I look elsewhere', 'the draft is kept when the tile is maximised');
+    await (await tileControl(page, 'Restore grid')).click(); await openView(page, 'Changes'); await openView(page, 'Workspace');
+    assert.equal(await draft.inputValue(), 'kept while I look elsewhere', 'the draft is kept when the tile is restored and another page is opened'); await draft.fill('');
+    // Full access asks once more; cancelled, the level in effect stays.
+    const level = page.locator('[data-chat-session] select.chat-permissions').first(); const before = await level.inputValue();
+    await level.selectOption('full'); const confirm = page.getByRole('alertdialog', { name: 'Turn on Full access?' });
+    await confirm.getByRole('button', { name: 'Turn on Full access', exact: true }).waitFor(); assert.equal(await level.inputValue(), before, 'Full access waits to be confirmed'); if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-full-access.png') });
+    await confirm.getByRole('button', { name: 'Cancel', exact: true }).click(); await confirm.waitFor({ state: 'detached' }); assert.equal(await level.inputValue(), before);
     await box.fill('please write a note'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
+    // The approval shows what the new file holds, not only its name.
+    await phone.locator('.phone-chat .chat-permission .chat-permission-changes pre.added').filter({ hasText: 'hi' }).waitFor();
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-approval.png') });
     await phone.locator('.phone-chat .chat-permission').getByRole('button', { name: 'Allow', exact: true }).click();
     await phone.locator('.phone-chat').filter({ hasText: 'Wrote notes.txt.' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-chat.png') });

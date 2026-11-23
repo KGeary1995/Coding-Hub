@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ImagePlus, MessagesSquare, Send, Settings2, Square, Users, X } from 'lucide-react';
+import { ImagePlus, MessagesSquare, Send, Settings2, Square, TriangleAlert, Users, X } from 'lucide-react';
 import { type ChatImage } from '../../../shared/chat';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
 import { hiddenSeatIds } from '../../../shared/table-seats';
-import { chatAnswered, chatFailed, chatSent, useChatStore } from '../../state/chat-store';
+import { chatAnswered, chatDrafts, chatFailed, chatSent, useChatStore } from '../../state/chat-store';
 import { seatsOf, useWorkspaceStore } from '../../state/workspace-store';
 import { seatLabels } from '../../state/hierarchy-state';
 import { useHubStore } from '../../state/hub-store';
@@ -60,7 +60,11 @@ export function ChatView({ session }: { session: Session }) {
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
   const busy = chat.busy || (table !== null && threads.some((thread) => thread.busy));
-  const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState('');
+  // The message being written is kept by channel (chatDrafts), so maximising the tile or opening another page loses none of it.
+  const [text, setText] = useState(() => chatDrafts.get(session.id)?.text ?? ''); const [images, setImages] = useState<ChatImage[]>(() => chatDrafts.get(session.id)?.images ?? []); const [error, setError] = useState('');
+  useEffect(() => { if (text || images.length) chatDrafts.set(session.id, { text, images }); else chatDrafts.delete(session.id); }, [session.id, text, images]);
+  /** Full access asks once more before it applies: it reaches a running agent at once, and every seat at its table. */
+  const [confirmFull, setConfirmFull] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   /** The seat whose own conversation the thread shows instead of the table's; the setup panel, when open. */
   const [shown, setShown] = useState<string | null>(null); const [setup, setSetup] = useState<SetupMode | null>(null);
@@ -99,10 +103,16 @@ export function ChatView({ session }: { session: Session }) {
     const message = text.trim(); const attached = images;
     chatSent(session.id, message, attached, !hierarchy); setText(''); setImages([]); pinned.current = true;
     // A message that was not taken goes back in the box (unless something new was written meanwhile), so nothing is lost.
-    const restore = () => { setText((current) => current || message); setImages((current) => current.length ? current : attached); };
+    // Kept by channel too, as the view may have closed meanwhile.
+    const restore = () => { const kept = chatDrafts.get(session.id); chatDrafts.set(session.id, { text: kept?.text || message, images: kept?.images.length ? kept.images : attached }); setText((current) => current || message); setImages((current) => current.length ? current : attached); };
     if (table) { const failure = await tableRequest(session.id, { action: 'table-send', text: message, images: attached }); if (failure) { chatFailed(session.id, failure); restore(); } return; }
     const result = await window.codingHub.chat({ action: 'send', sessionId: session.id, runId: session.runId!, text: message, images: attached }).catch(() => null);
     if (!result?.ok) { chatFailed(session.id, result?.error.message ?? 'The message could not be delivered.'); restore(); }
+  };
+  /** Sets the table's level; Full access only once confirmed (the select shows the level in effect until then). */
+  const choose = (level: PermissionLevel, confirmed = false) => {
+    if (level === 'full' && !confirmed) { setConfirmFull(true); return; }
+    setConfirmFull(false); void setPermissions(session.id, level).then((failure) => setError(failure ?? ''));
   };
   const answerFor = (target: Session | null) => (requestId: string) => async (allow: boolean, allowEdits?: boolean) => {
     if (!target?.runId || !window.codingHub) return;
@@ -182,10 +192,12 @@ export function ChatView({ session }: { session: Session }) {
     <div className="chat-composer">
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
       {error && <p className="chat-notice error" role="alert">{error}</p>}
+      {confirmFull && <div className="ui-banner warning chat-confirm" role="alertdialog" aria-label="Turn on Full access?"><TriangleAlert aria-hidden="true" /><div><p><strong>Turn on Full access?</strong> {permissionHelp(engine, 'full')}{tableNote}</p>
+        <div className="ui-actions"><button className="button danger solid small" onClick={() => choose('full', true)}>Turn on Full access</button><button className="button secondary small" onClick={() => setConfirmFull(false)}>Cancel</button></div></div></div>}
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         {!table && !seatedAt && !showable && <button className="chat-icon" aria-label="Round Table: add agents" title={channels >= MAX_CHANNELS ? TABLE_FULL : 'Round Table: bring other agents into this conversation, in this channel'} disabled={!running || channels >= MAX_CHANNELS} onClick={() => setSetup({ type: 'chat', leadId: session.id })}><Users size={16} /></button>}
-        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${tableNote}`} value={permissions} onChange={(event) => void setPermissions(session.id, event.target.value as PermissionLevel).then((failure) => setError(failure ?? ''))}>
+        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${tableNote}`} value={permissions} onChange={(event) => choose(event.target.value as PermissionLevel)}>
           {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
         </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
