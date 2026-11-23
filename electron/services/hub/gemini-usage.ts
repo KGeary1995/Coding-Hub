@@ -62,7 +62,13 @@ export function parseGeminiStepTime(metadata: Uint8Array | null): number | null 
 export function geminiUsageFiles(home: string, since: number, limit = 2000): { file: string; mtime: number }[] {
   const folder = path.join(home, 'conversations'); let names: string[] = []; try { names = fs.readdirSync(folder); } catch { return []; }
   const found: { file: string; mtime: number }[] = [];
-  for (const name of names) { if (!/^[0-9a-f-]{36}\.db$/.test(name)) continue; try { const stat = fs.statSync(path.join(folder, name)); if (stat.isFile() && stat.mtimeMs >= since) found.push({ file: path.join(folder, name), mtime: stat.mtimeMs }); } catch { /* Gone meanwhile. */ } }
+  for (const name of names) { if (!/^[0-9a-f-]{36}\.db$/.test(name)) continue; try {
+      const stat = fs.statSync(path.join(folder, name)); if (!stat.isFile()) continue;
+      // A running agy writes to the write-ahead log first (seen 2026-11-22: a live conversation's `-wal` was newer than its
+      // file), so the later of the two times says when the conversation last changed.
+      let mtime = stat.mtimeMs; try { mtime = Math.max(mtime, fs.statSync(path.join(folder, name + '-wal')).mtimeMs); } catch { /* No log: a conversation at rest. */ }
+      if (mtime >= since) found.push({ file: path.join(folder, name), mtime });
+    } catch { /* Gone meanwhile. */ } }
   return found.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
 }
 /**

@@ -92,6 +92,12 @@ describe('a Round Table bar and its token counts', () => {
     // Any other state is its plain words.
     expect(renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} onRequest={() => {}} />)).toContain('<span class="table-status" aria-live="polite">Your turn</span>');
   });
+  it('shows a seat whose usage is not measured yet as a dash, and keeps 0 for a counted zero', () => {
+    const seats = [...counted(12_400, 0), { ...counted(0, 0)[1], id: 'g', engine: 'gemini' as const, name: 'Gemini CLI', working: 'Gemini CLI', colour: 'gemini' as const, tokens: null }];
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={seats} onRequest={() => {}} />);
+    expect(html).toMatch(/<b class="seat-text-codex">Codex 0<\/b> · <b class="seat-text-gemini">Gemini CLI —<\/b>/);
+    expect(html).toContain('Gemini CLI — (—: not measured yet)');
+  });
   it('keeps who drives and the counts in a tooltip as well as in the bar, so a narrow tile can take them out of the bar', () => {
     const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={counted(12_400, 800)} onRequest={() => {}} />);
     expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews. New tokens today: Claude 12k · Codex 800">');

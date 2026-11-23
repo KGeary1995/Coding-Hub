@@ -7,6 +7,7 @@ import { timed } from '../storage/host-health';
 import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
 import { localDay, newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
 import { baseModel, builtInRate } from '../../../shared/model-prices';
+import { readGeminiRequests } from './gemini-usage';
 
 type Json = Record<string, any>;
 interface Snapshot { key: string; model: string; input: number; output: number; cached: number; cacheWrite: number; reasoning: number | null; context: UsageRecord['context'];
@@ -124,6 +125,23 @@ interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHo
 /** Totals of a run's recorded usage, kept between reads: `list()` runs every 30 s and grows with a year of history. */
 interface RunTotals { meta: Json; groups: Map<string, { model: string; day: string; input: number; output: number; cached: number; cacheWrite: number }>; model: string | null; reasoning: number | null; context: UsageRecord['context']; events: number }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * A Gemini CLI run. It writes no log of its own: its requests are rows of its conversation's file (gemini-usage.ts), so
+ * the run is tied to a conversation, and counts that file's rows from `baseline` on.
+ */
+interface GeminiWatch { run: AgentRunningSession; config: CLIEngineConfig; start: number; timer?: ReturnType<typeof setInterval>; stopped: boolean;
+  /** The conversation the run writes to, once known: a chat seat says it when it is ready, a resumed channel has it from the start, and a terminal's new one is looked for. */
+  conversation: string | null;
+  /** Rows the file held before this run could have written any: an earlier run's, or the person's own use. */
+  baseline: number;
+  /** Rows read so far, and the file's size and times then: the file is opened again only when those change. */
+  rows: number; stamp: string;
+  /** Conversations Gemini CLI already had when the run started, so one of them is never taken for this run's new one. */
+  known: Set<string>;
+  /** When a terminal's new conversation was last looked for. */
+  looked: number }
+/** How often a Gemini run's conversation file is checked, and its new conversation looked for (each look lists agy's conversations). */
+const GEMINI_EVERY = 2000; const GEMINI_FIND_EVERY = 6000;
 export class TelemetryService {
   private database: DatabaseSync;
   private watches = new Map<string, Watcher>();
@@ -151,6 +169,79 @@ export class TelemetryService {
     this.poll(w);
   }
   private assigned = new Set<string>(); private closed = false; private closing = false;
+  private geminiWatches = new Map<string, GeminiWatch>();
+  /** Where Gemini CLI keeps its data (null: nowhere, as in most tests), and how a terminal's new conversation is found; main sets both. */
+  geminiHome: () => string | null = () => null;
+  findGeminiConversation: (cwd: string, since: number, known: ReadonlySet<string>) => string | null = () => null;
+  private geminiFile(id: string) { const home = this.geminiHome(); return home && UUID.test(id) ? path.join(home, 'conversations', `${id.toLowerCase()}.db`) : null; }
+  /** A conversation file's size and times, with its write-ahead log's: a running agy writes there first, and the file itself can stay as it was for a while. */
+  private geminiStamp(file: string) { return [file, file + '-wal'].map((name) => { try { const stat = fs.statSync(name); return `${stat.size}:${stat.mtimeMs}`; } catch { return '-'; } }).join('|'); }
+  /**
+   * A Gemini CLI run started. Its usage is counted from its conversation's file once that is known; a resumed
+   * conversation counts only the rows it gains from here.
+   */
+  startGemini(run: AgentRunningSession, config: CLIEngineConfig) {
+    const start = Date.now(); const home = this.geminiHome(); let names: string[] = []; try { if (home) names = fs.readdirSync(path.join(home, 'conversations')); } catch { /* No conversations yet. */ }
+    const known = new Set(names.filter((name) => name.endsWith('.db') && UUID.test(name.slice(0, -3))).map((name) => name.slice(0, -3).toLowerCase()));
+    const watch: GeminiWatch = { run, config, start, stopped: false, conversation: null, baseline: 0, rows: 0, stamp: '', known, looked: 0 };
+    this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: 'gemini', model: config.model || 'Gemini CLI default', cwd: run.cwd, timestamp: new Date(start).toISOString() })); this.totals.delete(run.runId);
+    this.geminiWatches.set(run.runId, watch);
+    if (config.resumeId) this.setGeminiConversation(run.runId, config.resumeId);
+    watch.timer = setInterval(() => timed('telemetry-poll', () => this.pollGemini(watch)), GEMINI_EVERY); watch.timer.unref?.();
+  }
+  /**
+   * The conversation a Gemini CLI run writes to: a chat seat's, as it reports it when ready, or a terminal's, as Gemini
+   * CLI prints it on quitting. One that existed before the run counts from the rows it has now; a new one from its start.
+   */
+  setGeminiConversation(runId: string, conversationId: string) {
+    const w = this.geminiWatches.get(runId); const id = conversationId.toLowerCase(); if (!w || !UUID.test(id) || w.conversation === id || this.closed) return;
+    // What the conversation it leaves gained is read first.
+    if (w.conversation) this.pollGemini(w, true);
+    const file = this.geminiFile(id); let baseline = 0;
+    if (file && w.known.has(id)) baseline = readGeminiRequests(file, Number.MAX_SAFE_INTEGER)?.rows ?? 0;
+    w.conversation = id; w.baseline = baseline; w.rows = baseline; w.stamp = '';
+    try { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (record) { this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...JSON.parse(String(record.value)), conversationId: id }), runId); this.totals.delete(runId); } } catch { /* Usage is still counted. */ }
+    this.pollGemini(w, true);
+  }
+  /**
+   * Reads what a Gemini CLI run's conversation gained. Each request is one event, named by its conversation and row, so
+   * a row counts once however often it is read, and for one run only (tally). The last row read is read again: Gemini
+   * CLI can still be adding to it.
+   */
+  private pollGemini(w: GeminiWatch, force = false) {
+    if (this.closed) return;
+    try {
+      if (!w.conversation) {
+        // A chat seat says which conversation is its own (setGeminiConversation), so none is looked for: with two seats
+        // in one folder, a look could take the other's.
+        if (w.config.engine === 'gemini' && w.config.chat) return;
+        // A terminal's new conversation: the one Gemini CLI has made in this folder since the run started, when there is
+        // exactly one (two Gemini channels in one folder are not told apart: neither is guessed at).
+        const now = Date.now(); if (!force && now - w.looked < GEMINI_FIND_EVERY) return; w.looked = now;
+        const found = this.findGeminiConversation(w.run.cwd, w.start, w.known); if (!found) return;
+        if ([...this.geminiWatches.values()].some((other) => other !== w && other.conversation === found.toLowerCase())) return;
+        this.setGeminiConversation(w.run.runId, found); return;
+      }
+      const file = this.geminiFile(w.conversation); if (!file) return;
+      const stamp = this.geminiStamp(file); if (!force && stamp === w.stamp) return;
+      const read = readGeminiRequests(file, Math.max(w.baseline, w.rows - 1)); if (!read) return;
+      let changed = false; const started = localDay(new Date(w.start));
+      const own = !this.writing; if (own) { this.database.exec('BEGIN'); this.writing = true; }
+      try {
+        for (const request of read.requests) {
+          if (request.row < w.baseline) continue;
+          const snapshot: Snapshot = { key: `gemini:${w.conversation}:${request.row}`, model: request.model, input: request.input, output: request.output, cached: request.cached, cacheWrite: 0, reasoning: request.thinking || null, context: null, day: request.at === null ? started : localDay(new Date(request.at * 1000)) };
+          const old = this.select.get(w.run.runId, snapshot.key);
+          if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; if ((['input', 'output', 'cached'] as const).every((key) => prev[key] >= snapshot[key])) continue; for (const key of ['input', 'output', 'cached'] as const) snapshot[key] = Math.max(snapshot[key], prev[key]); }
+          this.upsert.run(w.run.runId, snapshot.key, JSON.stringify(snapshot)); changed = true;
+        }
+        if (own) this.database.exec('COMMIT');
+      } catch (error) { if (own) try { this.database.exec('ROLLBACK'); } catch { /* Not open. */ } throw error; }
+      finally { if (own) this.writing = false; }
+      w.rows = read.rows; w.stamp = stamp;
+      if (changed) { this.totals.delete(w.run.runId); const usage = this.runUsage(w.run.runId); if (usage) this.publish(usage); }
+    } catch { /* Read again at the next check: a file Gemini CLI is replacing, or a busy database. */ }
+  }
   /** Each run's totals as last read from the database; a run's entry goes when its rows or metadata change. */
   private totals = new Map<string, RunTotals | null>();
   private select!: StatementSync; private upsert!: StatementSync; private writing = false;
@@ -329,7 +420,7 @@ export class TelemetryService {
       const day = days[group.day] ??= { tokens: 0, cost: 0 }; day.tokens += newTokens(event); day.cost = eventCost === null || day.cost === null ? null : day.cost + eventCost; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += group[key]; }
     // Claude's transcript has the tokens in context but not the window; a running Claude reports that elsewhere.
     const window = this.windows.get(runId); if (usage.context && usage.context.limit === 0 && window) usage.context = { ...usage.context, limit: window };
-    usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = totals.events; usage.days = days; return usage;
+    usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : usage.engine === 'gemini' ? 'cli-logs' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = totals.events; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }
   /**
@@ -363,7 +454,7 @@ export class TelemetryService {
     return dated;
   }
   /** A run that was prepared but never started: its resume baseline and Codex log folder go. */
-  abandon(runId: string) { this.baselines.delete(runId); if (!this.watches.has(runId)) try { fs.rmSync(path.join(this.root, runId), { recursive: true, force: true }); } catch { /* Removed at the next start (constructor). */ } }
+  abandon(runId: string) { this.baselines.delete(runId); const gemini = this.geminiWatches.get(runId); if (gemini) { clearInterval(gemini.timer); this.geminiWatches.delete(runId); } if (!this.watches.has(runId)) try { fs.rmSync(path.join(this.root, runId), { recursive: true, force: true }); } catch { /* Removed at the next start (constructor). */ } }
   /** The CLI's own session file for a run, once it has been located. */
   transcript(runId: string): string | null { return this.watches.get(runId)?.file ?? null; }
   /**
@@ -371,6 +462,8 @@ export class TelemetryService {
    * A log that cannot be read to that point marks the run incomplete, so Usage does not present partial totals as final.
    */
   end(runId: string): Promise<string | null> {
+    // A Gemini CLI run: its conversation's last rows, and it has no transcript to hand on.
+    const gemini = this.geminiWatches.get(runId); if (gemini) { clearInterval(gemini.timer); gemini.stopped = true; this.pollGemini(gemini, true); this.geminiWatches.delete(runId); return Promise.resolve(null); }
     const w = this.watches.get(runId); if (!w) return Promise.resolve(null);
     clearInterval(w.timer); w.stopped = true;
     // The log's size is taken once it has been found (the first read may be what finds it).
@@ -388,6 +481,7 @@ export class TelemetryService {
   /** On quit every log is read to its end before the database closes. */
   close() {
     this.closing = true;
+    for (const gemini of [...this.geminiWatches.values()]) { clearInterval(gemini.timer); gemini.stopped = true; this.pollGemini(gemini, true); } this.geminiWatches.clear();
     for (const w of [...this.watches.values()]) { clearInterval(w.timer); w.stopped = true; this.poll(w); const target = Math.max(this.size(w), w.offset); for (let before = -1; w.file && w.offset < target && w.offset !== before;) { before = w.offset; this.poll(w); } this.finish(w, target); }
     this.closed = true; this.database.close();
   }
