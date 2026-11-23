@@ -1,3 +1,4 @@
+import { HelpTip } from './HelpTip';
 import { useEffect, useState } from 'react';
 import { CircleAlert, Monitor, TriangleAlert, X } from 'lucide-react';
 import type { LinkedComputer, RemoteStatus } from '../../shared/remote';
@@ -41,7 +42,7 @@ export function OtherComputersCard() {
     <p>Watch, type into, start and stop the channels on your other computers, each in its own tab.</p>
     {/* Who else gets to see these channels stays in view, not behind the help button: it is what linking gives away. The
         hints share a box so they stand 4 px apart, not the card's 12 px plus 4 (ui.css). */}
-    <div><p className="ui-hint ui-help-line">They connect over Tailscale, and each link's key stays on this computer.<button type="button" className="ui-help" aria-label="Help: how computers find each other" title="Computers find each other on your tailnet and through the Drive sync folder." /></p>
+    <div><p className="ui-hint ui-help-line">They connect over Tailscale, and each link's key stays on this computer.<HelpTip label="Help: how computers find each other" text="Computers find each other on your tailnet and through the Drive sync folder." /></p>
     <p className="ui-hint">A phone paired with either computer sees the channels of both.</p></div>
     <label className="ui-check"><input type="checkbox" checked={remote?.autoLink ?? true} disabled={busy || !remote} onChange={(event) => { const enabled = event.target.checked; void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-auto-link', enabled }))); }} />Link my computers automatically</label>
     <p className="ui-hint">Computers signed in to your Tailscale account ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>
@@ -71,7 +72,7 @@ export function OtherComputersCard() {
       </li>)}</ul>}
     </section>
     {share?.supported && <section className="link-this">
-      <div className="ui-help-line"><h4>Share this screen</h4><button type="button" className="ui-help" aria-label="Help: opening this screen from elsewhere" title="A linked computer opens it with Screen on this computer’s tab, and a paired phone with Screen in its app." /></div>
+      <div className="ui-help-line"><h4>Share this screen</h4><HelpTip label="Help: opening this screen from elsewhere" text="A linked computer opens it with Screen on this computer’s tab, and a paired phone with Screen in its app." /></div>
       <label className="ui-check"><input type="checkbox" checked={share.enabled} disabled={busy || (!ready && !share.enabled)} onChange={(event) => { const enabled = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled }))); }} />Let linked computers see and control this screen</label>
       {share.enabled && <label className="ui-check"><input type="checkbox" checked={share.elevated} disabled={busy} onChange={(event) => { const elevated = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled: true, elevated }))); }} />Also control apps running as administrator</label>}
       {share.enabled && share.problem && <p className="ui-banner danger" role="alert"><TriangleAlert aria-hidden="true" /><span>{share.problem}</span></p>}

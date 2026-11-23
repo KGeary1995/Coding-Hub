@@ -117,14 +117,14 @@ Trace replaces the sidebar with a top bar and a status bar:
 - **Top bar:**
   - the project switcher;
   - the **Workspace**, **Changes**, **Tasks** and **Projects** tabs;
-  - the **Insight** menu: Usage, Session history, Files, Search and **More tools** (AI coaching and Verification profiles);
+  - the **Insight** menu: Usage, Session history, Files, Search, AI coaching and Verification profiles (a **More tools** page held the last two until 1.31.5);
   - the layout controls (Workspace only) and the command field (**Ctrl+Shift+P**);
   - Help, and the **Agent setup** menu: Accounts, Shared memory, Shared rules, MCP servers, Skills & plugins and Settings;
   - **+ Channel** to add a channel (up to eight), listed in this order: Terminal, Claude Code, Codex, Gemini CLI, Round Table and Round Table (hierarchy). The two Round Table items open the seat setup panel (see [Round Table](#round-table)) instead of starting at once.
 - **Status bar:** every channel's state and tokens today, the project, today's tokens and cost on this computer (**Today**: read from Claude Code's and Codex's own logs and Gemini CLI's conversation files every 15 seconds, so it also counts use outside Trace or while Trace was closed, for every Claude account; a reply counts once, on the local day it was written; the logs are read in the background, and where each one was read to is kept in `day-usage.json`, so a start reads only what they gained since), each plan's limits, the save status (**Saved**; hover for its sentence) and **Needs you**. What you can press is drawn as a chip: click a channel to jump to its terminal, **Needs you** for its list, and **Today** or a plan's limits to open Usage. A channel that needs you, failed or is near its limit tints its chip. With nothing to report the bar shows no alert. Before 1.30.2 a second chip beside **Needs you** named the first channel waiting; it said the same twice and is gone (another computer's channels are in **Needs you** now).
 - **Keyboard:** **Alt+1…8** (**Cmd+1…8** on a Mac, where Option+digit types characters) focuses a channel. **G** then a letter opens a view:
   - W Workspace, C Changes, P Projects;
-  - U Usage, H History, F Files, L More tools, T Tasks, V Verification, O Coaching;
+  - U Usage, H History, F Files, T Tasks, V Verification, O Coaching;
   - A Accounts, M Memory, R Rules, S Settings.
 
 The app installs as **Trace** (Trace.app, Trace.exe, Start Menu and desktop shortcuts). Before 1.11 it installed as AI Coding Hub. The app ID, the Electron profile folder (still named `AI Coding Hub`), the data folder (`~/.coding-hub`), the Drive folders (`AI-Coding-Hub-Sync`, `AI-Coding-Hub-Memory`) and the update channel keep their original names, so existing installs upgrade in place and computers on different versions keep syncing. On Windows the Trace installer replaces the old-name install; on a Mac, Trace offers once to move AI Coding Hub.app to the Trash (only if you click **Move to Trash**).

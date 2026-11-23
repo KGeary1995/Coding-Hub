@@ -1,3 +1,4 @@
+import { HelpTip } from './HelpTip';
 import { ExperimentsPanel } from './ExperimentsPanel';
 import { LiveCoachingCard } from './LiveCoachingCard';
 import { useEffect, useState } from 'react';
@@ -38,7 +39,7 @@ export function CoachingPanel() {
   const max = Math.max(1, ...findings.days.map((day) => day.tokens));
   /** An example's outcome as a badge: its word and its state's colour. */
   const OUTCOME = { successful: ['Successful', 'success'], partial: ['Partial', 'warning'], failed: ['Failed', 'danger'] } as const;
-  return <section className="feature-panel hub-panel workbench-page coaching-panel"><header className="ui-page-head"><span className="ui-page-icon"><GraduationCap aria-hidden="true" /></span><div><h1>AI coaching</h1><p>Understand reported usage, review your phrasing, and compare outcomes.</p></div><div className="ui-page-actions"><button type="button" className="ui-help" title="Local findings use heuristics; an agent can provide deeper advice on a report you choose to share." aria-label="Help: AI coaching" /></div></header>
+  return <section className="feature-panel hub-panel workbench-page coaching-panel"><header className="ui-page-head"><span className="ui-page-icon"><GraduationCap aria-hidden="true" /></span><div><h1>AI coaching</h1><p>Understand reported usage, review your phrasing, and compare outcomes.</p></div><div className="ui-page-actions"><HelpTip label="Help: AI coaching" text="Local findings use heuristics; an agent can provide deeper advice on a report you choose to share." /></div></header>
     <div className="hub-toolbar"><label>Usage window <select aria-label="Coaching usage window" value={days} onChange={(event) => { setDays(Number(event.target.value)); setApproved(false); }}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label><span className="muted">Local statistics · CLI-reported usage · outcomes are self-reported</span></div>
     {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     <div className="ui-grid coaching-stats">{([['Reported runs', String(findings.runs)], ['Total tokens', formatNumber(findings.tokens)], ['Reported reasoning', formatNumber(findings.reasoning)], ['Estimated cost', dollars(findings.cost)]] as const).map(([label, value]) => <article key={label} className="ui-card span-3"><div className="ui-stat"><span>{label}</span><strong>{value}</strong></div></article>)}</div>

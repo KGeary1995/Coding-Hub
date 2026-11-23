@@ -43,7 +43,7 @@
 /* A field with its hint under it (the hint is outside the label: LinkedScreen). */
 .linked-screen-field { display: grid; gap: 4px; width: 100%; }
 /* The Windows lock note's help mark sits at the banner's end. */
-.linked-screen > .ui-banner > .ui-help { align-self: center; }
+.linked-screen > .ui-banner > .ui-help-wrap { align-self: center; }
 .linked-screen-actions { display: flex; align-items: center; gap: 8px; }
 /* A check box or a select with its words: Display and the modifier swap in the screen's bar, and "Save on this
    computer (encrypted)" in the sign-in form. */

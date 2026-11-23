@@ -86,6 +86,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // Enter on the tile itself moves into its terminal.
     await tile.focus(); await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea') && document.activeElement.closest('.session-tile') === document.querySelectorAll('.session-tile')[2]);
+    // Ctrl+Shift+P opens the command menu from a terminal that has the keyboard (checked in 1.31.5: it does).
+    await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Control+Shift+P'); await page.getByRole('dialog', { name: 'Workspace commands' }).waitFor();
+    await page.keyboard.press('Escape'); await page.getByRole('dialog', { name: 'Workspace commands' }).waitFor({ state: 'detached' });
     // An approval request shows on the tile until the person answers in the terminal.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('need-approval'); await page.keyboard.press('Enter');
     await tile.locator('.session-attention').getByText('Approval requested: npm test', { exact: true }).waitFor();

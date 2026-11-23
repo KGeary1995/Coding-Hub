@@ -7,7 +7,7 @@ import { DEFAULT_TITLES } from '../../shared/channel-name';
 import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
 import { hiddenSeatIds, savedSeats, type SavedSeat } from '../../shared/table-seats';
 
-export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'search' | 'tools';
+export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'search';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 /** A channel's settings for resuming a CLI's own conversation (from Session history, here or on a phone). */

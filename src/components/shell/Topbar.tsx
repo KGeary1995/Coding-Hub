@@ -4,7 +4,7 @@ import { seatRoom } from '../../runtime/round-table';
 import type { TableKind } from '../../../shared/table-seats';
 import { TableSetup } from '../chat/TableSetup';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
-import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, History, LayoutGrid, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
+import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
@@ -16,12 +16,9 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
 /** `icon` is the view's own: its menu entry shows it, and its page heading should show the same one. */
 export const INSIGHT_VIEWS: { view: NavigationView; label: string; icon: LucideIcon }[] = [
-  { view: 'usage', label: 'Usage', icon: ChartColumn }, { view: 'history', label: 'Session history', icon: History }, { view: 'files', label: 'Files', icon: Files }, { view: 'search', label: 'Search', icon: Search }, { view: 'tools', label: 'More tools', icon: LayoutGrid },
-];
-/** Rarely used tools, listed on the More tools page instead of in the menus. */
-export const MORE_TOOLS: { view: NavigationView; label: string; detail: string }[] = [
-  { view: 'coaching', label: 'AI coaching', detail: 'Prompt examples, usage trends and A/B wording experiments, with an optional coaching report from an agent.' },
-  { view: 'verification', label: 'Verification profiles', detail: 'Saved test and lint commands for a project, and their recorded results.' },
+  { view: 'usage', label: 'Usage', icon: ChartColumn }, { view: 'history', label: 'Session history', icon: History }, { view: 'files', label: 'Files', icon: Files }, { view: 'search', label: 'Search', icon: Search },
+  // AI coaching and Verification sit here too (1.31.5): a More tools page that held only these two was one step more.
+  { view: 'coaching', label: 'AI coaching', icon: GraduationCap }, { view: 'verification', label: 'Verification profiles', icon: ListChecks },
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIcon }[] = [
   { view: 'accounts', label: 'Accounts & connections', icon: CircleUserRound }, { view: 'memory', label: 'Shared memory', icon: BookOpen }, { view: 'rules', label: 'Shared rules', icon: ShieldCheck }, { view: 'connectors', label: 'MCP servers', icon: Cable },
@@ -64,7 +61,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
-  const insight = INSIGHT_VIEWS.find((item) => item.view === activeView) ?? (MORE_TOOLS.some((item) => item.view === activeView) ? INSIGHT_VIEWS.find((item) => item.view === 'tools') : undefined);
+  const insight = INSIGHT_VIEWS.find((item) => item.view === activeView);
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).

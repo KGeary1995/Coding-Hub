@@ -1,5 +1,20 @@
 ## What's new
 
+1.31.5 finishes the review's Phase 2, apart from the Changes screen (1.31.3). Each item was checked in the code first:
+
+- **AI coaching and Verification profiles are in the Insight menu.** The More tools page held only these two, one step further away. G then L, which opened it, is gone; G then O and G then V open them.
+- **The command menu opens Tasks, AI coaching, Verification profiles and each linked computer**, which it did not list.
+- **The "?" beside a heading can be pressed.** Its words open as a note under it, from the keyboard or a tap too, and Escape closes it. They were a tooltip only, out of reach of the keyboard, touch and screen readers.
+- **Settings says when it holds changes not saved yet**, beside Save preferences, with **Discard** to put them back.
+- **A verification profile can be edited.** **Edit** loads it into the editor, which then saves over it. Before, it could only be copied into a new one.
+- **A saved prompt experiment shows its two prompts.**
+- **Tasks:** the project folder can be cleared and typed again. Emptied, it put the channel's folder straight back.
+- **Usage:** the "unpriced" count beside the estimated cost now counts the same records the cost is added up from; it counted Trace's own runs instead.
+- **Tailwind:** its utility classes are left out. No component used them, and they brought in stray classes picked up from the code (.table, .fixed, .block, .blur and others). Its reset, which every screen is drawn on, stays.
+- **Checked and not changed:** the review said a terminal with the keyboard swallows Ctrl+Shift+P. It does not in this version (tried in the workbench smoke test, which now keeps checking it).
+- **Not done:** deleting a verification profile (Trace's host has no way to yet), and the review's larger Settings and Accounts reorganisation.
+- **Tried:** the unit tests, and the design, productivity, workbench, desktop and remote smoke tests, with new checks for the Insight menu, a "?" opened and closed from the keyboard, Settings' unsaved changes and Discard, editing a verification profile, and Ctrl+Shift+P from a terminal.
+
 1.31.4 is the first stage of the phone app's fixes. Each was checked in the code first; please try them on your phone:
 
 - **A channel's buttons follow it.** On a terminal channel, Start, Stop and Restart stayed as they were first drawn, so a channel stopped or started from the computer still showed the old buttons. They now change with the channel.

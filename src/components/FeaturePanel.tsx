@@ -17,18 +17,15 @@ const MemoryPanel = lazy(() => import('./HubPanels').then((module) => ({ default
 const SettingsPanel = lazy(() => import('./HubPanels').then((module) => ({ default: module.SettingsPanel })));
 const UsageScreen = lazy(() => import('./screens/UsageScreen').then((module) => ({ default: module.UsageScreen })));
 import { AgentSetup } from './screens/AgentSetup';
-import { MORE_TOOLS, SETUP_VIEWS } from './shell/Topbar';
-import { MoreTools, MoreToolsBack } from './screens/MoreTools';
+import { SETUP_VIEWS } from './shell/Topbar';
 export function FeaturePanel() {
   const view = useWorkspaceStore((s) => s.activeView);
   const panel = <Suspense fallback={<p className="control-note">Opening…</p>}><Panel /></Suspense>;
-  if (MORE_TOOLS.some((item) => item.view === view)) return <div className="more-tools-page"><MoreToolsBack />{panel}</div>;
   return SETUP_VIEWS.some((item) => item.view === view) ? <AgentSetup>{panel}</AgentSetup> : panel;
 }
 
 function Panel() {
   const view = useWorkspaceStore((s) => s.activeView);
-  if (view === 'tools') return <MoreTools />;
   if (view === 'search') return <SearchPage />;
   if (view === 'tasks') return <TasksPanel />;
   if (view === 'verification') return <VerificationPanel />;

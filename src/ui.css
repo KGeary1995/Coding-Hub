@@ -1,6 +1,6 @@
+/* Tailwind's reset only (Preflight), which every screen is drawn on. No component uses its utility classes, and their
+   layer added stray ones scraped from the code (.table, .fixed, .block, .blur and others; removed in 1.31.5). */
 @tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 /* Shared parts ("Midnight", docs/design/midnight/README.md, section 3): element rules and every part that more than one
    area uses. A part is drawn once, here; a screen composes parts and never restyles one. New parts take the ui- prefix;
@@ -165,6 +165,9 @@ kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; b
 /* Help: a round ? whose title holds the explanation. Leave the button empty and give it an aria-label. */
 .ui-help { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 50%; background: none; color: var(--tr-fg-dim); font: 600 11px/1 var(--tr-font-ui); cursor: help; }
 .ui-help:empty::before { content: "?"; }
+/* Pressed, its words open under it as a note (HelpTip), over what follows. */
+.ui-help-wrap { position: relative; display: inline-flex; flex: none; }
+.ui-help-note { position: absolute; top: calc(100% + 6px); left: 50%; z-index: 30; width: max-content; max-width: min(320px, 70vw); padding: 8px 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); font: 400 12px/18px var(--tr-font-ui); text-align: left; white-space: normal; transform: translateX(-50%); }
 .ui-help:hover { border-color: var(--tr-line-strong); background: var(--tr-hover); color: var(--tr-fg-strong); }
 /* A hint or a sub-heading that ends in the help button: the two on one line, the button level with the words. */
 .ui-help-line { display: flex; align-items: center; gap: 8px; }
@@ -176,7 +179,6 @@ kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; b
 /* Needs you: everything waiting for the person, opened from the status bar. */
 /* The list opens above the toasts (z-index 70), which sit over the same corner. The cell stretches to the bar's height. */
 .needs-you { position: relative; flex: 0 0 auto; display: flex; }
-.more-tools-page { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 /* A page: 24 px above, 32 px below. Reading and form pages stop at 1200 px, left-aligned; a data page adds .wide. */
 .ui-page, .feature-panel, .history-panel { width: 100%; max-width: 1200px; padding: 24px 0 32px; }
 .ui-page.wide { max-width: none; }
