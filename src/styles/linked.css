@@ -18,6 +18,9 @@
 .linked-grid { flex: 1; min-height: 0; overflow: auto; }
 /* Tiles fill their grid cell, which the person moves and resizes; the arrangement is kept on this computer only. */
 .linked-tile { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+/* A linked tile has no footer: its well, or its conversation (a well of the same form), ends the card's inset above its lower edge. */
+.linked-tile > .chat-view { margin: 0 var(--tr-tile-inset); overflow: hidden; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-small); }
+.linked-tile > :is(.terminal-frame, .chat-view):last-child { margin-bottom: var(--tr-tile-inset); }
 /* Close asks first. The question stays on one line, and the tile's other buttons give it their room meanwhile (as a
    tile on this computer does while it closes): in a narrow tile it wrapped to three lines and pushed the state out. */
 .linked-close-confirm { flex: none; display: inline-flex; align-items: center; gap: 4px; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-strong); white-space: nowrap; }

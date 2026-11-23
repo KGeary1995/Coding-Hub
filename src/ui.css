@@ -251,8 +251,10 @@ kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; b
 .ui-avatar.small svg { width: 12px; height: 12px; }
 .ui-avatar.large { width: 40px; height: 40px; border-radius: var(--tr-r-tile); font-size: 15px; }
 .ui-avatar.large svg { width: 20px; height: 20px; }
-/* Meter: a 6 px track with its fill in the state's colour. Use <progress class="ui-meter"> or a child <i> with a width. */
-.ui-meter, progress { --tone: var(--tr-accent); appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: var(--tr-r-chip); background: var(--tr-well); box-shadow: inset 0 0 0 1px var(--tr-line-faint); overflow: hidden; }
+/* Meter: a 6 px track with its fill in the state's colour. Use <progress class="ui-meter"> or a child <i> with a width.
+   The track is --tr-raised, which shows on a card, a well and the bars alike: as a well with a faint line it was all but
+   invisible on a card, and an empty meter read as nothing at all. */
+.ui-meter, progress { --tone: var(--tr-accent); appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: var(--tr-r-chip); background: var(--tr-raised); overflow: hidden; }
 .ui-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--tone); }
 progress::-webkit-progress-bar { background: none; }
 progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: var(--tone); }

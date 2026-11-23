@@ -55,6 +55,24 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       // The 2 × 2 grid fills the canvas without scrolling: each row takes about half of it. At 1100 × 800 / 125% a
       // tile is about 266 px under xvfb and 254 px on Windows, whose window frame takes part of the 800 px.
       assert.ok(bounds.gridBottom <= bounds.canvasBottom + 1, `grid overflows the canvas at ${width}px / ${scale}%`);
+      // All three engines' plan limits in the bar, as StatusBar draws them (no CLI answers here, so they are put in, and
+      // any real ones set aside meanwhile): each chip is drawn and none reaches past the bar's end, at every size.
+      const plans = await page.evaluate(() => {
+        const footer = document.querySelector('.app-statusbar'); const real = [...footer.querySelectorAll('.tr-sb-plan')]; for (const chip of real) chip.style.display = 'none';
+        const chip = (engine, name) => `<button class="tr-sb-cell tr-sb-plan" data-smoke><svg class="tr-sb-engine tr-state ${engine}" width="12" height="12"></svg><span class="tr-sb-plan-name">${name}</span><span class="tr-sb-window ok"><small>5h</small><i class="tr-sb-meter ui-meter ${engine}"><i style="width:42%"></i></i> 42%</span><span class="tr-sb-window critical worst"><small>wk</small><i class="tr-sb-meter ui-meter danger"><i style="width:100%"></i></i> 100%</span></button>`;
+        footer.querySelector('.tr-sb-today').insertAdjacentHTML('afterend', chip('claude', 'Claude') + chip('codex', 'Codex') + chip('gemini', 'Gemini'));
+        // The widest a chip gets: a named account in use near its cap after the default login's limits, and the mark of a
+        // failed check (StatusBar draws both inside the chip, after its limits).
+        const widest = footer.querySelector('.tr-sb-plan[data-smoke]'); widest.classList.add('stale'); widest.insertAdjacentHTML('beforeend', '<span class="tr-sb-account critical">Work 92%</span><svg class="tr-sb-stale" width="12" height="12"></svg>');
+        const end = footer.getBoundingClientRect().right; const chips = [...footer.querySelectorAll('.tr-sb-plan[data-smoke]')].map((node) => { const { right, width } = node.getBoundingClientRect(); return { right, width, label: node.querySelector('.tr-sb-window.worst small').getBoundingClientRect().width, text: node.innerText.replace(/\s+/g, ' ').trim() }; });
+        const past = [...footer.children].filter((item) => { const box = item.getBoundingClientRect(); return box.width > 1 && box.right > end + 1; }).map((item) => item.className);
+        footer.querySelectorAll('[data-smoke]').forEach((node) => node.remove()); for (const chip of real) chip.style.display = '';
+        return { end, chips, past };
+      });
+      assert.equal(plans.chips.length, 3);
+      assert.ok(plans.chips.every((chip) => chip.width > 1 && chip.right <= plans.end + 1) && plans.past.length === 0, `three plan chips at ${width}px / ${scale}%: ${JSON.stringify(plans)}`);
+      // However far a chip collapses, the limit it keeps is named ("wk"), not a bare percentage.
+      assert.ok(plans.chips.every((chip) => chip.label > 1), `a plan chip's fullest limit has lost its name at ${width}px / ${scale}%: ${JSON.stringify(plans.chips)}`);
       assert.ok(bounds.tiles.every((tile) => tile.width > 200 && tile.height >= 220 && tile.share >= 0.45), `tiles at ${width}px / ${scale}%: ${JSON.stringify(bounds.tiles)}`);
       if (process.env.CODING_HUB_DESIGN_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.CODING_HUB_DESIGN_SCREENSHOTS, `hub-${width}-${scale}.png`) });
     }
@@ -81,7 +99,60 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, and the More tools page.');
+    // Today's total is a chip that opens Usage, by the keyboard as by the pointer, with its focus ring inside its own edge
+    // (the box it leaves a short bar in clips, and outside it the ring was cut off).
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 960));
+    await page.evaluate(() => { document.documentElement.style.zoom = '1'; document.documentElement.style.setProperty('--display-scale', '1'); });
+    await page.waitForTimeout(350);
+    const todayChip = page.locator('.tr-sb-today-button');
+    assert.equal(await todayChip.evaluate((chip) => chip.tagName + ' ' + chip.tabIndex + ' ' + chip.closest('.tr-sb-today').classList.contains('gone')), 'BUTTON 0 false');
+    await todayChip.focus(); assert.equal(await todayChip.evaluate((chip) => getComputedStyle(chip).outlineOffset), '-2px');
+    for (const key of ['Enter', 'Space']) {
+      await todayChip.focus(); await page.keyboard.press(key); await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
+      await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('g'); await page.keyboard.press('w'); await page.locator('.session-tile').first().waitFor();
+    }
+    await todayChip.click(); await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
+    await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('g'); await page.keyboard.press('w'); await page.locator('.session-tile').first().waitFor();
+    // Eight channels, the most there are, in the narrowest windows: nothing in the status bar may reach past its end,
+    // where Needs you and the alert stand, and each tile keeps its name, its state and its controls button in view.
+    for (let i = 0; i < 4; i++) await addChannel(page, 'Claude Code');
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile').length === 8);
+    for (const [width, height, scale] of [[900, 700, 100], [1100, 800, 125]]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width, height]);
+      await page.evaluate((value) => { document.documentElement.style.zoom = String(value / 100); document.documentElement.style.setProperty('--display-scale', String(value / 100)); }, scale);
+      await page.getByRole('button', { name: 'Arrange in grid', exact: true }).click();
+      await page.waitForTimeout(350);
+      const bar = await page.evaluate(() => {
+        const footer = document.querySelector('.app-statusbar'); const end = footer.getBoundingClientRect().right;
+        const drawn = (node) => { const box = node.getBoundingClientRect(); return box.width > 1 && box.height > 1; };
+        return { channels: footer.querySelectorAll('.tr-sb-channel').length, past: [...footer.children].filter((item) => drawn(item) && item.getBoundingClientRect().right > end + 1).map((item) => item.className),
+          hidden: [...document.querySelectorAll('.session-tile')].filter((tile) => { const edge = tile.getBoundingClientRect(); return [...tile.querySelectorAll('.tr-tile-name, .tr-state-chip, .tr-tile-more')].some((part) => { const box = part.getBoundingClientRect(); return !drawn(part) || box.right > edge.right + 1 || box.left < edge.left - 1; }); }).map((tile) => `${Math.round(tile.getBoundingClientRect().width)} px: ` + [...tile.querySelectorAll('.tr-tile-name, .tr-state-chip, .tr-tile-more')].map((part) => `${part.className.split(' ')[0]} ${Math.round(part.getBoundingClientRect().width)}`).join(', ')) };
+      });
+      // The same with everything that asks for the person in the bar at once. No channel runs here, so their parts are
+      // put in as StatusBar draws them (the layout is the stylesheet's): Needs you, an alert, and a storage failure
+      // in place of the saved state. Each must be drawn, inside the bar, and clear of the one before it.
+      const asking = await page.evaluate(() => {
+        const footer = document.querySelector('.app-statusbar'); const saved = footer.querySelector('.storage-status'); const before = { name: saved.className, html: saved.innerHTML };
+        saved.className = 'tr-sb-cell storage-status tr-sb-drop error'; saved.innerHTML = '<span class="tr-sb-inner"><svg width="12" height="12"></svg><span class="tr-sb-error-words">Storage needs attention</span></span>';
+        footer.insertAdjacentHTML('beforeend', '<div class="needs-you" data-smoke><button class="tr-sb-cell needs-you-cell">Needs you<span class="needs-you-sep"> · </span><span class="ui-count waiting">2</span></button></div><button class="tr-sb-cell tr-sb-alert failed" data-smoke><span>✕</span><span class="tr-sb-text">CH2 needs approval · CH5 failed</span></button>');
+        const end = footer.getBoundingClientRect(); const box = (selector) => { const { left, right, width, height } = footer.querySelector(selector).getBoundingClientRect(); return { left, right, width, height }; };
+        const parts = { failure: box('.storage-status.error svg'), needs: box('.needs-you-cell'), alert: box('.tr-sb-alert'), lastChannel: box('.tr-sb-channel:nth-child(8)') };
+        footer.querySelectorAll('[data-smoke]').forEach((node) => node.remove()); saved.className = before.name; saved.innerHTML = before.html;
+        return { left: end.left, right: end.right, parts };
+      });
+      for (const [name, part] of Object.entries(asking.parts)) assert.ok(part.width > 1 && part.height > 1 && part.left >= asking.left - 1 && part.right <= asking.right + 1, `${name} is not in view in the status bar with eight channels at ${width}px / ${scale}%: ${JSON.stringify(asking)}`);
+      assert.ok(asking.parts.lastChannel.right <= asking.parts.failure.left + 1 && asking.parts.failure.right <= asking.parts.needs.left + 1 && asking.parts.needs.right <= asking.parts.alert.left + 1, `status bar items overlap with eight channels at ${width}px / ${scale}%: ${JSON.stringify(asking)}`);
+      // The rectangles are in the window's pixels: 6 px of the page is 7.5 of them at 125%.
+      assert.ok(Math.abs(asking.parts.alert.left - asking.parts.needs.right - 6 * scale / 100) <= 1, `Needs you and the alert are ${asking.parts.alert.left - asking.parts.needs.right} px apart, not the 6 px between chips, at ${width}px / ${scale}%`);
+      assert.ok(asking.parts.alert.width >= 40, `the alert is ${asking.parts.alert.width} px wide with eight channels at ${width}px / ${scale}%`);
+      // Where the Today chip has left the bar it is out of the tab order too, and where it shows it is whole and in it.
+      const today = await page.evaluate(() => { const chip = document.querySelector('.tr-sb-today-button'); const box = chip.closest('.tr-sb-today'); const a = chip.getBoundingClientRect(); const b = box.getBoundingClientRect(); return { gone: box.classList.contains('gone'), tab: chip.tabIndex, hidden: chip.getAttribute('aria-hidden'), drawn: a.top - b.top < b.height / 2 && a.width > 1 && a.right <= b.right + 1 }; });
+      assert.ok(today.gone ? today.tab === -1 && today.hidden === 'true' && !today.drawn : today.tab === 0 && today.hidden === null && today.drawn, `the Today chip with eight channels at ${width}px / ${scale}%: ${JSON.stringify(today)}`);
+      assert.equal(bar.channels, 8);
+      assert.deepEqual(bar.past, [], `status bar items past its end with eight channels at ${width}px / ${scale}%`);
+      assert.deepEqual(bar.hidden, [], `tiles whose name, state or controls button is out of view with eight channels at ${width}px / ${scale}%`);
+    }
+    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, the More tools page, and eight channels in the narrowest windows.');
   } finally {
     await app?.close().catch(() => {});
     await removeFolder(root);

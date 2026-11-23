@@ -47,7 +47,7 @@ Notes whose copies differ only in bytes (another program rewrote their line endi
 
 A project that says it exceeds its note limit (another computer's notes arrived while it was nearly full) is repaired by saving one new note: the oldest handoffs move to the project's `archive/` folder. Open items and decisions are never moved.
 
-### Today's total (Σ today) looks wrong
+### Today's total (Today in the status bar) looks wrong
 
 Trace reads Claude Code's and Codex's own logs for the last 60 days and keeps how far it read each one in `~/.coding-hub/day-usage.json` (`DayUsage`, `electron/services/hub/day-usage.ts`). If a CLI rewrote or removed its logs, the saved positions can be off. Quit Trace, delete `day-usage.json`, and start it again: the next start reads the 60 days again, in the background, so the total fills in over the first minute or so. Agents that a Claude Code workflow starts are counted too, and can appear up to 5 seconds after they start.
 

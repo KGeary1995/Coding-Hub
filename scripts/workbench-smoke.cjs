@@ -61,18 +61,27 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await tile.getByRole('status', { name: 'Channel 3 working', exact: true }).textContent(), 'Working');
     await page.waitForFunction(() => { const ys = [...document.querySelectorAll('.session-tile')[2].querySelector('.tr-scope-trace').getAttribute('d').matchAll(/ (-?[\d.]+)/g)].map((match) => Number(match[1])); return new Set(ys).size > 1; });
     await page.mouse.move(1, 1);
-    const detail = tile.locator('.tr-tile-detail');
-    await page.waitForFunction(() => getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')).opacity === '0');
-    // Shown, the row has its own height and stays clear of the header's state badge and action buttons.
+    const detail = tile.locator('.tr-tile-detail'); const more = tile.getByRole('button', { name: 'Controls of channel 3', exact: true });
+    // The controls row is closed until its button opens it. Pointing at the header does not show it: it once floated over
+    // the terminal's first lines for as long as the pointer was there.
+    await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } }); await page.waitForTimeout(300);
+    assert.equal(await detail.isVisible(), false, 'Pointing at the header opened the controls row');
+    // Opened, the row has its own place: clear of the header's state badge and action buttons, and above the terminal, not on it.
     const detailShown = async () => {
-      await tile.locator('.tr-tile-head').hover({ position: { x: 12, y: 12 } });
-      await page.waitForFunction(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.opacity === '1' && style.transform === 'none'; });
-      const { row, others } = await tile.evaluate((element) => { const box = (node) => { const { left, right, top, bottom } = node.getBoundingClientRect(); return { left, right, top, bottom }; }; return { row: box(element.querySelector('.tr-tile-detail')), others: [...element.querySelectorAll('.tr-state-chip, .tr-tile-head .tr-action')].map(box) }; });
-      assert.ok(row.bottom - row.top >= 22, `The detail row is ${row.bottom - row.top} px high`);
-      for (const other of others) assert.ok(other.right <= row.left || other.left >= row.right || other.bottom <= row.top || other.top >= row.bottom, 'The detail row lies over the header');
+      if (await more.getAttribute('aria-expanded') === 'false') await more.click();
+      await detail.waitFor();
+      const { row, others, well } = await tile.evaluate((element) => { const box = (node) => { const { left, right, top, bottom } = node.getBoundingClientRect(); return { left, right, top, bottom }; }; return { row: box(element.querySelector('.tr-tile-detail')), others: [...element.querySelectorAll('.tr-state-chip, .tr-tile-head .tr-action')].map(box), well: box(element.querySelector('.terminal-frame')) }; });
+      assert.ok(row.bottom - row.top >= 22, `The controls row is ${row.bottom - row.top} px high`);
+      for (const other of others) assert.ok(other.right <= row.left || other.left >= row.right || other.bottom <= row.top || other.top >= row.bottom, 'The controls row lies over the header');
+      assert.ok(row.bottom <= well.top + 1, `The controls row lies over the terminal: it ends at ${row.bottom} and the terminal starts at ${well.top}`);
     };
     await detailShown();
-    assert.match(await detail.textContent(), /pid \d+ · folder /);
+    // In plain words; the process ID is in the facts' tooltip, with the folder's whole path.
+    assert.match(await detail.textContent(), /^Running · Folder /); assert.match(await detail.locator('.tr-detail-facts').getAttribute('title'), / · Process ID \d+$/);
+    await more.click(); assert.equal(await detail.isVisible(), false, 'The controls button did not close the row');
+    // Held open by the settings it opened, the row closes with them at one press: the button never does nothing.
+    await (await tileControl(tile, 'Engine settings for channel 3')).click(); await tile.locator('.session-config').waitFor();
+    await more.click(); assert.equal(await detail.isVisible(), false, 'The controls button did not close a row its settings held open'); assert.equal(await tile.locator('.session-config').count(), 0, 'The controls button left the settings open');
     await page.mouse.move(1, 1);
     // Enter on the tile itself moves into its terminal.
     await tile.focus(); await page.keyboard.press('Enter');
@@ -118,9 +127,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[2].querySelector('.session-error')?.textContent.includes('fixture invalid model'));
     // The failed tile is on screen: Retry is in its header, and no notice is drawn.
     await tile.getByRole('button', { name: 'Retry', exact: true }).waitFor(); assert.equal(await page.locator('.tr-toast.failed').count(), 0, 'A failed channel whose tile is on screen raises no notice');
-    // With an error line under the header the row sits in the flow and stays shown, so it never covers the line or its button.
+    // With an error line under the header the row, opened, stands over the line: it never covers the line or its button.
     await detailShown(); await page.mouse.move(1, 1);
-    assert.equal(await page.evaluate(() => { const style = getComputedStyle(document.querySelectorAll('.session-tile')[2].querySelector('.tr-tile-detail')); return style.position + ' ' + style.opacity; }), 'static 1');
     assert.equal(await tile.locator('.session-error button').first().evaluate((button) => { const { left, top, width, height } = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(left + width / 2, top + height / 2)); }), true, 'The failed channel’s error button is covered');
     // A short tile can push the repeated error into scrollback (the Windows console repaints the main screen
     // first), so scroll back a line at a time until it is in view, as a user would.

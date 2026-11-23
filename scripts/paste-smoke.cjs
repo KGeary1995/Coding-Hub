@@ -44,7 +44,8 @@ const hex = (text) => Buffer.from(text).toString('hex');
   const received = async () => (await fs.readFile(log, 'utf8')).split('\n').filter(Boolean);
   const after = async (mark, prefix, wait = 1500) => { await sleep(wait); return (await received()).slice(mark).filter((line) => line.startsWith(prefix)); };
   const useFolder = async (tile) => {
-    const name = await tile.getByRole('button', { name: /^Engine settings for channel \d+$/ }).getAttribute('aria-label');
+    // The controls row is closed until its button opens it (tileControl does), so its button is looked for among the hidden.
+    const name = await tile.getByRole('button', { name: /^Engine settings for channel \d+$/, includeHidden: true }).getAttribute('aria-label');
     await (await tileControl(tile, name)).click();
     await tile.getByLabel('Working folder', { exact: true }).selectOption('independent'); await tile.getByLabel('Repository path', { exact: true }).fill(project);
     await (await tileControl(tile, name)).click();

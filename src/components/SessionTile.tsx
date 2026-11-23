@@ -3,7 +3,7 @@ import { SessionPreferences } from './SessionPreferences';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown } from 'lucide-react';
+import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, Ellipsis, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -40,7 +40,7 @@ import { closeAsks, ConfirmStep } from './ConfirmStep';
 const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
-/** One channel: header, a detail row on hover or keyboard focus, notices, the terminal and the footer (docs/design/midnight/README.md, section 5). */
+/** One channel: header, a controls row its button opens, notices, the terminal and the footer (docs/design/midnight/README.md, section 5). */
 export const SessionTile = memo(function SessionTile({ session, index }: { session: Session; index: number }) {
   const profiles = useAccountStore((s) => s.profiles);
   useEffect(() => { if (session.config.engine === 'claude') void refreshClaudeProfiles(); }, [session.config.engine]);
@@ -52,6 +52,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const { name, topic } = useChannelName(session);
   const [coachingSent, setCoachingSent] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
+  /** The controls row, opened and closed by its button in the header. */
+  const [detailPinned, setDetailPinned] = useState(false);
   const [conversation, setConversation] = useState(false);
   const [stopping, setStopping] = useState(false);
   /** Close on a running channel asks first: it stops the agent mid-task, and the tile cannot be brought back. */
@@ -131,13 +133,15 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
   const facts = [
-    stopping ? 'stopping CLI and child processes…' : session.pid ? `pid ${session.pid}` : session.status === 'starting' ? 'checking local CLI…' : session.exitCode !== null ? `exit ${session.exitCode}` : 'ready to launch',
-    cwd ? `folder ${folderName(cwd)}` : 'no working folder',
-    usage ? `cost ${dollars(usage.cost)}` : null,
-    context ? `ctx ${compact(context.used)} / ${compact(context.limit)}` : contextUsed !== null ? `ctx ${compact(contextUsed)}` : null,
+    stopping ? 'Stopping the CLI and what it started…' : session.pid ? 'Running' : session.status === 'starting' ? 'Checking the CLI…' : session.exitCode !== null ? (session.exitCode === 0 ? 'Ended normally' : `Ended with exit code ${session.exitCode}`) : 'Ready to start',
+    cwd ? `Folder ${folderName(cwd)}` : 'No folder chosen',
+    usage ? `Cost ${dollars(usage.cost)}` : null,
+    context ? `Context ${compact(context.used)} of ${compact(context.limit)}` : contextUsed !== null ? `Context ${compact(contextUsed)}` : null,
   ].filter(Boolean);
+  // The row stands open while what it opened is in use: the settings, a conversation, the question Close asks.
+  const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;
   return (
-    <article ref={tile} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
+    <article ref={tile} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${detailOpen ? 'detail-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
       data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
@@ -151,11 +155,12 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {account && <span className="tr-profile-chip account-profile-chip ui-badge" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           {action}
-          <span className="tr-state-chip ui-badge" role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}><i className="dot" aria-hidden="true" />{meta.word}</span>
+          <button className={`tr-detail-button icon tr-tile-more ${detailOpen ? 'selected' : ''}`} title={detailOpen ? 'Hide this channel’s controls' : 'Show this channel’s controls: Stop, Settings, Maximize and more'} aria-label={`Controls of channel ${channel}`} aria-expanded={detailOpen} onClick={() => { /* Closing it closes what holds it open too (the settings, the conversation, the close question), or the press would do nothing. */ if (detailOpen) { setControlsOpen(false); setConversation(false); setConfirmClose(false); } setDetailPinned(!detailOpen); }}><Ellipsis size={14} aria-hidden="true" /></button>
+          <span className="tr-state-chip ui-badge" role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}><i className="dot" aria-hidden="true" /><span className="tr-state-word">{meta.word}</span></span>
         </header>
         <div className="tr-tile-detail">
           {/* One span a fact, each after the first with its separator: a fact with no room leaves whole (tile.css). */}
-          <span className="tr-detail-facts" title={cwd ?? undefined}>{facts.map((fact, index) => <span key={index}>{index ? ' · ' : ''}{fact}</span>)}</span>
+          <span className="tr-detail-facts" title={[cwd, session.pid ? `Process ID ${session.pid}` : null].filter(Boolean).join(' · ') || undefined}>{facts.map((fact, index) => <span key={index}>{index ? ' · ' : ''}{fact}</span>)}</span>
           {session.status === 'running' && <button className="tr-detail-button icon" title="Interrupt current operation (Ctrl+C)" aria-label={`Interrupt channel ${channel}`} onClick={interrupt} disabled={stopping}><OctagonPause size={13} /></button>}
           {session.status === 'running'
             ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
@@ -194,7 +199,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
-      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} tokens={today.tokens} contextUsed={contextUsed}
+      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={today.tokens} contextUsed={contextUsed}
         tokensTitle={today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}

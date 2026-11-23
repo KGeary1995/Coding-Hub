@@ -9,14 +9,16 @@
 .session-grid-container { height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .focused-session { height: 100%; min-height: 340px; }
 
-/* ---------- The tile: a card whose well is the terminal ---------- */
+/* ---------- The tile: a card, with the terminal as a well set into it ---------- */
+/* The header, the footer and the strips are drawn on the card itself; only the terminal (or the conversation) is the
+   dark well, --tr-tile-inset in from the card's sides, so a channel reads as a window of the app, not a bare terminal. */
 .session-tile { container-type: inline-size; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 /* --ch is the engine's colour: the channel number, Start, a working state and the output trace take it.
    --term-top is the well's padding over the terminal's first line. --term-cover is how far down the well a row laid over
-   its top reaches: the detail row's height, then on to the end of the terminal line that height falls in, so a line is
+   its top reaches (a waiting channel's request strip): the controls row's height, then on to the end of the terminal line that height falls in, so a line is
    covered whole or not at all. --tr-term-row is one line's height, which SessionTile measures (useTerminalRow); until
    then the cover is the row's own height. */
-.session-tile.tr-tile { --ch: var(--tr-ch-codex); --term-top: 12px; --term-cover: calc(round(up, var(--tr-tile-detail-h) - var(--term-top), var(--tr-term-row, 1px)) + var(--term-top)); position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); box-shadow: var(--tr-shadow-card); transition: border-color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease); }
+.session-tile.tr-tile { --ch: var(--tr-ch-codex); --term-top: 12px; --term-cover: calc(round(up, var(--tr-tile-detail-h) - var(--term-top), var(--tr-term-row, 1px)) + var(--term-top)); position: relative; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-card); box-shadow: var(--tr-shadow-card); transition: border-color var(--tr-d-fast) var(--tr-ease), box-shadow var(--tr-d-fast) var(--tr-ease); }
 .session-tile.tr-tile.claude { --ch: var(--tr-ch-claude); }
 .session-tile.tr-tile.gemini { --ch: var(--tr-ch-gemini); }
 .session-tile.tr-tile.shell { --ch: var(--tr-ch-shell); }
@@ -40,10 +42,10 @@
 .session-tile.tr-tile[data-account]::before { content: ""; position: absolute; z-index: 20; inset: 0 auto 0 0; width: 3px; background: var(--account); pointer-events: none; }
 
 /* ---------- Header: handle, engine, CH1, name, topic | model, account, action, state ---------- */
-/* The top block holds the header and anchors the detail row that floats over the terminal. */
+/* The top block holds the header and, under it, the controls row. */
 .tr-tile-top { position: relative; z-index: 4; flex: none; }
 .tile-header { flex: none; }
-.tr-tile .tr-tile-head { height: var(--tr-tile-head-h); display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 8px; border-bottom: 1px solid var(--tr-tile-border); background: var(--tr-surface); }
+.tr-tile .tr-tile-head { height: var(--tr-tile-head-h); display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 8px; }
 .tr-tile .tile-drag-handle { flex: none; display: grid; place-items: center; color: var(--tr-fg-off); cursor: grab; }
 .tr-tile .tile-drag-handle:hover { color: var(--tr-fg-dim); }
 .tr-ch-badge { flex: none; color: var(--ch); font: 600 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -87,30 +89,20 @@
 .tr-action.retry, .tr-action.retry:hover:not(:disabled) { border-color: var(--tr-accent-solid); background: var(--tr-accent-solid); color: var(--tr-on-accent); }
 .tr-action.retry:hover:not(:disabled) { border-color: var(--tr-accent-solid-hover); background: var(--tr-accent-solid-hover); }
 
-/* ---------- Detail row ---------- */
-/* Laid over the top of the terminal, under the header, while the header is pointed at or a control has keyboard focus,
-   so the terminal never resizes for it. With settings open, or with anything but the terminal under the header (a
-   failed channel's error line, the prepared-request notice, a chat's approval banner), it sits in the flow and stays
-   shown instead: laid over a notice, it kept that notice's buttons out of reach for as long as the header held the focus. */
-.tr-tile-detail { position: absolute; left: 0; right: 0; top: var(--tr-tile-head-h); height: var(--tr-tile-detail-h); display: flex; align-items: center; gap: 4px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--tr-tile-border); background: var(--tr-surface); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--tr-d-fast) var(--tr-ease), transform var(--tr-d-fast) var(--tr-ease); }
-.tr-tile-head:hover ~ .tr-tile-detail, .tr-tile-detail:hover, .tr-tile-top:focus-within .tr-tile-detail, .config-open .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
-.config-open .tr-tile-detail, .tr-tile-top:not(:has(+ .terminal-frame)) .tr-tile-detail { position: static; height: var(--tr-tile-detail-h); opacity: 1; transform: none; pointer-events: auto; }
-/* Over a terminal the row ends inside the first line (the lines start 12 px down, the row is 30 px high), which left a
-   sliver of cut letters under it: the well is covered on to the end of that line (--term-cover). Not over a conversation,
-   which starts under the row. */
-.tr-tile-top:has(+ .terminal-frame:not(.chat-frame)) > .tr-tile-detail::after { content: ""; position: absolute; left: 0; right: 0; top: calc(100% + 1px); height: calc(var(--term-cover) - var(--tr-tile-detail-h)); background: var(--tr-term); pointer-events: none; }
-.tr-tile:has(> .terminal-frame > .transcript-overlay) .tr-tile-detail::after { content: none; }
+/* ---------- Controls row ---------- */
+/* The channel's facts and its controls, in a row of their own under the header: a toolbar on the card, a --tr-well row of
+   the well's width, 4 px over what follows. It is opened and closed by the header's controls button (.tr-tile-more), and
+   stands open while it is needed (the settings it opens, a conversation, the close question): SessionTile sets
+   .detail-open. It is never laid over the terminal: it once floated over the first lines while the header was pointed
+   at, and covered output. Opening it takes 34 px from the terminal once, when the person asks, not on every hover. */
+.tr-tile-detail { display: none; height: var(--tr-tile-detail-h); align-items: center; gap: 4px; margin: 0 var(--tr-tile-inset) 4px; padding: 0 8px 0 12px; border-radius: var(--tr-r-small); background: var(--tr-well); }
+.detail-open .tr-tile-detail { display: flex; }
 /* The facts give way whole, last first, never mid-word: each is an item that wraps to a second line when the row is
    short, and the one-line box clips that line. Only the first, which cannot wrap, shortens with an ellipsis. */
 .tr-detail-facts { flex: 1; min-width: 0; height: 16px; display: flex; flex-wrap: wrap; overflow: hidden; white-space: pre; font: var(--tr-t-small); font-variant-numeric: tabular-nums; color: var(--tr-fg-dim); }
 .tr-detail-facts > span { flex: none; }
 .tr-detail-facts > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* While a conversation is open the row stays shown and the conversation starts under it (see .transcript-overlay).
-   Laid over the conversation, the row covered its bar (the title and Refresh) for as long as the pointer or the focus
-   stayed in the header, which the focus does right after Conversation is pressed. */
-.tr-tile:has(> .terminal-frame > .transcript-overlay) .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
-/* Close on a running channel asks in the detail row: the row stays shown and holds only the question. */
-.tr-tile.closing .tr-tile-detail { opacity: 1; transform: none; pointer-events: auto; }
+/* Close on a running channel asks in the controls row: the row opens for it (SessionTile) and holds only the question. */
 .tr-tile.closing .tr-tile-detail > .tr-detail-button { display: none; }
 /* The row's buttons, and a linked tile's in its header, are the shared detail button (ui.css). A labelled one is 2 px
    tighter at each side here, where it shares the row with the facts. */
@@ -122,10 +114,10 @@
   :is(.tr-tile-detail, .tr-tile-head) .tr-detail-button:has(.tr-detail-icon) .tr-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
-/* ---------- Notices under the header: full-width strips in a banner's colours ---------- */
-/* Three lines at most, then it scrolls: 60 px of lines, 8 of padding and the line under them (at 68 px, three lines
-   already scrolled by that one pixel). */
-.session-error { --tone: var(--tr-danger); flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 69px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
+/* ---------- Notices under the header: strips in a banner's colours, as wide as the well ---------- */
+/* Three lines at most, then it scrolls: 60 px of lines, 8 of padding and its frame's 2 (one pixel short, three lines
+   already scrolled). */
+.session-error { --tone: var(--tr-danger); flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 70px; overflow-y: auto; margin: 0 var(--tr-tile-inset) 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
 /* A prepared request waiting to be sent is information; a missing login is a warning. */
 .session-error.notice { --tone: var(--tr-accent); }
 .session-error.warning { --tone: var(--tr-warning); }
@@ -154,20 +146,22 @@
 .session-error-more[aria-expanded="true"] > svg { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .session-error-more > svg { transition: none; } }
 /* A channel waiting for the person. Answering happens in the CLI's own prompt. Its fill is solid, since it can lie over text. */
-.session-attention { display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tr-st-waiting) 40%, var(--tr-term)); background: color-mix(in srgb, var(--tr-st-waiting) 14%, var(--tr-term)); color: var(--tr-fg-strong); font: 500 13px/20px var(--tr-font-ui); }
+.session-attention { display: flex; align-items: center; gap: 8px; margin: 0 var(--tr-tile-inset) 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--tr-st-waiting) 40%, var(--tr-term)); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tr-st-waiting) 14%, var(--tr-term)); color: var(--tr-fg-strong); font: 500 13px/20px var(--tr-font-ui); }
 .session-attention > span:first-child { color: var(--tr-st-waiting); font-size: 11px; }
 .session-attention > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* On a terminal channel it lies over the top of the terminal, so the terminal (and the CLI's size) stays as it is.
    It holds nothing to press, so clicks and selection reach the terminal under it. It ends where a terminal line ends
-   (--term-cover), as the detail row's cover does. */
-.terminal-frame > .session-attention.over-terminal { position: absolute; top: 0; left: 0; right: 0; z-index: 3; height: var(--term-cover); pointer-events: none; }
-.budget-notice { --tone: var(--tr-st-limit); flex-shrink: 0; max-height: 96px; overflow: auto; padding: 4px 12px; border-bottom: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
+   (--term-cover), which is measured from the well's outer edge, so less its 1 px frame here. */
+.terminal-frame > .session-attention.over-terminal { position: absolute; top: 0; left: 0; right: 0; z-index: 3; height: calc(var(--term-cover) - 1px); margin: 0; border-width: 0 0 1px; border-radius: 0; pointer-events: none; }
+.budget-notice { --tone: var(--tr-st-limit); flex-shrink: 0; max-height: 96px; overflow: auto; margin: 0 var(--tr-tile-inset) 4px; padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 14%, transparent); color: var(--tr-fg); font: 400 12px/20px var(--tr-font-ui); }
 .budget-notice summary { font: 500 12px/20px var(--tr-font-ui); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); }
 .budget-notice p { margin: 4px 0; }
 
 /* ---------- The terminal well ---------- */
 .terminal-frame { flex: 1; min-height: 70px; position: relative; container-type: size; }
-.tr-tile .terminal-frame { padding: var(--term-top) 12px 8px; background: var(--tr-term); }
+/* The well: in from the card's sides, with a faint frame of its own, which is part of --term-top: the lines still start
+   12 px under the header. It clips what lies over its corners (the start area, a request strip, a conversation). */
+.tr-tile .terminal-frame { margin: 0 var(--tr-tile-inset); padding: calc(var(--term-top) - 1px) 12px 8px; overflow: hidden; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-small); background: var(--tr-term); box-shadow: var(--tr-shadow-well); }
 /* Chat channels: the conversation drawn by Trace fills the well. */
 .terminal-frame.chat-frame { padding: 0; display: flex; min-height: 0; }
 .terminal-viewport, .terminal-surface { width: 100%; height: 100%; }
@@ -183,19 +177,15 @@
 .terminal-viewport .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { left: 4px !important; width: 6px !important; border-radius: var(--tr-r-chip); }
 /* Over the terminal rather than instead of it, so the running CLI keeps its size. */
 .transcript-overlay { position: absolute; inset: 0; display: flex; z-index: 2; }
-/* Under the detail row where that row floats over the well (it stays shown while a conversation is open), so the
-   conversation's own bar is never under it. Where the row sits in the flow, the well already starts below it. */
-.tr-tile-top + .terminal-frame > .transcript-overlay { top: var(--tr-tile-detail-h); }
-/* A channel that needs the person while its conversation is open: what it asks stays in view, as a second row of the
-   detail row's height under it (the row would cover it for as long as the conversation is open), and the conversation
-   starts under both. */
-.tr-tile-top + .terminal-frame:has(> .transcript-overlay) > .session-attention.over-terminal { top: var(--tr-tile-detail-h); height: var(--tr-tile-detail-h); }
-.tr-tile-top + .terminal-frame:has(> .session-attention.over-terminal) > .transcript-overlay { top: calc(var(--tr-tile-detail-h) * 2); }
+/* A channel that needs the person while its conversation is open: what it asks stays in view, as a row of the controls
+   row's height at the top of the well, and the conversation starts under it. */
+.tr-tile-top + .terminal-frame:has(> .transcript-overlay) > .session-attention.over-terminal { height: var(--tr-tile-detail-h); }
+.tr-tile-top + .terminal-frame:has(> .session-attention.over-terminal) > .transcript-overlay { top: var(--tr-tile-detail-h); }
 
 /* ---------- Before a channel starts: the engine, its name, one line, the folder and Start ---------- */
-/* The top padding keeps the content clear of the detail row, which lies over the top of the well while the header is
-   pointed at. */
-.session-welcome { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 8px; padding: 32px 16px 16px; overflow: auto; background: var(--tr-term); text-align: center; }
+/* A channel that has not started is not a terminal yet: its start area is the card's own surface inside the
+   well's frame, solid since the terminal lies under it, and the well turns dark when the channel runs. */
+.session-welcome { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 8px; padding: 16px; overflow: auto; background: var(--tr-surface-2); text-align: center; }
 .session-welcome .welcome-engine { margin-bottom: 4px; }
 .session-welcome h3 { margin: 0; font: var(--tr-t-section); color: var(--tr-fg-strong); }
 .session-welcome p { max-width: 320px; margin: 0; font: 400 13px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
@@ -215,26 +205,33 @@
   .welcome-actions { margin-top: 4px; }
 }
 
-/* ---------- Footer: one 24 px row under the terminal, in 12 px with tabular numbers ---------- */
-/* The context meter (the channel's budget when the CLI reports no window), its share, the channel's tokens today, then the
-   output trace and its rate. --trace is the state's colour; an idle trace is a mark, not a signal. */
-.tr-tile-foot { --trace: var(--tr-fg-off); flex: none; height: 24px; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 12px; border-top: 1px solid var(--tr-tile-border); background: var(--tr-surface-2); color: var(--tr-fg-dim); font: var(--tr-t-small); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+/* ---------- Footer: one 28 px row on the card under the well, in 12 px with tabular numbers ---------- */
+/* At the left what the channel has used, each a mark, a label and a value: its context (a meter and its share when the
+   CLI reports a window, or the channel's budget; only the amount when it reports none) and its tokens today. At the
+   right the output trace, a fixed 96 px, and its rate. --trace is the state's colour; an idle trace is a mark, not a
+   signal. */
+.tr-tile-foot { --trace: var(--tr-fg-off); flex: none; height: var(--tr-tile-foot-h); display: flex; align-items: center; gap: 16px; min-width: 0; padding: 0 calc(var(--tr-tile-inset) + 12px); color: var(--tr-fg-dim); font: var(--tr-t-small); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+/* A channel that is not running has no output to trace: the trace and its rate keep their place and are not drawn. */
+.tr-tile-foot.state-idle :is(.tr-scope-plot, .tr-scope-rate) { visibility: hidden; }
 .tr-tile-foot.state-starting { --trace: var(--tr-st-starting); }
 .tr-tile-foot.state-working { --trace: var(--ch); }
 .tr-tile-foot.state-waiting { --trace: var(--tr-st-waiting); }
 .tr-tile-foot.state-finished { --trace: var(--tr-st-finished); }
 .tr-tile-foot.state-failed { --trace: var(--tr-st-failed); }
 .tr-tile-foot.state-limit { --trace: var(--tr-st-limit); }
-.tr-tile-foot .tr-scope-limit { flex: 0 1 96px; width: auto; min-width: 32px; }
-.tr-foot-value { flex: none; font-weight: 400; color: var(--tr-fg-muted); }
+.tr-foot-item { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.tr-foot-item > svg { flex: none; color: var(--tr-fg-faint); }
+.tr-tile-foot .tr-scope-limit { flex: none; width: 56px; height: 4px; }
+.tr-foot-value { flex: none; font-weight: 600; color: var(--tr-fg); }
 .tr-foot-value.hot { color: var(--tr-st-limit); }
-.tr-scope-plot { flex: 1 1 80px; min-width: 40px; height: 16px; display: block; }
+.tr-scope-plot { flex: none; width: 96px; height: 14px; margin-left: auto; display: block; }
 .tr-scope-trace { fill: none; stroke: var(--trace); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.tr-scope-rate { flex: none; }
+/* The rate keeps its width whatever it reads, so the trace does not move as output comes and goes. */
+.tr-scope-rate { flex: none; min-width: 64px; margin-left: -8px; text-align: right; color: var(--tr-fg-faint); }
 
 /* ---------- Strips under the footer ---------- */
 /* The channel's task; red while it has a warning. Clicking opens Tasks. */
-.task-strip { flex-shrink: 0; width: 100%; min-width: 0; height: 24px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 0; border-top: 1px solid var(--tr-tile-border); background: var(--tr-surface-2); color: var(--tr-fg-dim); font: var(--tr-t-small); text-align: left; cursor: pointer; }
+.task-strip { flex-shrink: 0; width: 100%; min-width: 0; height: 24px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 0; border-top: 1px solid var(--tr-line-faint); color: var(--tr-fg-dim); font: var(--tr-t-small); text-align: left; cursor: pointer; }
 .task-strip:hover { background: var(--tr-hover); color: var(--tr-fg); }
 .task-strip.warned { border-top-color: var(--tr-danger); }
 .task-strip > svg { flex: none; }
@@ -244,7 +241,7 @@
 .task-strip .muted { font-size: 12px; white-space: nowrap; }
 .task-strip .error-message { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Live coaching under a channel: quiet, outside the terminal, at most a few lines before it scrolls. */
-.live-tip { flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 132px; overflow-y: auto; padding: 4px 12px; border-top: 1px solid var(--tr-tile-border); background: var(--tr-surface-2); color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-ui); }
+.live-tip { flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 132px; overflow-y: auto; padding: 4px 12px; border-top: 1px solid var(--tr-line-faint); color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-ui); }
 .live-tip-icon { flex: none; width: 14px; height: 24px; color: var(--tr-accent); }
 .live-tip-body { flex: 1; align-self: safe center; min-width: 0; }
 .live-tip-body p { margin: 0; overflow-wrap: anywhere; }
@@ -253,7 +250,7 @@
 .live-tip-body pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/20px var(--tr-font-mono); color: var(--tr-fg); }
 .live-tip-actions { flex: none; display: flex; align-items: center; gap: 4px; }
 /* Pasted images: Trace's view of what the person pasted; the CLI attaches its own copy. */
-.pasted-images { flex-shrink: 0; display: flex; align-items: flex-end; gap: 12px; padding: 4px 12px 8px; border-top: 1px solid var(--tr-tile-border); background: var(--tr-surface-2); }
+.pasted-images { flex-shrink: 0; display: flex; align-items: flex-end; gap: 12px; padding: 4px 12px 8px; border-top: 1px solid var(--tr-line-faint); }
 /* In a narrow tile the attached group gives way (its heading shortens, its images scroll); the sent group keeps room
    for its heading and Clear. */
 .pasted-group { display: flex; flex-direction: column; min-width: 0; }
@@ -274,7 +271,7 @@
 .pasted-images li.sent .pasted-thumb img { height: 36px; max-width: 72px; opacity: .8; }
 
 /* ---------- Settings: opens under the header, built from shared fields ---------- */
-.session-config { flex-shrink: 0; min-width: 0; max-height: 55%; overflow-y: auto; margin: 0; padding: 16px; border: 0; border-bottom: 1px solid var(--tr-tile-border); background: var(--tr-surface); }
+.session-config { flex-shrink: 0; min-width: 0; max-height: 55%; overflow-y: auto; margin: 0; padding: 4px calc(var(--tr-tile-inset) + 12px) 16px; border: 0; }
 .session-config > * + *, .session-preferences > * + * { margin-top: 12px; }
 .engine-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .engine-controls .model-control { grid-column: 1 / -1; }
@@ -307,7 +304,16 @@
   .session-error > .session-error-log { display: inline-flex; }
 }
 @container (max-width: 320px) { .tr-tile-head > .ui-avatar, .tr-tile-head .tr-action svg { display: none; } }
+/* Eight channels in four columns on the narrowest window (about 210 px a tile): the state badge keeps only its dot, in
+   the state's colour (its word stays its text for a screen reader, and the tile's frame and the status bar say it too),
+   so the name still shows beside the action and the controls button. */
+@container (max-width: 260px) {
+  .tr-tile .tr-state-chip { gap: 0; padding: 0 6px; }
+  .tr-state-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 
 /* ---------- Higher contrast (Settings > Display) ---------- */
 /* The tile's frame and its inner dividers come from --tr-tile-border, which that setting raises; the dim words follow. */
-[data-contrast="high"] :is(.tr-tile-topic, .tr-tile-model, .tr-detail-facts, .tr-tile-foot, .session-welcome p) { color: var(--tr-fg); }
+[data-contrast="high"] :is(.tr-tile-topic, .tr-tile-model, .tr-detail-facts, .tr-tile-foot, .tr-scope-rate, .session-welcome p) { color: var(--tr-fg); }
+[data-contrast="high"] .tr-foot-item > svg { color: var(--tr-fg-dim); }
+[data-contrast="high"] .tr-tile .terminal-frame { border-color: var(--tr-tile-border); }

@@ -43,7 +43,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
    assert.equal(await page.evaluate(runId=>window.events.some(event=>event.runId===runId&&event.type==='exit'),claude.runId),false,'Submitting a prompt must keep the Claude channel running');
   }
   assert.doesNotThrow(()=>process.kill(claude.pid,0));
-  await page.getByRole('link',{name:'Trace home',exact:true}).click();assert.equal(await first.getByRole('button',{name:'Stop',exact:true}).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));
+  await page.getByRole('link',{name:'Trace home',exact:true}).click();assert.equal(await (await tileControl(first, 'Stop')).isVisible(),true);assert.doesNotThrow(()=>process.kill(claude.pid,0));
   const child=app.process();await app.evaluate(async({BrowserWindow})=>{
    const window=BrowserWindow.getAllWindows().find(window=>window.getTitle()==='Trace');
    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Renderer recovery did not reload')),15000);window.webContents.once('did-finish-load',()=>{clearTimeout(timer);resolve();});window.webContents.forcefullyCrashRenderer();});

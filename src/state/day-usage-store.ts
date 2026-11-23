@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { localDay, type DayUsage, type LogUsage } from '../../shared/hub';
 import { workbench } from '../runtime/workbench';
 
-/** Today's usage from the CLIs' own logs (see DayUsage on the host), for the status bar's "Σ today". */
+/** Today's usage from the CLIs' own logs (see DayUsage on the host), for the status bar's Today total. */
 export const useDayUsage = create<{ usage: DayUsage | null; days: LogUsage | null }>(() => ({ usage: null, days: null }));
 let reading = false; let readingDays = false;
 /**
