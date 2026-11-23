@@ -44,6 +44,11 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: { dataset?: Rec
 }
 
 const app = document.getElementById('app')!;
+/**
+ * The height of what can be seen: smaller than the window while a phone's keyboard is open. iOS keeps 100dvh at the
+ * full height then, so the chat's message box went under the keyboard; the chat is sized from this (1.31.6).
+ */
+{ const view = window.visualViewport; if (view) { const set = () => document.documentElement.style.setProperty('--seen-height', `${Math.round(view.height)}px`); view.addEventListener('resize', set); set(); } }
 let channels: RemoteChannel[] = []; let current: string | null = null; let run: string | null = null;
 let stop: (() => void) | null = null; let terminal: Terminal | null = null; let fit: FitAddon | null = null; let connected = false;
 /** The other computer the phone is talking to directly while this app's own computer is off, if any. */
@@ -84,7 +89,10 @@ function showTab(tab: Exclude<Tab, 'channels'>) {
   leaveScreen(); leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   const label = TABS.find((item) => item.id === tab)!.label;
   const screen = h('div', { className: 'screen-host' });
-  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), directNotice(), screen);
+  // With more than one computer, which one these are from: the one the phone is connected to, whichever the channel
+  // list is showing (before 1.31.6 nothing said so, and picking another computer for the list did not change them).
+  const from = activeTarget().name ?? homeName(); const many = new Set(channels.flatMap((channel) => channel.computer ? [channel.computer.id] : [])).size > 1;
+  const main = h('main', { className: 'list' }, h('h1', {}, tab === 'more' ? 'Memory' : label), many && from ? h('p', { className: 'dim tab-computer' }, `From ${from}, the computer this phone is connected to`) : '', directNotice(), screen);
   if (tab === 'more') main.append(h('section', { className: 'phone-card' }, h('h2', {}, 'This computer'), h('button', { type: 'button', onclick: () => void showScreen() }, 'Screen')));
   app.replaceChildren(header(), main, tabBar(tab));
   unmountScreen = mountScreen(screen, tab === 'more' ? 'memory' : tab, me?.canRun ?? false);
@@ -307,7 +315,16 @@ function directNotice() {
   element.innerHTML = iconSvg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>');
   element.append(h('span', { className: 'banner-text' })); return element;
 }
+/**
+ * Android's Back and the iPhone's swipe from the edge leave a channel or the screen for the list, as the app's own Back
+ * does, instead of closing the app (1.31.6). Opening one adds a step to the browser's history; the app's own Back
+ * takes it off again, so a Back on the list still closes the app.
+ */
+let inner = false;
+function enterInner() { if (!inner) { inner = true; history.pushState({ trace: 'inner' }, ''); } }
+window.addEventListener('popstate', () => { if (inner) { inner = false; showList(); } });
 function showList() {
+  if (inner) { inner = false; if (history.state?.trace === 'inner') history.back(); }
   leaveScreen(); leaveChannel(); disposeTerminal(); closeChat(); closeScreen(); current = null; run = null; shownChat = null;
   if (reloadWhenIdle()) return;
   void whoAmI().then((value) => { me = value; renderList(); }).catch(() => {});
@@ -332,7 +349,7 @@ function leaveScreen() { viewer?.disconnect(); viewer = null; }
  * viewer. (These paths are not /api/screen, which a Windows computer that shares its screen passes to that service.)
  */
 async function showScreen() {
-  closeChat(); closeScreen();
+  enterInner(); closeChat(); closeScreen();
   leaveChannel(); disposeTerminal(); current = null; run = null; leaveScreen();
   const status = h('p', { className: 'dim', aria: { live: 'polite' } }, 'Connecting…');
   const user = h('input', { autocomplete: 'username', autocapitalize: 'none', placeholder: 'Mac user name', aria: { label: 'User name' } });
@@ -522,7 +539,7 @@ function toggleFit() {
 }
 
 function showChannel(sessionId: string) {
-  leaveScreen();
+  enterInner(); leaveScreen();
   if (current !== sessionId) leaveChannel();
   current = sessionId; run = null; holding = fitsOnOpen(chosenSize); granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);

@@ -257,7 +257,13 @@ else if (args.startsWith('serve --bg --https=443')) {
     // A terminal channel's buttons follow it (1.31.4; they stayed as first drawn): stopped, Start; started, Stop.
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click(); await phone.getByRole('button', { name: 'Stop CH2', exact: true }).click();
     await phone.getByRole('button', { name: 'Start CH2', exact: true }).click(); await phone.getByRole('button', { name: 'Stop CH2', exact: true }).waitFor();
-    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
+    // At 320 px wide (the narrowest phones) nothing on the channel screen runs past its edge, and the name keeps room
+    // (checked in 1.31.6, after a review said its header and tool bar ran over at 360).
+    const phoneSize = async (width) => { await app.evaluate(({ BrowserWindow }, [port, w]) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith(`http://127.0.0.1:${port}`) && !item.webContents.getURL().includes('#needs-you'))?.setContentSize(w, 780), [PORT, width]); await phone.waitForTimeout(400); };
+    await phoneSize(320); const narrow = await phone.evaluate(() => ({ page: document.documentElement.scrollWidth, width: innerWidth, title: Math.round(document.getElementById('channel-title')?.getBoundingClientRect().width ?? 0), past: [...document.querySelectorAll('.bar *, .tools *, main *')].filter((item) => { const box = item.getBoundingClientRect(); return box.width > 0 && box.right > innerWidth + 1; }).map((item) => item.className || item.tagName).slice(0, 6) }));
+    assert.ok(narrow.page <= narrow.width && !narrow.past.length && narrow.title >= 72, `the channel screen at 320 px: ${JSON.stringify(narrow)}`); await phoneSize(390);
+    // The phone's own Back (Android's Back button, the iPhone's swipe) leaves the channel for the list, not the app (1.31.6).
+    await phone.goBack(); await phone.locator('#channel-list button').first().waitFor(); assert.ok(phone.url().startsWith(`http://127.0.0.1:${PORT}`), 'still in the app');
     // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
     // the same request (linked computers and older phone apps send it), so the chat checks below use that.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
