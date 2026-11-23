@@ -56,6 +56,14 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('READY')));
     await tile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('needle task');await page.keyboard.press('Enter');
     await page.waitForFunction(()=>document.querySelectorAll('.budget-notice').length===1);
+    // An event hook (1.33.1), added in Settings once confirmed, runs when a channel needs you, told which and why.
+    const hookOut=path.join(root,'hook.txt');
+    await openView(page,'Settings');await page.getByLabel('Event hook event',{exact:true}).selectOption('needs-you');await page.getByLabel('Event hook program',{exact:true}).fill(process.execPath);
+    await page.getByLabel('Event hook arguments',{exact:true}).fill(['-e',`require('fs').writeFileSync(${JSON.stringify(hookOut)}, [process.env.TRACE_EVENT, process.env.TRACE_CHANNEL, process.env.TRACE_MESSAGE].join('|'))`].join('\n'));
+    await page.getByRole('button',{name:'Add event hook',exact:true}).click();await page.locator('.event-hooks li').first().waitFor();
+    await openView(page,'Workspace');await tile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('need-approval');await page.keyboard.press('Enter');
+    for(let i=0;i<150&&!(await fs.stat(hookOut).catch(()=>null));i++)await new Promise((resolve)=>setTimeout(resolve,100));
+    assert.match(await fs.readFile(hookOut,'utf8'),/^needs-you\|2\|Approval requested: npm test$/);
     const usage=await page.evaluate(()=>window.usages.at(-1));assert.ok(usage.conversationId);
     await (await tileControl(tile, 'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
     const saved=await native(page,'loadWorkspace');assert.equal(saved.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(saved.workspace.sessions[1].title,'Implementation');
@@ -102,6 +110,11 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await openView(page,'Verification profiles');const profileCount=(await wb(page,{action:'verification-list'})).profiles.length;const card=page.locator('.verification-profile').filter({hasText:'Template check'}).first();await card.getByRole('button',{name:'Edit',exact:true}).click();
     await page.getByRole('heading',{name:'Editing Template check',exact:true}).waitFor();await page.getByLabel('Verification profile name',{exact:true}).fill('Template check, edited');await page.getByRole('button',{name:'Save verification profile',exact:true}).click();
     await page.locator('.verification-profile').filter({hasText:'Template check, edited'}).first().waitFor();assert.equal((await wb(page,{action:'verification-list'})).profiles.length,profileCount,'editing saves over the profile, not beside it');
+    // It runs from the command menu too (1.33.1), on its page, after its confirmation.
+    const resultsBefore=(await wb(page,{action:'verification-list'})).results.length;
+    await page.keyboard.press('Control+Shift+P');await page.getByLabel('Search commands',{exact:true}).fill('Run verification');await page.getByRole('option').filter({hasText:'Run verification: Template check, edited'}).first().click();
+    for(let i=0;i<300&&(await wb(page,{action:'verification-list'})).results.length===resultsBefore;i++)await new Promise((resolve)=>setTimeout(resolve,100));
+    assert.equal((await wb(page,{action:'verification-list'})).results.length,resultsBefore+1,'the command menu ran the profile');
     // And deleted (1.31.7), after a confirmation; recorded results stay.
     const edited=page.locator('.verification-profile').filter({hasText:'Template check, edited'}).first();await edited.getByRole('button',{name:'Delete Template check, edited',exact:true}).click();await page.getByRole('button',{name:'Delete profile',exact:true}).click();await edited.waitFor({state:'detached'});assert.equal((await wb(page,{action:'verification-list'})).profiles.length,profileCount-1);
     await openView(page, 'Settings');await page.getByRole('button',{name:'Check running executable signature',exact:true}).click();await page.getByText('Source edition — no installer signature',{exact:true}).waitFor();

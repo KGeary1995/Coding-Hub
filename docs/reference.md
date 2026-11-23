@@ -310,6 +310,12 @@ Every Claude Code and Codex channel started in Trace gets shared project memory 
 
 The CLI asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access; in a Codex chat, which has no such prompt, the tools are refused. Turning the setting off stops them at once, even in running channels. Each run reaches Trace through its own secret address on 127.0.0.1, which also tells Trace which channel is asking. Gemini CLI channels get no tools (agy takes MCP servers only from its global settings).
 
+## Event hooks
+
+**Settings → Event hooks** (from 1.33.1): a program of your own that Trace runs when a channel needs you, ends its turn (Claude Code's end-of-turn hook or a chat turn; at a Round Table, its lead's), or fails. Give its full path and its arguments, one per line. Trace asks in a system dialog with the exact command before saving it, so nothing in the window alone can add one. It runs as you, without a shell, with `TRACE_EVENT` (`needs-you`, `turn-ended`, `failed`, or `test`), `TRACE_CHANNEL` (the number), `TRACE_CHANNEL_NAME`, `TRACE_FOLDER` and `TRACE_MESSAGE` set, and is stopped after 30 seconds. One hook runs at most once every 10 seconds for a channel, and at most four run at once. **Test** runs it once now; each hook shows how its last run went. Hooks are kept in `event-hooks.json` in Trace's storage folder (per computer).
+
+**Verification profiles from the command menu** (from 1.33.1): each profile is an action, *Run verification: name*, which opens Verification profiles and runs it there after its usual confirmation.
+
 ## Shared Google Drive memory
 
 On Windows the default shared folder is **`G:\My Drive\Coding Hub`**; on a Mac there is no default, so choose the folder Google Drive for desktop keeps there. The `CODING_HUB_DEFAULT_DRIVE_DIR` environment variable, set before Trace starts, replaces that default on Windows and on a Mac (an empty value means no folder) until preferences are first saved (`preferences.json`). Saving preferences stores the folder the Settings field shows, and the variable is not read after that. Trace's own tests set it so they never write into a real Drive folder. When the folder can't be used (none chosen, not a full path on this computer, or missing), Memory and Settings → Sync between computers say why, with Drive folder ID `1X057crI-PHRV3ie1tl5btF4bUbuhxzwM` retained as a reference. Google Drive for desktop handles authentication and cloud upload; no separate OAuth credentials are required by Trace.
