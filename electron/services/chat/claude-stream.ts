@@ -67,8 +67,13 @@ export class ClaudeStream implements ChatStream {
 
   /** Says hello; Claude then sends approval requests here instead of refusing them. */
   start() { this.control({ subtype: 'initialize', hooks: null }); }
+  /**
+   * Replies Trace has asked for and not yet seen end. While it is 0, a turn that ends is one Claude started by itself
+   * (a background task of its own finished): its end is `settled`, for the display only.
+   */
+  private owed = 0;
   send(message: string, images: ChatImage[]) {
-    this.stopped = false;
+    this.stopped = false; this.owed++;
     const content = [...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } })), ...(message ? [{ type: 'text', text: message }] : [])];
     this.line({ type: 'user', message: { role: 'user', content } });
   }
@@ -85,7 +90,7 @@ export class ClaudeStream implements ChatStream {
   /** Stop while a turn's end is held for a background subagent ends the turn now: Claude may send no further result. */
   interrupt() { this.stopped = true; this.control({ subtype: 'interrupt' }); this.release(true); }
   /** Requests still waiting when the run ends are closed in the window. */
-  close() { this.release(false); for (const requestId of this.pending.keys()) this.emit({ type: 'permission-done', requestId }); this.pending.clear(); }
+  close() { this.release(false); this.owed = 0; for (const requestId of this.pending.keys()) this.emit({ type: 'permission-done', requestId }); this.pending.clear(); }
 
   /** Output from Claude: complete lines are parsed, a partial line waits for the rest. */
   push(data: string) { readLines(this.lines, data, 'Claude Code', this.emit, (message) => this.read(message)); }
@@ -178,16 +183,22 @@ export class ClaudeStream implements ChatStream {
       // one, and a result of a turn Claude started itself (a subagent's notification) ends no turn of Trace's.
       if (!isError && !this.stopped) {
         if (this.agents > 0) { this.held = true; return; }
-        if ((message.origin as { kind?: unknown } | undefined)?.kind === 'task-notification' && !this.held) return;
+        if ((message.origin as { kind?: unknown } | undefined)?.kind === 'task-notification' && !this.held) {
+          // It still wrote a reply, which the conversation shows as being written until it is told the reply ended:
+          // dropped whole, "Claude Code is working" stayed on under a Round Table's "Your turn" (seen 2026-11-22, after
+          // background commands reported back). With a reply of Trace's still owed, that reply's own end says so.
+          if (this.owed === 0) this.emit({ type: 'settled' });
+          return;
+        }
       }
-      this.stopped = false; this.release(false);
+      this.stopped = false; this.release(false); this.owed = Math.max(0, this.owed - 1);
       this.emit({ type: 'done', isError, error: isError ? (text(message.result) || (Array.isArray(message.errors) ? (message.errors as unknown[]).map(text).join(' ') : '') || 'The reply ended with an error.') : null });
     }
   }
   /** Drops the held `done` and its timer; with `emit`, sends it first. */
   private release(emit: boolean) {
     clearTimeout(this.timer ?? undefined); this.timer = null;
-    const held = this.held; this.held = false; if (emit && held) this.emit({ type: 'done', isError: false, error: null });
+    const held = this.held; this.held = false; if (emit && held) { this.owed = Math.max(0, this.owed - 1); this.emit({ type: 'done', isError: false, error: null }); }
   }
   /** Background subagents running now, whether a `done` is held for them, the wait for a result after they end, and whether Stop was pressed since the last send. */
   private agents = 0; private held = false; private timer: ReturnType<typeof setTimeout> | null = null; private stopped = false;

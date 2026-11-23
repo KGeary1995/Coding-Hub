@@ -29,6 +29,13 @@ export type ChatEvent =
   | { type: 'permission-done'; requestId: string }
   /** The reply finished: whether it ended in an error, and Claude's own error text then. */
   | { type: 'done'; isError: boolean; error: string | null }
+  /**
+   * A reply Trace did not ask for has ended: one Claude Code started by itself, when a background task of its own
+   * finished and told it so. For the conversation's display only: it closes that reply and its "is working" line as
+   * `done` does. It is no turn's end, so a Round Table does not move on it, no task is marked and no handoff is asked for.
+   * A Trace that does not know it leaves the thread as it is.
+   */
+  | { type: 'settled' }
   /** Something Claude reported that is worth a line in the thread (a refused tool, an API retry). */
   | { type: 'notice'; text: string }
   /** The agent refused a permission change: the level still in effect, which the window shows again. */

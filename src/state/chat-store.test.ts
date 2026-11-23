@@ -45,6 +45,17 @@ describe('chat threads', () => {
     applyChatEvent({ sessionId: 's', runId: 'old', event: { type: 'notice', text: 'stale' } });
     expect(items().some((item) => item.kind === 'notice' && item.text === 'stale')).toBe(false);
   });
+  it('closes a reply Claude started by itself when it is told the reply ended, as it closes any reply', () => {
+    // No message was sent: the reply's text arriving is what shows the chat as working.
+    event({ type: 'delta', messageId: 'm1', text: 'The release is ' }); event({ type: 'delta', messageId: 'm1', text: 'published.' }); flushChatDeltas();
+    expect(useChatStore.getState().threads.s.busy).toBe(true);
+    event({ type: 'settled' });
+    const thread = useChatStore.getState().threads.s;
+    expect(thread.busy).toBe(false);
+    // Its streamed text is kept as the reply, and no error line is added.
+    expect(thread.items.at(-1)).toMatchObject({ kind: 'assistant', streaming: '', blocks: [{ type: 'text', text: 'The release is published.' }] });
+    expect(thread.items.some((item) => item.kind === 'notice' && item.error)).toBe(false);
+  });
   it('starts a fresh conversation empty and keeps a resumed one with a note', () => {
     chatSent('s', 'first', []);
     chatStarted('s', 'r2', true);

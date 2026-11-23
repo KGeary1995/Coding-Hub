@@ -122,6 +122,44 @@ describe('Claude chat protocol', () => {
         vi.advanceTimersByTime(60000); expect(dones()).toBe(1);
       } finally { vi.useRealTimers(); }
     });
+    it('ends a reply Claude started by itself, after a background command reported back, for the display only', () => {
+      const { events, stream, push, dones } = setup();
+      stream.send('watch the release in the background', []); push(tasks('local_bash')); push(say('Watching.')); push(result()); expect(dones()).toBe(1);
+      // The command finishes and tells Claude, which writes a reply nobody asked for. Its end is no turn's end (no `done`,
+      // which a task or a handoff would act on), but the conversation is told, or "Claude Code is working" stayed on.
+      push(tasks()); push(say('It is published.')); push(result(notification));
+      expect(dones()).toBe(1); expect(events.at(-1)).toEqual({ type: 'settled' });
+      // And again for the next one.
+      push(say('One more thing.')); push(result(notification)); expect(dones()).toBe(1); expect(events.filter((event) => event.type === 'settled')).toHaveLength(2);
+    });
+    it('leaves a reply the person is owed open when a notification’s turn ends before it', () => {
+      const { events, stream, push, dones } = setup();
+      stream.send('first', []); push(say('one')); push(result()); expect(dones()).toBe(1);
+      // The person's next message is waiting behind a turn Claude started itself: that turn's end frees nothing.
+      stream.send('second', []); push(say('The background task finished.')); push(result(notification));
+      expect(dones()).toBe(1); expect(events.some((event) => event.type === 'settled')).toBe(false);
+      push(say('two')); push(result()); expect(dones()).toBe(2); expect(events.at(-1)).toEqual({ type: 'done', isError: false, error: null });
+      // Nothing owed again: a later one settles.
+      push(say('late')); push(result(notification)); expect(events.at(-1)).toEqual({ type: 'settled' });
+    });
+    it('settles a subagent’s notification that comes after its turn was already given up as ended', () => {
+      vi.useFakeTimers();
+      try {
+        const { events, stream, push, dones } = setup();
+        stream.send('use an agent', []); push(tasks('local_agent')); push(say('STARTED')); push(result()); expect(dones()).toBe(0);
+        // The agent ends, no result follows in time, and the held turn is ended.
+        push(tasks()); vi.advanceTimersByTime(60000); expect(dones()).toBe(1);
+        // Its notification's turn comes late: one more `done` would end a turn nobody has open.
+        push(say('The agent reported.')); push(result(notification));
+        expect(dones()).toBe(1); expect(events.at(-1)).toEqual({ type: 'settled' });
+      } finally { vi.useRealTimers(); }
+    });
+    it('still ends a turn with an error or after Stop, whatever started it', () => {
+      const { events, stream, push, dones } = setup();
+      push(say('broken')); push(result({ ...notification, is_error: true, result: 'It failed.' }));
+      expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'It failed.' });
+      stream.interrupt(); push(result(notification)); expect(dones()).toBe(2);
+    });
     it('ends a plain turn at its result, and ignores a background shell command', () => {
       const { push, dones } = setup(); push(result()); expect(dones()).toBe(1);
       push(tasks('local_bash')); push(result()); expect(dones()).toBe(2);

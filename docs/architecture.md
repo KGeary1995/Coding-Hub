@@ -19,7 +19,7 @@ shared/  typed contracts and pure logic used by both sides
 | `electron/main.ts` | Startup, window, IPC registration (`handle()`), launch pipeline (`prepareLaunch`), shutdown |
 | `electron/preload.ts` | The `window.codingHub` bridge. Channel names are written out literally, because a sandboxed preload can't import project modules |
 | `electron/services/cli/` | Engine discovery, launch flags (`engine-adapter.ts`, also home of `HubError`), `pty-manager.ts`, process-tree stop, account logins, Claude profiles, Codex model catalog, `attention.ts` (approval alerts) |
-| `electron/services/chat/` | Chat channels: `claude-stream.ts` (stream-json), `codex-stream.ts` (app-server protocol), `chat-process.ts` (pipes, no PTY), `transcript.ts` |
+| `electron/services/chat/` | Chat channels: `claude-stream.ts` (stream-json), `codex-stream.ts` (app-server protocol), `chat-process.ts` (pipes, no PTY), `transcript.ts`. A reply's end is the `done` event, which Round Tables, tasks and automatic handoffs act on. A reply Claude Code starts by itself, when a background task of its own finishes and tells it so, ends with `settled` instead: for the conversation's display only (it closes the reply and its "is working" line), unless a reply Trace asked for is still owed |
 | `electron/services/storage/` | `WorkspaceStorage` (`storage.db`, run logs), `HostHealth` |
 | `electron/services/hub/` | The `hub` request dispatcher (`service.ts`), MCP/skills/plugins config (`config.ts`), shared rules, memory (`memory.ts`, `memory-server.ts`, `auto-memory.ts`), Drive mirror, device sync, telemetry/usage, plan limits |
 | `electron/services/remote/` | Phone server, Tailscale, linked computers, web push, screen mirror |
