@@ -65,9 +65,15 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     const labels=await wb(page,{action:'flow-conversations'});assert.equal(labels[0].pinned,true);
     await page.getByRole('button',{name:'Resume in new channel',exact:true}).click();await page.locator('.session-tile').nth(2).waitFor();
     await openView(page, 'AI coaching');await page.getByRole('button',{name:'Review coaching report',exact:true}).click();await page.getByLabel('Approve sharing coaching report through my CLI',{exact:true}).check();await page.getByRole('button',{name:'Prepare Claude coaching',exact:true}).click();await page.locator('.session-tile').nth(3).waitFor();
+    // A channel running when Trace closes starts again by itself, on its conversation (1.32.0); the stopped ones stay stopped.
+    await (await tileControl(tile,'Restart')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===1);
     await app.close();app=null;page=await launch();
+    await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));await page.getByText('A channel running when Trace closed was started again on its conversations.',{exact:false}).waitFor();
+    assert.equal(await page.locator('.session-tile[data-status="running"]').count(),1,'only the channel that was running starts again');
+    await (await tileControl(page.locator('.session-tile').nth(1),'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
+    await page.evaluate(()=>{window.events.length=0;});
     let restored=await native(page,'loadWorkspace');assert.equal(restored.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(restored.workspace.sessions[3].preparedRequest.label,'Send coaching request');assert.equal((await wb(page,{action:'flow-conversations'}))[0].name,'Pinned implementation');
-    const resumedTile=page.locator('.session-tile').nth(1);await resumedTile.getByRole('button',{name:'Start channel',exact:true}).click();await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));
+    const resumedTile=page.locator('.session-tile').nth(1);await (await tileControl(resumedTile,'Restart')).click();await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));
     await resumedTile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('fail-launch');await page.keyboard.press('Enter');await page.waitForFunction(()=>[...document.querySelectorAll('.session-error')].some((element)=>element.textContent.includes('fixture invalid model')));
     // Open log goes to Session history's Failed runs (1.31; before, the Workflow center's Recovery).
     await page.getByRole('button',{name:'Open log',exact:true}).click();await page.getByRole('heading',{name:'Failed runs',exact:true}).waitFor();await page.getByRole('button',{name:'Run recovery checks',exact:true}).click();await page.getByText('Interactive terminal transport · passed',{exact:true}).waitFor();assert.ok((await wb(page,{action:'flow-failures'})).some((run)=>run.diagnostic.includes('fixture invalid model')));

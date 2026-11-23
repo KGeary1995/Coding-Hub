@@ -41,6 +41,7 @@ import { isWithinDirectory, PtyManager } from './services/cli/pty-manager';
 import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './services/cli/attention';
 import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
+import { saveResume, takeResume } from './services/storage/resume-list';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, permissionLevel, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
@@ -957,9 +958,11 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.loadWorkspace, () => {
     const database = localStorage();
     const { workspace, removedChannels, rootDirectory } = database.loadMigrated();
+    // Only on the first load: a reload of the window has no quit before it, so starts nothing.
+    const resume = workspaceLoaded || !workspace ? [] : takeResume(storageRoot);
     workspaceLoaded = true;
     // Only Gemini channels were saved: no workspace is left, but its project folder is kept.
-    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}) };
+    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}), ...(resume.length ? { resume } : {}) };
   });
   handle(IPC_CHANNELS.saveWorkspace, (_owner, payload) => {
     if (!workspaceLoaded) throw new HubError('WORKSPACE_NOT_LOADED', 'Load the saved workspace before saving changes.');
@@ -1069,6 +1072,8 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
   quitting = true;
+  // The channels running now start again on their conversations when Trace next opens, unless that is turned off.
+  try { saveResume(storageRoot, hub?.preferences().resumeOnStart === false ? [] : manager.running().map((run) => run.sessionId)); } catch { hostHealth?.record('resume-list-failed'); }
   // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).
   const savingUsage = dayUsage.save();
   void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed'))

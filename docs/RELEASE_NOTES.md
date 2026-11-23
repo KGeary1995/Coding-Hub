@@ -1,5 +1,12 @@
 ## What's new
 
+1.32.0 starts on ideas from herdr, an open-source terminal tool for coding agents:
+
+- **Channels running when Trace closes start again when it opens.** Each agent continues its saved conversation and each shell starts afresh; a Round Table's seats start too, so the table opens again. Before, every channel came back stopped until you pressed Start on each. A notice says how many were started. Channels you had stopped stay stopped, and so does an agent channel with no saved conversation, since starting it would begin a new one. The programs that were running inside the channels do not come back.
+- **To turn it off:** Settings → Preferences → **Start channels again when Trace opens**. It is per computer and not synced.
+- **Not covered:** reloading the window, and a start after Trace crashed or the computer lost power. Trace notes the channels as it quits, so neither of those starts any.
+- **Tried:** the unit tests (the list is given once and then forgotten; a damaged one starts nothing), and the productivity smoke test (a running channel started again on its conversation after a restart, the others left stopped, the notice shown). The desktop smoke test turns the setting off and checks every channel comes back stopped. The enterprise, remote, profiles, models, workbench, table seats and design smoke tests pass.
+
 1.31.7 finishes what was left of the review apart from rewriting the phone app:
 
 - **A verification profile can be deleted.** **Delete** asks first; the profile's recorded results stay, since a task may name one as its evidence.
