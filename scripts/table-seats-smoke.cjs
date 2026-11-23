@@ -172,6 +172,8 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error
     assert.equal(await bar.locator('.chain-steps li.current, .chain-steps li:not(.past)').count(), 0, 'every step is past');
     await shot('6-hierarchy-done');
     // A hierarchy table shows a seat's own conversation too, as a discussion table does (1.31.2).
+    // In a short window (the CI runner's) the bar is folded, with Show behind its disclosure: opened first.
+    if ((await bar.getAttribute('class')).includes('folded')) await bar.getByRole('button', { name: 'Round Table steps and controls', exact: true }).click();
     const showSeat = bar.getByLabel("Show an agent's own conversation", { exact: true }); const seatNames = (await showSeat.locator('option').allTextContents()).slice(1);
     assert.ok(seatNames.length >= 2, `seats offered: ${seatNames}`); await showSeat.selectOption({ index: 1 });
     await chain.locator('.table-seated').filter({ hasText: `${seatNames[0]}'s own conversation` }).waitFor(); await showSeat.selectOption(''); await chain.locator('.table-seated').waitFor({ state: 'detached' });
