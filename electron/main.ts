@@ -152,6 +152,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); }
+  // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
+  // file, before the run is ended below. For any other run this is nothing new to telemetry.
+  if (event.type === 'conversation') try { hub?.telemetry?.setGeminiConversation(event.runId, event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   if (event.type === 'exit') {
     // Telemetry's last read of the run can be what finds a short run's transcript, so the summary waits for it.
     const transcript = hub?.telemetry?.transcript(event.runId) ?? null;
@@ -169,6 +172,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
 }), { onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
+  // A Gemini CLI seat says which conversation it writes to as soon as it is ready: its tokens are counted from that file.
+  if (envelope.event.type === 'ready') try { hub?.telemetry?.setGeminiConversation(envelope.runId, envelope.event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
@@ -176,7 +181,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
   beforeLaunch: (cwd, config) => autoMemory && config.engine !== 'gemini' ? autoMemory.ready(cwd, config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
-  // Gemini CLI: no usage log Trace can read, no shared memory (the person's choice); it resumes agy's own conversation.
+  // Gemini CLI: no shared memory (the person's choice); it resumes agy's own conversation. Its usage is read from that
+  // conversation's file once the run has started (telemetry.startGemini), so nothing is prepared for it here.
   if (config.engine === 'gemini') {
     if (config.resumeId) {
       const saved = new Map((storage?.load()?.sessions ?? []).map((session) => [session.id, session.config]));
@@ -203,7 +209,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   runOwners.set(run.runId, owner);
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
-  if (config.engine === 'gemini') return;
+  if (config.engine === 'gemini') { try { hub?.telemetry?.startGemini(run, config); } catch { reportStorageError('Usage recording is unavailable for this run.'); } return; }
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
   catch {
     // Without a usage watcher a session token limit would silently go unenforced.
@@ -609,6 +615,7 @@ else app.whenReady().then(() => {
     });
     hub.telemetry.onError = (_run, message) => { hostHealth?.record('telemetry-read-failed'); reportStorageError(message); };
     hub.telemetry.onConversation = (run, conversationId) => manager.notifyConversation(run.runId, conversationId);
+    hub.telemetry.geminiHome = () => geminiHome(); hub.telemetry.findGeminiConversation = (cwd, since, known) => geminiConversationSince(cwd, since, known);
     // Once, two minutes after starting (it reads Claude Code's older transcripts): each older reply's day.
     const telemetry = hub.telemetry; setTimeout(() => { try { telemetry.backfillDays([process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), ...claudeProfiles.list().map((profile) => claudeProfiles.directory(profile.id))]); } catch { hostHealth?.record('usage-days-backfill-failed'); } }, 120000).unref();
   } catch { /* Live sessions remain available without optional storage integrations. */ }
