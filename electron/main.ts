@@ -715,7 +715,7 @@ else app.whenReady().then(() => {
     ...(process.platform === 'darwin' ? { screenTarget: () => ({ host: '127.0.0.1', port: 5900 }) } : {}),
     ...(process.platform === 'win32' ? {
       screenService: () => shareEnabled(storageRoot),
-      openScreenService: (viewer: string) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${testServicePort ?? SCREEN_SERVICE_PORT}/`, token, undefined, 0, { 'X-Trace-Viewer': viewer }); },
+      openScreenService: (viewer: string, display = 0) => { const token = localScreenToken(storageRoot); if (!token) throw new HubError('SCREEN_SERVICE', 'The screen service has not started yet.'); return openTraceScreen('This computer', `http://127.0.0.1:${testServicePort ?? SCREEN_SERVICE_PORT}/`, token, undefined, display, { 'X-Trace-Viewer': viewer }); },
     } : {}),
     screenLocked: process.platform === 'darwin' ? macScreenLock() : () => { const state = powerMonitor.getSystemIdleState(1); return state === 'unknown' ? null : state === 'locked'; },
     // Usage as the status bar shows it. Plan limits are what was last read; reading them starts the CLIs, so a phone only
@@ -902,7 +902,7 @@ else app.whenReady().then(() => {
     }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
-    if (backups?.busy && ['verification-run', 'verification-save', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    if (backups?.busy && ['verification-run', 'verification-save', 'verification-delete', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
     // Jobs that run or rewrite local data wait out a Mac script update, as channel starts do (it restarts Trace once it is done).
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);

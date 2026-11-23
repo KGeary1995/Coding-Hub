@@ -65,6 +65,16 @@ const healthy = () => fetch(`http://127.0.0.1:${SERVICE_PORT}/health`).then((res
     // A tap is a click there.
     await canvas.click({ position: { x: 40, y: 30 } });
     await until(async () => (await fs.readFile(log, 'utf8')).split('\n').some((line) => /^pointer \d+ \d+ 1$/.test(line)), 'the tap in the log');
+    // Actual size shows the picture unscaled, to move around in; View only lets taps go nowhere (1.31.7).
+    const scaled = () => canvas.evaluate((element) => Math.abs(element.width - element.getBoundingClientRect().width) > 2);
+    assert.equal(await scaled(), true, 'fitted to the phone first');
+    await phone.getByRole('button', { name: 'Actual size', exact: true }).click(); await until(async () => !(await scaled()), 'the picture at its own size');
+    await phone.getByRole('button', { name: 'Actual size', exact: true }).click(); await until(() => scaled(), 'the picture fitted again');
+    const clicks = async () => (await fs.readFile(log, 'utf8')).split('\n').filter((line) => /^pointer \d+ \d+ 1$/.test(line)).length;
+    await phone.getByRole('button', { name: 'View only', exact: true }).click(); const before = await clicks();
+    await canvas.click({ position: { x: 60, y: 50 } }); await phone.waitForTimeout(500); assert.equal(await clicks(), before, 'no click in View only');
+    await phone.getByRole('button', { name: 'View only', exact: true }).click();
+    assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'the Screen controls fit the phone');
     // Leaving the screen lets go of it.
     await phone.getByRole('button', { name: 'Back to channels' }).click();
     await until(async () => (await fs.readFile(log, 'utf8')).includes('close'), 'the phone to leave the screen');

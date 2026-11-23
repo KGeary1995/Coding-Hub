@@ -19,6 +19,7 @@ import { refreshSynced } from '../runtime/use-native-host';
 import { OtherComputersCard } from './OtherComputers';
 import { PhoneAccessCard } from './PhoneAccess';
 import { ENGINE_ICONS } from './tile/engine-icons';
+import { rebaseDraft } from '../state/rebase-draft';
 
 /**
  * The budget fields kept to their ranges: when a field is left and on save, not on each keystroke, which turned the
@@ -189,11 +190,12 @@ function LocalStorageCard() {
 
 export function SettingsPanel() {
   const runtime = useRuntimeBackup(); const catalogDate = useHubStore((s) => s.catalog.asOf); const preferences = useHubStore((s) => s.preferences); const setPreferences = useHubStore((s) => s.setPreferences); const [draft, setDraft] = useState(preferences); const [syncKey, setSyncKey] = useState(0); const [prices, setPrices] = useState(JSON.stringify(preferences.prices, null, 2)); const op = useOperation();
-  // Settings can change underneath the form (saved here, or synced from another computer); unsaved edits are kept.
+  // Settings can change underneath the form (saved here, by Sync's "Use this folder", or synced from another computer):
+  // fields being edited keep the edits, the others take the new values (rebaseDraft).
   const shown = useRef(preferences);
   useEffect(() => {
     const previous = shown.current; shown.current = preferences;
-    setDraft((current) => JSON.stringify(current) === JSON.stringify(previous) ? preferences : current);
+    setDraft((current) => rebaseDraft(current, previous, preferences));
     setPrices((current) => current === JSON.stringify(previous.prices, null, 2) ? JSON.stringify(preferences.prices, null, 2) : current);
   }, [preferences]);
   // Whether the form holds changes not saved yet: the bar says so and offers Discard (1.31.5; before, nothing showed it).

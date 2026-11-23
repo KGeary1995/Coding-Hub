@@ -5,6 +5,8 @@ declare module '@novnc/novnc' {
     viewOnly: boolean;
     scaleViewport: boolean;
     clipViewport: boolean;
+    /** With clipViewport, a drag moves around the picture instead of dragging on the computer; a tap still clicks. */
+    dragViewport: boolean;
     resizeSession: boolean;
     focusOnClick: boolean;
     showDotCursor: boolean;
