@@ -42,6 +42,7 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownSt
 import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
+import { ChannelTools } from './services/cli/channel-tools';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, permissionLevel, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
@@ -143,6 +144,22 @@ const repositoryFiles = new RepositoryFiles();
 const repositoryGit = new RepositoryGit(repositoryFiles);
 // Claude Code reports permission prompts to this loopback endpoint; see services/cli/attention.ts.
 // SessionStart says which conversation a run is in: telemetry follows it there, then tells the window (see onConversation).
+/**
+ * Channel tools (1.33.0): agents may list, read, message and wait for other channels, only while the person has turned
+ * that on. A Round Table counts as its lead's channel; a message to a chat goes in as a chat message, to a terminal as a line.
+ */
+const channelTools = new ChannelTools({
+  enabled: () => { try { return hub?.preferences().channelTools === true; } catch { return false; } },
+  channels: () => { const running = new Map(manager.running().map((run) => [run.sessionId, run])); return workspaceChannels().filter((session) => !session.seatedAt).map((session, index) => ({ channel: index + 1, sessionId: session.id, name: session.title, engine: session.engine, running: running.has(session.id), waiting: null, folder: running.get(session.id)?.cwd ?? null })); },
+  sessionOf: (runId) => manager.running().find((run) => run.runId === runId)?.sessionId ?? null,
+  replies: (sessionId, count) => (channelTranscript(sessionId)?.messages ?? []).flatMap((message) => message.role === 'assistant' ? [message.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n').trim()] : []).filter(Boolean).slice(-count).map((text) => text.slice(-8000)),
+  send: async (sessionId, text) => {
+    const run = manager.running().find((item) => item.sessionId === sessionId); if (!run) throw new HubError('CHANNEL_TOOLS_STOPPED', 'That channel is not running.');
+    if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
+  },
+});
+/** The channel-tools MCP server's settings file for each Claude run, removed when the run ends. */
+const channelToolFiles = new Map<string, string>();
 const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished), (runId, conversationId) => hub?.telemetry?.follow(runId, conversationId), (runId, size) => hub?.telemetry?.setContextWindow(runId, size));
 // Each session event is labelled for the stall record (host-health.ts): saving output and ending runs happen here.
 const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, () => {
@@ -152,7 +169,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (event.type === 'data') storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
-  if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); }
+  if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); const file = channelToolFiles.get(event.runId); if (file) { channelToolFiles.delete(event.runId); fs.rm(file, { force: true }, () => {}); } }
+  try { channelTools.onSessionEvent(event); } catch { hostHealth?.record('channel-tools-event-failed'); }
   // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
   // file, before the run is ended below. For any other run this is nothing new to telemetry.
   if (event.type === 'conversation') try { hub?.telemetry?.setGeminiConversation(event.runId, event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
@@ -176,6 +194,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   // A Gemini CLI seat says which conversation it writes to as soon as it is ready: its tokens are counted from that file.
   if (envelope.event.type === 'ready') try { hub?.telemetry?.setGeminiConversation(envelope.runId, envelope.event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
+  try { channelTools.onChat(envelope); } catch { hostHealth?.record('channel-tools-event-failed'); }
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
@@ -206,7 +225,20 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
-}), abandonLaunch: (run) => { attention.unregister(run.runId); hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
+  // Then the channel tools, when turned on, join that list (or start it). Codex keeps asking before each call.
+  const toolsUrl = channelTools.register(run.runId);
+  if (toolsUrl) {
+    const server = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
+    if (config.engine === 'claude' && info.supportsMcpConfig) {
+      try {
+        const folder = path.join(storageRoot, 'channel-tools'); fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+        const file = path.join(folder, `${run.runId}.mcp.json`); fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'trace-channels': server } }), { mode: 0o600 }); channelToolFiles.set(run.runId, file);
+        if (launch.args.at(-2) === '--mcp-config') launch.args.push(file); else launch.args.push('--mcp-config', file);
+      } catch { channelTools.unregister(run.runId); }
+    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`);
+    else channelTools.unregister(run.runId);
+  }
+}), abandonLaunch: (run) => { attention.unregister(run.runId); channelTools.unregister(run.runId); const file = channelToolFiles.get(run.runId); if (file) { channelToolFiles.delete(run.runId); fs.rm(file, { force: true }, () => {}); } hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
   runOwners.set(run.runId, owner);
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
@@ -593,6 +625,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void offerToRemoveOldApp().catch(() => {});
   void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
+  void channelTools.start().catch(() => hostHealth?.record('channel-tools-unavailable'));
   hostHealth = new HostHealth(storageRoot);
   // About once a second: a main process blocked 250 ms or more is recorded with the job that ran (see timed()).
   mainStalls.start((ms, job) => hostHealth?.stall('main', 'main-stall', ms, job));
@@ -1097,7 +1130,7 @@ app.on('before-quit', (event) => {
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
     // Then those summaries reach Drive, or another computer starts without them.
     await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed')); await savingUsage;
-    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
+    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
     finally { if (reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate) app.relaunch(); app.quit(); }
   });
 });
