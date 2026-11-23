@@ -1,5 +1,24 @@
 ## What's new
 
+1.30.0 refines the look of the channels and the status bar, and counts each Gemini CLI channel by itself:
+
+- **Channels look like windows of the app, not bare terminals.** A channel is a card. Its header, notices and footer are on the card, and the terminal or the conversation is a dark panel set into it. A channel that has not started, and a chat, no longer sit on terminal black. Errors and approval requests are rounded banners above the terminal.
+- **A channel's controls have their own place.** Press **⋯** in a channel's header to open a row with Stop, Settings, Maximize and the rest, and press it again to close it. The row used to appear over the terminal's first lines whenever you pointed at the header, and covered output. Its facts are in plain words ("Running · Folder …"); hover over them for the process ID and the folder's whole path.
+- **A footer you can read.** Each channel's footer shows its context and its tokens today as labelled values, with a meter where the CLI reports a window, and a small trace of terminal output at the right. A chat has no output trace.
+- **A status bar of chips.** What you can press is drawn as a chip: each channel, today's total, each plan's limits, Needs you and alerts. A channel that needs you, failed or is near its limit tints its chip.
+  - **Today** now opens Usage, as the plan limits do.
+  - **Plan limits** have a small meter and their engine's mark. A named Claude account that one of your channels runs on is added once it is near its cap, and dimmed numbers with a warning mark tell you the last check failed.
+  - "Host · local" and "No alerts" are gone, and the saved state is one word, **Saved**, with the sentence in its tooltip.
+  - In a narrow window with eight channels, Needs you, an alert and a storage failure stay in view.
+- **Gemini CLI is counted per channel.** A Round Table's bar read "Gemini CLI 0" however much the seat had worked. Trace read Gemini CLI's usage only into the day's total.
+  - Each Gemini CLI channel and seat is now counted from the conversation it writes to: its tokens today show in the Round Table's bar, in the status bar and in its tile's footer, and its runs are listed on Usage with their cost.
+  - Until a seat's first request has been recorded the bar shows **—**; 0 means a counted zero. The count moves in steps: Gemini CLI records a request when it ends, and Trace looks every two seconds.
+  - Two Gemini CLI terminals started in the same folder are not told apart while they run, so each shows no count until it quits. Round Table seats are always told apart.
+  - These records stay on this computer: another computer's Usage does not list them. Today's total is unchanged and counts each request once.
+- **Smaller fixes:** Gemini CLI's messages at a Round Table have their colour and indent, and its share shows in Usage's "By engine" bar. Meter tracks are visible on cards. Long limit names on Usage no longer run into each other. A Round Table's bar keeps to two lines in a small window while the driver makes the changes.
+- **Tried:** the unit tests, the build, and the desktop tests with stand-in CLIs (design, workbench, desktop, Round Table seats, paste, productivity, profiles, models and stability, remote), and every screen at 1440 × 900 and 1100 × 800, also with Higher contrast. For Gemini CLI, a copy of a real seat's conversation was counted: 34 requests and 525,509 new tokens, where 1.29.1 showed 0.
+- **Not tried:** a real Gemini CLI seat in this version (the count rising as it works), a Gemini CLI terminal channel, a linked computer's tab, the phone app, a Mac and the installed version. Not seen on screen: Today's budget colours, a named account near its cap, and a failed limits check.
+
 1.29.1 fixes Full access for a Gemini CLI seat at a Round Table:
 
 - **Full access now reaches a Gemini CLI seat.** At a table set to Full access, a Gemini CLI seat still asked before every command.
