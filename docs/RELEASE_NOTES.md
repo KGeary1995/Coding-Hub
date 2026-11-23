@@ -1,5 +1,17 @@
 ## What's new
 
+1.31.2 makes the chat and the Round Table easier to follow (the review's Phase 1):
+
+- **Stop stays while you write the next message.** While an agent works, the Stop button used to give way to Send as soon as you typed. Both are now there. A message of images only can be sent too.
+- **Latest:** scrolled up to read, one press goes back to the newest message, and new replies follow again.
+- **Code blocks** in a reply show their language and a **Copy** button above them. Headings come in four sizes instead of one.
+- **A hierarchy table can show a seat's own conversation**, as a discussion table could, with **Show** on its bar.
+- **A folded hierarchy bar also counts the findings still open**, beside 1.31.1's challenge count.
+- **The Round Table setup panel asks before replacing seats you changed** when you pick another table or kind. Before, the names, models and instructions you had typed were lost without a word. **Escape** on one of its questions now closes only that question, not the whole panel.
+- **Not changed:** a second Approve plan button above the message box. Approve plan stays on the bar, also when it is folded, with the challenge count beside it, and the message box already says to write what to change.
+- **Tried:** the unit tests, and the remote, table, design and desktop smoke tests, with new checks for Stop beside Send, code-block Copy, Show at a hierarchy table, the setup panel's question and Escape.
+- **Not tried:** a real Claude Code or Codex chat, and the phone.
+
 1.31.1 fixes nine more problems found in the review of the interface. Each was checked in the code first:
 
 - **A channel that failed on another computer shows as Failed** on its tab, with why. It read as Idle.

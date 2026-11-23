@@ -1,4 +1,5 @@
 import { Fragment, memo, useState, type ReactNode } from 'react';
+import { Copy } from 'lucide-react';
 import { workbench } from '../../runtime/workbench';
 
 /**
@@ -25,6 +26,13 @@ export async function openAddress(url: string) {
 export async function copyAddress(url: string) {
   if (window.codingHub) { const result = await window.codingHub.copyText(url); if (!result.ok) throw new Error(result.error.message); return; }
   await navigator.clipboard.writeText(url);
+}
+/** A fenced block of code with its language and Copy above it (1.31.2), so a command or a file can be taken whole. */
+function CodeBlock({ code, language }: { code: string; language: string | undefined }) {
+  const [note, setNote] = useState('');
+  const copy = () => { void copyAddress(code).then(() => setNote('Copied'), (e: Error) => setNote(e.message || 'Not copied')).then(() => setTimeout(() => setNote(''), 2000)); };
+  return <div className="chat-code-block"><div className="chat-code-head"><span>{language || 'code'}</span><button type="button" className="quiet-button small" aria-label={`Copy this ${language || 'code'}`} onClick={copy}><Copy size={12} aria-hidden="true" /><span role="status">{note || 'Copy'}</span></button></div>
+    <pre className="chat-code" data-language={language || undefined}><code>{code}</code></pre></div>;
 }
 function ChatLink({ url, children }: { url: string; children: ReactNode }) {
   const [open, setOpen] = useState(false); const [note, setNote] = useState('');
@@ -72,7 +80,7 @@ function blocks(source: string): ReactNode[] {
     if (fence) {
       const body: string[] = []; i++;
       while (i < lines.length && !lines[i].startsWith('```')) body.push(lines[i++]);
-      i++; out.push(<pre key={key++} className="chat-code" data-language={fence[1] || undefined}><code>{body.join('\n')}</code></pre>); continue;
+      i++; out.push(<CodeBlock key={key++} code={body.join('\n')} language={fence[1] || undefined} />); continue;
     }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) { const Tag = `h${Math.min(6, heading[1].length + 2)}` as 'h3'; out.push(<Tag key={key++}>{inline(heading[2])}</Tag>); i++; continue; }

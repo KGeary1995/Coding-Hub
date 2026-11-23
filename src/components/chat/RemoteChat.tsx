@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
+import { ArrowDown, ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
@@ -54,7 +54,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   const busy = chat.busy || (table !== null && threads.some((thread) => thread.busy));
   const [text, setText] = useState(''); const [images, setImages] = useState<ChatImage[]>([]); const [error, setError] = useState(''); const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const file = useRef<HTMLInputElement>(null); const input = useRef<HTMLTextAreaElement>(null);
+  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const [away, setAway] = useState(false); const file = useRef<HTMLInputElement>(null); const input = useRef<HTMLTextAreaElement>(null);
   // Every seat's events are followed while the table is open.
   useEffect(() => follow && hiddenIds.length ? followSeats(follow, hiddenIds) : undefined, [hiddenKey, follow]);
   const views = useMemo(() => table ? seatViews(table, engine, { builderWorking: 'The builder', plannerWorking: 'The planner', plannerColour: 'claude' }, sessionId) : [], [table, engine, sessionId]);
@@ -93,10 +93,12 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   return <div className={`chat-view remote-chat ${className} ${table ? 'at-table' : ''}`}>
     {table && runId && hierarchy && <ChainBar table={table} busy={busy} plannerName="The planner" builderName="The builder" onRequest={(request) => void act({ ...request, sessionId, runId })} />}
     {table && runId && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} onRequest={(request) => void act({ ...request, sessionId, runId })} />}
-    <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }}>
+    <div className="chat-thread" ref={scroller} role="log" aria-label="Conversation" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; setAway(!pinned.current); }}>
       {!entries.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{live ? <><strong>No messages yet</strong><p>Ask {agent} anything. The conversation is the same one as on the computer.</p></> : <><strong>This chat is not running</strong><p>Start it to write to it.</p></>}</div>}
       <ThreadItems entries={entries} table={table !== null} answerFor={answerSeat} view={setViewing} />
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workingText(workers)}</p>}
+      {/* Scrolled up to read: one press back to the newest message, where new content follows again (1.31.2). */}
+      {away && <button type="button" className="chat-latest quiet-button small" onClick={() => { const element = scroller.current; if (element) element.scrollTop = element.scrollHeight; pinned.current = true; setAway(false); }}><ArrowDown size={13} aria-hidden="true" />Latest</button>}
     </div>
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button type="button" aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
@@ -106,9 +108,10 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
         {openTable && !table && live && <button type="button" className="chat-icon" aria-label={`Round Table: add ${engine === 'claude' ? 'Codex' : 'Claude'}`} title={opening ? 'Adding the other agent…' : `Round Table: bring ${engine === 'claude' ? 'Codex' : 'Claude Code'} into this conversation`} disabled={opening} onClick={() => { setOpening(true); setError(''); void openTable().then((failure) => { setOpening(false); if (failure) setError(failure); }); }}><Users size={18} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} />
-        {busy && !text.trim()
-          ? <button type="button" className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>
-          : <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}
+        {/* While agents work, Stop stays beside the box, and Send joins it once something is written or attached (before 1.31.2
+            Send took Stop's place as soon as anything was typed, so a reply could not be stopped while writing the next message). */}
+        {busy && <button type="button" className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>}
+        {(!busy || text.trim() || images.length > 0) && <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}
       </div>
     </form>
     {viewing && <div className="phone-image" role="dialog" aria-label="Image"><button type="button" className="button secondary" onClick={() => setViewing(null)}>Close</button><img src={viewing} alt="" /></div>}

@@ -281,6 +281,18 @@ else if (args.startsWith('serve --bg --https=443')) {
     await level.selectOption('full'); const confirm = page.getByRole('alertdialog', { name: 'Turn on Full access?' });
     await confirm.getByRole('button', { name: 'Turn on Full access', exact: true }).waitFor(); assert.equal(await level.inputValue(), before, 'Full access waits to be confirmed'); if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-full-access.png') });
     await confirm.getByRole('button', { name: 'Cancel', exact: true }).click(); await confirm.waitFor({ state: 'detached' }); assert.equal(await level.inputValue(), before);
+    // While a reply runs, Stop stays beside the box once the next message is being written, and Send joins it (1.31.2).
+    const chatView = page.locator('[data-chat-session]').filter({ hasText: 'hello from the phone' });
+    await draft.fill('slow-fixture-reply'); await draft.press('Enter'); const stopReply = chatView.getByRole('button', { name: "Stop Claude's reply", exact: true }); await stopReply.waitFor();
+    await draft.fill('the next one'); assert.ok(await stopReply.isVisible(), 'Stop stays while writing'); assert.ok(await chatView.getByRole('button', { name: 'Send', exact: true }).isVisible(), 'Send is beside it');
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-stop-send.png') });
+    await stopReply.click(); await chatView.locator('.chat-working').waitFor({ state: 'detached' }); await draft.fill('');
+    // A fenced block in a reply has its language and Copy above it.
+    await draft.fill('a block\n```sh\nnpm test\n```'); await draft.press('Enter');
+    const block = chatView.locator('.chat-code-block').filter({ hasText: 'npm test' }).last(); await block.locator('.chat-code-head').filter({ hasText: 'sh' }).waitFor();
+    await block.getByRole('button', { name: 'Copy this sh', exact: true }).click(); await block.getByText('Copied', { exact: true }).waitFor();
+    assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), 'npm test', 'Copy takes the code');
+    if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await page.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-code.png') });
     await box.fill('please write a note'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     // The approval shows what the new file holds, not only its name.
     await phone.locator('.phone-chat .chat-permission .chat-permission-changes pre.added').filter({ hasText: 'hi' }).waitFor();

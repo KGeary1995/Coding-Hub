@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ImagePlus, MessagesSquare, Send, Settings2, Square, TriangleAlert, Users, X } from 'lucide-react';
+import { ArrowDown, ImagePlus, MessagesSquare, Send, Settings2, Square, TriangleAlert, Users, X } from 'lucide-react';
 import { type ChatImage } from '../../../shared/chat';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import type { Session } from '../../../shared/types';
@@ -68,7 +68,7 @@ export function ChatView({ session }: { session: Session }) {
   const [viewing, setViewing] = useState<string | null>(null);
   /** The seat whose own conversation the thread shows instead of the table's; the setup panel, when open. */
   const [shown, setShown] = useState<string | null>(null); const [setup, setSetup] = useState<SetupMode | null>(null);
-  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const input = useRef<HTMLTextAreaElement>(null); const file = useRef<HTMLInputElement>(null);
+  const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const [away, setAway] = useState(false); const input = useRef<HTMLTextAreaElement>(null); const file = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (viewing) dialog.current?.showModal(); else dialog.current?.close(); }, [viewing]);
   useLayoutEffect(() => { const area = input.current; if (area) { area.style.height = 'auto'; area.style.height = Math.min(area.scrollHeight, 220) + 'px'; } }, [text]);
@@ -168,7 +168,8 @@ export function ChatView({ session }: { session: Session }) {
     ...(record.chain ? { chain: record.chain } : {}), ...(record.findings ? { findings: record.findings } : {}) } : null;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
-    {table && hierarchy && <ChainBar table={table} busy={busy} seats={chainSeats} plannerName={plannerName} builderName={builderName} onSeats={editSeats} onRequest={request} />}
+    {table && hierarchy && <ChainBar table={table} busy={busy} seats={chainSeats} plannerName={plannerName} builderName={builderName} onSeats={editSeats} onRequest={request}
+      show={showable ? { seats: others.filter((view) => bySeat.get(view.id)?.session).map(({ id, name }) => ({ id, name })), showing: shownSeat?.session ? shown : null, onShow: setShown } : undefined} />}
     {table && !hierarchy && <TableBar leadEngine={engine} table={table} busy={busy} seats={barSeats} showing={shownSeat?.session ? shown : null} onShow={showable ? setShown : undefined} onSeats={editSeats} onRequest={request} />}
     {savedTable && <ChainBar table={savedTable} busy={false} seats={chainSeats} plannerName={plannerName} builderName={builderName} onSeats={editSeats} onRequest={(action) => { if (action.action === 'table-close') closeTable(); }} detached={detached ? { note: detached, ...(!missing && stopped.length ? { onReopen: reopen } : {}) } : undefined} />}
     {!table && !hierarchy && record && showable && <div className="table-bar" role="group" aria-label="Round Table">
@@ -184,10 +185,12 @@ export function ChatView({ session }: { session: Session }) {
     </div>}
     {shownSeat?.session && shownView && <p className="table-seated" role="note">{shownView.name}'s own conversation, with what Trace passed to it. Your messages still go to the Round Table.</p>}
     {seatedAt && <p className="table-seated" role="note">At a Round Table: this chat answers there, and you write to it in that channel.</p>}
-    <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; }} role="log" aria-label="Conversation" aria-live="polite">
+    <div className="chat-thread" ref={scroller} onScroll={(event) => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40; setAway(!pinned.current); }} role="log" aria-label="Conversation" aria-live="polite">
       {!entries.length && <div className="chat-empty"><MessagesSquare aria-hidden="true" />{running ? <><strong>No messages yet</strong><p>Ask {agent} about this project. Paste or drop screenshots to include them.</p></> : <><strong>{agent} is not running</strong><p>Start the channel to chat with {agent} in this folder.</p></>}</div>}
       <ThreadItems entries={entries} table={table !== null || Boolean(shownSeat?.session && shownView)} answerFor={answerSeat} view={setViewing} />
       {busy && <p className="chat-working" aria-live="polite"><span className="chat-dots" aria-hidden="true"><i /><i /><i /></span>{workingText(workers)}</p>}
+      {/* Scrolled up to read: one press back to the newest message, where new content follows again (1.31.2). */}
+      {away && <button type="button" className="chat-latest quiet-button small" onClick={() => { const element = scroller.current; if (element) element.scrollTop = element.scrollHeight; pinned.current = true; setAway(false); }}><ArrowDown size={13} aria-hidden="true" />Latest</button>}
     </div>
     <div className="chat-composer">
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
@@ -202,9 +205,10 @@ export function ChatView({ session }: { session: Session }) {
         </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <textarea ref={input} rows={1} value={text} disabled={!running || Boolean(seatedAt)} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} onPaste={onPaste} />
-        {busy && !text.trim()
-          ? <button className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} title={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents and the discussion` : `Stop the reply (${agent} keeps what it has done)`} onClick={interrupt}><Square size={14} /></button>
-          : <button className="chat-icon send" aria-label="Send" disabled={!running || Boolean(seatedAt) || (!text.trim() && !images.length) || (chat.busy && !table)} onClick={() => void send()}><Send size={16} /></button>}
+        {/* While agents work, Stop stays beside the box, and Send joins it once something is written or attached (before 1.31.2
+            Send took Stop's place as soon as anything was typed, so a reply could not be stopped while writing the next message). */}
+        {busy && <button className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} title={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents and the discussion` : `Stop the reply (${agent} keeps what it has done)`} onClick={interrupt}><Square size={14} /></button>}
+        {(!busy || text.trim() || images.length > 0) && <button className="chat-icon send" aria-label="Send" disabled={!running || Boolean(seatedAt) || (!text.trim() && !images.length) || (chat.busy && !table)} onClick={() => void send()}><Send size={16} /></button>}
       </div>
     </div>
     <dialog ref={dialog} className="pasted-viewer" onClose={() => setViewing(null)} onClick={(event) => { if (event.target === event.currentTarget) setViewing(null); }}>
