@@ -86,6 +86,12 @@ describe('a Round Table message waiting to go', () => {
 describe('a Round Table bar and its token counts', () => {
   const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
   const counted = (lead: number, partner: number) => seatViews(table, 'claude').map((seat, index) => ({ ...seat, tokens: index ? partner : lead }));
+  it('shows a seat whose usage is not measured yet as a dash, and keeps 0 for a counted zero', () => {
+    const seats = [...counted(12_400, 0), { ...counted(0, 0)[1], id: 'g', engine: 'gemini' as const, name: 'Gemini CLI', working: 'Gemini CLI', colour: 'gemini' as const, tokens: null }];
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={seats} onRequest={() => {}} />);
+    expect(html).toMatch(/<b class="seat-text-codex">Codex 0<\/b> · <b class="seat-text-gemini">Gemini CLI —<\/b>/);
+    expect(html).toContain('Gemini CLI — (—: not measured yet)');
+  });
   it('keeps who drives and the counts in a tooltip as well as in the bar, so a narrow tile can take them out of the bar', () => {
     const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={counted(12_400, 800)} onRequest={() => {}} />);
     expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews. New tokens today: Claude 12k · Codex 800">');

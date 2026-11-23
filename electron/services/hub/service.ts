@@ -67,7 +67,10 @@ export class HubService {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.preferencesPath = path.join(root, 'preferences.json');
     this.rules = new RulesService(root); this.catalog = new PublishedCatalogService(root);
     this.memory = new MemoryService(path.join(root, 'memory')); this.drive = new DriveMirror(this.memory, () => this.preferences());
-    this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules, () => this.telemetry?.list() ?? []);
+    this.devices = new DeviceSync(root, () => this.preferences(), (preferences) => this.execute({ action: 'save-preferences', preferences }), this.rules,
+      // A Gemini CLI run's record stays on this computer: the usage file other computers read admits only Claude Code and
+      // Codex (device-sync's usageSchema), and one record it does not know makes an older Trace refuse the whole file.
+      () => (this.telemetry?.list() ?? []).filter((record) => record.engine !== 'gemini'));
     this.interval = setInterval(() => void this.tick(), 30000);
   }
   /** One at a time: a slow Drive folder can take longer to list than the 30 seconds between ticks. */

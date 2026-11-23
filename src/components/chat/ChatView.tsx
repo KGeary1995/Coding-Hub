@@ -50,6 +50,8 @@ export function ChatView({ session }: { session: Session }) {
   const threads = useChatStore(useShallow((state) => hiddenIds.map((id) => state.threads[id] ?? EMPTY)));
   const hidden = useWorkspaceStore(useShallow((state) => hiddenIds.map((id) => state.sessions.find((item) => item.id === id && item.id !== session.id) ?? null)));
   const tokens = useHubStore(useShallow((state) => [session.id, ...hiddenIds].map((id) => channelToday(id, state.usage).tokens)));
+  /** Whether each seat has any usage recorded: a Gemini CLI seat has none until its conversation's first request is read. */
+  const measured = useHubStore(useShallow((state) => [session.id, ...hiddenIds].map((id) => state.usage.some((record) => record.sessionId === id))));
   /** This chat sits at another channel's table: it is written to from there. */
   const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id || thread.table?.planner?.sessionId === session.id || thread.table?.seats?.some((seat, index) => index > 0 && seat.sessionId === session.id))?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
@@ -73,7 +75,7 @@ export function ChatView({ session }: { session: Session }) {
   /** Who sits at the table: from the open table, or as saved; a table from before 1.26 reads as its partner (and planner). */
   const views = useMemo(() => table ? seatViews(table, engine, { builder: builderName, planner: plannerName }, session.id) : record ? savedViews(useWorkspaceStore.getState().sessions, session.id) : [],
     [table, record, hidden, engine, builderName, plannerName, session.id]);
-  const bySeat = new Map(hiddenIds.map((id, index) => [id, { thread: threads[index], session: hidden[index], tokens: tokens[index + 1] }]));
+  const bySeat = new Map(hiddenIds.map((id, index) => [id, { thread: threads[index], session: hidden[index], tokens: tokens[index + 1], measured: measured[index + 1] }]));
   const leadSeat: SeatView = useMemo(() => (table ? views.find((view) => view.lead) : undefined) ?? { id: session.id, engine, lead: true, name: builderName, working: builderName, duties: [], driver: false, colour: engine }, [table, views, session.id, engine, builderName]);
   const seatSources: SeatThread[] = table ? views.map((view) => ({ seat: view, thread: view.lead ? chat : bySeat.get(view.id)?.thread ?? EMPTY })) : [{ seat: leadSeat, thread: chat }];
   /** At a table, every other seat's replies, approvals and notices join this thread in the order they came; Trace's prompts to it stay out. */
@@ -127,7 +129,10 @@ export function ChatView({ session }: { session: Session }) {
   /** What each seat is doing (seatState) and its tokens today, for the bars. */
   const stateOf = (view: SeatView) => view.lead ? seatState(session, chat.busy) : bySeat.get(view.id)?.session ? seatState(bySeat.get(view.id)!.session!, bySeat.get(view.id)!.thread.busy) : 'not seated';
   const tokensOf = (view: SeatView) => view.lead ? tokens[0] : bySeat.get(view.id)?.tokens ?? 0;
-  const barSeats: BarSeat[] = views.map((view) => ({ ...view, ...(view.lead ? {} : { state: stateOf(view) }), tokens: tokensOf(view) }));
+  // Null: not measured. Gemini CLI's usage is read from its conversation's file, so a seat of its has nothing to show
+  // until the first request is read (or ever, from a Trace before 1.30): that is "—" in the bar, and 0 is a counted zero.
+  const barTokens = (view: SeatView) => view.engine === 'gemini' && !(view.lead ? measured[0] : bySeat.get(view.id)?.measured) ? null : tokensOf(view);
+  const barSeats: BarSeat[] = views.map((view) => ({ ...view, ...(view.lead ? {} : { state: stateOf(view) }), tokens: barTokens(view) }));
   const seated = Boolean(table?.seats?.length || (!table && record?.seats?.length));
   /** The agent and model of a seat, when its name does not say it. */
   const detail = (view: SeatView) => { const config = (view.lead ? session : bySeat.get(view.id)?.session)?.config; const model = config && isAgentConfig(config) ? config.model : ''; return model ? (view.engine === 'claude' ? modelName(model) : model) : AGENT[view.engine]; };

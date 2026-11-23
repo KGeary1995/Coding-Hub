@@ -210,7 +210,9 @@ export function seatState(partner: Pick<Session, 'status' | 'error'> & { attenti
 export type TableAction = { action: 'table-waiting'; send: boolean } | { action: 'table-driver'; driver: 'claude' | 'codex'; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
 /** A seat as the bar shows it: `state` (seatState) for a seat that has no tile, and its new tokens today, when the caller has them (the desktop does). */
-export interface BarSeat extends SeatView { state?: string; tokens?: number }
+/** `tokens`: null when the seat's usage is not measured (a Gemini CLI seat before its first request is read), shown as "—". */
+export interface BarSeat extends SeatView { state?: string; tokens?: number | null }
+const counts = (seat: BarSeat) => seat.tokens === null || seat.tokens === undefined ? '—' : short(seat.tokens);
 /**
  * `seats`: who sits there, with how each is doing and its tokens (the desktop); without them the bar reads the table (a
  * phone, a linked computer). `onShow` (the desktop, where hidden seats have no tile) switches the thread to a seat's own
@@ -225,7 +227,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
   // Narrower still, Rounds, Stop and Show keep only their field or icon, and then the title leaves: their words stay their names,
   // and each has a tooltip, as every control that shows only an icon has.
   const roles = `${driver.name} drives · ${joinNames(others.map((seat) => seat.name))} ${others.length === 1 ? 'reviews' : 'review'}`;
-  const about = counted.length ? `${roles}. New tokens today: ${counted.map((seat) => `${seat.name} ${short(seat.tokens!)}`).join(' · ')}` : roles;
+  const about = counted.length ? `${roles}. New tokens today: ${counted.map((seat) => `${seat.name} ${counts(seat)}`).join(' · ')}${counted.some((seat) => seat.tokens === null) ? ' (—: not measured yet)' : ''}` : roles;
   const swap = others[0]; const swapEngine = swap && swap.engine !== 'gemini' ? swap.engine : null; const stopAll = many ? 'all' : 'both';
   // Grouped, so a narrow tile wraps whole groups (who sits there; how the others are doing; who drives and Rounds; where it is and its buttons), never one control alone.
   return <div className="table-bar" role="group" aria-label="Round Table">
@@ -235,7 +237,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
       <span className="table-roles">{roles}</span></span>
     {(hidden.some((seat) => seat.state) || counted.length > 0) && <span className="table-group">
       {hidden.map((seat) => seat.state && <span key={seat.id} className={`table-partner ${seat.state === 'needs approval' ? 'waiting' : ''}`} title={`${seat.name} runs in the background in this channel`}><b className={`seat-text-${seat.colour}`}>{seat.name}</b> {seat.state}</span>)}
-      {counted.length > 0 && <span className="table-tokens tnum" title="New tokens today in each agent's channel">{counted.map((seat, index) => <Fragment key={seat.id || index}>{index > 0 && ' · '}<b className={`seat-text-${seat.colour}`}>{seat.name} {short(seat.tokens!)}</b></Fragment>)}</span>}</span>}
+      {counted.length > 0 && <span className="table-tokens tnum" title="New tokens today in each agent's channel">{counted.map((seat, index) => <Fragment key={seat.id || index}>{index > 0 && ' · '}<b className={`seat-text-${seat.colour}`}>{seat.name} {counts(seat)}</b></Fragment>)}</span>}</span>}
     <span className="table-group">
       {!many && swap && swapEngine && <button className="quiet-button small" title={`Let ${swap.name} edit files and make ${driver.name} the reviewer`} onClick={() => run({ action: 'table-driver', driver: swapEngine, ...(table.seats && swap.id ? { seat: swap.id } : {}) })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>}
       {many && <label className="table-rounds" title="The agent that edits files; the others review and stay read-only"><span className="table-label">Edits files</span><select aria-label="Agent that edits files" value={driver.id} onChange={(event) => { const next = seats.find((seat) => seat.id === event.target.value); if (next && next.engine !== 'gemini') run({ action: 'table-driver', driver: next.engine, seat: next.id }); }}>{seats.filter((seat) => seat.engine !== 'gemini').map((seat) => <option key={seat.id} value={seat.id}>{seat.name}</option>)}</select></label>}
