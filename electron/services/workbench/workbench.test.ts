@@ -209,6 +209,14 @@ describe('a task moved into a worktree', () => {
   });
 });
 describe('verification and experiment evidence', () => {
+  it('deletes a profile and keeps its recorded results, which a task may cite', async () => {
+    const root = fixture(); const verification = new Verification(root, async () => true);
+    const profile = await verification.execute({ action: 'verification-save', name: 'Check', directory: root, steps: [{ label: 'Pass', tool: 'python', args: ['-c', 'print(1)'] }], timeoutSeconds: 10 }) as any;
+    const check = await verification.execute({ action: 'verification-run', id: profile.id }) as any;
+    expect(await verification.execute({ action: 'verification-delete', id: profile.id })).toBeNull();
+    expect(verification.data().profiles).toHaveLength(0); expect(verification.data().results.map((r) => r.id)).toEqual([check.id]);
+    await expect(verification.execute({ action: 'verification-delete', id: profile.id })).rejects.toMatchObject({ code: 'CHECK_PROFILE' });
+  });
   it('executes approved argument arrays and saves passing results, while cancelled review runs nothing', async () => {
     const root = fixture(); let approved = false; const verification = new Verification(root, async () => approved);
     const profile = await verification.execute({ action: 'verification-save', name: 'Check', directory: root, steps: [{ label: 'Python assertion', tool: 'python', args: ['-c', 'print("verified")'] }], timeoutSeconds: 5 }) as any;

@@ -76,11 +76,14 @@ ${terminalFixture}
     await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').first().waitFor();
 
     // Start the Codex channel on the computer, follow it on the phone, and answer its approval prompt from the phone.
-    const tile = page.locator('.session-tile').nth(1);
+    const tile = page.locator('.session-tile').filter({ has: page.getByRole('status', { name: /^Channel 2 / }) }); // CH2, wherever it is drawn (alone while isolated below)
     await page.getByRole('button', { name: 'Workspace', exact: true }).click();
     await tile.getByRole('button', { name: 'Start channel', exact: true }).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).filter({ hasText: 'Working' }).waitFor();
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-list.png') });
+    // CH2 maximised on the computer for the size checks below, so the desktop's size is wider than the phone's (60 columns)
+    // on any screen: in the grid on a smaller one (the Windows release candidate's) the tile was no wider than the phone.
+    await (await tileControl(page, 'Isolate channel 2')).click();
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     await phone.locator('#output').filter({ hasText: 'READY' }).waitFor();
     // Opening a terminal channel takes it at the phone's size: the text is at the chosen size (13 px) from the start,
@@ -139,7 +142,7 @@ ${terminalFixture}
     // size, as when the address bar hides), only when it is used.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('z'); await page.keyboard.press('Backspace');
     for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) > 60, 'typing at the desktop gives the desktop its size back');
+    assert.ok((await width()) > 60, `typing at the desktop gives the desktop its size back (${await width()} columns; the phone's button says "${await fitButton()}")`);
     await app.evaluate(({ BrowserWindow }, port) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith(`http://127.0.0.1:${port}`))?.setSize(390, 700), PORT); await phone.waitForTimeout(600);
     assert.ok((await width()) > 60, 'a phone screen change does not take the channel back');
     await phone.locator('#output').click();
@@ -189,6 +192,7 @@ ${terminalFixture}
     await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
     assert.equal(await phone.locator('#text').inputValue(), long, 'a draft survives going back to the channel list');
     await phone.locator('#text').fill('');
+    await (await tileControl(page, 'Restore grid')).click();
 
     // Tailscale HTTPS with certificates off for the tailnet: Trace shows the steps, opens the admin console's DNS page,
     // and tries again by itself once the person comes back. A fake tailscale stands in; it appears on PATH only now.

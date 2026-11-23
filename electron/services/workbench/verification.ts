@@ -13,7 +13,7 @@ const step = z.object({ label: z.string().trim().min(1).max(60), tool: z.enum(['
 const profile = z.object({ id: z.uuid(), name: z.string().trim().min(1).max(100), directory: z.string().max(4096), steps: z.array(step).min(1).max(8), timeoutSeconds: z.number().int().min(5).max(300), createdAt: z.iso.datetime() }).strict();
 const result = z.object({ id: z.uuid(), profileId: z.uuid(), directory: z.string(), profileName: z.string(), startedAt: z.iso.datetime(), endedAt: z.iso.datetime(), passed: z.boolean(), cancelled: z.boolean(), steps: z.array(z.object({ label: z.string(), exitCode: z.number().int().nullable(), output: z.string().max(512000), timedOut: z.boolean(), truncated: z.boolean() }).strict()).max(8), tested: z.object({ state: z.string().max(64), changedDuring: z.boolean() }).strict().optional() }).strict();
 const dataSchema = z.object({ profiles: z.array(profile).max(100), results: z.array(result).max(50) }).strict();
-const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('verification-list') }).strict(), z.object({ action: z.literal('verification-save'), id: z.uuid().optional(), name: profile.shape.name, directory: profile.shape.directory, steps: profile.shape.steps, timeoutSeconds: profile.shape.timeoutSeconds }).strict(), z.object({ action: z.literal('verification-run'), id: z.uuid() }).strict(), z.object({ action: z.literal('verification-cancel') }).strict(), z.object({ action: z.literal('verification-fresh') }).strict()]);
+const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('verification-list') }).strict(), z.object({ action: z.literal('verification-save'), id: z.uuid().optional(), name: profile.shape.name, directory: profile.shape.directory, steps: profile.shape.steps, timeoutSeconds: profile.shape.timeoutSeconds }).strict(), z.object({ action: z.literal('verification-run'), id: z.uuid() }).strict(), z.object({ action: z.literal('verification-delete'), id: z.uuid() }).strict(), z.object({ action: z.literal('verification-cancel') }).strict(), z.object({ action: z.literal('verification-fresh') }).strict()]);
 export class Verification {
   private child: ChildProcess | null = null;
   private busy = false; private cancelled = false;
@@ -68,6 +68,12 @@ export class Verification {
       if (request.id && !data.profiles.some((p) => p.id === request.id)) throw new HubError('CHECK_PROFILE', 'Verification profile is unavailable.');
       const next: VerificationProfile = { id: request.id ?? randomUUID(), name: request.name, directory: directory(request.directory), steps: request.steps, timeoutSeconds: request.timeoutSeconds, createdAt: data.profiles.find((p) => p.id === request.id)?.createdAt ?? new Date().toISOString() };
       this.persist([...data.profiles.filter((p) => p.id !== next.id), next], data.results); return next;
+    }
+    /** The profile only (1.31.7): its recorded results stay, named, since a task may point at one as its evidence. */
+    if (request.action === 'verification-delete') {
+      if (this.busy) throw new HubError('CHECK_BUSY', 'Finish or cancel verification before editing profiles.');
+      if (!data.profiles.some((p) => p.id === request.id)) throw new HubError('CHECK_PROFILE', 'Verification profile is unavailable.');
+      this.persist(data.profiles.filter((p) => p.id !== request.id), data.results); return null;
     }
     if (this.busy) throw new HubError('CHECK_BUSY', 'Verification is already running.');
     const selected = data.profiles.find((p) => p.id === request.id); if (!selected) throw new HubError('CHECK_PROFILE', 'Verification profile is unavailable.');

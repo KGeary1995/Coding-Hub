@@ -1,5 +1,17 @@
 ## What's new
 
+1.31.7 finishes what was left of the review apart from rewriting the phone app:
+
+- **A verification profile can be deleted.** **Delete** asks first; the profile's recorded results stay, since a task may name one as its evidence.
+- **Settings no longer puts back an old Drive folder.** With other settings changed and not yet saved, choosing a Drive folder in Sync between computers (or a sync from another computer) changed the saved settings but not the form, so the next **Save preferences** wrote the old folder back. The form now takes in each change made elsewhere to a field you have not edited, and keeps the ones you have.
+- **The phone's Screen has a Display picker**, when a Windows computer has more than one display: all of them side by side (as before, squeezed into a strip on a phone) or one at full size. It is remembered while the phone stays on Screen.
+- **Actual size** on the phone's Screen shows the picture at its own size: drag to move around it, and a tap still clicks where it shows. Tap it again to fit the picture to the phone.
+- **View only** on the phone's Screen lets you look without a stray tap clicking on the computer.
+- **The Windows release candidate now runs the phone and screen smoke tests**: the phone app, Screen between computers, Trace's screen service and a phone's Screen. The last two ran nowhere in CI, and the first two only on Linux.
+- **Not done:** pinch-to-zoom on the phone's Screen (Actual size and dragging do this job without throwing taps off); the phone's Usage, Tasks and History following the computer picked above the list; rewriting the phone app in React. These wait until you have tried 1.31.4 and 1.31.6 on a real phone.
+- **Tried:** the unit tests (a deleted profile keeps its results; the form keeps edits and takes in other changes; the phone's display passed to the screen service and reported back), and the productivity, phone screen, screen, screen service and remote smoke tests, with new checks for Delete and for Actual size, View only and the Screen controls fitting the phone.
+- **Not tried:** a computer with more than one display from a real phone.
+
 1.31.6 is the phone app's second stage. Please try it on your phone with 1.31.4's fixes:
 
 - **Back leaves a channel instead of the app.** Android's Back button and the iPhone's swipe from the edge closed the app from a channel or the screen. They now go back to the channel list, as the app's own Back does; on the list, Back still closes the app.

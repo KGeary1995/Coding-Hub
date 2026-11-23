@@ -68,6 +68,12 @@ jobs:
       - run: node scripts/table-seats-smoke.cjs
       # Windows-only: Ctrl+V and Alt+V image/text paste against the real system clipboard (the build above is current).
       - run: node scripts/paste-smoke.cjs
+      # The phone app and the screen on Windows (1.31.7; before, the last two ran nowhere in CI and the first two only on
+      # Linux): the phone driving channels, Screen between computers, Trace's screen service, and a phone's Screen.
+      - run: node scripts/remote-smoke.cjs
+      - run: node scripts/screen-smoke.cjs
+      - run: node scripts/screen-service-smoke.cjs
+      - run: node scripts/phone-screen-smoke.cjs
       - run: npm run dist:win
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}

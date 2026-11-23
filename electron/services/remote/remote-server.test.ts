@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
+import { Duplex } from 'node:stream';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import { eventJSON, RemoteServer, type RemoteHost, PHONE_QUIET_MS } from './remote-server';
 import { HubError } from '../cli/engine-adapter';
@@ -544,6 +545,20 @@ describe('phone screen of a Windows computer', () => {
     server.revoke(id);
     const service = new net.Socket(); answer({ socket: service, head: Buffer.alloc(0) });
     expect(await outcome).toBe('refused'); expect(service.destroyed).toBe(true);
+  });
+  it('opens the display the phone picked, and tells the phone how many there are (a browser cannot read the answer)', async () => {
+    const { server } = await remote(); const asked: number[] = [];
+    const host = (server as unknown as { host: RemoteHost }).host; host.screenService = () => true;
+    host.openScreenService = async (_viewer, display = 0) => { asked.push(display); const socket = new Duplex({ read() {}, write(_chunk, _encoding, done) { done(); } }); socket.push('RFB 003.008\n'); return { socket, head: Buffer.alloc(0), displays: 3, display }; };
+    await server.setEnabled(true); const phone = await paired(server); const id = server.status().devices.find((device) => device.name === 'Test phone')!.id; server.setCanRun(id, true);
+    const get = (route: string, init: RequestInit = {}) => fetch(base(server) + route, { ...init, headers: { Authorization: `Bearer ${phone}` } }).then((response) => response.json());
+    expect(await get('/api/phone-screen-displays')).toEqual({ displays: 1, display: 0 });
+    for (const [query, expected] of [['&display=2', 2], ['', 0], ['&display=99', 16], ['&display=-1', 0], ['&display=x', 0]] as const) {
+      const { ticket } = await get('/api/phone-screen-ticket', { method: 'POST' }) as { ticket: string };
+      const socket = new WebSocket(`ws://127.0.0.1:${server.address}/api/phone-screen?ticket=${ticket}${query}`); socket.binaryType = 'arraybuffer'; cleanup.push(() => socket.close());
+      expect(await new Promise<string>((resolve) => { socket.onmessage = (event) => resolve(Buffer.from(event.data as ArrayBuffer).toString()); socket.onerror = () => resolve('refused'); })).toBe('RFB 003.008\n');
+      expect(asked.at(-1)).toBe(expected); expect(await get('/api/phone-screen-displays')).toEqual({ displays: 3, display: expected }); socket.close();
+    }
   });
   /** A phone of a linked computer, given a key here through it (relayKey), with Can start and stop agents, watching the screen. */
   async function relayed() {

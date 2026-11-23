@@ -16,6 +16,7 @@ import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { phoneFile } from './phone-files';
 import { ScreenMirror } from './screen-mirror';
+import { MAX_DISPLAYS } from '../../../shared/screen';
 import { acceptKey, frame, FrameReader } from './websocket';
 import { pushEndpoint, pushSender, vapidKeys, type PushSender, type VapidKeys } from './web-push';
 import type { DayUsage, HubPreferences, MemoryNote } from '../../../shared/hub';
@@ -65,7 +66,8 @@ export interface RemoteHost {
    * on, and a VNC stream from it for the phone named `viewer` (shown by the clock there while it watches).
    */
   screenService?(): boolean;
-  openScreenService?(viewer: string): Promise<{ socket: Duplex; head: Buffer }>;
+  /** `display`: 0 for every display side by side, or one of them (1.31.7, the phone's Display picker). */
+  openScreenService?(viewer: string, display?: number): Promise<{ socket: Duplex; head: Buffer; displays?: number; display?: number }>;
   /** RemoteUsageSource; it may wait for a read of the CLI logs still under way, so the phone gets current numbers. */
   usage?(): RemoteUsageSource | Promise<RemoteUsageSource>;
   /** The task board, and moving a card on it (as dragging it on the desktop does). */
@@ -210,6 +212,8 @@ export class RemoteServer {
   private screenOwners = new Map<Duplex, { device: string; service: boolean }>();
   /** Why Trace's screen service last refused each phone, until it next lets that phone in. */
   private screenProblems = new Map<string, string>();
+  /** Per phone, how many displays its last Screen found and which it showed: a browser cannot read the WebSocket's answer headers. */
+  private screenDisplays = new Map<string, { displays: number; display: number }>();
   private replay = new Map<string, ScreenMirror>();
   /** Chat channels' recent events, kept whether or not phone access is on, so a phone opening a chat sees its thread. */
   private chats = new ChatReplayBuffer();
@@ -400,7 +404,8 @@ export class RemoteServer {
     if (service) {
       const phone = this.devices().find((device) => device.id === ticket.device)?.name ?? 'A phone';
       // Taken away (or the phone gone) while the service was answering: nothing is passed on.
-      try { const opened = await service(phone); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } this.screenProblems.delete(ticket.device); pipe(opened.socket, opened.head); }
+      const display = Math.min(MAX_DISPLAYS, Math.max(0, Math.trunc(Number(url.searchParams.get('display'))) || 0));
+      try { const opened = await service(phone, display); if (opened.displays === undefined) this.screenDisplays.delete(ticket.device); else this.screenDisplays.set(ticket.device, { displays: opened.displays, display: opened.display ?? display }); if (socket.destroyed || !this.screenOwners.has(socket)) { opened.socket.destroy(); this.screens.delete(socket); this.screenOwners.delete(socket); socket.destroy(); return; } this.screenProblems.delete(ticket.device); pipe(opened.socket, opened.head); }
       // A browser is told nothing about a refused WebSocket, so why is kept for the phone to ask (GET /api/phone-screen-problem).
       catch (error) { this.screenProblems.set(ticket.device, error instanceof Error && error.message ? error.message.slice(0, 500) : 'The screen service did not answer.'); this.screens.delete(socket); this.screenOwners.delete(socket); if (!socket.writableEnded) refuse(502, 'Bad Gateway'); }
       return;
@@ -942,6 +947,7 @@ export class RemoteServer {
       return this.send(response, 200, { ticket });
     }
     if (request.method === 'GET' && url.pathname === '/api/phone-screen-problem') return this.send(response, 200, { error: this.screenProblems.get(device.id) ?? null });
+    if (request.method === 'GET' && url.pathname === '/api/phone-screen-displays') return this.send(response, 200, this.screenDisplays.get(device.id) ?? { displays: 1, display: 0 });
     if (request.method === 'GET' && url.pathname === '/api/transcript') {
       const sessionId = url.searchParams.get('sessionId') ?? '';
       if (this.local(sessionId)) return this.send(response, 200, { transcript: this.host.transcript?.(sessionId) ?? null });

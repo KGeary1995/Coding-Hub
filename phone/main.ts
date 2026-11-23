@@ -339,6 +339,12 @@ function showList() {
 /** Two rows of four, so each key is at least 44 px wide on a phone. */
 const SCREEN_KEYS: [string, number, string][][] = [[['Esc', 0xff1b, 'Escape'], ['Tab', 0xff09, 'Tab'], ['⌫', 0xff08, 'Backspace'], ['⏎', 0xff0d, 'Enter']], [['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]];
 let viewer: RFB | null = null;
+/**
+ * The phone's Screen choices (1.31.7), kept through reconnects: which display of a Windows computer (0: all side by side;
+ * before, always all, squeezed into a strip), the picture fitted to the phone or at its own size (then a drag moves
+ * around it and a tap still clicks: noVNC's own panning, so a tap lands where it shows), and whether touches control it.
+ */
+let screenDisplay = 0; let screenActual = false; let screenViewOnly = false;
 /** Ends the screen session when the phone leaves the Screen view by any path (Back, a tab, a notification), so it does not run unseen. */
 function leaveScreen() { viewer?.disconnect(); viewer = null; }
 /**
@@ -356,6 +362,11 @@ async function showScreen() {
   const password = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Password', aria: { label: 'Password' } });
   const signin = h('form', { className: 'compose screen-signin', hidden: true }, user, password, h('button', { className: 'primary', type: 'submit' }, 'Sign in'));
   const view = h('div', { className: 'screen-view', aria: { label: 'Computer screen' } });
+  const display = h('select', { className: 'screen-display', hidden: true, aria: { label: 'Display' }, onchange: () => { screenDisplay = Number(display.value); void showScreen(); } });
+  const zoom = h('button', { type: 'button', aria: { pressed: String(screenActual) }, onclick: () => { screenActual = !screenActual; zoom.setAttribute('aria-pressed', String(screenActual)); fit(); } }, 'Actual size');
+  const only = h('button', { type: 'button', aria: { pressed: String(screenViewOnly) }, onclick: () => { screenViewOnly = !screenViewOnly; only.setAttribute('aria-pressed', String(screenViewOnly)); if (viewer) viewer.viewOnly = screenViewOnly; } }, 'View only');
+  const fit = () => { if (!viewer) return; viewer.scaleViewport = !screenActual; viewer.clipViewport = screenActual; viewer.dragViewport = screenActual; };
+  const tools = h('div', { className: 'screen-tools' }, display, zoom, only);
   const typing = h('input', { className: 'screen-typing', autocomplete: 'off', autocapitalize: 'none', placeholder: 'Type here to send keys', aria: { label: 'Keys to send' } });
   const send = (keys: KeyStroke[]) => { for (const key of keys) viewer?.sendKey(key.keysym, key.code, key.down); };
   // What the phone's keyboard inserts goes over as key presses; the field itself stays empty.
@@ -363,15 +374,22 @@ async function showScreen() {
   typing.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === 'Backspace') { event.preventDefault(); send([{ keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: true }, { keysym: event.key === 'Enter' ? 0xff0d : 0xff08, code: event.key, down: false }]); } });
   const keys = h('div', { className: 'keys screen-keys', aria: { role: 'group', label: 'Keys' } }, ...SCREEN_KEYS.map((row) => h('div', {}, ...row.map(([label, keysym, code]) => h('button', { type: 'button', onclick: () => send([{ keysym, code, down: true }, { keysym, code, down: false }]), aria: { label: code } }, label)))));
   const back = () => { leaveScreen(); showList(); };
-  app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, view, typing, keys));
+  app.replaceChildren(header(back, h('span', { className: 'title' }, `Screen${activeTarget().name ? ` · ${activeTarget().name}` : ''}`)), h('main', { className: 'screen' }, status, signin, tools, view, typing, keys));
   try {
     const { ticket } = await (await api('/api/phone-screen-ticket', { method: 'POST' })).json() as { ticket: string };
     const { default: Viewer } = await import('@novnc/novnc');
     const origin = activeTarget().base || location.origin;
-    const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/phone-screen?ticket=${encodeURIComponent(ticket)}`, { shared: true }); viewer = client;
-    client.scaleViewport = true; client.showDotCursor = true; client.background = 'transparent';
+    const client = new Viewer(view, `${origin.replace(/^http/, 'ws')}/api/phone-screen?ticket=${encodeURIComponent(ticket)}${screenDisplay ? `&display=${screenDisplay}` : ''}`, { shared: true }); viewer = client;
+    fit(); client.viewOnly = screenViewOnly; client.showDotCursor = true; client.background = 'transparent';
     let shown = false;
-    client.addEventListener('connect', () => { shown = true; status.textContent = ''; signin.hidden = true; });
+    client.addEventListener('connect', () => {
+      shown = true; status.textContent = ''; signin.hidden = true;
+      // A Windows computer's displays, when it has more than one (a Mac's screen sharing, or an older Trace, answers 1).
+      void api('/api/phone-screen-displays').then((response) => response.json()).then((value: { displays?: number; display?: number }) => {
+        const count = Number(value.displays) || 1; if (count < 2 || viewer !== client) return; screenDisplay = Number(value.display) || 0;
+        display.replaceChildren(...Array.from({ length: count + 1 }, (_, i) => h('option', { value: String(i), selected: i === screenDisplay }, i ? `Display ${i}` : 'All displays'))); display.hidden = false;
+      }).catch(() => { /* No picker. */ });
+    });
     client.addEventListener('credentialsrequired', () => { status.textContent = 'Sign in with this computer\'s user name and password.'; signin.hidden = false; user.focus(); });
     signin.onsubmit = (event) => { event.preventDefault(); client.sendCredentials({ username: user.value, password: password.value }); password.value = ''; status.textContent = 'Signing in…'; };
     client.addEventListener('securityfailure', () => { status.textContent = 'That user name and password were not accepted.'; });
