@@ -144,7 +144,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;
   return (
     <article ref={tile} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${detailOpen ? 'detail-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
-      data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
+      data-session={session.id} onFocusCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} onPointerDownCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>

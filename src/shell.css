@@ -118,6 +118,7 @@ button.tr-sb-cell:not(.needs-you-cell, :is(.warning, .critical) > .tr-sb-today-b
 /* A chip that asks for the person is tinted with what it asks: a channel that waits, failed or is near its limit. */
 .tr-sb-channel:has(.tr-state.waiting), .needs-you-cell { --tone: var(--tr-st-waiting); }
 .tr-sb-channel:has(.tr-state.failed) { --tone: var(--tr-st-failed); }
+.tr-sb-channel:has(.tr-state.done) { --tone: var(--tr-st-done); }
 .tr-sb-channel:has(.tr-state.limit) { --tone: var(--tr-st-limit); }
 button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))), button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: color-mix(in srgb, var(--tone) 40%, transparent); background: color-mix(in srgb, var(--tone) 14%, var(--tr-panel)); }
 button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit))):hover { border-color: var(--tone); }
@@ -153,6 +154,7 @@ button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limi
 .tr-state.starting { color: var(--tr-st-starting); }
 .tr-state.waiting { color: var(--tr-st-waiting); }
 .tr-state.finished { color: var(--tr-st-finished); }
+.tr-state.done { color: var(--tr-st-done); }
 .tr-state.failed { color: var(--tr-st-failed); }
 .tr-state.limit { color: var(--tr-st-limit); }
 .tr-state.claude { color: var(--tr-ch-claude); }

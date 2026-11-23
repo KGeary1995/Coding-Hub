@@ -10,7 +10,7 @@ const session = (patch: Partial<Session> = {}): Session => ({ ...createSession('
 const usage = (patch: Partial<UsageRecord> = {}): UsageRecord => ({ runId: 'run-1', sessionId: 's', engine: 'codex', model: 'm', cwd: '/p', timestamp: new Date().toISOString(), input: 100, output: 20, cached: 0, cacheWrite: 0, reasoning: null, context: null, cost: null, ...patch });
 
 describe('channel state', () => {
-  it('maps every session lifecycle to one of the seven states', () => {
+  it('maps every session lifecycle to one of the eight states', () => {
     expect(channelState(session({ status: 'idle', runId: null }))).toBe('idle');
     expect(channelState(session({ status: 'starting' }))).toBe('starting');
     expect(channelState(session())).toBe('working');
@@ -19,10 +19,12 @@ describe('channel state', () => {
     expect(channelState(session({ status: 'exited', exitCode: 1, error: 'CLI exited with code 1.' }))).toBe('failed');
     expect(channelState(session({ status: 'error', error: 'PTY failed' }))).toBe('failed');
     expect(channelState(session(), usage({ context: { used: 160, limit: 200 } }))).toBe('limit');
-    expect(Object.keys(CHANNEL_STATES)).toHaveLength(7);
+    // A turn that ended unseen shows Done (1.32.1), and a waiting approval still comes first.
+    expect(channelState(session({ unseen: true }))).toBe('done'); expect(channelState(session({ unseen: true, attention: { message: 'Approve?', at: '' } }))).toBe('waiting');
+    expect(Object.keys(CHANNEL_STATES)).toHaveLength(8);
   });
   it('names each state in plain words, in sentence case', () => {
-    expect(Object.values(CHANNEL_STATES).map((state) => state.word)).toEqual(['Idle', 'Starting', 'Working', 'Needs you', 'Finished', 'Failed', 'Near limit']);
+    expect(Object.values(CHANNEL_STATES).map((state) => state.word)).toEqual(['Idle', 'Starting', 'Working', 'Needs you', 'Done', 'Finished', 'Failed', 'Near limit']);
   });
   it('treats a stopped run as finished, and waits over a near limit', () => {
     expect(channelState(session({ status: 'exited', exitCode: 143, error: null }))).toBe('finished');

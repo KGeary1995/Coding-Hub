@@ -5,14 +5,15 @@ import { waitingImageCount, type RoundTableState } from '../../shared/chat';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { LinkedComputer } from '../../shared/remote';
 import { channelAlerts } from './channel-state';
+import { channelsOf } from './workspace-store';
 
 /**
  * Everything waiting for the person, in one list: channels waiting for an approval (with the exact request and since
  * when), channels that failed, and tasks that stopped, went quiet or are ready for review. Each says what to do next.
  * A linked computer's channel that waits or failed is listed too, with that computer's id (it opens on its tab).
  */
-export interface NeedsYouItem { key: string; kind: 'approval' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved' | 'plan-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings'; computerId?: string }
-const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8, 'findings-unsaved': 4, 'plan-review': 1 };
+export interface NeedsYouItem { key: string; kind: 'approval' | 'done' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved' | 'plan-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings' | 'open'; computerId?: string }
+const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8, 'findings-unsaved': 4, 'plan-review': 1, done: 9 };
 
 export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}, computers: LinkedComputer[] = []): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
@@ -30,6 +31,8 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
     else if (alert.state === 'failed') items.push({ key: `f:${alert.sessionId}`, kind: 'failed', title: alert.text, detail: (session?.error || 'The channel stopped with an error.') + onTask, since: session?.endedAt ?? null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: 'retry' });
     else items.push({ key: `l:${alert.sessionId}`, kind: 'limit', title: alert.text, detail: 'Near its context or budget limit: write a handoff before it runs out.' + onTask, since: null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: 'handoff' });
   }
+  // Channels whose agent finished a turn the person has not looked at yet (1.32.1), after everything that asks something.
+  channelsOf(sessions).forEach((session, index) => { if (session.unseen && session.status === 'running' && !session.attention && !items.some((item) => item.sessionId === session.id)) { const task = taskOf(session.id); items.push({ key: `d:${session.id}`, kind: 'done', title: `CH${index + 1} finished its turn`, detail: 'Look at what it did.' + (task ? ` · task: ${task.title}` : ''), since: null, sessionId: session.id, taskId: task?.id ?? null, action: 'open' }); } });
   for (const task of tasks) {
     // A failed channel is listed above with its task; its task is not listed twice.
     if (task.sessionId && items.some((item) => item.taskId === task.id)) continue;

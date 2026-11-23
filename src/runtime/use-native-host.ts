@@ -29,7 +29,18 @@ function chatTurnDone(sessionId: string, failed: boolean) {
   if (table?.kind === 'hierarchy' || lead?.roundTable?.kind === 'hierarchy') return;
   // Only the driver's reply says whether the work is done: the seat that edits (by session from 1.26, else by its agent).
   if (lead && table && seat && (table.driverSeat ? sessionId !== table.driverSeat : seat.config.engine !== table.driver)) return;
+  if (!failed) turnDone(lead?.id ?? sessionId);
   void taskTurnDone(lead?.id ?? sessionId, failed, { chat: sessionId });
+}
+
+/**
+ * An agent's turn ended (Claude Code's Stop hook, or a chat turn; for a Round Table, the driver's reply). Unless the person
+ * is looking at that channel (Trace in front, on the channels, with that tile focused), it shows Done until they look.
+ */
+function turnDone(sessionId: string) {
+  const state = useWorkspaceStore.getState(); if (!channelsOf(state.sessions).some((session) => session.id === sessionId)) return;
+  const looking = document.hasFocus() && state.activeView === 'workspace' && document.activeElement?.closest('.session-tile')?.getAttribute('data-session') === sessionId;
+  if (!looking) state.markDone(sessionId);
 }
 import { permissionsRefused, setPermissions } from './permissions';
 import { askForHandoff } from './auto-handoff';
@@ -93,7 +104,7 @@ export function useNativeHost() {
     // them, with Save to memory): they are tried again every few minutes, so a Drive folder that came back needs no click.
     const findingsTimer = setInterval(() => { const sessions = useWorkspaceStore.getState().sessions; for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) void forgetTable(session.id); } }, 5 * 60000);
     const unsubscribe = host.onSessionEvent((event) => {
-      if (event.type === 'answered' && event.finished) { taskTurnDone(event.sessionId); void askForHandoff(event.sessionId).catch(() => {}); }
+      if (event.type === 'answered' && event.finished) { turnDone(event.sessionId); taskTurnDone(event.sessionId); void askForHandoff(event.sessionId).catch(() => {}); }
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       // A chat's thread: Claude Code's or Codex's, or a Round Table's Gemini seat.

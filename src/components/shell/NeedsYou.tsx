@@ -8,7 +8,7 @@ import { jumpToChannel } from './StatusBar';
 import { forgetTable } from '../../runtime/round-table';
 import { useLinkedStore } from '../../state/linked-store';
 
-const ACTION: Record<NeedsYouItem['action'], string> = { answer: 'Answer', retry: 'Open channel', handoff: 'Write handoff', tasks: 'Open Tasks', 'save-findings': 'Save to memory' };
+const ACTION: Record<NeedsYouItem['action'], string> = { answer: 'Answer', retry: 'Open channel', handoff: 'Write handoff', tasks: 'Open Tasks', 'save-findings': 'Save to memory', open: 'Open channel' };
 
 /**
  * "Needs you · N" in the status bar: one list of everything waiting for the person, on this computer and linked ones,

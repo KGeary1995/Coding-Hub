@@ -130,6 +130,22 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await clipboardText(), 'first line\nsecond line');
     await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
+    // A turn that ends while the person is in another channel shows Done until they look at it (1.32.1).
+    const turns = () => page.evaluate(() => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length);
+    await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('end-turn-later'); await page.keyboard.press('Enter');
+    await second.locator('.xterm-helper-textarea').focus();
+    await page.waitForFunction(() => document.querySelector('.session-tile')?.getAttribute('data-state') === 'done');
+    assert.equal(await first.getAttribute('data-state'), 'done'); assert.equal(await first.getByRole('status', { name: 'Channel 1 done', exact: true }).textContent(), 'Done');
+    await page.locator('.needs-you-cell').click(); await page.locator('.needs-you-list li', { hasText: 'CH1 finished its turn' }).waitFor(); await page.keyboard.press('Escape');
+    // Looking at it (a click, or moving into its terminal) clears it.
+    await first.locator('.xterm-helper-textarea').focus(); await page.waitForFunction(() => document.querySelector('.session-tile')?.getAttribute('data-state') !== 'done');
+    // A turn that ends while the person is in that channel, with Trace in front, does not.
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
+    if (await page.evaluate(() => document.hasFocus())) {
+      const before = await turns(); await page.keyboard.type('end-turn'); await page.keyboard.press('Enter');
+      await page.waitForFunction((count) => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length > count, before);
+      await page.waitForTimeout(300); assert.notEqual(await first.getAttribute('data-state'), 'done', 'a turn the person watched end is not Done');
+    } else console.log('desktop smoke: the window could not be brought to the front, so the watched-turn check was skipped');
     await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line');
     // Trace's own menu has no Reload, Force Reload or Close Window, so Ctrl+R and Ctrl+W (Cmd on a Mac) cannot stop every
     // channel. Checked on the menu itself: Playwright's synthetic keys may never reach Electron's menu accelerators.
