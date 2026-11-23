@@ -10,6 +10,7 @@ import { COMMAND_SCOPES, matchRange, parseQuery, searchesFiles, type CommandScop
 import { CHANNEL_STATES, channelState, usageFor } from '../state/channel-state';
 import { VIEW_KEYS } from '../runtime/view-shortcuts';
 import { jumpToChannel } from './shell/StatusBar';
+import { useLinkedStore } from '../state/linked-store';
 import { channelKeyHint } from './channel-key';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
 import { MAX_CHANNELS } from '../../shared/schemas';
@@ -43,7 +44,7 @@ export function CommandMenu() {
   const list = useRef<HTMLDivElement>(null);
   const { sessions: all, rootDirectory, setView, arrange } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, rootDirectory: s.rootDirectory, setView: s.setView, arrange: s.arrange })));
   // Round Table seats start, stop and are answered with their lead's channel.
-  const sessions = useMemo(() => channelsOf(all), [all]);
+  const sessions = useMemo(() => channelsOf(all), [all]); const computers = useLinkedStore((state) => state.computers);
   const usage = useHubStore((state) => state.usage);
   const { scope, text } = parseQuery(input, chosenScope);
   useEffect(() => {
@@ -98,13 +99,17 @@ export function CommandMenu() {
       { id: 'skills', label: 'Inspect skills and plugins', run: go('skills') },
       { id: 'help', label: 'Open help and AI guide', run: go('help') },
       { id: 'settings', label: 'Open settings', run: go('settings') },
-      { id: 'tools', label: 'Open more tools (coaching, verification)', run: go('tools') },
+      { id: 'tasks', label: 'Open tasks', run: go('tasks') },
+      { id: 'coaching', label: 'Open AI coaching', run: go('coaching') },
+      { id: 'verification', label: 'Open verification profiles', run: go('verification') },
       { id: 'search', label: 'Search local workspace', run: go('search') },
       { id: 'recovery', label: 'Recover a failed channel', run: () => { useWorkspaceStore.setState({ historyMode: 'failed' }); setView('history'); } },
       { id: 'templates', label: 'Apply a project template', run: go('projects') },
       { id: 'support', label: 'Export a diagnostic report', run: go('settings') },
       { id: 'grid', label: 'Arrange channels in grid', run: () => { setView('workspace'); arrange('grid'); } },
       { id: 'detect', label: 'Refresh local CLI detection', run: () => void refreshEngines() },
+      // Each linked computer's tab (1.31.5), as its tab in the top bar opens it.
+      ...computers.filter((computer) => computer.linked).map((computer) => ({ id: `computer-${computer.id}`, label: `Open ${computer.name}${computer.connected ? '' : ' (not connected)'}`, run: () => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' }) })),
       ...sessions.flatMap((session, index) => session.status === 'running'
         ? [{ id: `stop-${session.id}`, label: `Stop CH${index + 1} · ${channelNameNow(session)}`, run: () => void stopSession(session.id) }]
         : session.status !== 'starting' ? [{ id: `start-${session.id}`, label: `Start CH${index + 1} · ${channelNameNow(session)}`, run: () => { setView('workspace'); void startSession(session.id); } }] : []),
@@ -122,7 +127,7 @@ export function CommandMenu() {
     }
     // Actions and channels match on their label; search hits already matched their content.
     return all.filter((item) => (scope === 'all' || scope === item.group) && (item.group === 'files' || item.group === 'memory' || !text || matchRange(item.label, text)));
-  }, [sessions, usage, hits, scope, text, rootDirectory, setView, arrange]);
+  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange]);
   useEffect(() => { setSelected(0); }, [scope, text]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   const run = (item: Item | undefined) => { if (!item) return; setOpen(false); item.run(); };

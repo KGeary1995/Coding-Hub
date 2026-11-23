@@ -86,17 +86,22 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    // Occasional tools live on More tools, not in the Insight menu, and each one leads back there.
+    // AI coaching and Verification are in the Insight menu itself (1.31.5; before, on a More tools page), and the menu
+    // names the view it is on.
     await page.getByRole('button', { name: 'Insight views', exact: true }).click();
-    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'Search', 'More tools']);
-    await page.getByRole('menuitem', { name: 'More tools', exact: true }).click();
-    // Tasks moved to the top bar in 1.17; More tools keeps the occasional ones.
-    assert.deepEqual(await page.locator('.more-tools h2').allTextContents(), ['AI coaching', 'Verification profiles']);
-    await page.getByRole('button', { name: 'Open Verification profiles', exact: true }).click();
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'Search', 'AI coaching', 'Verification profiles']);
+    await page.getByRole('menuitem', { name: 'Verification profiles', exact: true }).click();
     await page.getByRole('heading', { name: 'Verification profiles', exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Insight views', exact: true }).textContent(), 'More tools▾');
-    await page.getByRole('button', { name: 'More tools', exact: true }).click();
-    await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Insight views', exact: true }).textContent(), 'Verification profiles▾');
+    // A "?" opens its words as a note, from the keyboard too, and Escape closes it (1.31.5; it was a tooltip only).
+    const help = page.getByRole('button', { name: 'Help: verification profiles', exact: true }); await help.focus(); await page.keyboard.press('Enter');
+    await page.getByRole('note').filter({ hasText: 'a confirmation shows its exact commands' }).waitFor(); assert.equal(await help.getAttribute('aria-expanded'), 'true');
+    await page.keyboard.press('Escape'); await page.getByRole('note').filter({ hasText: 'a confirmation shows its exact commands' }).waitFor({ state: 'detached' });
+    // Settings says when the form holds changes not saved yet, and Discard puts them back (1.31.5).
+    await openView(page, 'Settings'); const font = page.getByLabel('Terminal font size', { exact: true }); const fontBefore = await font.inputValue();
+    assert.equal(await page.getByText('Unsaved changes', { exact: true }).count(), 0); await font.fill(String(Number(fontBefore) + 1));
+    await page.getByText('Unsaved changes', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Discard', exact: true }).click();
+    await page.getByText('Unsaved changes', { exact: true }).waitFor({ state: 'detached' }); assert.equal(await font.inputValue(), fontBefore);
     // Higher contrast keeps a focused field's accent border and an error's colour, and compact density leaves the cards
     // drawn edge to edge without padding (1.31.1: a rule for each outweighed them).
     // Search loads when first opened: the field is waited for before it is measured (a slower machine had none yet).
@@ -166,7 +171,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       assert.deepEqual(bar.past, [], `status bar items past its end with eight channels at ${width}px / ${scale}%`);
       assert.deepEqual(bar.hidden, [], `tiles whose name, state or controls button is out of view with eight channels at ${width}px / ${scale}%`);
     }
-    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, the More tools page, and eight channels in the narrowest windows.');
+    console.log('PASS: four-channel workbench, responsive canvas, 125% zoom, visible status bar, explorer toggle, G-letter view shortcuts, AI coaching and Verification in the Insight menu, and eight channels in the narrowest windows.');
   } finally {
     await app?.close().catch(() => {});
     await removeFolder(root);

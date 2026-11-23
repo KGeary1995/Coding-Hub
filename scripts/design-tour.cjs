@@ -25,7 +25,7 @@
 //   11-failed-channel-other-page   its notice, on Tasks
 //   12-close-question    Close on a running channel            13-menu-project … 16-menu-new-channel   the top-bar menus
 //   17-command-menu, 18-command-menu-query                     19-changes          diff of a file, delivery column
-//   20-files … 30-settings, 31-34-workflow-*, 35-ai-coaching, 36-verification-profiles, 37-more-tools, 38-help-topic
+//   20-files … 30-settings, 31-34-workflow-*, 35-ai-coaching, 36-verification-profiles, 38-help-topic
 //   then 02, 19, 21, 23, 30 again with -1100 (unless --size) and -contrast (Higher contrast on)
 const { realpath, mkdtemp, mkdir, writeFile } = require('node:fs/promises');
 const os = require('node:os');
@@ -44,7 +44,7 @@ const realUsage = flag('real-usage') !== undefined;
 const PARTS = 'abcdefghij';
 const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history', 'Session history'], ['23-usage', 'Usage'], ['24-projects', 'Projects'],
   ['25-accounts', 'Accounts & connections'], ['26-shared-memory', 'Shared memory'], ['27-shared-rules', 'Shared rules'], ['28-mcp-servers', 'MCP servers'],
-  ['29-skills-plugins', 'Skills & plugins'], ['30-settings', 'Settings'], ['35-ai-coaching', 'AI coaching'], ['36-verification-profiles', 'Verification profiles'], ['37-more-tools', 'More tools']];
+  ['29-skills-plugins', 'Skills & plugins'], ['30-settings', 'Settings'], ['35-ai-coaching', 'AI coaching'], ['36-verification-profiles', 'Verification profiles']];
 
 (async () => {
   const started = Date.now();

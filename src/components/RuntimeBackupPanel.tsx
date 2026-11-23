@@ -1,3 +1,4 @@
+import { HelpTip } from './HelpTip';
 import { useEffect, useState } from 'react';
 import { AppWindow, ArchiveRestore, CircleAlert, CircleCheck, TriangleAlert } from 'lucide-react';
 import { APP_VERSION } from '../version';
@@ -27,7 +28,7 @@ export function RunningApplicationCard({ state: { runtime, error } }: { state: R
     {runtime && runtime.version !== APP_VERSION && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>The renderer and native host versions differ. Close old app windows and rebuild or install the latest source release.</span></p>}
     {runtime ? <dl className="settings-facts"><dt>Version</dt><dd>Renderer v{APP_VERSION} · Host v{runtime.version}</dd><dt>Executable</dt><dd><code>{runtime.executable}</code></dd><dt>Application folder</dt><dd><code>{runtime.applicationPath}</code></dd><dt>Active local data</dt><dd><code>{runtime.storagePath}</code></dd></dl>
       : error ? <p className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p> : <p className="ui-hint">Checking the running application…</p>}
-    <p className="ui-hint ui-help-line">Source files do not update an installed shortcut.<button type="button" className="ui-help" aria-label="Help: running a newer source version" title={MAC ? 'Use npm start in the intended source folder, or rebuild and install its disk image.' : 'Use npm.cmd start in the intended source folder, or rebuild and install its Windows Setup.exe.'} /></p><CrashDiagnostics storagePath={runtime?.storagePath} /></article>;
+    <p className="ui-hint ui-help-line">Source files do not update an installed shortcut.<HelpTip label="Help: running a newer source version" text={MAC ? 'Use npm start in the intended source folder, or rebuild and install its disk image.' : 'Use npm.cmd start in the intended source folder, or rebuild and install its Windows Setup.exe.'} /></p><CrashDiagnostics storagePath={runtime?.storagePath} /></article>;
 }
 export function LocalBackupCard({ state: { backups, loaded, includeLogs, setIncludeLogs, busy, error, notice, run, runtime } }: { state: RuntimeBackup }) {
   return <article className="storage-card ui-card settings-card"><div className="ui-card-head"><ArchiveRestore aria-hidden="true" /><h3>Local backup and recovery</h3></div>

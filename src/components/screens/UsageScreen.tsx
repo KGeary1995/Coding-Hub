@@ -1,3 +1,4 @@
+import { HelpTip } from '../HelpTip';
 import { PlanLimitsCard } from './PlanLimitsCard';
 import { useEffect, useMemo, useState } from 'react';
 import { ChartColumn, ChartPie, RefreshCw, Rows3, CircleAlert } from 'lucide-react';
@@ -37,7 +38,8 @@ export function UsageScreen() {
   const current = useMemo(() => inWindow(filtered, days, now), [filtered, days, now]);
   const counted = useMemo(() => inWindow(measured, days, now), [measured, days, now]);
   const sessionTotals = usageTotals(current);
-  const totals = { ...usageTotals(counted), sessions: sessionTotals.sessions, overContext: sessionTotals.overContext, unpriced: sessionTotals.unpriced }; const prior = usageTotals(inWindow(measured, days, now, 1));
+  // The unpriced count is of the records the cost is summed from (before 1.31.5 it was of Trace's own runs, another set).
+  const totals = { ...usageTotals(counted), sessions: sessionTotals.sessions, overContext: sessionTotals.overContext }; const prior = usageTotals(inWindow(measured, days, now, 1));
   const series = useMemo(() => dailySeries(counted, days, now), [counted, days, now]);
   const top = axisMax(Math.max(...series.map((day) => day.claude + day.codex + day.gemini)));
   const focus = series[hovered ?? series.length - 1];
@@ -101,7 +103,7 @@ export function UsageScreen() {
         <p className="ui-hint">Only Codex reports its context window.</p>
       </aside>
       <section className="ui-card tr-usage-sessions" aria-labelledby="usage-sessions-title">
-        <div className="ui-card-head"><Rows3 aria-hidden="true" /><h2 id="usage-sessions-title">Sessions</h2><span className="ui-count neutral">{current.length}</span><span className="ui-card-actions"><span className="ui-caption">Trace's own sessions</span><button type="button" className="ui-help" aria-label="Help: how sessions are counted" title="Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are inside its totals." /></span></div>
+        <div className="ui-card-head"><Rows3 aria-hidden="true" /><h2 id="usage-sessions-title">Sessions</h2><span className="ui-count neutral">{current.length}</span><span className="ui-card-actions"><span className="ui-caption">Trace's own sessions</span><HelpTip label="Help: how sessions are counted" text="Costs use your configured rates (Settings) and need an exact model match. Claude cache reads and writes are separate from input; Codex cached input and reasoning are inside its totals." /></span></div>
         {current.length ? <div className="tr-usage-table-wrap">
           <table className="usage-table ui-table">
             <thead><tr><th>Channel</th><th>Session</th><th>Model</th><th>Started</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache</th><th title="Context window in use at the session's latest report">Context</th><th className="num">Cost</th></tr></thead>

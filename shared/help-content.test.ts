@@ -14,7 +14,7 @@ describe('help covers what Trace has now', () => {
   it('finds the features added since the guide was written, and every view the top bar names', () => {
     for (const query of ['phone', 'round table', 'tailscale', 'linked computer', 'plan limit', 'alt+1', 'F1', 'chat', 'permissions full access', 'hierarchy', 'daily budget'])
       expect(searchHelp(query).length, query).toBeGreaterThan(0);
-    for (const label of ['Workspace', 'Changes', 'Projects', 'Usage', 'Session history', 'Files', 'More tools', 'AI coaching', 'Tasks', 'Verification profiles', 'Accounts & connections', 'Shared memory', 'Shared rules', 'MCP servers', 'Skills & plugins', 'Settings', 'Search', 'Failed runs', 'Project templates', 'Terminal', 'Round Table (hierarchy)'])
+    for (const label of ['Workspace', 'Changes', 'Projects', 'Usage', 'Session history', 'Files', 'AI coaching', 'Tasks', 'Verification profiles', 'Accounts & connections', 'Shared memory', 'Shared rules', 'MCP servers', 'Skills & plugins', 'Settings', 'Search', 'Failed runs', 'Project templates', 'Terminal', 'Round Table (hierarchy)'])
       expect(searchHelp(label).length, label).toBeGreaterThan(0);
   });
   it('no longer says what the code stopped doing', () => {

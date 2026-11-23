@@ -90,6 +90,9 @@
 .experiment-form > .button, .trial-form > .button { grid-column: 1 / -1; justify-self: start; }
 .experiment-summary { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--tr-line-faint); }
 .experiment-summary > small { color: var(--tr-fg-dim); }
+/* The two wordings compared, kept as written (1.31.5; they were not shown once saved). */
+.experiment-prompts p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.experiment-prompts strong { margin-right: 8px; }
 @container shell (max-width: 1000px) { .trial-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* Verification profiles */
@@ -100,10 +103,6 @@
 .verification-profile > .quiet-button { margin-left: -8px; }
 
 /* More tools: a card per tool, an icon, its name, one line and the way in. */
-.more-tools-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.more-tools-list > .ui-card { display: flex; flex-direction: column; align-items: start; gap: 12px; }
-.workbench-page .more-tools-list p { flex: 1; margin-top: -4px; }
-.more-tools-back { justify-self: start; margin: 16px 0 0 -8px; }
 
 /* Help: a 240 px topic list beside the topic, whose text keeps a readable measure. */
 .help-search { display: flex; align-items: center; gap: 8px; min-height: 40px; margin-bottom: 12px; padding: 0 12px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-control); background: var(--tr-well); color: var(--tr-fg-dim); }
