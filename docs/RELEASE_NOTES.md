@@ -8,6 +8,7 @@
 - **The budget fields can be typed into.** **Warn at this share** turned the first digit of 75 into 50, and **Daily cost budget** turned the 0 of 0.5 into 0.01. Both are now kept to their ranges when you leave the field or save.
 - **Enter sends on another computer's tab.** The chat there had no Enter-to-send and its box did not grow; both now work as on this computer. On a phone Enter stays a new line, as the Send button is beside it.
 - **The folded hierarchy bar no longer measures the window on every keystroke.** It measured the layout each time anything in the channel was drawn, typing included. It now does so when the tile or the conversation is resized or the bar's content changes.
+- **Releases:** the step that publishes a release after the Windows release candidate now waits up to two minutes for GitHub to list the candidate as passed. 1.30.2's release stopped because it asked 18 seconds after the candidate passed, before GitHub listed it, and had to be started by hand.
 - **Searching CLI conversation history finds the agent's name** ("codex" finds Codex's conversations).
 - **Tried:** the unit tests, and the desktop, remote, workbench, design and table smoke tests. The desktop smoke now checks the Delivery card after **Refresh changes**; it fails with 1.30.2's code. The table smoke now checks the hierarchy bar folds in a short window, stays folded while typing and unfolds with room.
 - **Not tried:** real Codex and Gemini CLI approvals, a real linked computer's tab, and a phone.

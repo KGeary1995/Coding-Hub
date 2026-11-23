@@ -57,6 +57,9 @@ jobs:
               gh run watch "$run" --exit-status --interval 60 >/dev/null || { echo "::error::The Windows release candidate failed twice on $SHA. Nothing is published."; exit 1; }
             fi
           fi
+          # The run list can take a while to show a run that has just finished (1.30.2's candidate passed at 06:42:27 and
+          # was not listed 18 seconds later), so it is asked again for up to two minutes.
+          for attempt in $(seq 1 12); do [ "$(passed)" = 1 ] && break; sleep 10; done
           if [ "$(passed)" != 1 ]; then echo "::error::No successful Windows release candidate on $SHA."; exit 1; fi
           if [ "$(newest)" != "$SHA" ]; then echo "main moved on while the candidate ran; nothing is published for $SHA."; exit 0; fi
           if [ "$(gh run list --workflow release.yml --commit "$SHA" --json databaseId --jq 'length')" != 0 ]; then echo "Release has already been started on $SHA."; exit 0; fi
