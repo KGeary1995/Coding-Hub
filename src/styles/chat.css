@@ -12,6 +12,8 @@
 /* A conversation is read, not a terminal: it stands on the card's own lower surface inside the well's frame, as a
    channel that has not started does, and --tr-term stays the colour of a real terminal. */
 .chat-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tr-surface-2); }
+/* Back to the newest message: held at the foot of the thread while scrolled up. */
+.chat-latest { position: sticky; bottom: 0; align-self: center; flex: none; margin-top: -8px; gap: 4px; border: 1px solid var(--tr-line-control); background: var(--tr-surface); box-shadow: var(--tr-shadow-card); }
 .chat-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 16px; color: var(--tr-fg); font: 400 14px/22px var(--tr-font-ui); }
 /* Before the first message: an empty state in the middle of the thread. */
 .chat-empty { margin: auto; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; color: var(--tr-fg-dim); font: 400 13px/20px var(--tr-font-ui); }
@@ -35,9 +37,18 @@
 .chat-markdown ul, .chat-markdown ol { padding-left: 24px; }
 .chat-markdown ul { list-style: disc; }
 .chat-markdown ol { list-style: decimal; }
+/* # to ####: 18, 16, 15 and 14 px (before 1.31.2 all were 15 px, so a section and its parts looked alike). */
 .chat-markdown h3, .chat-markdown h4, .chat-markdown h5, .chat-markdown h6 { margin: 16px 0 8px; color: var(--tr-fg-strong); font: 600 15px/20px var(--tr-font-ui); }
+.chat-markdown h3 { font-size: 18px; line-height: 24px; }
+.chat-markdown h4 { font-size: 16px; line-height: 22px; }
+.chat-markdown h6 { font-size: 14px; }
 .chat-markdown code { padding: 0 4px; border-radius: var(--tr-r-small); background: var(--tr-well); font: 400 12px var(--tr-font-mono); }
 .chat-markdown blockquote { padding-left: 12px; border-left: 3px solid var(--tr-line); color: var(--tr-fg-muted); }
+/* A code block: its language and Copy on a strip, then the code, framed as one. */
+.chat-code-block { margin: 0 0 8px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); overflow: hidden; }
+.chat-code-head { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--tr-line-faint); color: var(--tr-fg-dim); font: 500 11px/16px var(--tr-font-mono); }
+.chat-code-head > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-code-block > .chat-code { margin: 0; border: 0; border-radius: 0; }
 .chat-code { margin: 0 0 8px; padding: 8px 12px; overflow-x: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-inset); background: var(--tr-well); font: 400 12px/20px var(--tr-font-mono); }
 .chat-code code { padding: 0; background: none; }
 /* A link is a button: it shows its address, with Copy and (for web addresses) Open in browser, under the text. Its
@@ -225,6 +236,7 @@
 .chain-summary b { font-weight: 600; }
 /* The plan waits for the person: its challenges in the waiting colour, as Approve plan is. */
 .chain-summary .chain-fold-challenges { color: var(--tr-st-waiting); }
+.chain-summary .chain-fold-findings { color: var(--tr-warning); }
 .seat-text-planner { color: var(--tr-ch-planner); }
 .chain-fold-toggle svg { transition: transform var(--tr-d-fast) var(--tr-ease); }
 .chain-bar.open .chain-fold-toggle svg { transform: rotate(180deg); }
@@ -246,7 +258,7 @@
 .chain-next-tasks { width: 100%; margin: 4px 0 0; padding-left: 20px; list-style: decimal; font: 400 12px/20px var(--tr-font-ui); }
 .chain-next-tasks li button { margin-left: 8px; }
 [data-contrast="high"] :is(.table-status, .table-partner, .table-tokens, .chain-seats, .chain-steps li, .chat-thinking, .chat-notice:not(.error), .chat-working, .chat-tool-summary) { color: var(--tr-fg); }
-[data-contrast="high"] :is(.chat-tool, .chat-code, .chain-steps li) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.chat-tool, .chat-code-block, .chat-code-head, .chain-steps li) { border-color: var(--tr-line-strong); }
 
 /* The Round Table setup panel (TableSetup.tsx): a modal over the window, the preset and the seats, then Start or Apply. */
 .table-setup { width: min(720px, 94vw); max-height: 90vh; padding: 0; overflow: hidden; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); }

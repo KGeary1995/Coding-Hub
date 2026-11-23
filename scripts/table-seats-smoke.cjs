@@ -150,6 +150,11 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error
       await setup.getByLabel('Seat 4 agent', { exact: true }).selectOption('claude');
       const duties = async (seat, wanted) => { const group = setup.getByRole('group', { name: `Seat ${seat} duties`, exact: true }); for (const label of ['Plans', 'Challenges the plan', 'Reviews', 'Final review']) { const box = group.getByLabel(label, { exact: true }); if (await box.isChecked() !== wanted.includes(label)) await box.setChecked(wanted.includes(label)); } };
       await duties(4, ['Reviews']); await duties(2, ['Plans']);
+      // Seats changed, another table asks first; Escape answers only that question, and the seats stay (1.31.2).
+      await setup.getByLabel('Table', { exact: true }).selectOption({ index: 0 });
+      const replace = setup.getByRole('group', { name: 'Replace the seats you changed?', exact: true }); await replace.waitFor();
+      await replace.getByRole('button', { name: 'Keep', exact: true }).focus(); await page.keyboard.press('Escape'); await replace.waitFor({ state: 'detached' });
+      assert.ok(await setup.isVisible(), 'Escape closed only the question'); assert.equal(await setup.getByLabel('Seat 4 agent', { exact: true }).count(), 1, 'the changed seats are kept');
       assert.equal(await setup.getByRole('group', { name: 'Seat 2 duties' }).getByLabel('Final review', { exact: true }).isChecked(), false);
       await shot('5-hierarchy-setup');
     });
@@ -166,6 +171,10 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error
     assert.equal(await bar.locator('.chain-steps li').filter({ hasText: /final/i }).count(), 0, 'the steps have no final review');
     assert.equal(await bar.locator('.chain-steps li.current, .chain-steps li:not(.past)').count(), 0, 'every step is past');
     await shot('6-hierarchy-done');
+    // A hierarchy table shows a seat's own conversation too, as a discussion table does (1.31.2).
+    const showSeat = bar.getByLabel("Show an agent's own conversation", { exact: true }); const seatNames = (await showSeat.locator('option').allTextContents()).slice(1);
+    assert.ok(seatNames.length >= 2, `seats offered: ${seatNames}`); await showSeat.selectOption({ index: 1 });
+    await chain.locator('.table-seated').filter({ hasText: `${seatNames[0]}'s own conversation` }).waitFor(); await showSeat.selectOption(''); await chain.locator('.table-seated').waitFor({ state: 'detached' });
     // In a tile too short for it the bar folds, and it unfolds once there is room again: measured on resize, not on
     // every draw (1.30.3). Typing in the message box does not change it.
     const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());

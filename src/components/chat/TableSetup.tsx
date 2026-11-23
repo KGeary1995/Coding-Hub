@@ -90,6 +90,12 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   const problem = draftProblem(draft) ?? (draft.seats.length > room ? `This table has ${draft.seats.length} seats, but only ${room} fit now: Trace runs at most ${MAX_CHANNELS} agents and terminals at once, and every seat is one. Take a seat away or close a channel.` : null); const [low, high] = roundsRange(draft.kind);
   const own = presets.some((preset) => preset.id === draft.presetId && !isBuiltInPreset(preset.id));
   const change = (next: Draft) => { setDraft(next); setError(''); setNote(''); };
+  /**
+   * Table and Kind replace every seat with another table's: once the seats have been changed, they ask first (1.31.2;
+   * before, a name, model or instructions typed in were lost without a word). `chosen` is the draft as last picked.
+   */
+  const [chosen, setChosen] = useState(draft); const [replacing, setReplacing] = useState<Draft | null>(null);
+  const choose = (next: Draft) => { if (next === draft) return; if (JSON.stringify(draft) !== JSON.stringify(chosen)) { setReplacing(next); return; } change(next); setChosen(next); };
 
   const submit = async () => {
     setError(''); setNote('');
@@ -107,13 +113,14 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
       <header><h2 id={`${id}-title`}>{mode.type === 'new' ? 'New Round Table' : mode.type === 'chat' ? 'Round Table on this chat' : 'Seats at this Round Table'}</h2><button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={14} /></button></header>
       <div className="table-setup-body">
         {!editing && <div className="table-setup-row">
-          <label className="ui-field">Table<select aria-label="Table" value={draft.presetId} onChange={(event) => { const preset = presets.find((item) => item.id === event.target.value); if (preset) change(draftFromPreset(preset, fixed)); }}>
+          <label className="ui-field">Table<select aria-label="Table" value={draft.presetId} onChange={(event) => { const preset = presets.find((item) => item.id === event.target.value); if (preset) choose(draftFromPreset(preset, fixed)); }}>
             <optgroup label="Trace's own">{presets.filter((preset) => isBuiltInPreset(preset.id)).map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · {preset.kind}</option>)}</optgroup>
             {presets.some((preset) => !isBuiltInPreset(preset.id)) && <optgroup label="Yours">{presets.filter((preset) => !isBuiltInPreset(preset.id)).map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · {preset.kind}</option>)}</optgroup>}
           </select></label>
-          <label className="ui-field">Kind<select aria-label="Kind of table" value={draft.kind} onChange={(event) => change(withKind(draft, presets, kindOf(event.target.value), fixed))}>
+          <label className="ui-field">Kind<select aria-label="Kind of table" value={draft.kind} onChange={(event) => choose(withKind(draft, presets, kindOf(event.target.value), fixed))}>
             {(['discussion', 'hierarchy'] as const).map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}</select></label>
         </div>}
+        {replacing && <ConfirmStep question="Replace the seats you changed?" action="Replace them" onCancel={() => setReplacing(null)} onConfirm={() => { change(replacing); setChosen(replacing); setReplacing(null); }} />}
         {editing && <p className="ui-hint">{hierarchy ? 'A hierarchy Round Table' : 'A discussion Round Table'}. Seats can only be changed while the Round Table is not working; Trace says so if it is. Changing a seat's model restarts that agent, and its conversation is resumed.</p>}
         {mode.type === 'chat' && <p className="ui-hint">This chat leads the table with its own agent and model{hierarchy ? ', as the builder' : ''}.</p>}
 
@@ -147,7 +154,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
         <div className="table-setup-presets">
           <label className="ui-field">Name for a saved table<input aria-label="Name for a saved table" maxLength={MAX_PRESET_NAME} value={draft.name} placeholder="For example: Two reviewers" onChange={(event) => change({ ...draft, name: event.target.value })} /></label>
           <div className="ui-actions">
-            <button type="button" className="button secondary small" disabled={busy} onClick={() => { const next = crypto.randomUUID(); void keep(() => saveAsPreset(draft, next, { savePreset, deletePreset }), 'Saved as one of your tables.', () => setDraft((current) => ({ ...current, presetId: next }))); }}>Save as preset</button>
+            <button type="button" className="button secondary small" disabled={busy} onClick={() => { const next = crypto.randomUUID(); void keep(() => saveAsPreset(draft, next, { savePreset, deletePreset }), 'Saved as one of your tables.', () => setDraft((current) => { const saved = { ...current, presetId: next }; setChosen(saved); return saved; })); }}>Save as preset</button>
             {own && <button type="button" className="button secondary small" disabled={busy} onClick={() => void keep(() => updatePreset(draft, { savePreset, deletePreset }), 'Your table is updated.')}>Update preset</button>}
             {own && !deleting && <button type="button" className="button secondary small" disabled={busy} onClick={() => setDeleting(true)}>Delete preset</button>}
             {own && deleting && <ConfirmStep question="Delete this table?" action="Delete preset" busy={busy} onCancel={() => setDeleting(false)} onConfirm={() => { setDeleting(false); void keep(() => removePreset(draft.presetId, { savePreset, deletePreset }), 'Deleted. Tables already open keep their seats.', () => setDraft((current) => ({ ...current, presetId: pickPreset(presets, current.kind, null).id }))); }} />}
