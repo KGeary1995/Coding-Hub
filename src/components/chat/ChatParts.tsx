@@ -56,24 +56,41 @@ function toolSummary(name: string, given: unknown) {
   return Object.values(input).find((item): item is string => typeof item === 'string')?.slice(0, 120) ?? '';
 }
 
+/**
+ * What a file tool will change, in full: an edit as the text removed and the text added (each edit of a MultiEdit), a
+ * new file as its content. Read from the input's shape, as a tool may be shown under another name (Claude's display
+ * name, Gemini CLI's own tools). Null for any other input, or one without the text (Codex names only the files).
+ */
+export function toolChanges(input: Record<string, unknown>) {
+  const text = (value: unknown) => typeof value === 'string' ? value : null;
+  const change = (key: number, before: string | null, after: string) => <div key={key} className="chat-diff">{before !== null && <pre className="removed">{before}</pre>}<pre className="added">{after}</pre></div>;
+  if (text(input.old_string) !== null) return change(0, text(input.old_string), text(input.new_string) ?? '');
+  if (Array.isArray(input.edits)) { const edits = input.edits.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && text((item as Record<string, unknown>).old_string) !== null); return edits.length ? <>{edits.map((item, index) => change(index, text(item.old_string), text(item.new_string) ?? ''))}</> : null; }
+  if (text(input.file_path) !== null && text(input.content) !== null) return change(0, null, text(input.content)!);
+  return null;
+}
+
 export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 'tool' }>; result?: ToolResult }) {
   // A block from a linked computer on another version may come without its input: shown as none rather than failing.
   const input = block.input && typeof block.input === 'object' ? block.input : {};
   const summary = toolSummary(block.name, input);
-  const edit = block.name === 'Edit' && typeof input.old_string === 'string' ? input : null;
+  const changes = toolChanges(input);
   return <details className={`chat-tool ${result?.isError ? 'error' : ''} ${result ? 'done' : 'running'}`}>
     <summary><ChevronRight size={13} className="chat-chevron" aria-hidden="true" /><strong>{block.name}</strong><span className="chat-tool-summary" title={summary}>{summary}</span><span className="chat-tool-state">{!result ? 'running…' : result.isError ? 'failed' : 'done'}</span></summary>
-    {edit && <div className="chat-diff"><pre className="removed">{String(edit.old_string)}</pre><pre className="added">{String(edit.new_string ?? '')}</pre></div>}
-    {!edit && block.name !== 'Bash' && <pre className="chat-tool-input">{JSON.stringify(input, null, 2).slice(0, 4000)}</pre>}
+    {/* A command in full, as the summary line cuts it short; a file change as removed and added text; else the input. */}
+    {changes ?? (block.name === 'Bash' ? summary && <pre className="chat-tool-input">{summary}</pre> : <pre className="chat-tool-input">{JSON.stringify(input, null, 2).slice(0, 4000)}</pre>)}
     {result && (result.text || result.image) && <pre className="chat-tool-output">{result.text || '(an image)'}</pre>}
   </details>;
 }
 
 export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; answer: (allow: boolean, allowEdits?: boolean) => void }) {
   const summary = toolSummary(item.toolName, item.input);
+  // An edit is approved seeing what it changes, not only the file's name (the streams pass the tool's input).
+  const changes = toolChanges(item.input && typeof item.input === 'object' ? item.input : {});
   return <div className={`chat-permission ${item.answer ?? 'open'}`} role={item.answer ? undefined : 'alert'}>
     <p><strong>{agent} wants to use {item.toolName}</strong>{item.description && item.description !== summary ? ` · ${item.description}` : ''}</p>
     {summary && <pre>{summary}</pre>}
+    {changes && <div className="chat-permission-changes">{changes}</div>}
     {item.answer ? <p className="chat-permission-answer">{item.answer === 'allowed' ? 'Allowed' : item.answer === 'denied' ? 'Denied' : 'No longer waiting'}</p>
       : <div className="chat-permission-actions">
         <button className="button primary" onClick={() => answer(true)}>Allow</button>

@@ -4,10 +4,8 @@ import { channelNameNow } from '../../state/channel-names';
 import { limitLevel, refreshPlanLimits, resetText, usePlanLimits } from '../../state/plan-limits-store';
 import { channelsOf, leadOf, useWorkspaceStore } from '../../state/workspace-store';
 import { useHubStore, formatNumber, dollars } from '../../state/hub-store';
-import { CHANNEL_STATES, channelAlerts, channelState, channelTokensToday, todayTotals, usageFor } from '../../state/channel-state';
+import { CHANNEL_STATES, channelState, channelTokensToday, todayTotals, usageFor } from '../../state/channel-state';
 import { focusTerminal } from '../../runtime/terminals';
-import { useLinkedStore } from '../../state/linked-store';
-import type { LinkedComputer } from '../../../shared/remote';
 import { PLAN_NAME, type LimitWindow, type PlanLimits } from '../../../shared/plan-limits';
 import { dayTotal, refreshDayUsage, useDayUsage } from '../../state/day-usage-store';
 import { NeedsYouCell } from './NeedsYou';
@@ -119,16 +117,11 @@ function PlanLimitCells() {
   })}</>;
 }
 
-/** Linked computers' channels that wait for the person or stopped with an error, for the alert cell. */
-type LinkedAlert = { sessionId: string; computerId: string; state: 'waiting' | 'failed'; text: string };
-const linkedAlerts = (computers: LinkedComputer[]): LinkedAlert[] => computers.filter((computer) => computer.linked && computer.connected).flatMap((computer) => computer.channels.flatMap((channel): LinkedAlert[] =>
-  channel.running && channel.attention ? [{ sessionId: channel.sessionId, computerId: computer.id, state: 'waiting' as const, text: `${computer.name} CH${channel.channel} needs approval` }]
-    : !channel.running && channel.failed ? [{ sessionId: channel.sessionId, computerId: computer.id, state: 'failed' as const, text: `${computer.name} CH${channel.channel} failed` }] : []));
 /** The saved state's sentence: the tooltip of the word the bar shows, and the words themselves for a failure. */
 const SAVED = { saved: 'Workspace saved locally', saving: 'Saving workspace…', error: 'Storage needs attention', loading: 'Loading workspace…' } as const;
 /**
  * The one global status layer: every channel's state and the project at the left; at the right the saved state, today's
- * usage, plan limits, Needs you and alerts. What can be pressed is a chip (a channel, a plan, Needs you, an alert); what
+ * usage, plan limits and Needs you. What can be pressed is a chip (a channel, a plan, Needs you); what
  * only informs is a mark and its words.
  */
 export function StatusBar() {
@@ -153,9 +146,6 @@ export function StatusBar() {
   // The CLIs' logs are read every 15 s, and soon after Trace's own channels report usage.
   useEffect(() => { void refreshDayUsage(); const timer = setInterval(() => void refreshDayUsage(), 15000); return () => clearInterval(timer); }, []);
   useEffect(() => { const timer = setTimeout(() => void refreshDayUsage(), 2000); return () => clearTimeout(timer); }, [usage]);
-  const computers = useLinkedStore((state) => state.computers);
-  // This computer's channels first, then linked computers' channels that wait or failed (clicking opens their tab).
-  const alerts: { sessionId: string; computerId?: string; state: 'waiting' | 'failed' | 'limit'; text: string }[] = [...channelAlerts(sessions, usage), ...linkedAlerts(computers)];
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'No project';
   const channels = channelsOf(sessions);
   const jump = jumpToChannel;
@@ -190,10 +180,6 @@ export function StatusBar() {
     </span>
     <PlanLimitCells />
     <NeedsYouCell />
-    {/* With nothing to report the bar says nothing: a standing "No alerts" was read past. */}
-    {alerts.length > 0 && <button className={`tr-sb-cell tr-sb-alert ${alerts.some((alert) => alert.state === 'failed') ? 'failed' : alerts[0].state}`} onClick={() => alerts[0].computerId ? useWorkspaceStore.setState({ computerId: alerts[0].computerId, activeView: 'computer' }) : jump(alerts[0].sessionId)} title="Go to the first channel that needs you">
-      <span aria-hidden="true">{CHANNEL_STATES[alerts[0].state].glyph}</span><span className="tr-sb-text">{alerts.map((alert) => alert.text).join(' · ')}</span>
-    </button>}
   </footer>;
 }
 

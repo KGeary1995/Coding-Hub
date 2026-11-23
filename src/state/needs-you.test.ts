@@ -26,6 +26,16 @@ describe('Needs you', () => {
     const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false, waiting: '', waitingKept: true };
     expect(needsYou([], [], [], { linked: { ...table, waitingImageCount: 2 } })[0]?.detail).toBe('2 images');
   });
+  it('lists a linked computer’s channels that wait or failed, with the computer to open, and none from one not connected', () => {
+    const channel = { title: '', engine: 'claude' as const, runId: 'r', cols: null, rows: null };
+    const computer = (id: string, connected: boolean) => ({ id, name: id === 'mac' ? 'Mac' : 'Laptop', url: null, linked: true, connected, error: null, channels: [
+      { ...channel, sessionId: `${id}-1`, channel: 1, running: true, attention: 'Allow Bash: npm test?' },
+      { ...channel, sessionId: `${id}-2`, channel: 2, running: false, attention: null, failed: 'claude exited with code 1' },
+      { ...channel, sessionId: `${id}-3`, channel: 3, running: true, attention: null }] });
+    expect(needsYou([], [], [], {}, [computer('mac', true), computer('laptop', false)])).toMatchObject([
+      { kind: 'approval', title: 'Mac CH1 needs approval', detail: 'Allow Bash: npm test?', sessionId: 'mac-1', computerId: 'mac', action: 'answer' },
+      { kind: 'failed', title: 'Mac CH2 failed', detail: 'claude exited with code 1', sessionId: 'mac-2', computerId: 'mac', action: 'retry' }]);
+  });
   it('says how long something has waited', () => {
     const now = Date.parse('2026-11-10T12:00:00.000Z');
     expect(waited('2026-11-10T11:56:00.000Z', now)).toBe('4 min'); expect(waited('2026-11-10T09:00:00.000Z', now)).toBe('3 h'); expect(waited('2026-11-07T12:00:00.000Z', now)).toBe('3 d'); expect(waited(null)).toBe('');

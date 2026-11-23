@@ -1,5 +1,14 @@
 ## What's new
 
+1.30.2 makes four fixes found in a review of the interface:
+
+- **One alert in the status bar.** **Needs you** and a second chip naming the first waiting channel both showed, with different lists: the chip also had other computers' channels, **Needs you** also had tasks. The chip is gone and **Needs you** lists everything, other computers' channels that wait or failed included (**Answer** opens that computer's tab). Hover the chip to see what it holds.
+- **An approval shows what an edit changes.** Claude's card for **Edit**, **MultiEdit** or **Write** showed only the file's name. It now shows the text removed and added, or the new file's content, scrolled within the card when long. This is in the chat channels on the computer, the phone and a linked computer. Codex's file-change approvals still name only the files, as Codex sends no more. A command's tool card, opened, now shows the whole command; before, it showed only a line cut short.
+- **Full access asks first.** Choosing **Full access** beside a chat's message box changed a running agent, and every seat at its Round Table, at once. It now asks once more and says what it allows; **Cancel** keeps the level in effect. Channel settings, where the level applies when the channel starts, are unchanged.
+- **A message being written is no longer lost.** Text and images typed in a chat were dropped when its tile was maximised or restored, or another page was opened, because the chat was drawn anew. They are now kept for each channel until it is sent or the channel is removed. They are not kept when Trace closes.
+- **Tried:** the unit tests, and the remote, workbench, design and desktop smoke tests, which now check each of the four in the built app with stand-in agents.
+- **Not tried:** a real Claude Code edit approval, the phone on a real phone, and a real linked computer's alert in **Needs you**.
+
 1.30.1 fixes a chat that kept saying an agent was working after it had finished:
 
 - **"Claude Code is working" no longer stays on after Claude Code has finished.** A chat or a Round Table could show the three dots and "Claude Code is working" with nothing running, while the Round Table's bar said **Your turn**.

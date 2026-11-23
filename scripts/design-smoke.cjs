@@ -129,22 +129,19 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
           hidden: [...document.querySelectorAll('.session-tile')].filter((tile) => { const edge = tile.getBoundingClientRect(); return [...tile.querySelectorAll('.tr-tile-name, .tr-state-chip, .tr-tile-more')].some((part) => { const box = part.getBoundingClientRect(); return !drawn(part) || box.right > edge.right + 1 || box.left < edge.left - 1; }); }).map((tile) => `${Math.round(tile.getBoundingClientRect().width)} px: ` + [...tile.querySelectorAll('.tr-tile-name, .tr-state-chip, .tr-tile-more')].map((part) => `${part.className.split(' ')[0]} ${Math.round(part.getBoundingClientRect().width)}`).join(', ')) };
       });
       // The same with everything that asks for the person in the bar at once. No channel runs here, so their parts are
-      // put in as StatusBar draws them (the layout is the stylesheet's): Needs you, an alert, and a storage failure
+      // put in as StatusBar draws them (the layout is the stylesheet's): Needs you and a storage failure
       // in place of the saved state. Each must be drawn, inside the bar, and clear of the one before it.
       const asking = await page.evaluate(() => {
         const footer = document.querySelector('.app-statusbar'); const saved = footer.querySelector('.storage-status'); const before = { name: saved.className, html: saved.innerHTML };
         saved.className = 'tr-sb-cell storage-status tr-sb-drop error'; saved.innerHTML = '<span class="tr-sb-inner"><svg width="12" height="12"></svg><span class="tr-sb-error-words">Storage needs attention</span></span>';
-        footer.insertAdjacentHTML('beforeend', '<div class="needs-you" data-smoke><button class="tr-sb-cell needs-you-cell">Needs you<span class="needs-you-sep"> · </span><span class="ui-count waiting">2</span></button></div><button class="tr-sb-cell tr-sb-alert failed" data-smoke><span>✕</span><span class="tr-sb-text">CH2 needs approval · CH5 failed</span></button>');
+        footer.insertAdjacentHTML('beforeend', '<div class="needs-you" data-smoke><button class="tr-sb-cell needs-you-cell">Needs you<span class="needs-you-sep"> · </span><span class="ui-count waiting">2</span></button></div>');
         const end = footer.getBoundingClientRect(); const box = (selector) => { const { left, right, width, height } = footer.querySelector(selector).getBoundingClientRect(); return { left, right, width, height }; };
-        const parts = { failure: box('.storage-status.error svg'), needs: box('.needs-you-cell'), alert: box('.tr-sb-alert'), lastChannel: box('.tr-sb-channel:nth-child(8)') };
+        const parts = { failure: box('.storage-status.error svg'), needs: box('.needs-you-cell'), lastChannel: box('.tr-sb-channel:nth-child(8)') };
         footer.querySelectorAll('[data-smoke]').forEach((node) => node.remove()); saved.className = before.name; saved.innerHTML = before.html;
         return { left: end.left, right: end.right, parts };
       });
       for (const [name, part] of Object.entries(asking.parts)) assert.ok(part.width > 1 && part.height > 1 && part.left >= asking.left - 1 && part.right <= asking.right + 1, `${name} is not in view in the status bar with eight channels at ${width}px / ${scale}%: ${JSON.stringify(asking)}`);
-      assert.ok(asking.parts.lastChannel.right <= asking.parts.failure.left + 1 && asking.parts.failure.right <= asking.parts.needs.left + 1 && asking.parts.needs.right <= asking.parts.alert.left + 1, `status bar items overlap with eight channels at ${width}px / ${scale}%: ${JSON.stringify(asking)}`);
-      // The rectangles are in the window's pixels: 6 px of the page is 7.5 of them at 125%.
-      assert.ok(Math.abs(asking.parts.alert.left - asking.parts.needs.right - 6 * scale / 100) <= 1, `Needs you and the alert are ${asking.parts.alert.left - asking.parts.needs.right} px apart, not the 6 px between chips, at ${width}px / ${scale}%`);
-      assert.ok(asking.parts.alert.width >= 40, `the alert is ${asking.parts.alert.width} px wide with eight channels at ${width}px / ${scale}%`);
+      assert.ok(asking.parts.lastChannel.right <= asking.parts.failure.left + 1 && asking.parts.failure.right <= asking.parts.needs.left + 1, `status bar items overlap with eight channels at ${width}px / ${scale}%: ${JSON.stringify(asking)}`);
       // Where the Today chip has left the bar it is out of the tab order too, and where it shows it is whole and in it.
       const today = await page.evaluate(() => { const chip = document.querySelector('.tr-sb-today-button'); const box = chip.closest('.tr-sb-today'); const a = chip.getBoundingClientRect(); const b = box.getBoundingClientRect(); return { gone: box.classList.contains('gone'), tab: chip.tabIndex, hidden: chip.getAttribute('aria-hidden'), drawn: a.top - b.top < b.height / 2 && a.width > 1 && a.right <= b.right + 1 }; });
       assert.ok(today.gone ? today.tab === -1 && today.hidden === 'true' && !today.drawn : today.tab === 0 && today.hidden === null && today.drawn, `the Today chip with eight channels at ${width}px / ${scale}%: ${JSON.stringify(today)}`);

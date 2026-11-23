@@ -21,6 +21,11 @@ function update(sessionId: string, change: (current: ChatThread) => ChatThread) 
   useChatStore.setState((state) => ({ threads: { ...state.threads, [sessionId]: change(state.threads[sessionId] ?? EMPTY) } }));
 }
 let counter = 0; const nextId = () => `chat-${++counter}`;
+/**
+ * Each chat's unsent message and images, by channel. A chat's view is drawn anew when its tile is maximised or restored
+ * and when the workspace is left for another page, and what the person was writing outlives it. In memory only.
+ */
+export const chatDrafts = new Map<string, { text: string; images: ChatImage[] }>();
 
 /** The index of a reply in a thread, looked up from the end (the reply being streamed is the newest), or -1. */
 function assistantAt(items: ChatItem[], id: string) { for (let index = items.length - 1; index >= 0; index--) { const item = items[index]; if (item.kind === 'assistant' && item.id === id) return index; } return -1; }
@@ -81,6 +86,7 @@ export function chatEnded(sessionId: string) { update(sessionId, (current) => ({
 const isLinked = (key: string) => key.includes(':');
 function keepThreads(keep: (key: string) => boolean) {
   const threads = useChatStore.getState().threads; for (const key of pendingDeltas.keys()) if (!keep(key)) pendingDeltas.delete(key);
+  for (const key of chatDrafts.keys()) if (!keep(key)) chatDrafts.delete(key);
   if (Object.keys(threads).every(keep)) return;
   useChatStore.setState({ threads: Object.fromEntries(Object.entries(threads).filter(([key]) => keep(key))) });
 }
