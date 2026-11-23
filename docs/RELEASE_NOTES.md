@@ -1,5 +1,16 @@
 ## What's new
 
+1.31.4 is the first stage of the phone app's fixes. Each was checked in the code first; please try them on your phone:
+
+- **A channel's buttons follow it.** On a terminal channel, Start, Stop and Restart stayed as they were first drawn, so a channel stopped or started from the computer still showed the old buttons. They now change with the channel.
+- **Ask AI shows on this computer's own channels.** Live coaching offered Ask AI only for a channel with no computer name, and Trace names its own channels too, so the button never showed.
+- **What the phone may do is known after a reconnect.** Opened while the computer could not be reached, the phone did not offer Start, Stop or + Channel until you left the list and came back. It now asks once it connects.
+- **No zooming into the Round Table's menus on an iPhone.** Their 12 px text made iOS zoom the page when tapped. They are 16 px on the phone.
+- **Dark menus and scroll bars** (the page now says it is dark), **a visible track on the usage meters**, and **an image's Close button clear of the notch**.
+- **Tried:** the unit tests, and the remote smoke test in a phone-sized window, with a new check that stopping and starting a terminal channel from the phone changes its buttons (it fails with 1.31.3's code). The phone screen smoke test.
+- **Not tried:** a real iPhone or Android phone, Ask AI on a real channel, and opening the app while the computer is off.
+- **Next stages** (planned, not in this version): the iPhone keyboard covering the chat box, the channel header crowding on narrow phones, the Back gesture, and which computer the Usage, Tasks and History tabs show.
+
 1.31.3 rebuilds Changes in the three columns you chose:
 
 - **One file list, which also stages.** Each file has **+** (stage) or **−** (unstage) at its end, and each group has **Stage all** or **Unstage all**. **Filter files** narrows the list. Before, a second list of check boxes in the Delivery card did the staging, apart from the list beside the diff, and picking a staged and an unstaged file at once disabled both buttons.

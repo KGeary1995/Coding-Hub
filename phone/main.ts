@@ -171,9 +171,19 @@ function listen(sessionId: string | null) {
     showEmpty();
     // On its own computer, the phone picks up keys to the others, so it can still reach them when this one is off.
     if (value && !target.id) void collectKeys().catch(() => {});
+    // Opened while the computer could not be reached, the phone did not know what it may do (start, stop, + Channel)
+    // until the list was opened again: it asks once a connection is made (1.31.4).
+    if (value && !me) void whoAmI().then((found) => { me = found; if (!current) renderList(); else renderChannel(); }).catch(() => {});
   }, () => showPair('This phone was removed on the computer. Pair it again to continue.'));
 }
 
+/**
+ * The channel screen's buttons in a box of their own, drawn again when the channel starts or stops or what this phone
+ * may do becomes known (before 1.31.4 they stayed as first drawn: Start on a channel already running). The box takes
+ * no room of its own (phone.css), so the header's layout is the buttons'.
+ */
+const controlsKey = (channel: RemoteChannel) => `${channel.running}|${me?.canRun ?? ''}|${me?.computer ?? ''}`;
+function controlsBox(channel: RemoteChannel) { return h('span', { className: 'channel-controls', id: 'channel-controls', dataset: { key: controlsKey(channel) } }, ...channelControls(channel)); }
 /** Start, Stop and Restart for a channel on this computer, when this phone may start and stop agents. */
 function channelControls(channel: RemoteChannel): Node[] {
   // Only this computer's own channels: the server does not start or stop another computer's.
@@ -523,7 +533,7 @@ function showChannel(sessionId: string) {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
     // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.
-    app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), ...channelControls(channel)), h('p', { id: 'control-error', className: 'error control-error', hidden: true, aria: { role: 'alert' } }), container);
+    app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), controlsBox(channel)), h('p', { id: 'control-error', className: 'error control-error', hidden: true, aria: { role: 'alert' } }), container);
     unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
       ...(me?.canRun && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
       follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
@@ -557,7 +567,7 @@ function showChannel(sessionId: string) {
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
-  app.replaceChildren(header(showList, title, ...(channel ? channelControls(channel) : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
+  app.replaceChildren(header(showList, title, ...(channel ? [controlsBox(channel)] : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false, allowProposedApi: true,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   measureLikeTheCLIs(terminal); fit = new FitAddon(); terminal.loadAddon(fit);
@@ -722,7 +732,9 @@ function renderCoach(channel: RemoteChannel) {
   const box = document.getElementById('coach'); if (!box) return;
   const tip = channel.coaching; if (!tip || coachDismissed === tip.id) { box.hidden = true; return; }
   box.hidden = false;
-  const ask = !tip.review && !channel.computer && h('button', { className: 'quiet', disabled: coachAsking === tip.id, onclick: async () => {
+  // This computer's own channels carry its name too (remote-server stamps them), so "own" is the same computer, not no
+  // computer: with no computer name the button never showed (before 1.31.4).
+  const ask = !tip.review && (!channel.computer || channel.computer.id === me?.computer) && h('button', { className: 'quiet', disabled: coachAsking === tip.id, onclick: async () => {
     coachAsking = tip.id; coachError = ''; renderCoach(channel);
     try { const response = await api('/api/coaching-review', { method: 'POST', body: JSON.stringify({ id: tip.id }) }); if (!response.ok) coachError = ((await response.json().catch(() => ({}))) as { error?: string }).error ?? 'The prompt could not be reviewed.'; }
     catch (error) { coachError = (error as Error).message; }
@@ -739,6 +751,7 @@ function renderChannel() {
   const title = document.getElementById('channel-title');
   // Two lines, so the name keeps its room beside the channel's buttons: CH2 and the name, then the state and the account.
   title?.replaceChildren(h('span', { className: 'title-line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('span', { className: 'title-name' }, channel.title)), h('span', { className: 'title-line' }, badge(channel, `state-${state(channel)}`), account(channel)));
+  const controls = document.getElementById('channel-controls'); if (controls && controls.dataset.key !== controlsKey(channel)) controls.replaceWith(controlsBox(channel));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
   renderCoach(channel);
