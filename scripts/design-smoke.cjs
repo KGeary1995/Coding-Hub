@@ -99,7 +99,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
     // Higher contrast keeps a focused field's accent border and an error's colour, and compact density leaves the cards
     // drawn edge to edge without padding (1.31.1: a rule for each outweighed them).
-    await openView(page, 'Search'); const field = page.getByLabel('Workspace search query', { exact: true });
+    // Search loads when first opened: the field is waited for before it is measured (a slower machine had none yet).
+    await openView(page, 'Search'); const field = page.getByLabel('Workspace search query', { exact: true }); await field.waitFor();
     const looks = await page.evaluate(async () => {
       const root = document.documentElement; const before = { contrast: root.dataset.contrast, density: root.dataset.density }; root.dataset.contrast = 'high'; root.dataset.density = 'compact';
       const input = document.querySelector('[aria-label="Workspace search query"]'); input.focus(); await new Promise((resolve) => setTimeout(resolve, 500)); // after the border's fade
