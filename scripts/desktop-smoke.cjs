@@ -211,6 +211,17 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Changes', exact: true }).click();
     await page.getByRole('button', { name: 'Unstaged src/main.ts', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[aria-label="Git diff"] .addition')?.textContent.includes('working desktop edit'));
+    // A comment on a diff line goes to the agent working in this repository, in one message, typed in (1.32.2).
+    const commented = page.locator('[aria-label="Git diff"] .diff-line.addition').filter({ hasText: 'working desktop edit' }).first();
+    await commented.hover(); await commented.locator('.diff-comment-add').click();
+    await page.getByRole('textbox', { name: /^Comment on src\/main\.ts line \d+$/ }).fill('Use the saved value here.');
+    await page.getByRole('button', { name: 'Add comment', exact: true }).click();
+    await page.locator('.diff-comment').filter({ hasText: 'Use the saved value here.' }).waitFor();
+    assert.match(await page.getByLabel('Channel to send the comments to', { exact: true }).locator('option:checked').textContent(), /^CH1 · /);
+    await page.getByRole('button', { name: 'Send to channel', exact: true }).click();
+    await page.getByText('Sent the comment to CH1.', { exact: true }).waitFor();
+    await page.waitForFunction(() => { const data = window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''); return data.includes('ECHO:Review comments on your changes (one comment, from Changes in Trace):') && data.includes('Use the saved value here.'); });
+    assert.equal(await page.locator('.diff-comment').count(), 0, 'sent comments are cleared');
     await page.getByRole('button', { name: 'Staged src/main.ts', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[aria-label="Git diff"] .addition')?.textContent.includes('"staged"'));
     assert.ok(await page.locator('.diff-line.deletion').count());
