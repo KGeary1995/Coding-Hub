@@ -4,8 +4,9 @@ import { HELP_TOPICS, searchHelp } from '../../shared/help-content';
 import { useWorkspaceStore } from '../state/workspace-store';
 
 /** Shortcuts written in the guide's text ("Ctrl+Shift+P", "Alt+1", "F1"), drawn as key hints. */
-const KEYS = /\b((?:Ctrl|Cmd|Alt|Shift)(?:\+(?:Ctrl|Cmd|Alt|Shift))*\+[A-Z0-9]\b|F\d{1,2}\b)/;
-function withKeys(text: string): ReactNode { const parts = text.split(KEYS); return parts.length === 1 ? text : parts.map((part, i) => i % 2 ? <kbd key={i}>{part}</kbd> : <Fragment key={i}>{part}</Fragment>); }
+const KEYS = /\b((?:Ctrl|Cmd|Alt|Shift)(?:\+(?:Ctrl|Cmd|Alt|Shift))*\+[A-Z0-9]\b|(?<!,\s)F(?:1[0-2]|[1-9])\b(?!,\s*F\d))/;
+/** Shortcuts as key caps. A function key is F1 to F12, but not in a list such as a Round Table's findings, "F1, F2, …" (key caps before 1.31.1). */
+export function withKeys(text: string): ReactNode { const parts = text.split(KEYS); return parts.length === 1 ? text : parts.map((part, i) => i % 2 ? <kbd key={i}>{part}</kbd> : <Fragment key={i}>{part}</Fragment>); }
 
 export function HelpPanel() {
   const [query, setQuery] = useState('');

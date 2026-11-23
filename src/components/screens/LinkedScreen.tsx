@@ -24,10 +24,19 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * The modifier each side copies and pastes with differs, so one local key stands in for the other's: on Windows (whose
  * Windows key cannot be sent) viewing a Mac, Ctrl sends ⌘; on a Mac viewing Windows, ⌘ sends Ctrl (noVNC would send Alt).
  */
-function swapFor(kind: ScreenKind | null) {
-  if (kind === 'system' && !MAC) return { codes: ['ControlLeft', 'ControlRight'], keysym: XK_SUPER_L, code: 'MetaLeft', label: 'Ctrl as ⌘', title: 'Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on the Mac', paste: (event: KeyboardEvent) => event.ctrlKey && !event.metaKey };
-  if (kind === 'trace' && MAC) return { codes: ['MetaLeft', 'MetaRight'], keysym: XK_CONTROL_L, code: 'ControlLeft', label: '⌘ as Ctrl', title: '⌘ is sent as Ctrl, so ⌘C and ⌘V copy and paste on Windows', paste: (event: KeyboardEvent) => event.metaKey && !event.ctrlKey };
+export function swapFor(kind: ScreenKind | null, mac = MAC) {
+  if (kind === 'system' && !mac) return { codes: ['ControlLeft', 'ControlRight'], keysym: XK_SUPER_L, code: 'MetaLeft', label: 'Ctrl as ⌘', title: 'Ctrl is sent as ⌘ (Command), so Ctrl+C and Ctrl+V copy and paste on the Mac', paste: (event: Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>) => event.ctrlKey && !event.metaKey };
+  if (kind === 'trace' && mac) return { codes: ['MetaLeft', 'MetaRight'], keysym: XK_CONTROL_L, code: 'ControlLeft', label: '⌘ as Ctrl', title: '⌘ is sent as Ctrl, so ⌘C and ⌘V copy and paste on Windows', paste: (event: Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>) => event.metaKey && !event.ctrlKey };
   return null;
+}
+/**
+ * The keys that paste on the other computer, held here: its V first hands this computer's text over (before 1.31.1
+ * only with a swap, so between two Windows PCs or two Macs the other computer's own clipboard was pasted). With the
+ * swap turned off, Ctrl goes as Ctrl to a Mac (or ⌘ as noVNC sends it to Windows), which does not paste there: null.
+ */
+export function pasteKeys(kind: ScreenKind | null, command: boolean, mac = MAC): ((event: Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>) => boolean) | null {
+  const swap = swapFor(kind, mac); if (swap) return command ? swap.paste : null;
+  return kind === null ? null : mac ? (event) => event.metaKey && !event.ctrlKey : (event) => event.ctrlKey && !event.metaKey;
 }
 
 /**
@@ -116,20 +125,20 @@ export function LinkedScreen({ computer, onClose }: { computer: LinkedComputer; 
     return () => clearInterval(timer);
   }, [status, kind, computer.id]);
 
-  // The swapped key is sent as the other side's (down and up, so it never sticks), and its V first puts this computer's
-  // text on the other's clipboard: the browser pastes into a hidden field, which hands the text over before V is sent.
+  // The swapped key is sent as the other side's (down and up, so it never sticks). The paste keys' V first puts this
+  // computer's text on the other's clipboard: the browser pastes into a hidden field, which hands the text over before V is sent.
   useEffect(() => {
-    const target = view.current; if (!target || !command || !swap) return; let held = false;
+    const target = view.current; const swapped = command ? swap : null; const paste = pasteKeys(kind, command); if (!target || (!swapped && !paste)) return; let held = false;
     const key = (event: KeyboardEvent) => {
       const client = rfb.current; if (!client || !control) return;
-      if (swap.codes.includes(event.code)) {
+      if (swapped?.codes.includes(event.code)) {
         event.preventDefault(); event.stopPropagation(); const down = event.type === 'keydown';
-        if (!(down && held)) { held = down; client.sendKey(swap.keysym, swap.code, down); }
+        if (!(down && held)) { held = down; client.sendKey(swapped.keysym, swapped.code, down); }
         return;
       }
-      if (event.type === 'keydown' && swap.paste(event) && !event.altKey && !event.shiftKey && event.code === 'KeyV') { event.stopPropagation(); pasteTarget.current?.focus(); }
+      if (event.type === 'keydown' && paste?.(event) && !event.altKey && !event.shiftKey && event.code === 'KeyV') { event.stopPropagation(); pasteTarget.current?.focus(); }
     };
-    const release = () => { if (held) { held = false; rfb.current?.sendKey(swap.keysym, swap.code, false); } };
+    const release = () => { if (held && swapped) { held = false; rfb.current?.sendKey(swapped.keysym, swapped.code, false); } };
     target.addEventListener('keydown', key, true); target.addEventListener('keyup', key, true); window.addEventListener('blur', release);
     return () => { release(); target.removeEventListener('keydown', key, true); target.removeEventListener('keyup', key, true); window.removeEventListener('blur', release); };
   }, [command, control, kind]);

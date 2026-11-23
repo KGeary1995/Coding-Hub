@@ -1,5 +1,19 @@
 ## What's new
 
+1.31.1 fixes nine more problems found in the review of the interface. Each was checked in the code first:
+
+- **A channel that failed on another computer shows as Failed** on its tab, with why. It read as Idle.
+- **Trace's shortcuts step aside in another computer's screen.** F1, Ctrl+Shift+F and Alt+1–8 were taken by Trace while you typed into the screen, and opening another page closed it. They now go to that computer, as do Ctrl+Shift+P and the G letters.
+- **Pasting into the screen of a computer of the same kind.** Between two Windows PCs or two Macs, the paste key pasted what was on the other computer's own clipboard. It now hands this computer's text over first, as it already did between Windows and a Mac.
+- **A folded hierarchy bar says how many challenges the plan has**, beside Approve plan. The tasks queued from Tasks also stay in view when it is folded; before, both were hidden until you opened it.
+- **Higher contrast keeps a focused field's blue border, a field's error red, and an error's colour.** A rule meant to strengthen borders outweighed all three.
+- **Compact density no longer adds padding** to the Changes and Files cards and the explorer, which are drawn edge to edge.
+- **Accounts no longer says to install a CLI while it is still checking** whether it is installed.
+- **Help no longer draws a Round Table's finding numbers (F1, F2) as keys.** F1 the key still is one.
+- **A file opened from the command menu shows in the Files tree**, its folders opened to it.
+- **Tried:** the unit tests, and the desktop, design, screen, remote, workbench, table and productivity smoke tests, with new checks: F1 in a remote screen (fails with 1.31.0's code), the contrast and density rules (fail with 1.31.0's stylesheet), the Files tree, the challenge count and the pasting rule for each pair of computers.
+- **Not tried:** a real Mac viewing a Mac, a real Windows PC viewing another, and a real linked computer's failed channel.
+
 1.31.0 retires the Workflow center. Its four tools now sit where you would look for them:
 
 - **Failed runs** is part of **Session history** (a **Failed runs** button beside **View native CLI conversations**). **Open log** on a failed channel, or its notice, goes there, with that channel chosen. The command menu's **Recover a failed channel** does too.

@@ -214,14 +214,17 @@
 .chain-fold { display: none; }
 .chain-bar.folded { padding-top: 4px; padding-bottom: 4px; }
 .chain-bar.folded > .chain-fold { display: flex; flex: 1 1 0; align-items: center; gap: 4px; min-width: 0; }
-.chain-bar.folded:not(.open) > :not(.chain-fold, .chain-act, .table-seats, span.table-waiting) { display: none; }
-.chain-bar.folded:not(.open) > span.table-waiting { flex-basis: 100%; }
+/* What waits stays in view folded: a message to send, and tasks queued from Tasks (hidden before 1.31.1). */
+.chain-bar.folded:not(.open) > :not(.chain-fold, .chain-act, .table-seats, .table-waiting) { display: none; }
+.chain-bar.folded:not(.open) > .table-waiting { flex-basis: 100%; }
 .chain-bar.folded > .table-seats { order: -2; }
 .chain-bar.folded > strong { order: -1; }
 .chain-bar.open > .chain-fold { flex: none; }
 .chain-bar.open .chain-summary { display: none; }
 .chain-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tr-fg-muted); font: 400 12px/16px var(--tr-font-ui); }
 .chain-summary b { font-weight: 600; }
+/* The plan waits for the person: its challenges in the waiting colour, as Approve plan is. */
+.chain-summary .chain-fold-challenges { color: var(--tr-st-waiting); }
 .seat-text-planner { color: var(--tr-ch-planner); }
 .chain-fold-toggle svg { transition: transform var(--tr-d-fast) var(--tr-ease); }
 .chain-bar.open .chain-fold-toggle svg { transform: rotate(180deg); }

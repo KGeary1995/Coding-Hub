@@ -80,7 +80,8 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
   const interrupt = () => { if (channel.runId) void workbench({ action: 'linked-input', id: computer.id, sessionId: channel.sessionId, runId: channel.runId, data: '\x03' }).catch((e: Error) => setError(e.message)); };
-  const state = !channel.running ? 'idle' : channel.attention ? 'waiting' : 'working';
+  // A channel that stopped with an error there is Failed here too, with why (it read as Idle before 1.31.1).
+  const state = !channel.running ? (channel.failed ? 'failed' : 'idle') : channel.attention ? 'waiting' : 'working';
   // Whose account it runs on there, coloured as on desktop tiles here (that computer numbers its own accounts).
   const tone = channel.account ? String(channel.account.tone % 4) : undefined; const EngineIcon = ENGINE_ICONS[channel.engine];
   return <article className={`session-tile tr-tile linked-tile ${channel.engine} state-${state}`} data-account={tone} aria-label={`${computer.name} channel ${channel.channel}: ${channel.title}${channel.account ? `, ${channel.account.name} account` : ''}`}>
@@ -106,6 +107,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       <span className="tr-state-chip ui-badge" role="status"><i className="dot" aria-hidden="true" />{CHANNEL_STATES[state].word}</span>
     </header>
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
+    {state === 'failed' && <div className="session-error failure" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{channel.failed}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
     {channel.chat && (channel.engine === 'claude' || channel.engine === 'codex')
       ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />

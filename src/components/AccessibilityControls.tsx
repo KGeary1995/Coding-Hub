@@ -11,6 +11,9 @@ export function useAccessibility() {
   useEffect(() => {
     apply(load());
     const handler = (event: KeyboardEvent) => {
+      // Keys typed into another computer's screen are that computer's: this listener runs first (capture, on the window),
+      // so it took Ctrl+Shift+F, F1 and Alt+1–8 and its page change closed the screen (before 1.31.1).
+      if (event.target instanceof Element && event.target.closest('.linked-screen')) return;
       const channel = channelKey(event);
       if (channel !== null) {
         const state = useWorkspaceStore.getState(); const session = channelsOf(state.sessions)[channel];

@@ -147,6 +147,12 @@ describe('the hierarchy bar folds in a tile too short for it', () => {
     expect(summary).toMatch(/^<span class="chain-summary"[^>]*>Opus 5\.5 building…<span aria-hidden="true"> · <\/span><b class="seat-text-planner">Fable 5\.2<\/b><span aria-hidden="true"> › <\/span><b class="seat-text-claude">Opus 5\.5<\/b><span aria-hidden="true"> › <\/span><b class="seat-text-codex">Codex<\/b><\/span>$/);
     expect(parts(table('plan-review'), false).summary).toContain('Fable 5.2&#x27;s plan is ready');
   });
+  it('names how many challenges the plan has on the folded line, as their list is behind the disclosure', () => {
+    const challenged = table('plan-review'); const chain = { ...challenged.chain!, challenged: true as const, challenges: [{ id: 'C1', severity: 'high' as const, text: 'Misses mobile' }, { id: 'C2', severity: 'low' as const, text: 'Use a partial' }] };
+    const { summary } = parts({ ...challenged, chain }, false);
+    expect(summary).toContain('<b class="chain-fold-challenges"> · 2 challenges</b>'); expect(summary).toContain('title="Fable 5.2&#x27;s plan is ready · 2 challenges · ');
+    expect(parts(table('plan-review'), false).summary).not.toContain('chain-fold-challenges');
+  });
   it('draws a waiting message as a span of its own in the bar, which the sheet keeps in view on the folded line', () => {
     // chat.css shows `span.table-waiting` under a folded bar's line: Send now and Drop it are the person's to press.
     const html = renderToStaticMarkup(<ChainBar table={table('idle', { waiting: 'Next task', waitingKept: true })} busy={false} plannerName="Fable 5.2" builderName="Opus 5.5" seats={seats} onRequest={() => {}} />);
