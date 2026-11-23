@@ -145,11 +145,12 @@ export function applyChatEvent({ sessionId, runId, event }: ChatEnvelope) {
           : { kind: 'assistant', order: ++counter, id: nextId(), blocks: message.blocks, streaming: '' });
         return { ...current, results: { ...event.results, ...current.results }, items: [...earlier, { kind: 'notice', order: ++counter, id: nextId(), text: 'Resumed. The messages above are from the saved conversation.', error: false }] };
       }
-      case 'done': {
+      // `settled` ends a reply Claude started by itself: the same for what the thread shows, and it carries no error.
+      case 'done': case 'settled': {
         // Streamed text that never got its final message (an interruption) stays as it was.
         // An approval still open when its reply ended no longer belongs to anything.
         const settled = items.map((item) => item.kind === 'assistant' && item.streaming ? { ...item, blocks: [...item.blocks, { type: 'text' as const, text: item.streaming }], streaming: '' } : item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' as const } : item);
-        return { ...current, busy: false, items: event.isError && event.error ? [...settled, { kind: 'notice', order: ++counter, id: nextId(), text: event.error, error: true }] : settled };
+        return { ...current, busy: false, items: event.type === 'done' && event.isError && event.error ? [...settled, { kind: 'notice', order: ++counter, id: nextId(), text: event.error, error: true }] : settled };
       }
       // A newer Trace on a linked computer may send events this version does not know: they leave the thread as it is.
       default: return current;

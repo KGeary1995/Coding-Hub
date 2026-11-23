@@ -30,6 +30,21 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
 }
 
 describe('Round Table', () => {
+  it('keeps what a seat said by itself, between turns, out of its next answer, and does not move on its end', () => {
+    const { tables, sent, say, done, last, runs } = setup();
+    tables.open(1, CLAUDE, CODEX, 'claude', 0);
+    // The lead reports on a background task of its own: nobody asked, and the table stays as it is.
+    say(CLAUDE, 'The release is published.');
+    tables.observe({ sessionId: runs[CLAUDE].sessionId, runId: CLAUDE, event: { type: 'settled' } });
+    expect(sent).toEqual([]); expect(last().table?.phase).toBe('idle');
+    // With a round to discuss, the lead's answer goes to the reviewer: only the answer the table asked for.
+    const next = setup(); next.tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    next.say(CLAUDE, 'Unasked words from before.');
+    next.tables.send(CLAUDE, 'Which port?', []);
+    next.say(CLAUDE, 'Port 8080.'); next.done(CLAUDE); next.say(CODEX, 'Agreed.'); next.done(CODEX);
+    const toCodex = next.sent.filter((item) => item.runId === CODEX).map((item) => item.text).join(' | ');
+    expect(toCodex).toContain('Port 8080.'); expect(toCodex).not.toContain('Unasked words');
+  });
   it('sends the person’s message to both, then each the other’s answer, for the set number of rounds', () => {
     const { tables, sent, modes, say, done, last } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 1);

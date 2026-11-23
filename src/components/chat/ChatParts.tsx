@@ -222,7 +222,12 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
   const seats: BarSeat[] = given ?? seatViews(table, leadEngine); const many = seats.length > 2;
   const driver = seats.find((seat) => seat.driver) ?? seats[0]; const others = seats.filter((seat) => seat !== driver); const hidden = seats.filter((seat) => !seat.lead);
   const run = onRequest; const images = waitingImageCount(table); const counted = seats.filter((seat) => seat.tokens !== undefined);
-  const status = table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'acting' ? `${driver.name} making the changes` : table.phase === 'idle' && table.agreed ? (many ? 'They all agree. Your turn' : 'They agree. Your turn') : PHASE(many)[table.phase];
+  // While the lead writes a reply nobody asked it for (a background task of its own reporting back) the table is idle,
+  // but "Your turn" beside "… is working" read as two answers to one question: the bar says who is writing. A message
+  // can still be sent; it waits as any message sent to a busy table does.
+  // The one writing is a hidden seat when its state says so (the lead has no state of its own here), else the lead.
+  const writing = seats.find((seat) => seat.state === 'working') ?? seats.find((seat) => seat.lead) ?? driver;
+  const status = table.phase === 'idle' && busy ? `${writing.name} is working` : table.phase === 'discussing' ? `Round ${table.round} of ${table.rounds}` : table.phase === 'acting' ? `${driver.name} making the changes` : table.phase === 'idle' && table.agreed ? (many ? 'They all agree. Your turn' : 'They agree. Your turn') : PHASE(many)[table.phase];
   // In a narrow tile the token counts, then who drives, leave the bar (chat.css): there they are this tooltip, and still read out.
   // Narrower still, Rounds, Stop and Show keep only their field or icon, and then the title leaves: their words stay their names,
   // and each has a tooltip, as every control that shows only an icon has.

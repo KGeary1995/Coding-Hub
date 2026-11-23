@@ -98,6 +98,14 @@ describe('a Round Table bar and its token counts', () => {
     expect(html).toMatch(/<b class="seat-text-codex">Codex 0<\/b> · <b class="seat-text-gemini">Gemini CLI —<\/b>/);
     expect(html).toContain('Gemini CLI — (—: not measured yet)');
   });
+  it('says who is writing, not "Your turn", while the lead writes a reply nobody asked it for', () => {
+    const bar = (busy: boolean) => renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={busy} onRequest={() => {}} />);
+    expect(bar(true)).toContain('<span class="table-status" aria-live="polite">Claude is working</span>'); expect(bar(true)).not.toContain('Your turn');
+    expect(bar(false)).toContain('<span class="table-status" aria-live="polite">Your turn</span>');
+    // A hidden seat that is the one working is named, not the lead.
+    const seats = counted(0, 0).map((seat, index) => index ? { ...seat, state: 'working' } : seat);
+    expect(renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy seats={seats} onRequest={() => {}} />)).toContain('<span class="table-status" aria-live="polite">Codex is working</span>');
+  });
   it('keeps who drives and the counts in a tooltip as well as in the bar, so a narrow tile can take them out of the bar', () => {
     const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={counted(12_400, 800)} onRequest={() => {}} />);
     expect(html).toContain('<span class="table-group" title="Claude drives · Codex reviews. New tokens today: Claude 12k · Codex 800">');
