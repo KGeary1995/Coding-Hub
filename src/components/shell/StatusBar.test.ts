@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanLimits } from '../../../shared/plan-limits';
-import { planReading, scrollToTile } from './StatusBar';
+import { accountWarnings, planReading, scrollToTile } from './StatusBar';
 
 const reading = (extra: Partial<PlanLimits> = {}): PlanLimits => ({ engine: 'claude', account: 'Default', windows: [], plan: null, checkedAt: '2026-11-18T10:00:00.000Z', error: null, ...extra });
 const window = (label: string, usedPercent: number) => ({ label, usedPercent, resets: null });
@@ -19,6 +19,20 @@ describe('an engine’s plan cell in the status bar', () => {
   it('keeps the cell, with nothing to count, for an error or when only another account has limits', () => {
     expect(planReading([reading({ error: 'Sign in to Claude Code to see its limits.' })])).toEqual([]);
     expect(planReading([reading(), reading({ account: 'Work', windows: [window('Week', 30)] })])).toEqual([]);
+  });
+});
+
+describe('a named account in use that nears its cap', () => {
+  const all = [reading({ windows: [window('Session', 12), window('Week', 40)] }), reading({ account: 'Work', windows: [window('Session', 30), window('Week', 92)] }), reading({ account: 'Side', windows: [window('Week', 80)] })];
+  it('is named in the bar with its fullest limit, once a channel runs on it', () => {
+    expect(accountWarnings(all, new Set(['Work']))).toEqual([{ account: 'Work', window: window('Week', 92) }]);
+    expect(accountWarnings(all, new Set(['Work', 'Side']))).toEqual([{ account: 'Work', window: window('Week', 92) }, { account: 'Side', window: window('Week', 80) }]);
+  });
+  it('says nothing of an account no channel runs on, of one with room, or of the reading the cell already shows', () => {
+    expect(accountWarnings(all, new Set())).toEqual([]);
+    expect(accountWarnings([all[0], reading({ account: 'Work', windows: [window('Week', 74)] })], new Set(['Work']))).toEqual([]);
+    expect(accountWarnings([reading({ windows: [window('Week', 95)] })], new Set(['Default']))).toEqual([]);
+    expect(accountWarnings([reading(), reading({ account: 'Work', error: 'Sign in to Claude Code to see its limits.' })], new Set(['Work']))).toEqual([]);
   });
 });
 

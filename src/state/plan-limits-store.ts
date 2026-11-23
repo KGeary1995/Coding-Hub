@@ -2,14 +2,17 @@ import { create } from 'zustand';
 import type { LimitWindow, PlanLimits } from '../../shared/plan-limits';
 import { workbench } from '../runtime/workbench';
 
-/** The usage limits last read from the CLIs (see PlanLimitsService), for the status bar and Usage. */
-export const usePlanLimits = create<{ limits: PlanLimits[]; loading: boolean }>(() => ({ limits: [], loading: false }));
+/**
+ * The usage limits last read from the CLIs (see PlanLimitsService), for the status bar and Usage. `stale`: the last
+ * refresh did not come back, so `limits` are an earlier reading's and are shown as such.
+ */
+export const usePlanLimits = create<{ limits: PlanLimits[]; loading: boolean; stale: boolean }>(() => ({ limits: [], loading: false, stale: false }));
 
 export async function refreshPlanLimits(force = false) {
   if (usePlanLimits.getState().loading) return;
   usePlanLimits.setState({ loading: true });
-  try { usePlanLimits.setState({ limits: await workbench<PlanLimits[]>({ action: 'plan-limits', force }) }); }
-  catch { /* Kept as it was; shown as unavailable. */ }
+  try { usePlanLimits.setState({ limits: await workbench<PlanLimits[]>({ action: 'plan-limits', force }), stale: false }); }
+  catch { /* Kept as it was, and marked: the percentages are no longer current. */ usePlanLimits.setState({ stale: true }); }
   finally { usePlanLimits.setState({ loading: false }); }
 }
 

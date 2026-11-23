@@ -100,13 +100,14 @@
   --tr-r-small: 6px;           /* controls 24 px tall or less, key hints */
   --tr-r-control: 8px;
   --tr-r-inset: 8px;           /* rows in a card */
-  --tr-r-tile: 10px;
+  --tr-r-tile: 12px;           /* a channel tile, which is a card; its well is --tr-r-small, the tile's radius less --tr-tile-inset */
   --tr-r-panel: 12px;          /* cards */
   --tr-r-overlay: 14px;
   --tr-r-chip: 999px;          /* badges */
 
   /* depth: a card has a lit top edge, a selected tile glows, only overlays cast a real shadow */
   --tr-shadow-card: inset 0 1px 0 rgba(120,160,255,.06), 0 1px 2px rgba(0,0,0,.4);
+  --tr-shadow-well: inset 0 1px 3px rgba(0,0,0,.5);  /* a tile's well, sunk under the card */
   --tr-glow-accent: 0 0 0 1px rgba(76,154,255,.12), 0 0 28px rgba(46,110,255,.14);
   --tr-glow-waiting: 0 0 0 1px rgba(255,106,213,.12), 0 0 28px rgba(255,106,213,.14);  /* a channel that needs the person */
   --tr-shadow-overlay: 0 24px 64px rgba(0,0,0,.6), 0 0 0 1px rgba(76,154,255,.16);
@@ -121,8 +122,10 @@
   /* layout */
   --tr-topbar-h: 44px;
   --tr-statusbar-h: 28px;
-  --tr-tile-head-h: 34px;
+  --tr-tile-head-h: 36px;
   --tr-tile-detail-h: 30px;
+  --tr-tile-foot-h: 28px;
+  --tr-tile-inset: 6px;        /* the card's edge around a tile's well: the well's radius is the card's less this */
   --tr-focus: 2px solid var(--tr-accent);
 }
 

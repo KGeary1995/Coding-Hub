@@ -86,6 +86,12 @@ describe('a Round Table message waiting to go', () => {
 describe('a Round Table bar and its token counts', () => {
   const table = { partner: { sessionId: 'p', runId: 'r', engine: 'codex' as const }, driver: 'claude' as const, rounds: 2, round: 0, phase: 'idle' as const, agreed: false };
   const counted = (lead: number, partner: number) => seatViews(table, 'claude').map((seat, index) => ({ ...seat, tokens: index ? partner : lead }));
+  it('names who is making the changes in a part of its own, so a narrow tile can take the name out and keep the status on its line', () => {
+    const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={{ ...table, phase: 'acting' as const }} busy onRequest={() => {}} />);
+    expect(html).toMatch(/<span class="table-status" aria-live="polite"><span class="table-acting-who">[^<]+ <\/span><span class="table-acting-what">making the changes<\/span><\/span>/);
+    // Any other state is its plain words.
+    expect(renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} onRequest={() => {}} />)).toContain('<span class="table-status" aria-live="polite">Your turn</span>');
+  });
   it('shows a seat whose usage is not measured yet as a dash, and keeps 0 for a counted zero', () => {
     const seats = [...counted(12_400, 0), { ...counted(0, 0)[1], id: 'g', engine: 'gemini' as const, name: 'Gemini CLI', working: 'Gemini CLI', colour: 'gemini' as const, tokens: null }];
     const html = renderToStaticMarkup(<TableBar leadEngine="claude" table={table} busy={false} seats={seats} onRequest={() => {}} />);

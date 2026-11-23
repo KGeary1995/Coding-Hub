@@ -54,7 +54,7 @@ export function dailySeries(records: UsageRecord[], days: number, now = new Date
   for (let offset = 0; offset < days; offset++) { const date = new Date(start); date.setDate(start.getDate() + offset); series.push({ key: dayKey(date), date, claude: 0, codex: 0, gemini: 0, cost: null }); }
   const byKey = new Map(series.map((day) => [day.key, day]));
   for (const record of records) {
-    // A run that reports usage by day adds to each day it was used on (as the status bar's "Σ today" does); older
+    // A run that reports usage by day adds to each day it was used on (as the status bar's Today total does); older
     // records, and other computers' runs, count on the day they started.
     if (record.days) {
       for (const [key, used] of Object.entries(record.days)) { const day = byKey.get(key); if (!day) continue; day[record.engine] += used.tokens; if (used.cost !== null) day.cost = (day.cost ?? 0) + used.cost; }
@@ -82,7 +82,7 @@ export function median(values: number[]) {
 
 /**
  * This computer's usage from the CLIs' own logs as one record per day and engine, so the Usage screen's totals and
- * chart count every day's use (in Trace or not, by the day it happened) the way the status bar's "Σ today" does.
+ * chart count every day's use (in Trace or not, by the day it happened) the way the status bar's Today total does.
  * Codex's input keeps its cached input inside it, as its run records do.
  */
 export function logRecords(logs: LogUsage): UsageRecord[] {

@@ -263,7 +263,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // A synced record as Trace writes it: usage by day stays on the computer that recorded it.
     const synced = ({ days: _days, ...record }) => record;
     await writeFile(path.join(driveFolder, 'AI-Coding-Hub-Sync', 'usage', other.id + '.json'), JSON.stringify({ version: 1, machine: other, updatedAt: new Date().toISOString(), value: [{ ...synced(usage.value[0]), runId: 'laptop-run', sessionId: 'laptop-session', source: usage.value[0].source, confidence: 'reported' }] }));
-    const today = page.locator('.tr-sb-cell').filter({ hasText: 'Σ today' }); const todayBefore = await today.textContent();
+    const today = page.locator('.tr-sb-today'); const todayBefore = await today.textContent();
     assert.equal((await page.evaluate(() => window.codingHub.hub({ action: 'device-sync-now' }))).value.computers[0].name, 'laptop');
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.usage-table tbody tr').length === 3);

@@ -7,11 +7,13 @@
 //   --size        size of the page, so of every shot (default 1440x900); without it a short list is also taken at
 //                 1100x800 (-1100)
 //   --visible     leave the window on screen; by default it is moved off screen so it does not cover the person's work
-//   --real-usage  keep the real home folder, so Usage, Session history's native conversations and Accounts read the
+//   --real-usage  keep the real home folder and the person's own Gemini CLI, so Usage, the status bar's plan limits,
+//                 Session history's native conversations and Accounts read the
 //                 person's own ~/.claude and ~/.codex (and GitHub sees the real gh login): the screenshots then contain
 //                 personal data (projects, usage, account names). Without it the e-mail shown is the fixture's. The
 //                 Terminal channel's two commands are then also added to the person's own shell history.
-//   TOUR_DEBUG=1  print the whole error of a skipped scene, not just its first line
+//   TOUR_DEBUG=1  print the whole error of a skipped scene, not just its first line, and take the window as it stood then
+//                 (skip-<scene>.png)
 // Shots (a view taller than the window is taken as -a, -b, … top to bottom, at most ten: Settings needs seven at 1100x800):
 //   00-start (-1100, -contrast)  empty window, no project      01-workspace-idle   project opened, two channels not started
 //   02-channels-running  Claude, Codex and a Terminal running  03-chat             Round Table chat: messages and an approval
@@ -56,7 +58,10 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   // os.homedir() reads USERPROFILE on Windows and HOME elsewhere: with both in the temp folder, no account, e-mail address,
   // history or usage of the person's shows. --real-usage keeps them; the fixtures still write only to their own folders.
-  if (!realUsage) { env.USERPROFILE = env.HOME = path.join(root, 'home'); env.CLAUDE_CONFIG_DIR = homes.claude; env.CODEX_HOME = homes.codex; env.GH_CONFIG_DIR = path.join(root, 'gh'); }
+  // The tour has no Gemini CLI fixture, and the person's own agy is still on PATH: left alone it was run and asked for its
+  // limits, so the status bar and Usage showed the person's real Gemini quota in every shot. As in the smoke tests
+  // (lib/no-drive.cjs), it counts as not installed and its conversations are looked for in a folder that does not exist.
+  if (!realUsage) { env.USERPROFILE = env.HOME = path.join(root, 'home'); env.CLAUDE_CONFIG_DIR = homes.claude; env.CODEX_HOME = homes.codex; env.GH_CONFIG_DIR = path.join(root, 'gh'); env.CODING_HUB_TEST_NO_GEMINI = '1'; env.CODING_HUB_GEMINI_HOME = path.join(root, 'no-gemini'); }
   /** What the app starts with. Called inside `try`, so the temporary folder is removed when any of this fails too. */
   const prepare = async () => {
     await makeProject(project); await installFixtures(bin, homes);
@@ -83,7 +88,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
   /** One scene: a failure is reported and the tour goes on, with any menu or dialog it left open closed. */
   const scene = async (name, run) => {
     try { await run(); }
-    catch (error) { skips++; console.log(`skip ${name}: ${String(error.message ?? error).split('\n')[0]}`); if (process.env.TOUR_DEBUG) console.log(error.stack); for (let i = 0; i < 2; i++) await page.keyboard.press('Escape').catch(() => {}); await page.mouse.move(1, 1).catch(() => {}); }
+    catch (error) { skips++; console.log(`skip ${name}: ${String(error.message ?? error).split('\n')[0]}`); if (process.env.TOUR_DEBUG) { console.log(error.stack); await page.screenshot({ path: path.join(out, `skip-${name}.png`) }).catch(() => {}); } for (let i = 0; i < 2; i++) await page.keyboard.press('Escape').catch(() => {}); await page.mouse.move(1, 1).catch(() => {}); }
   };
   /** A scene that only takes pictures runs when one of its shots is wanted; scenes that set up later ones always run. */
   const view = (names, run) => [names].flat().some(wantedAny) ? scene([names].flat()[0], run) : Promise.resolve();
@@ -166,6 +171,9 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       await box.fill('What does greet() return for an empty name?', { timeout: 30_000 }); await page.keyboard.press('Enter');
       await chat.getByText('You said:', { exact: false }).first().waitFor({ timeout: 20_000 });
       await page.waitForTimeout(1500);
+      // Since 1.29.0 the seats only discuss at first, and Trace declines an edit asked for meanwhile, so no approval is
+      // asked for then. With Rounds at 0 there is no discussion: the driver starts at once and asks to write the file.
+      await chat.locator('.table-rounds select').selectOption('0');
       await box.fill('write the answer to notes.txt'); await page.keyboard.press('Enter');
       await chat.getByRole('button', { name: 'Allow', exact: true }).first().waitFor({ timeout: 20_000 });
       // Maximised, so the conversation is readable rather than a quarter of the grid.

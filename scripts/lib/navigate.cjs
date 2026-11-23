@@ -37,15 +37,16 @@ async function startTable(page, item = 'Round Table', setup) {
 }
 
 /**
- * A control in a channel's detail row, which shows when the person points at the tile's header, or while a control in it
- * has the keyboard focus. The test's own pointer is not enough: the window is on the real screen, and the real pointer
- * moving over it (the person at the computer) took the header's hover away before the click, which then waited 20 s on a
- * hidden row ("terminal-frame intercepts pointer events"). The focus keeps the row shown whatever the pointer does.
+ * A control in a channel's controls row, which the tile's controls button (the ellipsis in its header) opens and closes;
+ * the row also stands open while the channel's settings, its conversation or its close question is. The row is opened
+ * here when it is closed, so the control can be pressed. A closed row is not drawn, so the control is looked for among
+ * the hidden too.
  */
 async function tileControl(scope, name) {
-  const button = scope.getByRole('button', { name, exact: true });
-  await button.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " tr-tile-top ")]').hover({ position: { x: 12, y: 12 } });
-  await button.focus();
+  const button = scope.getByRole('button', { name, exact: true, includeHidden: true });
+  await button.waitFor({ state: 'attached' });
+  if (!await button.isVisible()) await button.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " tr-tile-top ")]').locator('.tr-tile-more').click();
+  await button.waitFor();
   return button;
 }
 

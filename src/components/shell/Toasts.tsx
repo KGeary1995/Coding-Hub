@@ -112,8 +112,9 @@ function useClearPlace() {
       // The whole stack's height, also while `room` cuts it short.
       const height = box.clientHeight ? own.height * box.scrollHeight / box.clientHeight : 0;
       const all = [...document.querySelectorAll('.session-tile')];
-      // A tile that moves or resizes, a composer that grows and bars that wrap all change what the corner covers.
-      const watch = [...all, ...all.flatMap((tile) => [...tile.querySelectorAll('.chat-composer, .chat-thread')])];
+      // A tile that moves or resizes, a composer that grows, bars that wrap and a controls row that opens (its block
+      // under the header grows) all change what the corner covers.
+      const watch = [...all, ...all.flatMap((tile) => [...tile.querySelectorAll('.chat-composer, .chat-thread, .tr-tile-top')])];
       for (const element of watched) if (!watch.includes(element)) observer.unobserve(element);
       for (const element of watch) if (!watched.includes(element)) observer.observe(element);
       watched = watch;

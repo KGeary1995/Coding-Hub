@@ -36,6 +36,7 @@
 .tr-split i { display: block; min-width: 0; }
 .tr-split > i.claude { background: var(--tr-ch-claude); }
 .tr-split > i.codex { background: var(--tr-ch-codex); }
+.tr-split > i.gemini { background: var(--tr-ch-gemini); }
 .tr-split i + i { border-left: 2px solid var(--tr-well); }
 /* Each figure is a row (a well inside the card): the rows take the card down to its hint, level with the chart's, so the
    card beside the taller chart holds no gap. */
@@ -62,7 +63,8 @@
 .tr-plan-account { display: grid; grid-template-columns: 112px minmax(0, 1fr) 40px auto; column-gap: 12px; align-content: start; }
 .tr-plan-account > :is(h3, p) { grid-column: 1 / -1; }
 .tr-plan-account h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 600 13px/20px var(--tr-font-ui); }
-.tr-plan-window { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 28px; font: var(--tr-t-control); color: var(--tr-fg-muted); }
+/* A long name ("Week (Claude and GPT models)") takes two lines: the 4 px above and below keep it clear of its neighbours. */
+.tr-plan-window { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; min-height: 28px; padding: 4px 0; font: var(--tr-t-control); color: var(--tr-fg-muted); }
 .tr-plan-window > .tnum { text-align: right; color: var(--tr-fg-strong); }
 
 /* Session history: the page fills the window and its two panes scroll inside it, so a long output never pushes the list
