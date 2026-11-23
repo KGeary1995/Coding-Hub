@@ -172,3 +172,17 @@
 .worktree-row code { font: var(--tr-t-meta); }
 /* The closing note is a line of a form page: 72 characters at most (spec, section 6). */
 .worktree-manager > .control-note { max-width: 72ch; }
+
+/* Review comments (1.32.2): a button at the start of each unified diff line, shown on hover or focus; a kept comment and
+   the form for one sit under their line; the bar above the diff sends them to an agent channel. */
+.diff-comment-add, .diff-comment-gap { flex-shrink: 0; width: 22px; }
+.diff-comment-add { display: inline-grid; place-items: center; padding: 0; border: 0; background: none; color: var(--tr-accent); opacity: 0; cursor: pointer; }
+.diff-line:hover .diff-comment-add, .diff-comment-add:focus-visible { opacity: 1; }
+.diff-comment, .diff-comment-form { margin: 4px 12px 6px 96px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--tr-accent) 45%, transparent); border-radius: var(--tr-r-control); background: var(--tr-raised); font-family: var(--tr-font-ui); }
+.diff-comment { display: flex; align-items: flex-start; gap: 8px; }
+.diff-comment p { flex: 1; margin: 0; white-space: pre-wrap; color: var(--tr-fg); }
+.diff-comment-form textarea { width: 100%; resize: vertical; }
+.diff-comment-form .ui-actions { margin-top: 8px; gap: 8px; }
+.review-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line-faint); }
+.review-target { display: inline-flex; align-items: center; gap: 8px; }
+.review-target select { min-width: 0; max-width: 260px; }

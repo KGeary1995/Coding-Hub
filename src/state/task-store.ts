@@ -4,11 +4,11 @@ import type { ChannelTranscript } from '../../shared/remote';
 import type { ChatBlock, RoundTableState } from '../../shared/chat';
 import { promptMark, replyToTask, taskSignal } from '../../shared/task-signal';
 import { workbench } from '../runtime/workbench';
-import { writeTerminal } from '../runtime/terminals';
 import { useWorkspaceStore } from './workspace-store';
 import { activitySamples } from './activity-store';
 import { sendMark } from './task-evidence';
-import { chatFailed, chatSent, useChatStore } from './chat-store';
+import { useChatStore } from './chat-store';
+import { sendToChannel } from '../runtime/send-to-channel';
 import { hierarchyDetached } from './hierarchy-state';
 import { isChatEngineConfig } from '../../shared/types';
 
@@ -57,16 +57,8 @@ export async function sendTask(id: string) {
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
   const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
-  let sent: boolean;
-  if (session.config.chat && window.codingHub) {
-    const hierarchy = useChatStore.getState().threads[session.id]?.table?.kind === 'hierarchy';
-    chatSent(session.id, prompt, [], !hierarchy);
-    // A chat leading a Round Table passes the task to both agents, as a message typed there would.
-    const table = Boolean(useChatStore.getState().threads[session.id]?.table);
-    const result = await window.codingHub.chat(table ? { action: 'table-send', sessionId: session.id, runId: session.runId, text: prompt, images: [] } : { action: 'send', sessionId: session.id, runId: session.runId, text: prompt, images: [] }).catch(() => null);
-    if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.');
-    sent = Boolean(result?.ok);
-  } else sent = await writeTerminal(session.id, prompt + '\r');
+  // A chat leading a Round Table passes the task to both agents, as a message typed there would (sendToChannel).
+  const sent = await sendToChannel(session, prompt);
   if (!sent) { await setTaskStatus(id, 'queued'); throw new Error('The task could not be typed into that channel. It is back in To do.'); }
   await loadTasks(); void refreshTaskWatch();
 }

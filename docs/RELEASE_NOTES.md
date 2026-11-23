@@ -1,5 +1,12 @@
 ## What's new
 
+1.32.2 is the third idea from herdr, whose most-used add-ons include reviewing an agent's diff and sending comments back:
+
+- **Comment on a line of a diff in Changes and send the comments to the agent.** In Unified view, the button at the start of a line opens a comment on it. Comments stay under their lines while Changes is open. The bar above the diff sends them all as one message to an agent channel running in that repository, typed in as you would: each with its file, line and code. **Send to** picks the channel when there are several.
+- **Tasks are sent the same way as before.** Sending a task and sending comments now share one piece of code.
+- **Not done:** commenting in Split view (it shows comments; switch to Unified to add one). Comments are not saved when Trace closes.
+- **Tried:** the unit tests (the message's wording; which channels are offered: running agents in the repository or a folder inside it, never a shell or another folder), and the desktop smoke test: a comment on a changed line, sent, arrives in the Claude Code channel working in that repository as one message, and is then cleared. The workbench, enterprise, design and table seats smoke tests pass.
+
 1.32.1 is the second idea from herdr:
 
 - **A channel says Done when its agent finishes while you are elsewhere.** The tile's badge and the status bar show **Done** in blue, and **Needs you** lists it last as *CHn finished its turn*, with **Open channel**. Clicking the tile or moving into its terminal clears it. A turn that ends while you are in that channel, with Trace in front, is not marked. Before, a running channel showed Working whether or not its agent was still busy.
