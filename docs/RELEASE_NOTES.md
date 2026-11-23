@@ -1,5 +1,15 @@
 ## What's new
 
+1.30.1 fixes a chat that kept saying an agent was working after it had finished:
+
+- **"Claude Code is working" no longer stays on after Claude Code has finished.** A chat or a Round Table could show the three dots and "Claude Code is working" with nothing running, while the Round Table's bar said **Your turn**.
+  - **Cause:** when a command Claude Code had left running in the background finished, Claude Code wrote a reply by itself to report on it. Trace showed that reply as being written, and then never heard that it had ended: the end of such a reply was set aside whole, so that a Round Table, a task or an automatic handoff would not take it for the end of a turn.
+  - **Fix:** the conversation is now told when such a reply has ended, and closes it. Nothing else acts on it: a Round Table does not move on, no task is marked and no handoff is asked for. If a message of yours is waiting behind such a reply, the chat stays busy until your own reply has ended.
+  - While an agent writes a reply nobody asked it for, a Round Table's bar now says who is working, not **Your turn**. You can still send a message; it waits as any message sent to a busy table does.
+- **If you see it in 1.30.0:** it is only the line that is stuck. You can type and send as usual, and the line clears when the next reply ends.
+- **Tried:** the unit tests, which replay the messages Claude Code sends in this order (a reply after a background command, a reply while one of yours is still owed, a late report from a subagent, an error and Stop), the build, and the desktop tests with stand-in CLIs for Round Table seats, the desktop and the phone.
+- **Not tried:** a real Claude Code chat running a background command and reporting back. The cause was read from the code and from when it was seen, not reproduced. Also not tried: a phone or a linked computer on an older version (which leaves a message it does not know alone), a Mac and the installed version.
+
 1.30.0 refines the look of the channels and the status bar, and counts each Gemini CLI channel by itself:
 
 - **Channels look like windows of the app, not bare terminals.** A channel is a card. Its header, notices and footer are on the card, and the terminal or the conversation is a dark panel set into it. A channel that has not started, and a chat, no longer sit on terminal black. Errors and approval requests are rounded banners above the terminal.
