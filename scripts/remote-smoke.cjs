@@ -139,7 +139,8 @@ ${terminalFixture}
     // size, as when the address bar hides), only when it is used.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('z'); await page.keyboard.press('Backspace');
     for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) > 60, 'typing at the desktop gives the desktop its size back');
+    // Seen once on the Windows release candidate only (1.31.7): say what each side showed, to tell a lost keystroke from the phone taking the size again.
+    if ((await width()) <= 60) assert.fail(`typing at the desktop gives the desktop its size back: ${await width()} columns, the phone's button says "${await fitButton()}", the desktop's typed key ${(await tile.locator('.xterm-rows').innerText()).includes('z') ? 'reached' : 'did not reach'} the channel, focus on ${await page.evaluate(() => document.activeElement?.className)}`);
     await app.evaluate(({ BrowserWindow }, port) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith(`http://127.0.0.1:${port}`))?.setSize(390, 700), PORT); await phone.waitForTimeout(600);
     assert.ok((await width()) > 60, 'a phone screen change does not take the channel back');
     await phone.locator('#output').click();
