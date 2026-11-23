@@ -1,5 +1,14 @@
 ## What's new
 
+1.31.6 is the phone app's second stage. Please try it on your phone with 1.31.4's fixes:
+
+- **Back leaves a channel instead of the app.** Android's Back button and the iPhone's swipe from the edge closed the app from a channel or the screen. They now go back to the channel list, as the app's own Back does; on the list, Back still closes the app.
+- **The chat's message box stays above an iPhone's keyboard.** The chat was as tall as the whole screen, which iOS keeps while its keyboard is open, so the box went under it. It now fits the part of the screen the keyboard leaves.
+- **Usage, Tasks, History and Memory say which computer they show**, when the phone knows of more than one: the one it is connected to, whichever computer the channel list is showing. Picking another computer above the list does not change them; showing that computer's figures there is a larger change, not in this version.
+- **Checked and not changed:** the review said a channel's header and tool bar ran past the edge of a small phone. They do not: at 320 px wide nothing runs over and the channel's name keeps its room. The remote smoke test now checks this.
+- **Tried:** the remote smoke test (Back from a channel returns to the list; the channel screen at 320 px), the phone screen smoke test and the unit tests.
+- **Not tried:** a real iPhone or Android phone (the keyboard above all), and a phone that knows of more than one computer.
+
 1.31.5 finishes the review's Phase 2, apart from the Changes screen (1.31.3). Each item was checked in the code first:
 
 - **AI coaching and Verification profiles are in the Insight menu.** The More tools page held only these two, one step further away. G then L, which opened it, is gone; G then O and G then V open them.
