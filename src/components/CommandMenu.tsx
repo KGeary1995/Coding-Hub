@@ -48,6 +48,8 @@ export function CommandMenu() {
   const { scope, text } = parseQuery(input, chosenScope);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // Ctrl+Shift+P typed into another computer's screen is that computer's.
+      if (event.target instanceof Element && event.target.closest('.linked-screen')) return;
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); setOpen((current) => !current); }
       if (event.key === 'Escape') setOpen(false);
     };

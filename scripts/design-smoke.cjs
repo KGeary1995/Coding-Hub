@@ -97,6 +97,23 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await page.getByRole('button', { name: 'Insight views', exact: true }).textContent(), 'More tools▾');
     await page.getByRole('button', { name: 'More tools', exact: true }).click();
     await page.getByRole('heading', { name: 'More tools', exact: true }).waitFor();
+    // Higher contrast keeps a focused field's accent border and an error's colour, and compact density leaves the cards
+    // drawn edge to edge without padding (1.31.1: a rule for each outweighed them).
+    // Search loads when first opened: the field is waited for before it is measured (a slower machine had none yet).
+    await openView(page, 'Search'); const field = page.getByLabel('Workspace search query', { exact: true }); await field.waitFor();
+    const looks = await page.evaluate(async () => {
+      const root = document.documentElement; const before = { contrast: root.dataset.contrast, density: root.dataset.density }; root.dataset.contrast = 'high'; root.dataset.density = 'compact';
+      const input = document.querySelector('[aria-label="Workspace search query"]'); input.focus(); await new Promise((resolve) => setTimeout(resolve, 500)); // after the border's fade
+      const probe = document.createElement('i'); probe.style.color = 'var(--tr-accent)'; document.body.append(probe); const accent = getComputedStyle(probe).color;
+      probe.style.color = 'var(--tr-danger)'; const danger = getComputedStyle(probe).color; probe.className = 'ui-hint error-message'; probe.style.color = ''; const hint = getComputedStyle(probe).color; probe.remove();
+      const card = document.createElement('div'); card.className = 'repository-workbench ui-card'; document.body.append(card); const padding = getComputedStyle(card).paddingTop; card.remove();
+      const focused = getComputedStyle(input).borderTopColor; input.blur(); root.dataset.contrast = before.contrast ?? 'normal'; root.dataset.density = before.density ?? 'comfortable';
+      return { accent, focused, danger, hint, padding };
+    });
+    assert.equal(looks.focused, looks.accent, `a focused field's border in higher contrast: ${JSON.stringify(looks)}`);
+    assert.equal(looks.hint, looks.danger, `an error hint's colour in higher contrast: ${JSON.stringify(looks)}`);
+    assert.equal(looks.padding, '0px', 'the Changes card has no padding in compact density');
+    await field.waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
     // Today's total is a chip that opens Usage, by the keyboard as by the pointer, with its focus ring inside its own edge

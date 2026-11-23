@@ -133,6 +133,10 @@ const until = async (check, what) => { for (let i = 0; i < 200; i++) { if (await
       await until(() => vnc.cutText.includes('hello mac') && vnc.keys.some((key) => key.key === 0x76 && !key.down), 'the paste');
       assert.deepEqual(vnc.keys.map((key) => key.key), [0xffeb, 0x76, 0x76, 0xffeb], 'V is sent once, inside ⌘');
     } else console.log('Ctrl+V pastes only on Windows and Linux: the paste is not checked on a Mac');
+    // Trace's own shortcuts step aside in the screen (1.31.1): F1 goes to that computer, and Help does not open.
+    await canvas.click(); vnc.keys.length = 0; await page.keyboard.press('F1');
+    await until(() => vnc.keys.some((key) => key.key === 0xffbe), 'F1 sent to the other computer');
+    assert.equal(await page.getByRole('heading', { name: 'Help & AI guide', exact: true }).count(), 0, 'F1 in the screen does not open Help'); assert.ok(await canvas.isVisible(), 'the screen is still open');
 
     // View only sends nothing.
     await panel.getByRole('button', { name: 'Control', exact: true }).click(); await panel.getByRole('status').filter({ hasText: 'Viewing' }).waitFor();

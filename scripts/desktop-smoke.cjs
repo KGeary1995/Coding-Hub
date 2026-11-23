@@ -209,6 +209,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
     // The page's Refresh reaches the Delivery card too (before 1.30.3 it kept the files it had read before).
     await page.getByRole('complementary', { name: 'Git delivery' }).getByText('later.md', { exact: true }).waitFor({ timeout: 15000 });
+    // A file opened from the command menu shows in the Files tree, its folder opened to it (1.31.1).
+    await page.keyboard.press('Control+Shift+P'); await page.getByLabel('Search commands', { exact: true }).fill('/working desktop edit');
+    await page.getByRole('option').filter({ hasText: 'main.ts' }).first().click();
+    await page.getByRole('treeitem', { name: 'File src/main.ts', exact: true }).waitFor({ timeout: 15000 });
+    assert.equal(await page.getByRole('treeitem', { name: 'Folder src', exact: true }).getAttribute('aria-expanded'), 'true');
+    await page.getByRole('button', { name: 'Changes', exact: true }).click();
     const codexSession = starts.find((run) => run.engine === 'codex').sessionId;
     await page.getByLabel('Repository context', { exact: true }).selectOption(codexSession);
     await page.getByRole('heading', { name: 'Working tree is clean', exact: true }).waitFor();

@@ -357,12 +357,14 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 
 /* ---------- Density and contrast (Settings > Display) ---------- */
 [data-density="compact"] :is(.ui-page, .feature-panel, .history-panel) { padding-top: 16px; }
-[data-density="compact"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection) { padding: 12px; }
+/* Not the cards drawn edge to edge (Changes and Files, the explorer): their parts carry their own padding. */
+[data-density="compact"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection):not(.repository-workbench, .workspace-explorer) { padding: 12px; }
 [data-density="compact"] .ui-row { min-height: 32px; padding: 4px 12px; }
-[data-contrast="high"] :is(.muted, .control-note, .eyebrow, .ui-hint) { color: var(--tr-fg); }
-[data-contrast="high"] :is(input, select, textarea) { border-color: var(--tr-fg-dim); }
+/* An error keeps its colour. Fields need no rule of their own: tokens.css raises --tr-line-control, and one here (before
+   1.31.1) outweighed the focus and invalid borders, so a focused or invalid field looked like any other. */
+[data-contrast="high"] :is(.muted, .control-note, .eyebrow, .ui-hint):not(.error-message) { color: var(--tr-fg); }
 [data-contrast="high"] :is(.ui-card, .storage-card, .hub-form, .hub-preview, .server-card, .memory-connection, .help-article, .history-empty) { border-color: var(--tr-fg-dim); }
-[data-contrast="high"] :is(.ui-row, .hub-list, .diagnostic-step, .check-output) { border-color: var(--tr-line-strong); }
+[data-contrast="high"] :is(.ui-row, .hub-list, .diagnostic-step:not(.failed), .check-output) { border-color: var(--tr-line-strong); }
 /* Apart from the list above: inside :is() its element name would outweigh an area's own rule for a row. */
 [data-contrast="high"] .hub-preview pre { border-color: var(--tr-line-strong); }
 [data-contrast="high"] :is(.quiet-button, .icon-button) { color: var(--tr-fg-strong); }

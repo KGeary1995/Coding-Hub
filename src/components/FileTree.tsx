@@ -25,8 +25,12 @@ function DirectoryContents({ relative, depth, ...props }: TreeProps & { relative
 }
 
 function TreeEntry({ entry, depth, ...props }: TreeProps & { entry: DirectoryEntry; depth: number }) {
-  const [expanded, setExpanded] = useState(false);
   const folder = entry.kind === 'directory';
+  // A file opened from elsewhere (the command menu, Search) shows in the tree: each folder on its way opens (before
+  // 1.31.1 the tree stayed closed and the file was nowhere to be seen in it).
+  const holdsSelected = folder && !!props.selected && props.selected.replace(/\\/g, '/').startsWith(entry.path.replace(/\\/g, '/') + '/');
+  const [expanded, setExpanded] = useState(holdsSelected);
+  useEffect(() => { if (holdsSelected) setExpanded(true); }, [holdsSelected, props.selected]);
   const available = folder || entry.kind === 'file';
   const Icon = folder ? expanded ? FolderOpen : Folder : entry.kind === 'symlink' ? Link2 : File;
   // The depth only: the indent per level is in styles/changes.css.
