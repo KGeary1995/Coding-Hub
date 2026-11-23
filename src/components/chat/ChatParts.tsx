@@ -45,7 +45,10 @@ function toolSummary(name: string, given: unknown) {
   const input: Record<string, unknown> = given && typeof given === 'object' ? given as Record<string, unknown> : {};
   const value = (key: string) => typeof input[key] === 'string' ? input[key] as string : '';
   const short = (path: string) => path.split(/[\\/]/).slice(-3).join('/');
-  if (name === 'Bash') return value('command');
+  // Codex's and Gemini CLI's commands are named Shell: in full too (a command cut at 120 characters is not one to approve).
+  if ((name === 'Bash' || name === 'Shell') && value('command')) return value('command');
+  // Codex's file-change approvals name the files (the description gives only their names, without folders).
+  if (Array.isArray(input.files) && input.files.every((item) => typeof item === 'string')) return input.files.join('\n');
   if (['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(name)) return short(value('file_path') || value('notebook_path'));
   if (name === 'Grep') return `${value('pattern')}${value('path') ? ` in ${short(value('path'))}` : ''}`;
   if (name === 'Glob') return value('pattern');
@@ -83,7 +86,8 @@ export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 
   </details>;
 }
 
-export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; answer: (allow: boolean, allowEdits?: boolean) => void }) {
+/** `engine`: the seat's agent. A seat's name says it only by default (a seat may be named Reviewer, or Codex 2). */
+export function Permission({ item, agent, engine, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; engine?: 'claude' | 'codex' | 'gemini'; answer: (allow: boolean, allowEdits?: boolean) => void }) {
   const summary = toolSummary(item.toolName, item.input);
   // An edit is approved seeing what it changes, not only the file's name (the streams pass the tool's input).
   const changes = toolChanges(item.input && typeof item.input === 'object' ? item.input : {});
@@ -94,7 +98,7 @@ export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { 
     {item.answer ? <p className="chat-permission-answer">{item.answer === 'allowed' ? 'Allowed' : item.answer === 'denied' ? 'Denied' : 'No longer waiting'}</p>
       : <div className="chat-permission-actions">
         <button className="button primary" onClick={() => answer(true)}>Allow</button>
-        {item.canAllowEdits && (agent === 'Codex'
+        {item.canAllowEdits && ((engine ? engine === 'codex' : agent === 'Codex')
           ? <button className="button secondary" title="Allow this kind of action without asking for the rest of this session" onClick={() => answer(true, true)}>Allow for this session</button>
           : <button className="button secondary" title="Let Claude edit files without asking for the rest of this run" onClick={() => answer(true, true)}>Allow edits this run</button>)}
         <button className="button secondary" onClick={() => answer(false)}>Deny</button>
@@ -105,14 +109,14 @@ export function Permission({ item, agent, answer }: { item: Extract<ChatItem, { 
 export const AGENT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
 const PHASE = (many: boolean): Record<RoundTableState['phase'], string> => ({ joining: many ? 'Catching the others up' : 'Catching the other agent up', answering: many ? 'All answering' : 'Both answering', discussing: 'Discussing', acting: 'Making the changes', idle: 'Your turn' });
 
-export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; author?: 'claude' | 'codex' | 'gemini' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
+export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; engine?: 'claude' | 'codex' | 'gemini'; author?: 'claude' | 'codex' | 'gemini' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
 /**
  * Whether a message would draw the same: the store keeps a settled item's object while another streams, and the tool
  * results that matter are its own tool calls'. So a streamed piece, a keystroke in the message box or another channel's
  * change draws again only the message it touches, not every message's Markdown.
  */
 export function sameItem(before: ItemProps, after: ItemProps) {
-  if (before.item !== after.item || before.agent !== after.agent || before.author !== after.author || before.role !== after.role || before.answer !== after.answer || before.view !== after.view) return false;
+  if (before.item !== after.item || before.agent !== after.agent || before.engine !== after.engine || before.author !== after.author || before.role !== after.role || before.answer !== after.answer || before.view !== after.view) return false;
   const item = after.item;
   return before.results === after.results || item.kind !== 'assistant' || item.blocks.every((block) => block.type !== 'tool' || before.results[block.id] === after.results[block.id]);
 }
@@ -161,7 +165,7 @@ export function useSeatAnswers(answer: SeatAnswer) {
 }
 /** A table's messages, each labelled with its seat's name and what it does there; the person's own say You. */
 export function ThreadItems({ entries, table, answerFor, view }: { entries: ThreadEntry[]; table: boolean; answerFor: (seatId: string) => ItemProps['answer']; view: (url: string) => void }) {
-  return <>{entries.map(({ item, seat, thread }) => <Item key={seat.lead ? item.id : `${seat.id}-${item.id}`} item={item} results={thread.results} agent={seat.name} author={table ? seat.colour : undefined} role={table ? seat.role : undefined} answer={answerFor(seat.id)} view={view} />)}</>;
+  return <>{entries.map(({ item, seat, thread }) => <Item key={seat.lead ? item.id : `${seat.id}-${item.id}`} item={item} results={thread.results} agent={seat.name} engine={seat.engine} author={table ? seat.colour : undefined} role={table ? seat.role : undefined} answer={answerFor(seat.id)} view={view} />)}</>;
 }
 /** The "… is working" line: who works now, from the seats that are busy. */
 export const workingText = (names: readonly string[]) => `${joinNames(names)} ${names.length > 1 ? 'are' : 'is'} working`;
@@ -197,7 +201,7 @@ function SeatAvatar({ seat }: { seat: keyof typeof SEAT_ICON }) { const Icon = S
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
 /** At a Round Table: `role` labels an agent's messages (driver or reviewer), and the person's messages say You. */
-export const Item = memo(function Item({ item, results, agent, author, answer, view, role }: ItemProps) {
+export const Item = memo(function Item({ item, results, agent, engine, author, answer, view, role }: ItemProps) {
   if (item.kind === 'user') return <div className={`chat-message user ${author ? 'table-you' : ''}`}>
     {author && <p className="chat-author"><SeatAvatar seat="you" />You</p>}
     {item.images.length > 0 && <div className="chat-images">{item.images.map((url, index) => <button key={index} className="chat-image" aria-label={`Enlarge image ${index + 1}`} onClick={() => view(url)}><img src={url} alt="" /></button>)}</div>}
@@ -212,7 +216,7 @@ export const Item = memo(function Item({ item, results, agent, author, answer, v
     {item.streaming && <div className="chat-streaming"><Markdown text={item.streaming} /></div>}
   </div>;
   // Resolved at the click, so the handler (steady, see useSteady) uses the run current then, not at this draw.
-  if (item.kind === 'permission') return <Permission item={item} agent={agent} answer={(allow, allowEdits) => answer(item.id)(allow, allowEdits)} />;
+  if (item.kind === 'permission') return <Permission item={item} agent={agent} engine={engine} answer={(allow, allowEdits) => answer(item.id)(allow, allowEdits)} />;
   return <p className={`chat-notice ${item.error ? 'error' : ''}`}>{author ? `${agent}: ` : ''}{item.text}</p>;
 }, sameItem);
 
@@ -374,8 +378,9 @@ export function ChainBar({ table, busy, plannerName, builderName, onRequest, det
 export function foldChainBar(full: number, room: number, tile: number) { return tile > 0 && room - full < tile / 2; }
 /**
  * A hierarchy bar's box. In a channel tile too short for the whole bar (foldChainBar) it folds to the summary, the
- * step's buttons and Close, with a disclosure that opens the rest. Its height is measured unfolded on each draw and
- * resize, so it unfolds again when there is room. Not in a tile (the phone), it never folds.
+ * step's buttons and Close, with a disclosure that opens the rest. Its height is measured unfolded when it is first
+ * drawn, when the tile or the conversation is resized and when its own content changes, so it unfolds again when there
+ * is room. Not on every draw: one for each keystroke in the message box measured the layout each time (before 1.30.3). Not in a tile (the phone), it never folds.
  */
 function ChainFold({ summary, children }: { summary: ReactNode; children: ReactNode }) {
   const bar = useRef<HTMLDivElement>(null); const [folded, setFolded] = useState(false); const [open, setOpen] = useState(false);
@@ -386,8 +391,13 @@ function ChainFold({ summary, children }: { summary: ReactNode; children: ReactN
     const now = element.offsetHeight; const was = element.classList.contains('folded'); element.classList.remove('folded'); const full = element.offsetHeight; if (was) element.classList.add('folded');
     const fold = foldChainBar(full, now + thread.offsetHeight, tile.getBoundingClientRect().height); setFolded(fold); if (!fold) setOpen(false);
   });
-  useLayoutEffect(() => { measure(); });
-  useLayoutEffect(() => { const found = parts(); if (!found || typeof ResizeObserver === 'undefined') return; const observer = new ResizeObserver(() => measure()); observer.observe(found.tile); observer.observe(found.thread); return () => observer.disconnect(); }, []);
+  useLayoutEffect(() => {
+    measure(); const found = parts(); if (!found) return;
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure()); resized?.observe(found.tile); resized?.observe(found.thread);
+    // Its parts and words (a step, a challenge, a status), also while folded and hidden; not the class measure() sets.
+    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => measure()); changed?.observe(found.element, { childList: true, subtree: true, characterData: true });
+    return () => { resized?.disconnect(); changed?.disconnect(); };
+  }, []);
   return <div ref={bar} className={`table-bar chain-bar${folded ? ' folded' : ''}${folded && open ? ' open' : ''}`} role="group" aria-label="Round Table">
     {folded && <span className="chain-fold">{summary}<button className="quiet-button small chain-fold-toggle" aria-expanded={open} aria-label="Round Table steps and controls" title="Round Table steps and controls" onClick={() => setOpen(!open)}><ChevronDown size={16} /></button></span>}
     {children}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
@@ -75,6 +75,13 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     const target = seatId === sessionId ? runId : table ? seatRun(table, seatId) : undefined; if (!target) return;
     if (await act({ action: 'answer', sessionId: seatId, runId: target, requestId, allow, ...(allowEdits ? { allowEdits } : {}) })) chatAnswered(keyOf(seatId), requestId, allow);
   });
+  /**
+   * Enter sends, Shift+Enter is a new line, as in a chat on the computer; with a mouse only (another computer's tab):
+   * on a phone's keyboard Enter stays a new line, as the Send button is beside it.
+   */
+  const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && window.matchMedia?.('(pointer: fine)').matches) { event.preventDefault(); void submit(); } };
+  // The box grows with what is written, up to a limit, as on the computer.
+  useLayoutEffect(() => { const area = input.current; if (area) { area.style.height = 'auto'; area.style.height = Math.min(area.scrollHeight, 220) + 'px'; } }, [text]);
   const stop = () => { if (!runId) return; void act(table ? { action: 'table-stop', sessionId, runId } : { action: 'interrupt', sessionId, runId }); };
   const attach = async (files: Blob[]) => { try { const read = await Promise.all(files.filter((item) => item.type.startsWith('image/')).map(readImage)); setImages((current) => [...current, ...read].slice(0, 10)); } catch (e) { setError((e as Error).message); } };
   const agent = AGENT[engine];
@@ -98,7 +105,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
         <button type="button" className="chat-icon" aria-label="Attach images or take a photo" disabled={!live} onClick={() => file.current?.click()}><ImagePlus size={18} /></button>
         {openTable && !table && live && <button type="button" className="chat-icon" aria-label={`Round Table: add ${engine === 'claude' ? 'Codex' : 'Claude'}`} title={opening ? 'Adding the other agent…' : `Round Table: bring ${engine === 'claude' ? 'Codex' : 'Claude Code'} into this conversation`} disabled={opening} onClick={() => { setOpening(true); setError(''); void openTable().then((failure) => { setOpening(false); if (failure) setError(failure); }); }}><Users size={18} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
-        <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} />
+        <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} />
         {busy && !text.trim()
           ? <button type="button" className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>
           : <button type="submit" className="chat-icon send" aria-label="Send" disabled={!live || sending || (!text.trim() && !images.length) || (chat.busy && !table)}><Send size={18} /></button>}

@@ -207,6 +207,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await writeFile(path.join(projects[0], 'later.md'), 'Added while the view was open.\n');
     await page.getByRole('button', { name: 'Refresh changes', exact: true }).click();
     await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
+    // The page's Refresh reaches the Delivery card too (before 1.30.3 it kept the files it had read before).
+    await page.getByRole('complementary', { name: 'Git delivery' }).getByText('later.md', { exact: true }).waitFor({ timeout: 15000 });
     const codexSession = starts.find((run) => run.engine === 'codex').sessionId;
     await page.getByLabel('Repository context', { exact: true }).selectOption(codexSession);
     await page.getByRole('heading', { name: 'Working tree is clean', exact: true }).waitFor();

@@ -166,6 +166,15 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error
     assert.equal(await bar.locator('.chain-steps li').filter({ hasText: /final/i }).count(), 0, 'the steps have no final review');
     assert.equal(await bar.locator('.chain-steps li.current, .chain-steps li:not(.past)').count(), 0, 'every step is past');
     await shot('6-hierarchy-done');
+    // In a tile too short for it the bar folds, and it unfolds once there is room again: measured on resize, not on
+    // every draw (1.30.3). Typing in the message box does not change it.
+    const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 520));
+    await until(async () => (await bar.getAttribute('class')).includes('folded'), 'the hierarchy bar folds in a short tile', 15000);
+    const box = chain.getByRole('textbox', { name: 'Message to the Round Table', exact: true }); await box.pressSequentially('abc'); await box.fill('');
+    assert.ok((await bar.getAttribute('class')).includes('folded'), 'typing does not unfold the bar');
+    await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0].setSize(width, Math.max(height, 1000)), size);
+    await until(async () => !(await bar.getAttribute('class')).includes('folded'), 'the hierarchy bar unfolds with room again', 15000);
 
     // 6. Restart on the same profile: the three-seat table is seated again with the same names.
     await sleep(1500); await app.close(); app = null;
