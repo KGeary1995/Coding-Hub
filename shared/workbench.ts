@@ -9,6 +9,10 @@ export interface GeminiModelCatalog { models: { model: string; displayName: stri
 export interface HostHealthReport { previousShutdown: 'clean' | 'unclean' | 'unknown'; events: { time: string; event: string; reason: string | null; exitCode: number | null }[]; stalls?: { time: string; side: 'main' | 'window' | 'gpu'; kind: string; ms: number | null; job: string | null }[] }
 export interface NativeConversation { key: string; id: string; engine: 'claude' | 'codex' | 'gemini'; profileId?: string; directory: string | null; title: string; modifiedAt: string }
 export interface NativeResume { conversation: NativeConversation; directory: string }
+/** Where a search inside past conversations found its words: the text on each side of the hit, on one line. */
+export interface NativeSnippet { role: 'user' | 'assistant'; before: string; match: string; after: string }
+/** A search inside past conversations (native-search). `partial`: it stopped at its time or result limit, so more may match; `skipped`: files too large to read. */
+export interface NativeSearch { query: string; results: (NativeConversation & { matches: number; snippets: NativeSnippet[] })[]; partial: boolean; skipped: number }
 export interface Experiment { id: string; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string; createdAt: string }
 export interface Trial { id: string; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: 'successful' | 'partial' | 'failed'; evidence: string; createdAt: string }
 export interface ExperimentsData { experiments: Experiment[]; trials: Trial[] }
@@ -47,7 +51,7 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | { action: 'gemini-models' }
  | { action: 'host-health' }
  | { action: 'diagnose'; engine: 'claude' | 'codex'; directory: string | null; profileId?: string }
- | { action: 'native-list' } | { action: 'native-resume'; key: string; directory?: string }
+ | { action: 'native-list' } | { action: 'native-resume'; key: string; directory?: string } | { action: 'native-search'; query: string }
  | { action: 'experiment-list' } | { action: 'experiment-save'; name: string; hypothesis: string; criterion: string; promptA: string; promptB: string }
  | { action: 'trial-add'; experimentId: string; variant: 'A' | 'B'; runId: string | null; minutes: number; rework: number; outcome: Trial['outcome']; evidence: string }
  /** Both answer with what experiment-list answers; deleting an experiment deletes its trials. */
@@ -57,4 +61,4 @@ export type WorkbenchRequest = import('./remote').RemoteRequest | import('./remo
  | import('./plugins').PluginRequest
  | { action: 'hook-list' } | { action: 'hook-save'; event: EventHookEvent; program: string; args: string[] } | { action: 'hook-delete'; id: string } | { action: 'hook-test'; id: string }
  | { action: 'verification-list' } | { action: 'verification-save'; id?: string; name: string; directory: string; steps: VerificationStep[]; timeoutSeconds: number } | { action: 'verification-run'; id: string } | { action: 'verification-delete'; id: string } | { action: 'verification-cancel' } | { action: 'verification-fresh' };
-export type WorkbenchResponse = import('./plugins').PluginData | import('./plugins').PluginRun[] | import('./plugins').PluginPreview | import('./plugins').PluginBrowseItem[] | EventHookData | EventHook | import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | TaskDetail | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | GeminiModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null;
+export type WorkbenchResponse = import('./plugins').PluginData | import('./plugins').PluginRun[] | import('./plugins').PluginPreview | import('./plugins').PluginBrowseItem[] | EventHookData | EventHook | import('./remote').ChatReplay | import('./remote').RemoteStatus | import('./remote').LinkedComputer[] | import('./remote').LinkedScreenState | import('./remote').ChannelTranscript | import('./plan-limits').PlanLimits[] | import('./hub').DayUsage | TaskSent | TaskWatch | TaskDetail | { message: string } | import('./hub').LogUsage | import('./productivity').WorkflowResponse | RuntimeInfo | DiagnosticReport | CodexModelCatalog | GeminiModelCatalog | HostHealthReport | NativeConversation[] | NativeResume | NativeSearch | ExperimentsData | Experiment | Trial | BackupRecord[] | BackupResult | Task[] | Task | TaskAudit | VerificationFreshness | VerificationData | VerificationProfile | VerificationResult | null;

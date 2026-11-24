@@ -46,7 +46,7 @@ This release adds all eight workflow improvements. See [the usage guide](workflo
 | --- | --- |
 | Connection diagnostics | Accounts & connections: installation, login, configuration, working folder, and native terminal checks |
 | Version and installation clarity | Settings: renderer/host versions, executable, source/installed edition, and active data folder |
-| Native conversation resume | Session history → View native CLI conversations: default accounts and named Claude profiles |
+| Native conversation resume | Session history → View native CLI conversations: default accounts and named Claude profiles. The search box filters by name, folder, agent or ID; **Search inside conversations** (or Enter) looks through what you and Claude Code or Codex wrote in the listed conversations (not tool output, thinking or Gemini CLI conversations), ignoring case, and shows up to three marked snippets under each match, newest first, with the same resume buttons. It stops after 50 matching conversations or 8 seconds, skips files over 20 MB, and says when it stopped early |
 | Coaching experiments | AI coaching: compare A/B prompt wording, measured CLI tokens (new tokens, as elsewhere in Trace), time, rework, and outcome evidence. Each trial needs its time, rework, outcome and evidence filled in. **Delete** removes a trial, or an experiment with its trials, after a confirmation |
 | Backup and restore | Settings: verified local backups, export/import, separate restored data copy, explicit restart |
 | Tasks | Tasks: give a channel a job and its files, send it, follow its status and changed files, warn about clashes |

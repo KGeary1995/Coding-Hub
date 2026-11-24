@@ -81,7 +81,8 @@ export async function taskHistory(engine: 'claude' | 'codex', file: string, mark
   }
 }
 
-function historyOf(engine: 'claude' | 'codex', lines: string[]): Extract<ChatEvent, { type: 'history' }> {
+/** Also what a search inside past conversations reads (native-search.ts). */
+export function historyOf(engine: 'claude' | 'codex', lines: string[]): Extract<ChatEvent, { type: 'history' }> {
   const messages: ChatHistoryMessage[] = []; const results: Extract<ChatEvent, { type: 'history' }>['results'] = {};
   if (engine === 'claude') {
     for (const line of lines) {

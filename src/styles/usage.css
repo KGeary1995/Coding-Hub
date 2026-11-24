@@ -96,6 +96,15 @@
 .native-history-search > .ui-hint { margin-top: 8px; }
 .native-history-search > svg { position: absolute; left: 12px; top: 8px; width: 16px; height: 16px; color: var(--tr-fg-faint); pointer-events: none; }
 .native-history-search input { width: 100%; max-width: 480px; padding-left: 40px; }
+/* The words and the button that searches inside conversations sit on one row, wrapping on a narrow page. */
+.native-history-query { display: flex; flex-wrap: wrap; gap: 8px; }
+.native-history-query > input { flex: 1 1 240px; }
+.native-history-found > span { flex: 1; }
+/* Where a conversation mentions the searched words: one line each, the words in the accent's colour as in the command menu. */
+.native-history-snippets { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 4px; font: var(--tr-t-small); color: var(--tr-fg-muted); }
+.native-history-snippets > li { overflow-wrap: anywhere; }
+.native-history-snippets mark { background: none; color: var(--tr-accent); font-weight: 600; }
+.native-history-role { color: var(--tr-fg-dim); }
 .native-history-date { font: var(--tr-t-small); color: var(--tr-fg-dim); font-variant-numeric: tabular-nums; }
 .native-history-path { display: block; font: var(--tr-t-meta); color: var(--tr-fg-muted); overflow-wrap: anywhere; }
 .native-history-meta { margin: 4px 0 12px; font: var(--tr-t-small); color: var(--tr-fg-dim); }
