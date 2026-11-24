@@ -160,6 +160,8 @@ interface WorkspaceState {
   setView: (view: NavigationView) => void;
   restoreRun: (run: SessionHistoryRun) => boolean;
   addSession: (engine: ChannelEngine, sourceSessionId?: string) => void;
+  /** A plugin tile: a Terminal channel that runs a plugin's tile program (docs/plugins.md). */
+  addPluginTile: (plugin: { id: string; tile: string }, title: string) => void;
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
   addChatSession: (engine: 'claude' | 'codex') => void;
   removeSession: (id: string) => void;
@@ -251,6 +253,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const source = state.sessions.find((session) => session.id === sourceSessionId);
     const session = createSession(engine, source ? { ...source.binding } : undefined);
     if (source?.config.engine === engine) { session.config = structuredClone(source.config); if (isAgentConfig(session.config)) delete session.config.resumeId; }
+    const sessions = [...state.sessions, session];
+    return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
+  }),
+  addPluginTile: (plugin, title) => set((state) => {
+    if (state.sessions.length >= MAX_CHANNELS) return state;
+    const session = createSession('shell'); session.config = { engine: 'shell', plugin }; session.title = title.slice(0, 80);
     const sessions = [...state.sessions, session];
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };
   }),

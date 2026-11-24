@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { workbench } from '../../runtime/workbench';
+import type { PluginData } from '../../../shared/plugins';
 import { useShallow } from 'zustand/react/shallow';
 import { seatRoom } from '../../runtime/round-table';
 import type { TableKind } from '../../../shared/table-seats';
 import { TableSetup } from '../chat/TableSetup';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
-import { BookOpen, Cable, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
+import { BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { MenuButton, type MenuItem } from './MenuButton';
@@ -67,11 +69,16 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
   // The order is the person's: Terminal, Claude Code, Codex, Gemini CLI, then the Round Tables (on the phone too).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
+  // The tiles of the plugins that are on (docs/plugins.md), read again when the view changes (after Skills & plugins).
+  const [tiles, setTiles] = useState<{ plugin: string; tile: string; title: string; name: string }[]>([]);
+  useEffect(() => { void workbench<PluginData>({ action: 'plugin-list' }).then((data) => setTiles(data.plugins.filter((plugin) => plugin.enabled && !plugin.problem).flatMap((plugin) => plugin.tiles.map((tile) => ({ plugin: plugin.id, tile: tile.id, title: tile.title, name: plugin.name }))))).catch(() => setTiles([])); }, [activeView]);
+  const addPluginTile = useWorkspaceStore((state) => state.addPluginTile);
   const channelMenu: MenuItem[] = other
     ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
     : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
-      ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : [])];
+      ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : []),
+      ...tiles.map((item): MenuItem => ({ label: `${item.title} (${item.name})`, icon: <span className="ui-avatar small shell" aria-hidden="true"><Puzzle /></span>, onSelect: () => addPluginTile({ id: item.plugin, tile: item.tile }, item.title) }))];
   return <header className="tr-topbar">
     <Wordmark />
     {/* A secondary button with a folder mark; the chosen tab beside it takes the accent (shell.css). */}

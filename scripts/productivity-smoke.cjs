@@ -78,6 +78,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByLabel('Sample plugin on',{exact:true}).uncheck();await page.keyboard.press('Control+Shift+P');await page.getByLabel('Search commands',{exact:true}).fill('Sample plugin');
     await page.waitForTimeout(500);assert.equal(await page.getByRole('option').filter({hasText:'Sample plugin:'}).count(),0,'a plugin turned off has no actions');await page.keyboard.press('Escape');
     await page.getByLabel('Sample plugin on',{exact:true}).check();await openView(page,'Workspace');
+    // A plugin tile (+ Channel): a channel running the plugin's tile program, found by Trace in the installed manifest.
+    await page.getByRole('button',{name:'New channel',exact:true}).click();await page.getByRole('menuitem',{name:'Sample board (Sample plugin)',exact:true}).click();
+    const board=page.locator('.session-tile').filter({hasText:'Sample board'});await board.getByRole('button',{name:'Start channel',exact:true}).click();
+    await board.locator('.xterm-rows').filter({hasText:'TILE READY fixture.sample'}).waitFor();await board.locator('.xterm-helper-textarea').focus();await page.keyboard.type('hi board');await page.keyboard.press('Enter');await board.locator('.xterm-rows').filter({hasText:'TILE GOT hi board'}).waitFor();
+    await (await tileControl(board,'Stop')).click();await page.waitForFunction(()=>![...document.querySelectorAll('.session-tile')].some((tile)=>tile.textContent.includes('Sample board')&&tile.getAttribute('data-status')==='running'));
+    await (await tileControl(board,'Close channel 3')).click();await board.waitFor({state:'detached'});
     const usage=await page.evaluate(()=>window.usages.at(-1));assert.ok(usage.conversationId);
     await (await tileControl(tile, 'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
     const saved=await native(page,'loadWorkspace');assert.equal(saved.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(saved.workspace.sessions[1].title,'Implementation');

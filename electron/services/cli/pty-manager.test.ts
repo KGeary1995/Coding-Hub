@@ -630,3 +630,17 @@ describe('updates with the background runner', () => {
     expect(manager.hasSessions).toBe(true); expect(manager.hasLocalSessions).toBe(false);
   });
 });
+
+describe('plugin tiles', () => {
+  it('run the program Trace finds for the plugin and tile the channel names', async () => {
+    const spawn = vi.fn((_file: string, _args: string[], _options: unknown) => new FakePty() as unknown as IPty);
+    const pluginTile = vi.fn(() => ({ file: '/node', args: ['/plugins/sample/sample.js', 'tile'], env: { PATH: '/bin', TRACE_PLUGIN_ID: 'fixture.sample' } }));
+    const manager = new PtyManager(() => {}, { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), pluginTile });
+    managers.push(manager);
+    await manager.start(1, { ...request('tile-board'), config: { engine: 'shell' as const, plugin: { id: 'fixture.sample', tile: 'board' } } });
+    expect(pluginTile).toHaveBeenCalledWith({ id: 'fixture.sample', tile: 'board' });
+    expect(spawn.mock.calls[0][0]).toBe('/node'); expect(spawn.mock.calls[0][1]).toEqual(['/plugins/sample/sample.js', 'tile']);
+    expect((spawn.mock.calls[0][2] as { env: Record<string, string> }).env.TRACE_PLUGIN_ID).toBe('fixture.sample');
+    await expect(manager.start(1, { ...request('tile-bad'), config: { engine: 'shell' as const, plugin: { id: '../x', tile: 'board' } } })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+});

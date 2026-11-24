@@ -107,6 +107,20 @@ export class Plugins {
     return null;
   }
 
+  /**
+   * A plugin tile's program, from the installed manifest (never from the window), with the plugin's API in its
+   * environment as for its actions. Refused when the plugin is gone, off or broken, or has no such tile here.
+   */
+  tile(id: string, tileId: string) {
+    const found = this.state().find((item) => item.id === id); if (!found) throw new HubError('PLUGIN_MISSING', `The plugin ${id} is not installed any more. Install it again, or close this tile.`);
+    if (!found.enabled) throw new HubError('PLUGIN_OFF', `The plugin ${id} is turned off. Turn it on in Skills & plugins to start this tile.`);
+    const manifest = readManifest(found.folder, this.host.version); const tile = manifest.tiles.find((item) => item.id === tileId);
+    if (!tile) throw new HubError('PLUGIN_TILE', `${manifest.name} has no tile ${tileId} on this computer now.`);
+    const { url, cli } = this.host.api(found.id, this.tokenOf(found.id)); const data = this.dataFolder(found.id); fs.mkdirSync(data, { recursive: true, mode: 0o700 });
+    const env = { ...this.host.environment(), TRACE_PLUGIN_ID: found.id, TRACE_PLUGIN_DATA: data, TRACE_API_URL: url, TRACE_CLI: cli };
+    return { ...resolveCommand(found.folder, tile.command, env), title: tile.title };
+  }
+
   /** Runs every plugin's commands for an event, without waiting; one per plugin and channel every 10 seconds. */
   fire(event: PluginEventName, key: string, context: PluginContext) {
     if (!PLUGIN_EVENTS.includes(event)) return;

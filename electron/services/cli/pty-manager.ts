@@ -165,7 +165,9 @@ export class PtyManager {
       geminiKnown?: () => string[];
       held?: HeldTerminals;
       /** A terminal the runner kept while Trace was closed was taken up again: what prepareLaunch set up for it is restored. */
-      onAdopted?: (session: RunningSession, meta: HeldMeta, owner: number) => void } = {},
+      onAdopted?: (session: RunningSession, meta: HeldMeta, owner: number) => void;
+      /** A plugin tile's program (plugins.ts), looked up by the plugin and tile the channel names. */
+      pluginTile?: (plugin: { id: string; tile: string }) => { file: string; args: string[]; env: Record<string, string> } } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -289,10 +291,13 @@ export class PtyManager {
       if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
-        const program = shellProgram(baseEnvironment, process.platform, existsSync, () => sudo);
+        // A plugin tile runs its plugin's program, looked up here, never named by the window.
+        const plugin = request.config.plugin;
+        if (plugin && !this.dependencies.pluginTile) throw new HubError('PLUGIN_TILE', 'Plugin tiles are unavailable.');
+        const program = plugin ? this.dependencies.pluginTile!(plugin) : shellProgram(baseEnvironment, process.platform, existsSync, () => sudo);
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
         session = { sessionId: request.sessionId, runId: randomUUID(), engine: 'shell', pid: 0, cwd };
-        ({ file, args } = program); env = { ...baseEnvironment, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+        ({ file, args } = program); env = { ...('env' in program ? program.env : baseEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       } else {
         const profileEnvironment = this.dependencies.profileEnvironment;
         if (profileId && !profileEnvironment) throw new HubError('PROFILE_STORAGE', 'Claude profile storage is unavailable.');

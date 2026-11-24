@@ -263,6 +263,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   // A channel taken up after a restart: its agent's hooks and channel tools call with the tokens it was started with.
   // Its usage is not followed again (Usage would count what the run had already read).
   onAdopted: (session, meta, owner) => { runOwners.set(session.runId, owner); attention.restore(session.runId, meta.attention); channelTools.restore(session.runId, meta.tools); },
+  pluginTile: (plugin) => { if (!plugins) throw new HubError('PLUGIN_TILE', 'Plugins are unavailable: Trace\'s storage could not be opened.'); return plugins.tile(plugin.id, plugin.tile); },
   onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }

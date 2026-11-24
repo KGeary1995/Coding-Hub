@@ -57,6 +57,15 @@ describe('the plugins service', () => {
     await plugins.execute({ action: 'plugin-link', folder }); expect(asked).toHaveLength(1); expect((asked[0] as { commands: unknown[] }).commands).toEqual([{ what: 'Action: Go', command: ['./write.js', 'action'] }]);
     await expect(plugins.execute({ action: 'plugin-link', folder })).rejects.toMatchObject({ code: 'PLUGIN_EXISTS' });
   });
+  it('gives a plugin tile its program from the installed manifest, and refuses one turned off or gone', async () => {
+    const { folder } = plugin({ tiles: [{ id: 'board', title: 'Board', command: ['./write.js', 'tile'] }] });
+    const { plugins } = setup(); await plugins.execute({ action: 'plugin-link', folder });
+    const tile = plugins.tile('test.plugin', 'board');
+    expect(tile.title).toBe('Board'); expect(tile.args.at(-2)).toBe(path.join(folder, 'write.js')); expect(tile.args.at(-1)).toBe('tile'); expect(tile.env.TRACE_PLUGIN_ID).toBe('test.plugin'); expect(tile.env.TRACE_API_URL).toBeTruthy();
+    expect(() => plugins.tile('test.plugin', 'other')).toThrow(/no tile other/);
+    await plugins.execute({ action: 'plugin-enable', id: 'test.plugin', enabled: false }); expect(() => plugins.tile('test.plugin', 'board')).toThrow(/turned off/);
+    await plugins.execute({ action: 'plugin-remove', id: 'test.plugin' }); expect(() => plugins.tile('test.plugin', 'board')).toThrow(/not installed/);
+  });
   it('runs an action and event commands with what happened, and records each run', async () => {
     const { folder, out } = plugin({ actions: [{ id: 'go', title: 'Go', command: ['./write.js', 'action'] }], events: [{ on: 'channel.needs-you', command: ['./write.js', 'event'] }] });
     const { plugins } = setup(); await plugins.execute({ action: 'plugin-link', folder });

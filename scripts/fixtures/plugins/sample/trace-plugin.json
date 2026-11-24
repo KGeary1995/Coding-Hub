@@ -3,12 +3,13 @@
   "name": "Sample plugin",
   "version": "0.1.0",
   "minTrace": "1.35.0",
-  "description": "The smoke tests' plugin: an action that calls the plugin API, one that uses the trace helper, and an event.",
+  "description": "The smoke tests' plugin: an action that calls the plugin API, one that uses the trace helper, an event, and a tile.",
   "permissions": ["channels.read", "notify"],
   "actions": [
     { "id": "list", "title": "List channels", "command": ["./sample.js", "list"] },
     { "id": "helper", "title": "List channels with the trace helper", "command": ["./sample.js", "helper"] },
     { "id": "send", "title": "Try to message CH1", "command": ["./sample.js", "send"] }
   ],
-  "events": [{ "on": "channel.started", "command": ["./sample.js", "started"] }]
+  "events": [{ "on": "channel.started", "command": ["./sample.js", "started"] }],
+  "tiles": [{ "id": "board", "title": "Sample board", "command": ["./sample.js", "tile"] }]
 }
