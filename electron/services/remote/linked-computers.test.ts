@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
 import type { ChannelControl, LinkedComputerEvent } from '../../../shared/remote';
-import { DESKTOP_IDLE_SECONDS, RemoteServer, type RemoteHost } from './remote-server';
+import { RemoteServer, type RemoteHost } from './remote-server';
 import { INPUT_TIMEOUT, LINK_LIMIT, LinkedComputers, linkableAddress, tailnetOf } from './linked-computers';
 import { ChatReplayBuffer } from './chat-replay';
 import { save } from '../workbench/local-store';
@@ -231,7 +231,8 @@ describe('linked computers', () => {
     cleanup.push(() => link.stop()); mac.server.setRelay(link);
     await link.link(PC, pc.server.pair('computer').pairing!.code); await until(() => link.channels().length === 1, 'the PC channels');
     const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
-    const size = (sessionId: string, cols: number, rows: number) => fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId, runId: 'run-' + sessionId, cols, rows }) });
+    // The phone app asks only when it is used there, always with force.
+    const size = (sessionId: string, cols: number, rows: number) => fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId, runId: 'run-' + sessionId, cols, rows, force: true }) });
     const release = (sessionId: string) => fetch(`${mac.url}api/size`, { method: 'DELETE', headers: auth, body: JSON.stringify({ sessionId }) });
 
     // The phone's size, then a new one (keyboard opened), then back to the desktop's own 100x30.
@@ -263,67 +264,34 @@ describe('linked computers', () => {
     expect((await size('mac-1', 5, 2)).status).toBe(400);
   });
 
-  it('keeps the desktop size while the computer is in use, and gives the phone its size once it is idle or asked', async () => {
-    const idle = { seconds: 5 }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
+  it('draws a channel at the size of whoever last used it: a phone that touched it, or the desktop when its tile is used (1.35.2)', async () => {
+    const mac = await computer(MAC, 'MacBook', 'mac-1');
     const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
-    const size = async (cols: number, rows: number, force?: boolean) => (await (await fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: 'mac-1', runId: 'run-mac-1', cols, rows, ...(force ? { force } : {}) }) })).json()) as { held: boolean };
-    // The person is at the computer: the phone's request waits, and the desktop tile keeps its size.
+    const size = async (cols: number, rows: number, force?: boolean) => (await (await fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: 'mac-1', runId: 'run-mac-1', cols, rows, ...(force ? { force } : {}) }) })).json());
+    // Asked without being used there (no force): only watched, so nothing changes, however long the computer is idle.
     expect(await size(44, 30)).toEqual({ ok: true, held: false }); expect(mac.sizes).toEqual([]);
-    // Two minutes without keyboard or mouse: the phone gets its size.
-    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes).toEqual(['44x30']);
-    // The person is back: the desktop size returns at once, and the phone's size waits for the next idle spell.
-    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes).toEqual(['44x30', '100x30']);
-    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
-    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
-    // "Fit to phone" applies it now and keeps it while the computer is used, until the person types in that channel.
-    expect(await size(44, 30, true)).toEqual({ ok: true, held: true }); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
-    mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
-    mac.server.personInput('mac-1', 'a'); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
-    // Typing at the desktop also drops the waiting request: an idle spell does not shrink the channel again by itself.
-    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
-  });
-
-  it('counts using its channels from a linked computer as using the computer, so a phone gives the size back', async () => {
-    const idle = { seconds: DESKTOP_IDLE_SECONDS }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
-    const phone = await phoneToken(mac.server); const auth = { Authorization: `Bearer ${phone}`, 'Content-Type': 'application/json' };
-    // Nobody at the Mac: a phone answering a prompt there gets its size.
-    await fetch(`${mac.url}api/size`, { method: 'POST', headers: auth, body: JSON.stringify({ sessionId: 'mac-1', runId: 'run-mac-1', cols: 44, rows: 30 }) });
-    expect(mac.sizes).toEqual(['44x30']);
-    // Only a linked computer may say it is in use.
+    // Used there: the phone leads, and keeps the size until the desktop uses that channel.
+    expect(await size(44, 30, true)).toEqual({ ok: true, held: true }); expect(mac.sizes).toEqual(['44x30']);
+    mac.server.desktopFocus('mac-1'); expect(mac.sizes).toEqual(['44x30', '100x30']);
+    expect(await size(44, 30, true)).toEqual({ ok: true, held: true }); mac.server.personInput('mac-1', 'a'); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    // A linked computer saying it is in use no longer moves sizes (still answered, for older ones), and only it may say so.
     expect((await fetch(`${mac.url}api/active`, { method: 'POST', headers: auth, body: '{}' })).status).toBe(403);
-    const here = { seconds: 1 };
-    const pc = new LinkedComputers(temporary(), () => ({ id: PC, name: 'Obsidian-Halo' }), () => [{ id: MAC, name: 'MacBook', url: mac.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetch, () => here.seconds);
-    cleanup.push(() => pc.stop());
-    await pc.link(MAC, mac.server.pair('computer').pairing!.code); await until(() => pc.status()[0].connected, 'the stream');
-    // The Mac's tab is not open here: nothing is reported.
-    pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); expect(mac.sizes).toEqual(['44x30']);
-    // Its tab is open but the person here is away too: still the phone's size.
-    pc.watch(MAC); here.seconds = 30; pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); expect(mac.sizes).toEqual(['44x30']);
-    // The person here is using it: the Mac puts its own size back, and the phone's size waits for an idle spell.
-    here.seconds = 1; pc.reportActive(); await until(() => mac.sizes.length === 2, 'the desktop size'); expect(mac.sizes).toEqual(['44x30', '100x30']);
-    mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
   });
 
-  it('draws a channel at the size of its tile on a linked computer while nobody uses its own computer', async () => {
-    const idle = { seconds: DESKTOP_IDLE_SECONDS }; const mac = await computer(MAC, 'MacBook', 'mac-1', idle);
-    const here = { seconds: 1 };
-    const pc = new LinkedComputers(temporary(), () => ({ id: PC, name: 'Obsidian-Halo' }), () => [{ id: MAC, name: 'MacBook', url: mac.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetch, () => here.seconds);
+  it('draws a channel at the size of its tile on a linked computer once the person types into that tile, not while it only shows it', async () => {
+    const mac = await computer(MAC, 'MacBook', 'mac-1');
+    const pc = new LinkedComputers(temporary(), () => ({ id: PC, name: 'Obsidian-Halo' }), () => [{ id: MAC, name: 'MacBook', url: mac.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} }, fetch, () => 1);
     cleanup.push(() => pc.stop());
     await pc.link(MAC, mac.server.pair('computer').pairing!.code); await until(() => pc.status()[0].connected, 'the stream');
-    // The Mac's tab is open on the PC and nobody is at the Mac: the channel fills the PC's tile.
-    pc.watch(MAC); await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); expect(mac.sizes).toEqual(['150x40']);
-    // The person using the Mac's channels from the PC does not give that size back, as it would a phone's.
-    pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); mac.server.checkDesktop(); expect(mac.sizes).toEqual(['150x40']);
-    // Someone at the Mac takes it back, and the tile's size returns once the Mac is unused again.
-    idle.seconds = 1; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
-    idle.seconds = DESKTOP_IDLE_SECONDS; mac.server.checkDesktop(); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
-    // A phone of the PC's showing that channel, then leaving it, puts back the tile's size rather than the Mac's.
-    await pc.size('mac-1', 'run-mac-1', { cols: 44, rows: 30 }); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
-    await pc.size('mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
-    // Closing the tile gives the Mac its size back; so does the PC going away.
-    await pc.fit(MAC, 'mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
-    await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); expect(mac.sizes.slice(-1)).toEqual(['150x40']);
-    pc.stop(); await until(() => mac.sizes.at(-1) === '100x30', 'the Mac’s size after the PC left');
+    // The Mac's tab is open on the PC: its tile's size is only recorded, and the Mac's channel keeps its own.
+    pc.watch(MAC); await pc.fit(MAC, 'mac-1', 'run-mac-1', { cols: 150, rows: 40 }); pc.reportActive(); await new Promise((resolve) => setTimeout(resolve, 50)); expect(mac.sizes).toEqual([]);
+    // The person types into that tile: it leads, at its size.
+    await pc.input(MAC, 'mac-1', 'run-mac-1', 'ls'); await until(() => mac.sizes.length === 1, 'the tile size'); expect(mac.sizes).toEqual(['150x40']);
+    // The Mac's own tile focused there: the Mac leads again.
+    mac.server.desktopFocus('mac-1'); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
+    // A phone of the PC's using that channel leads, and leaving it gives the size back.
+    await pc.size('mac-1', 'run-mac-1', { cols: 44, rows: 30 }, true); expect(mac.sizes.slice(-1)).toEqual(['44x30']);
+    await pc.size('mac-1', 'run-mac-1', null); expect(mac.sizes.slice(-1)).toEqual(['100x30']);
   });
 
   it('pastes an image into a channel there, from linked computers only', async () => {

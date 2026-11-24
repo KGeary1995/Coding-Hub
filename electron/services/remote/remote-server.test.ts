@@ -6,7 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { Duplex } from 'node:stream';
 import type { RunReference, RunningSession } from '../../../shared/ipc';
-import { eventJSON, RemoteServer, type RemoteHost, PHONE_QUIET_MS } from './remote-server';
+import { eventJSON, RemoteServer, type RemoteHost } from './remote-server';
 import { HubError } from '../cli/engine-adapter';
 import { localScreenToken, ScreenService, SHARE_FILE } from './screen-service-server';
 import { openTraceScreen } from './screen-sharing';
@@ -284,37 +284,18 @@ describe('phone remote', () => {
     expect(relayed).toEqual([['far', { cols: 40, rows: 20 }], ['far', null]]);
   });
 
-  it('gives a size a phone insisted on back once the phone has gone quiet and the computer is used', async () => {
-    const { server, running } = await remote(); const resizes: number[][] = []; let idle = 0;
+  it('gives a channel to a viewer that only watched it once that viewer types into it, and back to the desktop when its tile is used (1.35.2)', async () => {
+    const { server, running } = await remote(); const resizes: number[][] = [];
     Object.assign(running[0], { cols: 120, rows: 40 }); const host = (server as unknown as { host: RemoteHost }).host;
-    host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); }; host.idleSeconds = () => idle;
+    host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); };
     await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    const holds = (server as unknown as { phoneSizes: Map<string, { at: number }> }).phoneSizes;
-    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20, force: true }) });
-    // The computer is in use, and the phone asked a moment ago: the phone keeps its size.
-    server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
-    // The phone has asked for nothing for longer than PHONE_QUIET_MS, but typed just now: still the phone's.
-    holds.get('s1')!.at = Date.now() - PHONE_QUIET_MS - 1000;
-    await fetch(base(server) + '/api/input', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', data: 'y' }) });
-    server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
-    // Quiet that long with the computer idle: the phone is the only one there.
-    holds.get('s1')!.at = Date.now() - PHONE_QUIET_MS - 1000; idle = 60; server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
-    // Quiet and the computer in use: the computer's size comes back, and is not taken again by itself.
-    idle = 0; server.checkDesktop(); expect(resizes).toEqual([[40, 20], [120, 40]]);
-    idle = 600; server.checkDesktop(); expect(resizes).toHaveLength(2);
-  });
-
-  it('waits with a size asked without force while Trace is in front, and gives it back when Trace comes to the front', async () => {
-    const { server, running } = await remote(); const resizes: number[][] = []; let front = true;
-    Object.assign(running[0], { cols: 120, rows: 40 }); const host = (server as unknown as { host: RemoteHost }).host;
-    host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); }; host.idleSeconds = () => 600; host.inFront = () => front;
-    await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    // A tile on a linked computer (no force): nobody has touched this computer for ten minutes, but Trace is in front here.
-    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20 }) });
-    server.checkDesktop(); expect(resizes).toEqual([]);
-    // Trace in the background (or hidden): the other size is drawn; brought to the front again: this computer's comes back.
-    front = false; server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
-    front = true; server.checkDesktop(); expect(resizes).toEqual([[40, 20], [120, 40]]);
+    // Asked without force (only watching): recorded, not drawn.
+    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20 }) }); expect(resizes).toEqual([]);
+    // It types into that channel: it leads, at its size.
+    await fetch(base(server) + '/api/input', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', data: 'y' }) }); expect(resizes).toEqual([[40, 20]]);
+    // The desktop's tile focused: the desktop leads again; nothing changes by itself after that.
+    server.desktopFocus('s1'); expect(resizes).toEqual([[40, 20], [120, 40]]);
+    await new Promise((resolve) => setTimeout(resolve, 100)); expect(resizes).toHaveLength(2);
   });
 
   it('lets a phone that may start agents read and change a channel\'s settings, and no other phone', async () => {

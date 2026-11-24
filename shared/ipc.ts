@@ -100,6 +100,8 @@ export interface CodingHubHost {
   resizeSession(request: RunReference & { cols: number; rows: number }): Promise<HostResult<null>>;
   /** The window drew this much of a run's output (flow control). */
   ackSession(request: RunReference & { bytes: number }): Promise<HostResult<null>>;
+  /** The person focused a channel's tile: this computer's desktop leads that channel's size again (1.35.2). */
+  focusChannel(request: { sessionId: string }): Promise<HostResult<null>>;
   stopSession(request: RunReference): Promise<HostResult<null>>;
   onSessionEvent(listener: (event: SessionEvent) => void): () => void;
   clipboardImage(): Promise<HostResult<ClipboardImage | null>>;
@@ -176,6 +178,7 @@ export const IPC_CHANNELS = {
   writeSession: 'coding-hub:write-session',
   resizeSession: 'coding-hub:resize-session',
   ackSession: 'coding-hub:ack-session',
+  focusChannel: 'coding-hub:focus-channel',
   stopSession: 'coding-hub:stop-session',
   sessionEvent: 'coding-hub:session-event',
   clipboardImage: 'coding-hub:clipboard-image',

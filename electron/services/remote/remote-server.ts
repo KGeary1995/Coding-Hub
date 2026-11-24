@@ -54,9 +54,6 @@ export interface RemoteHost {
   /** Resizes a running CLI for a phone showing it (the desktop window resizes through its own route). */
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
-  idleSeconds?(): number;
-  /** Whether Trace's window is in front here (shown and focused): the person may be reading it without touching anything. */
-  inFront?(): boolean;
   /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
   screenLocked?(): boolean | null | Promise<boolean | null>;
   /** A channel's conversation from its CLI's transcript, across restarts. */
@@ -88,14 +85,6 @@ export interface RemoteHost {
 }
 /** One-time tickets a phone opens its screen with: a browser's WebSocket cannot send the Authorization header. */
 const SCREEN_TICKET_MS = 30000; const MAX_SCREENS = 2;
-/** A phone gets its own size for a channel only once the computer has gone unused this long, unless it insists. */
-export const DESKTOP_IDLE_SECONDS = 120;
-/**
- * A phone keeps the size it insisted on while it is the device in use: once it has asked for nothing and typed nothing
- * for this long and the computer is being used, the computer's size comes back. Before, only typing in that very
- * channel on the computer gave it back, so a phone left open on a channel kept its tile squeezed (2026-11-22).
- */
-export const PHONE_QUIET_MS = 10000;
 /** Channels running on linked computers, which this computer passes on to its phones. */
 export interface RemoteRelay {
   /** Each with `computer` set. */
@@ -258,8 +247,6 @@ export class RemoteServer {
    */
   private relaySizes = new Map<string, { device: string; at: number }>();
   /** When each linked computer last said its person was using this computer's channels (`/api/active`). */
-  private usedFrom = new Map<string, number>();
-  private desktopTimer: ReturnType<typeof setInterval> | null = null;
   private sender: PushSender;
   constructor(private root: string, private host: RemoteHost, readonly port = REMOTE_PORT, private phoneRoot = '', sender?: PushSender) { this.sender = sender ?? pushSender(() => this.vapid()); }
 
@@ -341,7 +328,7 @@ export class RemoteServer {
   }
   private async close() {
     await this.starting?.catch(() => {});
-    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.desktopTimer) clearInterval(this.desktopTimer); this.desktopTimer = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
+    if (this.heartbeat) clearInterval(this.heartbeat); this.heartbeat = null; if (this.channelsTimer) clearTimeout(this.channelsTimer); this.channelsTimer = null;
     for (const stream of this.streams) stream.response.end(); this.streams.clear();
     for (const socket of this.screens) socket.destroy(); this.screens.clear(); this.screenOwners.clear(); this.screenTickets.clear();
     for (const id of [...this.replay.keys()]) this.forget(id);
@@ -573,16 +560,20 @@ export class RemoteServer {
     hold.desktop = { cols, rows }; return true;
   }
   /**
-   * A phone asking to draw a channel at its own size. The desktop wins while the person is using this computer: the
-   * request is kept and applied once the computer has gone unused for DESKTOP_IDLE_SECONDS, and given back as soon as it
-   * is used again (`checkDesktop`). `force` (the phone app, whenever it asks: opening a channel, "Fit to phone") applies
-   * it at once, until the person types in that channel on the desktop, or uses the computer after the phone has gone
-   * quiet (PHONE_QUIET_MS). Returns whether the phone now has its size.
+   * A phone or a linked computer's tile asking to draw a channel at its own size. One rule decides whose size a channel
+   * has (1.35.2, from herdr-core's viewers.rs): the viewer that last used that channel leads. `force` means the person
+   * used it there (the phone app asks only then: opening the channel, touching it, typing, "Fit to phone"), so that
+   * viewer leads at once. Without it (a linked computer's tile merely shown) the viewer only watches: its size is kept
+   * and drawn when the person types into that tile. The desktop leads again when the person types in that channel's
+   * tile or focuses it (`personInput`, `desktopFocus`). Before, idle times, the window being in front and a phone's
+   * quiet time decided, which drew channels at another computer's size while the person only read them.
+   * Returns whether the viewer now has its size.
    */
   private phoneSize(device: string, sessionId: string, runId: string, cols: number, rows: number, force = false): boolean {
     const run = this.host.running().find((item) => item.sessionId === sessionId && item.runId === runId);
     if (!run || !this.host.resize) throw new HubError('STALE_SESSION', 'This channel is not running.');
-    if (!force && !this.desktopAway(device)) { this.wants.set(sessionId, { device, runId, cols, rows, at: Date.now() }); this.watchDesktop(); return false; }
+    // Only watching now: a viewer that led steps back (its phone left the channel), and its size is kept for when it is used.
+    if (!force) { if (this.phoneSizes.get(sessionId)?.device === device) this.release(sessionId, device); this.wants.set(sessionId, { device, runId, cols, rows, at: Date.now() }); return false; }
     this.wants.delete(sessionId); this.apply(device, sessionId, runId, cols, rows, force); return true;
   }
   /** Draws a channel at a phone's size, remembering the desktop's size the first time. */
@@ -592,43 +583,13 @@ export class RemoteServer {
     const desktop = hold?.runId === runId ? hold.desktop : { cols: run.cols ?? 80, rows: run.rows ?? 24 };
     this.phoneSizes.set(sessionId, { device, runId, desktop, cols, rows, forced, at: Date.now() });
     if (run.cols !== cols || run.rows !== rows) { this.host.resize({ sessionId, runId }, cols, rows); this.resized(sessionId); }
-    this.watchDesktop();
   }
-  /**
-   * Seconds since the person last used this computer: here, or through a linked computer showing its channels
-   * (`/api/active`). A linked computer that asked for a channel at its own size does not count against that size.
-   */
-  private idle(device?: string) {
-    const own = this.host.idleSeconds?.(); if (own === undefined) return undefined;
-    let last = 0; for (const [id, time] of this.usedFrom) if (id !== device) last = Math.max(last, time);
-    return Math.min(own, (Date.now() - last) / 1000);
-  }
-  /**
-   * Whether a size asked for without `force` (a linked computer's tile, a phone in the background) may be applied: the
-   * computer unused for DESKTOP_IDLE_SECONDS, and Trace's window not in front. Before 1.34.0 only the mouse and keyboard
-   * counted, so reading a long reply for two minutes redrew the channels at another computer's tile size until the
-   * mouse moved.
-   */
-  private desktopAway(device?: string) { const idle = this.idle(device); return idle === undefined || (idle >= DESKTOP_IDLE_SECONDS && !this.host.inFront?.()); }
-  /** While phones want or hold a size, follows whether the person is at this computer. */
-  private watchDesktop() {
-    if (this.desktopTimer || !this.host.idleSeconds) return;
-    this.desktopTimer = setInterval(() => this.checkDesktop(), 2000); this.desktopTimer.unref?.();
-  }
-  /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
-  checkDesktop() {
-    if (this.idle() === undefined) return;
-    // Trace brought to the front gives an automatic size back too, as using the computer does.
-    const front = this.host.inFront?.() === true;
-    for (const [sessionId, hold] of [...this.phoneSizes]) {
-      if (this.idle(hold.device)! >= 3 && !(front && !hold.forced)) continue;
-      // An automatic size goes back at once and is applied again when the computer is idle; one the phone insisted on
-      // goes back when the phone has gone quiet, and the phone asks again when it is next used.
-      if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows, at: hold.at }); this.release(sessionId, hold.device, true); }
-      else if (Date.now() - hold.at > PHONE_QUIET_MS) this.release(sessionId, hold.device);
-    }
-    for (const [sessionId, want] of [...this.wants]) if (this.desktopAway(want.device)) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
-    if (!this.wants.size && !this.phoneSizes.size && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
+  /** The person focused a channel's tile on this computer's desktop: the desktop leads that channel again. */
+  desktopFocus(sessionId: string) { const hold = this.phoneSizes.get(sessionId); if (hold) this.release(sessionId, hold.device); }
+  /** A viewer that only watched a channel typed into it: its recorded size is drawn, as it now leads. */
+  private used(device: string, sessionId: string) {
+    const want = this.wants.get(sessionId); if (!want || want.device !== device || this.phoneSizes.get(sessionId)?.device === device) return;
+    this.wants.delete(sessionId); this.apply(device, sessionId, want.runId, want.cols, want.rows, true);
   }
   /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
   private release(sessionId: string, device: string, keepWant = false) {
@@ -878,7 +839,7 @@ export class RemoteServer {
         // Unless a newer stream of the same device follows it: a late-noticed dead connection must not take the size from the live one.
         if (sessionId && !all && !this.follows(device.id, sessionId)) { if (this.local(sessionId)) this.release(sessionId, device.id); else if (kind === 'phone') void this.relayRelease(sessionId, device.id).catch(() => {}); }
         // A linked computer that closed (or lost the connection) gives back every channel it showed at its size.
-        if (all) { this.usedFrom.delete(device.id); for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
+        if (all) { for (const id of new Set([...this.phoneSizes.keys(), ...this.wants.keys()])) this.release(id, device.id); }
       });
       // What was last broadcast is no longer what every stream has: the next change is sent even if it matches that.
       this.sentChannels = '';
@@ -908,8 +869,9 @@ export class RemoteServer {
         else this.host.write({ sessionId: parsed.data.sessionId, runId: parsed.data.runId }, parsed.data.data);
       } catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'Input could not be delivered.' }); }
       if (isPersonInput(parsed.data.data) && this.attention.delete(parsed.data.sessionId)) this.broadcastChannels();
-      // Typing on the phone is using it: the size it holds on that channel stays (see PHONE_QUIET_MS).
+      // Typing there is using that channel there: a viewer that only watched now leads (`used`).
       const hold = this.phoneSizes.get(parsed.data.sessionId); if (hold?.device === device.id) hold.at = Date.now();
+      if (this.local(parsed.data.sessionId) && isPersonInput(parsed.data.data)) this.used(device.id, parsed.data.sessionId);
       return this.send(response, 200, { ok: true });
     }
     if (request.method === 'POST' && url.pathname === '/api/phone-key/revoke') {
@@ -976,7 +938,8 @@ export class RemoteServer {
     if (request.method === 'POST' && url.pathname === '/api/active') {
       // A linked computer is showing this one's channels and its person is using it: that counts as using this one.
       if (kind !== 'computer') return this.send(response, 403, { error: 'Only a linked computer can report that it is in use.' });
-      this.usedFrom.set(device.id, Date.now()); this.checkDesktop(); return this.send(response, 200, { ok: true });
+      // From 1.35.2 a channel's size follows who last used it, not whether a computer is in use: answered, for older ones.
+      return this.send(response, 200, { ok: true });
     }
     if (url.pathname === '/api/size' && (request.method === 'POST' || request.method === 'DELETE')) {
       const body = await this.body(request);
