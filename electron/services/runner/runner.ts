@@ -8,7 +8,7 @@ export interface RunnerPty {
   pid: number;
   onData(listener: (data: string) => void): unknown;
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): unknown;
-  write(data: string): void; resize(cols: number, rows: number): void; kill(): void;
+  write(data: string): void; resize(cols: number, rows: number): void; kill(): void; pause?(): void; resume?(): void;
 }
 export interface RunnerDependencies {
   spawn(request: SpawnRequest): RunnerPty;
@@ -22,7 +22,7 @@ export interface RunnerDependencies {
   tailBytes?: number;
 }
 
-interface Terminal { term: number; id: string; pty: RunnerPty; tail: Tail; cols: number; rows: number; exitCode?: number; exited: Promise<void>; skipped: boolean }
+interface Terminal { term: number; id: string; pty: RunnerPty; tail: Tail; cols: number; rows: number; exitCode?: number; exited: Promise<void>; skipped: boolean; paused: boolean; meta?: unknown }
 
 /**
  * The background runner (docs/background-runner.md): owns every terminal so channels outlive Trace, and nothing else.
@@ -39,7 +39,11 @@ export class Runner {
     // A connection that does not say hello at once is not Trace.
     const helloTimer = setTimeout(() => { if (!greeted) socket.destroy(); }, 5000); helloTimer.unref?.();
     socket.on('error', () => {});
-    socket.on('close', () => { clearTimeout(helloTimer); if (this.client === socket) { this.client = null; this.idle(); } });
+    socket.on('close', () => {
+      clearTimeout(helloTimer); if (this.client !== socket) return;
+      // Nobody is left to resume a program Trace paused: it reads on, into its tail.
+      this.client = null; for (const terminal of this.terminals.values()) this.setPaused(terminal, false); this.idle();
+    });
     socket.on('drain', () => this.caughtUp(socket));
     socket.on('data', (chunk: Buffer) => {
       let frames: Frame[]; try { frames = reader.push(chunk); } catch { socket.destroy(); return; }
@@ -63,7 +67,7 @@ export class Runner {
   }
 
   /** Running and ended-but-not-forgotten terminals, oldest first. */
-  list(): RunnerTerminal[] { return [...this.terminals.values()].map(({ term, id, pty, cols, rows, exitCode }) => ({ term, id, pid: pty.pid, cols, rows, ...(exitCode === undefined ? {} : { exitCode }) })); }
+  list(): RunnerTerminal[] { return [...this.terminals.values()].map(({ term, id, pty, cols, rows, exitCode, meta }) => ({ term, id, pid: pty.pid, cols, rows, ...(exitCode === undefined ? {} : { exitCode }), ...(meta === undefined ? {} : { meta }) })); }
 
   private handle(socket: Socket, frame: Frame) {
     if (frame.kind === Kind.spawn) { this.spawn(socket, frame); return; }
@@ -82,7 +86,8 @@ export class Runner {
       if (!running) return;
       if (signal === 'interrupt') terminal.pty.write('\x03');
       else if (signal === 'stop') void (this.dependencies.stop ? this.dependencies.stop(terminal.pty, terminal.exited) : Promise.resolve(terminal.pty.kill())).catch(() => {});
-    } else if (frame.kind === Kind.tail) this.send(socket, encode(Kind.tail, terminal.term, terminal.tail.read()));
+    } else if (frame.kind === Kind.pause || frame.kind === Kind.resume) { if (running) this.setPaused(terminal, frame.kind === Kind.pause); }
+    else if (frame.kind === Kind.tail) this.send(socket, encode(Kind.tail, terminal.term, terminal.tail.read()));
     else if (frame.kind === Kind.forget) { if (!running) this.terminals.delete(terminal.term); this.idle(); }
   }
 
@@ -93,7 +98,7 @@ export class Runner {
     let pty: RunnerPty;
     try { pty = this.dependencies.spawn(request); } catch (error) { this.send(socket, encode(Kind.error, 0, { id: request.id, message: error instanceof Error ? error.message : String(error) })); return; }
     let ended!: () => void; const exited = new Promise<void>((resolve) => { ended = resolve; });
-    const terminal: Terminal = { term: this.next++, id: request.id, pty, tail: new Tail(this.dependencies.tailBytes), cols: request.cols, rows: request.rows, exited, skipped: false };
+    const terminal: Terminal = { term: this.next++, id: request.id, pty, tail: new Tail(this.dependencies.tailBytes), cols: request.cols, rows: request.rows, exited, skipped: false, paused: false, ...(request.meta === undefined ? {} : { meta: request.meta }) };
     this.terminals.set(terminal.term, terminal); this.busy();
     pty.onData((data) => { const bytes = Buffer.from(data, 'utf8'); terminal.tail.append(bytes); this.forward(terminal, bytes); });
     pty.onExit(({ exitCode, signal }) => {
@@ -119,6 +124,11 @@ export class Runner {
   private caughtUp(socket: Socket) {
     if (this.client !== socket || socket.writableLength > 0) return;
     for (const terminal of this.terminals.values()) if (terminal.skipped) { terminal.skipped = false; this.send(socket, encode(Kind.skipped, terminal.term)); }
+  }
+
+  private setPaused(terminal: Terminal, paused: boolean) {
+    if (terminal.paused === paused || terminal.exitCode !== undefined) return;
+    terminal.paused = paused; try { if (paused) terminal.pty.pause?.(); else terminal.pty.resume?.(); } catch { /* It ended. */ }
   }
 
   private drain() { this.draining = true; this.finishDrain(); }

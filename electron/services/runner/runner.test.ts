@@ -8,6 +8,7 @@ import { Runner, type RunnerPty } from './runner';
 import { Tail } from './tail';
 
 class FakePty implements RunnerPty {
+  pause?: () => void; resume?: () => void;
   pid = 4242; written: string[] = []; size: [number, number] | null = null; killed = false;
   private data: ((data: string) => void)[] = []; private exit: ((event: { exitCode: number }) => void)[] = [];
   onData(listener: (data: string) => void) { this.data.push(listener); }
@@ -111,6 +112,22 @@ describe('Runner', () => {
     again.send(Kind.list, 0); expect(body(await again.next(Kind.list))).toEqual([{ term, id: 'run-1', pid: 4242, cols: 100, rows: 30 }]);
     again.send(Kind.tail, term); expect((await again.next(Kind.tail)).payload.toString()).toBe('while away');
     expect(ptys[0].killed).toBe(false);
+  });
+
+  it('pauses a program for Trace, and resumes it when Trace goes', async () => {
+    const { connect, ptys } = await start(); const trace = await connect(); await trace.next(Kind.welcome);
+    trace.send(Kind.spawn, 0, spawnRequest('run-1')); const { term } = body<{ term: number }>(await trace.next(Kind.spawned));
+    const calls: string[] = []; ptys[0].pause = () => calls.push('pause'); ptys[0].resume = () => calls.push('resume');
+    trace.send(Kind.pause, term); trace.send(Kind.pause, term); trace.send(Kind.resume, term); trace.send(Kind.pause, term);
+    await until(() => calls.length === 3); expect(calls).toEqual(['pause', 'resume', 'pause']);
+    trace.socket.destroy(); await until(() => calls.length === 4); expect(calls[3]).toBe('resume');
+  });
+
+  it('gives back the channel details a terminal was started with', async () => {
+    const { connect } = await start(); const trace = await connect(); await trace.next(Kind.welcome);
+    const meta = { sessionId: 's-1', engine: 'claude', token: 'abc' };
+    trace.send(Kind.spawn, 0, { ...spawnRequest('run-1'), meta }); await trace.next(Kind.spawned);
+    trace.send(Kind.list, 0); expect(body<{ meta?: unknown }[]>(await trace.next(Kind.list))[0].meta).toEqual(meta);
   });
 
   it('lets the newest Trace take over, and closes the older one', async () => {

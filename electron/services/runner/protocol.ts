@@ -37,12 +37,18 @@ export const Kind = {
   skipped: 14,
   /** Runner → Trace: `{ id?, message }`, a request that failed (a spawn names its id). */
   error: 15,
+  /** Trace → runner: stop reading the program for now (Trace's window is behind; xterm.js flow control). The program
+   * waits to write; nothing is lost. Every paused terminal is resumed when Trace disconnects. */
+  pause: 16,
+  resume: 17,
 } as const;
 export type FrameKind = typeof Kind[keyof typeof Kind];
 
 export interface Frame { kind: number; term: number; payload: Buffer }
-export interface RunnerTerminal { term: number; id: string; pid: number; cols: number; rows: number; exitCode?: number }
-export interface SpawnRequest { id: string; file: string; args: string[]; cwd: string; env: Record<string, string>; cols: number; rows: number }
+/** `meta`: the channel's details from Trace, kept by the runner without reading them and given back in the list, so a
+ * Trace that opens again knows which channel each terminal is. */
+export interface RunnerTerminal { term: number; id: string; pid: number; cols: number; rows: number; exitCode?: number; meta?: unknown }
+export interface SpawnRequest { id: string; file: string; args: string[]; cwd: string; env: Record<string, string>; cols: number; rows: number; meta?: unknown }
 
 export function encode(kind: FrameKind, term: number, payload: Buffer | string | object = Buffer.alloc(0)): Buffer {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));
