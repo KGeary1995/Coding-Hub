@@ -1,5 +1,13 @@
 ## What's new
 
+1.35.3 reads Claude Code's and Codex's screens as a second check of what they are doing, with rules taken from herdr:
+
+- **An approval the CLI did not announce still shows as Needs you.** If Claude Code shows its confirm or select form, or Codex shows "Allow command?" or "Action Required", and the CLI's own signal (Claude's hook, Codex's notice) did not say so within 5 seconds, the tile says Needs you with the question from the screen.
+- **A "Needs you" left behind clears itself** once the screen shows the agent working again (its spinner in the title, or "esc to interrupt"). herdr moved to reading the screen after the same signals left panes stuck.
+- **Strict on purpose:** only those known forms count as waiting, and a change counts only when read twice in a row, so a passing line of output does not raise anything.
+- **Tried:** the unit tests (each rule on sample screens, including look-alike text that must not count; a change counted only when read twice), and the desktop smoke test: a stand-in Claude Code draws its approval form without its hook, the tile shows Needs you with the question, and drawing its working line clears it. The workbench, enterprise, remote, productivity, table seats and design smoke tests pass.
+- **Not tried:** real Claude Code and Codex releases beyond the screens in herdr's rules; their wording can change.
+
 1.35.2 replaces the rules for whose size a channel has with herdr's single rule:
 
 - **A channel is drawn at the size of whoever last used it.** Using it means typing in it, clicking into its tile, or, on the phone, opening, touching or typing in it. Showing it does not count, and neither does the computer being idle or Trace being in front. This replaces the idle timers, the "in front" check from 1.34.0 and the phone's quiet time, which together made channels shrink and bounce back while you only read them.

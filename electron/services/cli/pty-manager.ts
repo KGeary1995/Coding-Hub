@@ -16,6 +16,7 @@ import { discoverEngine, freshHostEnvironment } from './discovery';
 import { AUTH_TIMED_OUT } from './auth-status';
 import { geminiConversations } from './gemini-conversations';
 import { cleanMessage, codexApproval, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
+import { ScreenReader } from './screen-reader';
 import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
@@ -97,6 +98,8 @@ interface ManagedRun {
   owner: number;
   /** Codex reports approval requests as OSC 9 notifications in its output. */
   osc?: OscNotifications;
+  /** A Claude Code or Codex terminal's screen, read as a cross-check of its own signals (1.35.3, screen-reader.ts). */
+  screen?: ScreenReader;
   /** Gemini CLI reports working, waiting (with the question) and done over OSC 7501; `since` is when the run started. */
   gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number; known: Set<string> };
   session: RunningSession;
@@ -166,6 +169,7 @@ export class PtyManager {
   notifyAttention(runId: string, message: string) {
     const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
     if (!run || run.finished) return;
+    run.screen?.asked();
     this.flush(run);
     this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId, message, at: new Date().toISOString() });
   }
@@ -215,7 +219,7 @@ export class PtyManager {
 
   /** A run whose process just ended cannot be resized; that is not an error, its exit event follows. */
   private resizePty(run: ManagedRun, cols: number, rows: number) {
-    try { run.pty.resize(cols, rows); }
+    try { run.pty.resize(cols, rows); run.screen?.resize(cols, rows); }
     catch { if (!ptyProcessEnded(run.pty)) throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
   }
 
@@ -301,12 +305,20 @@ export class PtyManager {
       else pty.onData((data) => {
         if (run.finished) return;
         run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
+        run.screen?.write(data);
         if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
         if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
         if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
+      });
+      // Claude Code and Codex terminals: their screen is read too, to catch an approval their own signal missed and to
+      // clear a "needs you" once they work again (rules after herdr's).
+      if (!chat && (session.engine === 'claude' || session.engine === 'codex') && !process.env.CODING_HUB_NO_SCREEN_STATE) run.screen = new ScreenReader(session.engine, pty.cols, pty.rows, () => run.title ?? '', (change, message) => {
+        if (run.finished) return;
+        if (change === 'resolved') { this.notifyResolved(run.session.runId); return; }
+        this.flush(run); this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId: run.session.runId, message: message ?? 'Waiting for your answer', at: new Date().toISOString() });
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
@@ -542,6 +554,7 @@ export class PtyManager {
 
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
+    run.screen?.dispose();
     // Gemini CLI prints the conversation to resume as it quits; stopped by Trace it prints none, so agy's list says.
     if (run.gemini && !run.chat) {
       const printed = [...run.outputTail.matchAll(/agy --conversation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)].at(-1)?.[1];
