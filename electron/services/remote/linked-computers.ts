@@ -29,6 +29,10 @@ export const LINK_LIMIT = 20;
 const limitReached = () => new HubError('LINK_LIMIT', `Trace links at most ${LINK_LIMIT} computers. Unlink one in Settings → Other computers, then link again.`);
 const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: dimensions.cols.nullable().catch(null), rows: dimensions.rows.nullable().catch(null), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), table: z.enum(['claude', 'codex']).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
 const RETRY_MAX = 30000;
+/** A link must stay up this long before its retry delay starts again from 2 s, so one that keeps dropping backs off (herdr's rule). */
+export const STABLE_MS = 60000;
+/** No ping for this long means the link is dead. Pings come every 10 s (every 25 s from a Trace before 1.35.1). */
+export const SILENCE_MS = 30000;
 /** The most one stream event may take (a channel's screen with its scrollback is a few MB): more, and the connection is dropped rather than buffered without end. */
 export const STREAM_EVENT_LIMIT = 32 * 1024 * 1024;
 /** Typing that has not reached the computer in this long fails, so keys typed after it are not held for minutes and then all delivered at once. */
@@ -57,7 +61,7 @@ export function tailnetOf(url: string): string | null {
 
 interface Connection {
   link: Link; controller: AbortController | null; stopped: boolean; connected: boolean; error: string | null;
-  channels: RemoteChannel[]; mirrors: Map<string, ScreenMirror>; wake?: () => void;
+  channels: RemoteChannel[]; mirrors: Map<string, ScreenMirror>; wake?: () => void; /** Woken from sleep: the next try is now. */ woken?: boolean;
   /** Its chat channels' recent events, for this window's tab and this computer's phones. */
   chats: ChatReplayBuffer;
   /** The size each of its channels' tiles has in this computer's window, asked for while the tile is shown. */
@@ -421,21 +425,21 @@ export class LinkedComputers implements RemoteRelay {
     this.connections.set(link.id, connection);
     void (async () => {
       // A computer that keeps sending too much in one piece is retried with the usual backoff, not every 2 s.
-      let delay = 2000; let oversized = false;
+      let delay = 2000; let oversized = false; let connectedAt = 0;
       while (!connection.stopped) {
         connection.controller = new AbortController();
         try {
           const response = await this.request(link, 'api/stream?all=1', { signal: connection.controller.signal });
-          connection.connected = true; connection.error = null; if (!oversized) delay = 2000; oversized = false; this.notify();
+          connection.connected = true; connection.error = null; connectedAt = Date.now(); this.notify();
           void this.sendRevocations(link);
           // The other computer gave the tiles' sizes back when the last stream closed: ask for them again.
           for (const [sessionId, fit] of connection.fits) void this.request(link, 'api/size', { method: 'POST', body: JSON.stringify({ sessionId, ...fit }) }).catch(() => {});
           const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
-          // The other computer sends at least a ping every 25 seconds. A minute of silence means it slept or the network
-          // dropped without a reset: reconnect, rather than show its channels as live while typing into them fails.
+          // The other computer sends a ping at least every 25 seconds (10 from 1.35.1). Silence for SILENCE_MS means it slept
+          // or the network dropped without a reset: reconnect, rather than show its channels as live while typing fails.
           const controller = connection.controller; let silence: ReturnType<typeof setTimeout> | undefined;
           for (;;) {
-            silence = setTimeout(() => controller.abort(), 60000); let next: ReadableStreamReadResult<Uint8Array>;
+            silence = setTimeout(() => controller.abort(), SILENCE_MS); let next: ReadableStreamReadResult<Uint8Array>;
             try { next = await reader.read(); } finally { clearTimeout(silence); }
             const { value, done } = next; if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -455,8 +459,12 @@ export class LinkedComputers implements RemoteRelay {
           if (error instanceof HubError && error.code === 'LINK_REVOKED') { this.forget(connection); return; }
         }
         this.drop(connection); this.notify(); this.sink.changed();
+        // The delay starts again only after a connection that held for a minute; one that keeps dropping backs off, and so
+        // does a computer that sends too much in one piece. Waking (the computer resumed) tries again at once.
+        if (connectedAt && Date.now() - connectedAt >= STABLE_MS && !oversized) delay = 2000; connectedAt = 0; oversized = false;
+        if (connection.woken) { connection.woken = false; delay = 2000; continue; }
         await new Promise<void>((resolve) => { const timer = setTimeout(resolve, delay); connection.wake = () => { clearTimeout(timer); resolve(); }; });
-        delay = Math.min(delay * 2, RETRY_MAX);
+        if (connection.woken) { connection.woken = false; delay = 2000; } else delay = Math.min(delay * 2, RETRY_MAX);
       }
     })();
   }
@@ -477,6 +485,11 @@ export class LinkedComputers implements RemoteRelay {
     this.removed.set(link.id, { name: link.name, url: link.url });
     this.notify(); this.sink.changed();
   }
+  /**
+   * This computer woke from sleep (1.35.1): every link may be dead without knowing it, so each drops its stream and
+   * connects again at once, instead of showing stale channels until its silence timer or retry delay runs out.
+   */
+  resumed() { for (const connection of this.connections.values()) { if (connection.stopped) continue; connection.woken = true; connection.controller?.abort(); connection.wake?.(); } }
   private disconnect(connection: Connection) { connection.stopped = true; connection.controller?.abort(); connection.wake?.(); this.drop(connection); }
 
   private event(connection: Connection, type: string, data: unknown) {

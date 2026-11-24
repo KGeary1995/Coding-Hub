@@ -329,7 +329,8 @@ export class RemoteServer {
       this.server = server; this.error = null;
       server.on('upgrade', (request, socket, head) => void this.upgrade(request, socket, head).catch(() => socket.destroy()));
       for (const run of this.host.running()) if (!this.replay.has(run.sessionId)) this.mirror(run.sessionId, run.runId);
-      this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); this.releaseOrphans(); }, 25000);
+      // Every 10 seconds (1.35.1; was 25), so a linked computer notices a dead link within 30 (herdr pings every 5).
+      this.heartbeat = setInterval(() => { for (const stream of this.streams) this.write(stream, ': ping\n\n'); this.releaseOrphans(); }, 10000);
     } catch (error) {
       this.error = (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ? `Port ${this.port} on this computer is in use by another program.` : 'The phone remote could not start.';
     }

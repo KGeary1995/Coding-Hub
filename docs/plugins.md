@@ -163,8 +163,8 @@ plugin's author adds the topic. Trace keeps no list of its own.
 | Release | Contents |
 |---|---|
 | 1.35.0 | Manifest and its checks; Link a folder; actions; the wider event hooks; the plugin API and `trace` helper (channels, tasks, notify); the Plugins page (Installed). |
-| 1.35.1 | Plugin tiles (+ Channel → Plugin tile, saved in the workspace, on the phone as terminals). |
-| 1.35.2 | Install and update from GitHub with the preview; Uninstall; the daily update check; Browse. |
+| next | Plugin tiles (+ Channel → Plugin tile, saved in the workspace, on the phone as terminals). |
+| after | Install and update from GitHub with the preview; Uninstall; the daily update check; Browse. |
 
 Each release gets unit tests (the manifest checks, permissions, the install steps against a local Git repository) and
 a smoke test with a sample plugin in `scripts/fixtures/plugins/` that uses every part it delivers. Then comes the

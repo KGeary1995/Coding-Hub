@@ -42,6 +42,17 @@ async function phoneToken(server: RemoteServer) {
 const PC = '11111111-1111-4111-8111-111111111111'; const MAC = '22222222-2222-4222-8222-222222222222';
 
 describe('linked computers', () => {
+  it('connects again at once when this computer wakes from sleep (1.35.1)', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }, { id: MAC, name: 'MacBook', url: null }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop());
+    await mac.link(PC, pc.server.pair('computer').pairing!.code); await until(() => mac.status()[0].connected, 'the first stream');
+    const streams = () => (pc.server as unknown as { streams: Set<unknown> }).streams; const first = [...streams()];
+    // Woken: the old stream is dropped and a new one opened well inside the 2 s retry delay.
+    const woke = Date.now(); mac.resumed();
+    await until(() => mac.status()[0].connected && [...streams()].some((stream) => !first.includes(stream)), 'a new stream after waking');
+    expect(Date.now() - woke).toBeLessThan(1500);
+  });
   it('links with a computer code, follows every channel, types, and starts and stops channels there', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
     const events: LinkedComputerEvent[] = []; const relayed: string[] = [];
