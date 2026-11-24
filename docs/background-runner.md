@@ -1,6 +1,6 @@
 # Background runner: plan for review
 
-Status: **plan for the owner's review** (2026-11-24). Nothing here is built.
+Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Nothing here is built yet.
 
 **Goal:** channels keep running when Trace quits, crashes or updates, and Trace finds them again when it opens. 1.34.0
 covers closing the window (Trace stays in the tray); this covers the rest.
@@ -101,4 +101,4 @@ Each step is its own release.
 ## 8. Questions for the owner
 
 1. **Quitting.** Answered 2026-11-24: Quit leaves channels running in the background until the owner stops them; Trace reattaches next time. Stopping is a channel's own Stop, or **Stop all channels** in the tray menu.
-2. **The native helper** for Windows job objects (step 5) means shipping a small compiled file. Is that acceptable, or should Trace keep `taskkill` for now?
+2. **The native helper.** Answered 2026-11-24: shipping a small compiled helper for Windows job objects is acceptable.
