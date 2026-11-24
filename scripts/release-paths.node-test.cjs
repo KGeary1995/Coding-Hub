@@ -112,3 +112,12 @@ test('a Mac build is refused unless latest-mac.yml lists both update zips and bo
   // A zip listed without its checksum is refused too.
   assert.throws(() => checkMacFeed(full.replace(`sha512: ${sum('B')}`, 'size: 2'), '1.21.1', 'Trace'), /arm64\.zip with its sha512/);
 });
+test('the release description fits GitHub\'s 125,000 characters: newest notes first, then a pointer and Install', () => {
+  const { releaseDescription, LIMIT } = require('./release-notes.cjs');
+  const version = (n) => `1.${n}.0 does thing ${n}:\n\n- ${'detail '.repeat(800)}\n`;
+  const text = `## What's new\n\n${Array.from({ length: 40 }, (_, i) => version(40 - i)).join('\n')}\n## Install\n\n- **Windows:** run the installer.\n`;
+  const out = releaseDescription(text, 30_000);
+  assert.ok(out.length <= 30_000); assert.ok(out.startsWith('## What\'s new\n\n1.40.0 does thing 40:')); assert.match(out, /Notes for earlier versions[^\n]*\n\n## Install\n\n- \*\*Windows:\*\* run the installer\.\n$/);
+  assert.equal(out.includes('1.1.0 does'), false); assert.equal(releaseDescription('## What\'s new\n\n1.2.0 small.\n'), '## What\'s new\n\n1.2.0 small.\n');
+  assert.ok(releaseDescription(fs.readFileSync(path.resolve(__dirname, '../docs/RELEASE_NOTES.md'), 'utf8')).length <= LIMIT);
+});

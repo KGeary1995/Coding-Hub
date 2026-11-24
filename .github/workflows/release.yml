@@ -138,4 +138,6 @@ jobs:
           # A tag names the release; a manual run on main takes the version from package.json. An existing release is never replaced.
           tag="$GITHUB_REF_NAME"; [ "$GITHUB_REF_TYPE" = tag ] || tag="v$(node -p "require('./package.json').version")"
           ls -l release-assets
-          gh release create "$tag" --repo KGeary1995/trace-releases --title "Trace ${tag#v}" --notes-file docs/RELEASE_NOTES.md release-assets/*
+          # GitHub refuses a description over 125,000 characters: the newest versions' notes that fit, then Install.
+          node scripts/release-notes.cjs docs/RELEASE_NOTES.md "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" --repo KGeary1995/trace-releases --title "Trace ${tag#v}" --notes-file "$RUNNER_TEMP/notes.md" release-assets/*
