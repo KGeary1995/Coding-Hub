@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { MessageSquarePlus, Send, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { isChatEngineConfig } from '../../shared/types';
+import { isChatRun } from '../../shared/types';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { reviewChannels, reviewMessage, type ReviewComment } from '../state/review-comments';
 import { sendToChannel } from '../runtime/send-to-channel';
@@ -39,7 +39,7 @@ export function ReviewBar({ root, comments, onSent, onClear }: { root: string; c
   const send = async () => {
     if (!target) return; setNote(null);
     // A terminal waiting on an approval would take the message's Enter as the answer.
-    if (!(isChatEngineConfig(target.session.config) && target.session.config.chat) && target.session.attention) { setNote({ error: true, text: `CH${target.channel} is waiting for you. Answer it first, then send.` }); return; }
+    if (!isChatRun(target.session.config) && target.session.attention) { setNote({ error: true, text: `CH${target.channel} is waiting for you. Answer it first, then send.` }); return; }
     setBusy(true);
     try {
       if (await sendToChannel(target.session, reviewMessage(comments))) { setNote({ error: false, text: `Sent ${comments.length === 1 ? 'the comment' : `${comments.length} comments`} to CH${target.channel}.` }); onSent(); }

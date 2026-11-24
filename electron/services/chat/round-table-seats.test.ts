@@ -63,14 +63,16 @@ describe('a discussion table with three seats', () => {
     tables.setDriver(A, 'claude'); expect(modes).toEqual({ [A]: false, [B]: true, [C]: true });
     expect(() => tables.setDriver(A, 'nobody')).toThrow(/must sit at this Round Table/);
   });
-  it('seats a Gemini CLI agent as a reviewer: it hears the others, its edits are declined, and it is never the seat that edits', () => {
+  it('seats a Gemini agent as a reviewer: it hears the others and its edits are declined; swapped in, it is the seat that edits (from 1.39)', () => {
     const { tables, runs, modes, answers, ask, reply, to, last } = setup(); runs[B].engine = 'gemini';
     tables.open(1, A, [{ sessionId: 'a', runId: A }, { sessionId: 'b', runId: B }], 'a', 1);
     expect(modes).toEqual({ [A]: false, [B]: true }); expect(last().seats!.map((seat) => seat.engine)).toEqual(['claude', 'gemini']);
     // What Gemini CLI asks to write (its protocol names any file change so) is declined, as for any reviewer.
     expect(ask(B, 'r1', 'File changes')).toBe('Trace declined File changes for Gemini: the reviewer does not edit files. Swap the driver to let it.');
     expect(answers).toEqual([{ runId: B, requestId: 'r1', allow: false }]);
-    expect(() => tables.setDriver(A, 'b')).toThrow(/Gemini seat reviews or plans/); expect(() => tables.setDriver(A, 'gemini')).toThrow(/Gemini seat reviews or plans/);
+    // Swapped in, by its seat or by its agent: it edits, and the lead reviews.
+    tables.setDriver(A, 'b'); expect(modes).toEqual({ [A]: true, [B]: false }); expect(last()).toMatchObject({ driverSeat: 'b', driver: 'gemini' }); expect(ask(B, 'r2', 'File changes')).toBeNull();
+    tables.setDriver(A, 'a'); expect(modes).toEqual({ [A]: false, [B]: true }); tables.setDriver(A, 'gemini'); expect(last()).toMatchObject({ driverSeat: 'b', driver: 'gemini' }); tables.setDriver(A, 'a');
     // A message goes to both, and each then reads what the other said.
     tables.send(A, 'What is this project?', []); expect(to(B).at(-1)!.text).toContain('What is this project?');
     reply(A, 'A scratch project.'); reply(B, 'About lighthouses.');

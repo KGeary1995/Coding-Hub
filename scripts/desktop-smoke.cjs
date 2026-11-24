@@ -153,6 +153,23 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(await mainWindow('visible'), false, 'closing the window hides it'); assert.equal(await page.evaluate(() => document.querySelectorAll('.session-tile[data-status="running"]').length), 2, 'its channels keep running');
     await mainWindow('show'); await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('after-hiding'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('ECHO:after-hiding'));
+    // App preview (1.39.0): an address a channel prints is offered on its tile and opens beside the channels by itself, in a
+    // page of its own that stays on that address; a port no channel printed is refused; a stopped app says so.
+    const appServer = require('node:http').createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<title>Fixture app</title><h1>Fixture app</h1>'); });
+    await new Promise((resolve) => appServer.listen(0, '127.0.0.1', resolve)); const appPort = appServer.address().port;
+    await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type(`serve-at http://127.0.0.1:${appPort}/`); await page.keyboard.press('Enter');
+    await first.getByRole('button', { name: `Open the app at 127.0.0.1:${appPort} from channel 1`, exact: true }).waitFor();
+    await page.locator('.app-preview-page[data-status="ready"]').waitFor({ timeout: 15000 });
+    const previewPage = (script) => app.evaluate(async ({ webContents }, [port, code]) => { const found = webContents.getAllWebContents().find((item) => item.getURL().startsWith(`http://127.0.0.1:${port}/`)); if (!found) return null; if (code) { await found.executeJavaScript(code).catch(() => {}); await new Promise((resolve) => setTimeout(resolve, 500)); } return { url: found.getURL(), title: found.getTitle(), node: await found.executeJavaScript('typeof require + typeof process') }; }, [appPort, script ?? null]);
+    assert.deepEqual(await previewPage(), { url: `http://127.0.0.1:${appPort}/`, title: 'Fixture app', node: 'undefinedundefined' });
+    assert.deepEqual(await previewPage('location.href = "file:///"'), { url: `http://127.0.0.1:${appPort}/`, title: 'Fixture app', node: 'undefinedundefined' }, 'the preview stays on its address');
+    const firstSession = await first.getAttribute('data-session');
+    const unknownPort = await page.evaluate(([sessionId, port]) => window.codingHub.workbench({ action: 'preview-show', sessionId, port }), [firstSession, appPort === 65535 ? 65534 : appPort + 1]);
+    assert.equal(unknownPort.ok, false); assert.equal(unknownPort.error.code, 'PREVIEW_UNKNOWN');
+    await new Promise((resolve) => { appServer.close(resolve); appServer.closeAllConnections(); });
+    await page.locator('.app-preview-page[data-status="stopped"]').filter({ hasText: 'The app stopped.' }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: 'Close the app preview', exact: true }).click();
+    await page.locator('.app-preview').waitFor({ state: 'detached' });
     // A turn that ends while the person is in another channel shows Done until they look at it (1.32.1).
     const turns = () => page.evaluate(() => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length);
     await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('end-turn-later'); await page.keyboard.press('Enter');

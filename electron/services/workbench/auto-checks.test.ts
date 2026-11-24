@@ -76,6 +76,24 @@ describe('automatic checks after a turn', () => {
     files.state = 'b'; checks.turnEnded('s1', folder); await settle(); expect(ran).toHaveLength(2);
     checks.turnEnded('s1', folder); await settle(); expect(ran).toHaveLength(2);
   });
+  // What a task's pull request waits for (settled, 1.39.0).
+  it('waits for a due run and reuses its result while the files are as it checked them', async () => {
+    vi.useFakeTimers(); const { folder, checks, ran } = setup([true, true]);
+    files.state = 'a'; checks.turnEnded('s1', folder);
+    const result = checks.settled(folder, 's1'); await settle(); await vi.advanceTimersByTimeAsync(2000);
+    expect(await result).toMatchObject({ passed: true, summary: 'Checks passed: npm run typecheck, npm test' }); expect(ran).toHaveLength(2);
+  });
+  it('runs the checks itself on files they have not run on, and does not send a failure to the agent', async () => {
+    const { folder, checks, ran, sent, statuses } = setup([true, false]);
+    files.state = 'b';
+    expect(await checks.settled(folder, 's1')).toMatchObject({ passed: false, summary: 'npm test failed.' });
+    expect(ran).toEqual(['npm run typecheck', 'npm test']); expect(sent).toEqual([]); expect(statuses.at(-1)).toMatchObject({ state: 'failed', summary: 'npm test failed: over to you.' });
+  });
+  it('says there are none for a project without checks, or when they are off', async () => {
+    const none = new AutoChecks({ enabled: () => true, canMessage: () => true, send: async () => {}, publish: () => {} });
+    expect(await none.settled(project({ 'README.md': '# hi' }), 's1')).toBeNull();
+    const off = setup([], { enabled: false }); expect(await off.checks.settled(off.folder, 's1')).toBeNull(); expect(off.ran).toEqual([]);
+  });
 });
 
 describe('running a project’s real check', () => {

@@ -2,10 +2,12 @@ import { useShallow } from 'zustand/react/shallow';
 import { SessionPreferences } from './SessionPreferences';
 import { StartStepSettings } from './StartStepSettings';
 import { AutoCheckLine } from './AutoCheckLine';
+import { UndoTurnLine } from './UndoTurnLine';
+import { useUndoStore } from '../state/undo-store';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
 import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, Ellipsis, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown } from 'lucide-react';
+import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, Ellipsis, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown, Undo2, AppWindow } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
 import { freshInput, type UsageRecord } from '../../shared/hub';
@@ -35,8 +37,10 @@ import { useTerminalRow } from './tile/terminal-row';
 import { newTaskFor } from '../state/task-store';
 import { compact } from './shell/StatusBar';
 import { MAX_CHANNELS } from '../../shared/schemas';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../shared/types';
 import { closeAsks, ConfirmStep } from './ConfirmStep';
+import { openPreview, usePreviewStore } from '../state/preview-store';
+import { previewLabel } from '../../shared/app-preview';
 
 /** What "tok" counts, and the cache traffic it leaves out. */
 const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
@@ -70,22 +74,25 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // Before a run's first reply, the model this channel last used (a resumed or restarted channel usually keeps it).
   const lastModel = useHubStore((s) => { let found: { model: string; timestamp: string } | null = null; for (const record of s.usage) if (record.sessionId === session.id && record.model && record.model !== 'CLI default' && (!found || record.timestamp > found.timestamp)) found = record; return found?.model ?? null; });
   const alerts = budgetAlerts(session.budget, usage);
+  /** The app this channel's run printed the address of (1.39.0): Preview opens it beside the channels. */
+  const offer = usePreviewStore((s) => s.offers[session.id]); const preview = session.status === 'running' ? offer : undefined;
   const { engines, rootDirectory, focusedSessionId, toggleFocus, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore(useShallow((s) => ({ engines: s.engines, rootDirectory: s.rootDirectory, focusedSessionId: s.focusedSessionId, toggleFocus: s.toggleFocus, addSession: s.addSession, updateConfig: s.updateConfig, updateBinding: s.updateBinding, setView: s.setView })));
   const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
   const engine = session.config.engine;
   const claude = engine === 'claude';
   const shell = engine === 'shell';
   // Claude Code or Codex: usage, context, tasks and coaching. Terminal channels have none of these.
-  /** Tasks and live coaching read the CLI's transcript, which only Claude Code and Codex keep in a form Trace reads. */
+  /** Tasks and live coaching read Claude Code's and Codex's transcripts only; Gemini's tasks are read from its screen. */
   const tasked = isChatEngineConfig(session.config);
-  const chat = isChatEngineConfig(session.config) && session.config.chat === true;
+  // A Gemini chat too (one that leads a Round Table, from 1.39).
+  const chat = isChatRun(session.config);
   // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
   const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex CLI';
+  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : engine === 'gemini' ? 'Gemini chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex CLI';
   // The engine's mark, in its avatar: a shape as well as a colour.
   const EngineIcon = ENGINE_ICONS[engine];
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
@@ -98,6 +105,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // One terminal line's height, for what lies over the terminal's top (tile.css, --term-cover).
   const tile = useRef<HTMLElement>(null); useTerminalRow(tile, session.id, !chat);
   const busy = session.status === 'running' || session.status === 'starting';
+  /** Undo last turn cannot keep copies here (not a Git folder): the controls row says why. */
+  const undoUnavailable = useUndoStore((s) => { const status = s.bySession[session.id]; return status && !status.available ? status.reason ?? 'Undo last turn is unavailable here.' : null; });
   // A Round Table's hidden seat waiting on an approval holds this tile: its card is in this thread.
   const seatWaiting = useWorkspaceStore((s) => hiddenSeats(s.sessions, session.id).some((seat) => seat.status === 'running' && seat.attention));
   // Counts, not the list: a change to another channel then does not draw this tile again.
@@ -158,6 +167,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <span className="tr-spacer" />
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {account && <span className="tr-profile-chip account-profile-chip ui-badge" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
+          {preview && <button className="tr-action ghost" title={`Open the app at ${previewLabel(preview.url)}`} aria-label={`Open the app at ${previewLabel(preview.url)} from channel ${channel}`} onClick={() => void openPreview(session.id)}><AppWindow size={12} aria-hidden="true" />Preview</button>}
           {action}
           <button className={`tr-detail-button icon tr-tile-more ${detailOpen ? 'selected' : ''}`} title={detailOpen ? 'Hide this channel’s controls' : 'Show this channel’s controls: Stop, Settings, Maximize and more'} aria-label={`Controls of channel ${channel}`} aria-expanded={detailOpen} onClick={() => { /* Closing it closes what holds it open too (the settings, the conversation, the close question), or the press would do nothing. */ if (detailOpen) { setControlsOpen(false); setConversation(false); setConfirmClose(false); } setDetailPinned(!detailOpen); }}><Ellipsis size={14} aria-hidden="true" /></button>
           <span className="tr-state-chip ui-badge" role="status" aria-label={`Channel ${channel} ${meta.word.toLowerCase()}`}><i className="dot" aria-hidden="true" /><span className="tr-state-word">{meta.word}</span></span>
@@ -169,9 +179,10 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           {session.status === 'running'
             ? <button className="tr-detail-button stop" title="Stop the CLI and its child processes" onClick={() => void stop()} disabled={stopping}>{stopping ? <LoaderCircle size={13} className="spin" /> : <Square size={12} className="tr-detail-icon" />}<span className="tr-detail-label">{stopping ? 'Stopping' : 'Stop'}</span></button>
             : state === 'finished' && <button className="tr-detail-button" title="Start this channel again" onClick={start}><RotateCcw size={13} className="tr-detail-icon" /><span className="tr-detail-label">Restart</span></button>}
-          {!shell && !chat && engine !== 'gemini' && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of channel ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
+          {!shell && !chat && resumeId && <button className={`tr-detail-button ${conversation ? 'selected' : ''}`} title="The whole conversation, including what was said before restarts" aria-label={`Conversation of channel ${channel}`} aria-pressed={conversation} onClick={() => setConversation(!conversation)}><MessagesSquare size={13} className="tr-detail-icon" /><span className="tr-detail-label">Conversation</span></button>}
           <button className={`tr-detail-button ${controlsOpen ? 'selected' : ''}`} title="Engine settings" aria-label={`Engine settings for channel ${channel}`} aria-expanded={controlsOpen} onClick={() => setControlsOpen(!controlsOpen)}><Settings2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Settings</span></button>
           {tasked && <button className="tr-detail-button" title="Give this channel a task" aria-label={`Give channel ${channel} a task`} onClick={() => newTaskFor(session.id)}><ClipboardList size={13} className="tr-detail-icon" /><span className="tr-detail-label">Task</span></button>}
+          {!shell && undoUnavailable && <button className="tr-detail-button" aria-disabled="true" title={undoUnavailable} aria-label={`Undo last turn is unavailable: ${undoUnavailable}`}><Undo2 size={13} className="tr-detail-icon" /><span className="tr-detail-label">Undo last turn</span></button>}
           <button className="tr-detail-button" title="Duplicate" aria-label={`Duplicate channel ${channel}`} disabled={sessionCount >= MAX_CHANNELS} onClick={() => addSession(engine, session.id)}><Copy size={13} className="tr-detail-icon" /><span className="tr-detail-label">Duplicate</span></button>
           <button className="tr-detail-button" title={focusedSessionId ? 'Restore grid' : 'Maximize'} aria-label={focusedSessionId ? 'Restore grid' : `Isolate channel ${channel}`} onClick={() => toggleFocus(session.id)}>{focusedSessionId ? <Minimize2 size={13} className="tr-detail-icon" /> : <Maximize2 size={13} className="tr-detail-icon" />}<span className="tr-detail-label">{focusedSessionId ? 'Restore' : 'Maximize'}</span></button>
           {confirmClose
@@ -190,14 +201,15 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>{peekCoachingPrompt(session.id)?.label === 'Send first request' ? 'Its first request from Start in order. Finish any CLI trust or setup prompts first.' : 'Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.'}</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       <AutoCheckLine sessionId={session.id} />
+      {!shell && <UndoTurnLine sessionId={session.id} channel={channel} folder={cwd} />}
       {chat && attention}
       {session.error && <div className={`session-error failure ${strip.open ? 'open' : ''}`} role="alert"><CircleAlert size={14} />{strip.open ? <span>{errorText(session.error)}</span> : <span className="session-error-lines" ref={strip.lines}>{closedError.lines.map((line, at) => <span key={at} title={line}>{line}</span>)}</span>}{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && setupView && <button className="quiet-button small" onClick={() => setView(setupView)}>{SETUP_TARGETS[setupView]}</button>}{(closedError.more || strip.cut || strip.open) && <button className="quiet-button small session-error-more" aria-expanded={strip.open} aria-label={`${strip.open ? 'Show less' : 'Show all'} of channel ${channel}'s error`} onClick={() => strip.setOpen(!strip.open)}>{strip.open ? 'Show less' : 'Show all'}<ChevronDown size={16} aria-hidden="true" /></button>}{/* A narrow tile's header has no room for Open log (tile.css, 400 px), and a tile on screen has no notice to carry it. */}{state === 'failed' && <button className="quiet-button small session-error-log" onClick={openLog}>Open log</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
-      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && engine !== 'gemini' && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
+      <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
         <span className={`welcome-engine ui-avatar large ${engine}`} aria-hidden="true"><EngineIcon /></span>
         <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex'}</h3>
-        <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
+        <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
         {/* The folder opens the channel's settings, where its folder is chosen; with no project yet, it opens Projects. */}
         <div className="welcome-actions">
           {cwd ? <button className="button secondary welcome-directory" aria-label={`${folderName(cwd)} · channel ${channel} settings`} title={`Channel settings · ${cwd}`} onClick={() => setControlsOpen(true)}><Folder size={14} /><span>{folderName(cwd)}</span></button>

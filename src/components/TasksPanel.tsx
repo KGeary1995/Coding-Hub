@@ -1,5 +1,5 @@
 import { createElement, useEffect, useState, type DragEvent } from 'react';
-import { ClipboardList, FolderOpen, GitBranch, Inbox, Plus, Send, CircleAlert, CircleCheck } from 'lucide-react';
+import { ClipboardList, FolderOpen, GitBranch, GitPullRequest, Inbox, Plus, Send, CircleAlert, CircleCheck } from 'lucide-react';
 import { MenuButton } from './shell/MenuButton';
 import { ENGINE_ICONS } from './tile/engine-icons';
 import type { Task, TaskDetail, TaskOutcome, VerificationData, VerificationFreshness } from '../../shared/workbench';
@@ -11,8 +11,9 @@ import { workbench } from '../runtime/workbench';
 import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { channelNameNow } from '../state/channel-names';
 import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTask, setTaskStatus, TASK_COLUMNS, useTaskStore } from '../state/task-store';
-import { isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig } from '../../shared/types';
 import { ConfirmStep } from './ConfirmStep';
+import { ScheduledJobsCard } from './ScheduledJobsCard';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
 /** "Only these files": blank means the whole project. */
@@ -61,7 +62,7 @@ export function TasksPanel() {
   const [checks, setChecks] = useState<VerificationData>({ profiles: [], results: [], running: false }); const [fresh, setFresh] = useState<VerificationFreshness>({});
   // A Round Table's hidden seats are not offered: tasks go to the channel that leads it.
   // Tasks read their outcome from the CLI's transcript: Claude Code and Codex only.
-  const agents = channelsOf(sessions).filter((session) => isChatEngineConfig(session.config));
+  const agents = channelsOf(sessions).filter((session) => isAgentConfig(session.config));
   const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   /** Until the first list arrives, the board says it is loading rather than that there are no tasks. */
@@ -91,6 +92,7 @@ export function TasksPanel() {
       {!open && <div className="ui-page-actions"><button className="button primary" onClick={() => { setForm({ ...EMPTY_FORM, directory: rootDirectory ?? '' }); setOpen(true); }}><Plus />New task</button></div>}</header>
     {error && <p className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}{note && <p className="ui-banner success" role="status"><CircleCheck aria-hidden="true" /><span>{note}</span></p>}
     <details className="task-howto"><summary>How this works</summary><ol><li><strong>Write a task</strong> and pick the channel to do it, or press <strong>Task</strong> on a channel.</li><li><strong>Send it.</strong> Trace types it into that agent, with its files and a request to say what it changed, and moves it along as the agent works.</li><li><strong>Check the result.</strong> When the agent finishes, the task moves to Ready for review with the files it changed. Look them over and mark it done.</li></ol><p>Trace warns you when an agent changes files outside its task or the same files as another task.</p></details>
+    <ScheduledJobsCard />
     {open && <form className="ui-card task-form" onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       <div className="ui-card-head"><ClipboardList aria-hidden="true" /><h2>{form.id ? 'Edit task' : 'New task'}</h2></div>
       <label className="ui-field">What should the agent do?<input aria-label="Task title" required maxLength={150} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="For example: Add a dark mode switch to Settings" /></label>
@@ -113,7 +115,7 @@ export function TasksPanel() {
       {inColumn.map((task) => {
         const changed = watch.changed[task.id] ?? []; const warnings = warningsFor(task.id); const files = limitedTo(task);
         const outcome = task.outcome && OUTCOME_BADGE[task.outcome];
-        return <article key={task.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/task', task.id)} className={`ui-card task-card ${warnings.length ? 'warned' : ''}`}>
+        return <article key={task.id} id={`task-${task.id}`} tabIndex={-1} draggable onDragStart={(e) => e.dataTransfer.setData('text/task', task.id)} className={`ui-card task-card ${warnings.length ? 'warned' : ''}`}>
           <strong className="task-title">{task.title}</strong>
           <div className="task-badges"><span className={`ui-badge ${channelTone(task.sessionId)}`}>{channelLabel(task.sessionId)}</span>{outcome && <span className={`ui-badge dot ${outcome.tone}`}>{outcome.word}</span>}{warnings.length > 0 && <span className="ui-badge dot danger">{warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`}</span>}</div>
           {files && <small>Only {files.join(', ')}</small>}
@@ -122,7 +124,7 @@ export function TasksPanel() {
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
           {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' || task.outcome === 'unconfirmed' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}{task.outcome === 'blocked' && task.outcomeNote ? ` It says: ${task.outcomeNote}` : ''}</p>}
           {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
-          {task.notes && <small className="task-notes">{task.notes}</small>}
+          {task.notes && <small className="task-notes">{task.notes}</small>}{task.pullRequest && <button className="quiet-button small" title={task.pullRequest} onClick={() => void workbench({ action: 'flow-open-pr', url: task.pullRequest! })}><GitPullRequest aria-hidden="true" />Pull request #{task.pullRequest.split('/').at(-1)}</button>}
           <TaskEverything task={task} channel={channelLabel(task.sessionId)} changed={changed} check={task.verificationId ? checkText(task) : ''} />
           <div className="task-actions">
             {/* A To do task's one primary action: Send when it has a channel, otherwise starting it in a worktree of its own. */}

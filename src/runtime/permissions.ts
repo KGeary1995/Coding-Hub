@@ -6,13 +6,16 @@ import { isAgentConfig, isChatRun } from '../../shared/types';
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
 /** What each level means for each agent, in the person's words (tooltips and the settings note). */
-export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: PermissionLevel) {
+/** `chat`: a chat channel's (a Gemini chat differs from its terminal: see GEMINI_MODE in gemini-stream.ts). */
+export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: PermissionLevel, chat = false) {
+  // Over its agent protocol Trace cannot pass Gemini settings: Ask is Gemini's Default mode as Gemini is set (seen with agy 1.5.16, it edited without asking).
+  if (engine === 'gemini' && chat) return (level === 'ask' ? 'Gemini asks before commands; whether it asks before edits follows Gemini’s own permission settings (it may edit without asking).' : level === 'edits' ? 'Gemini edits files in the project without asking; it asks before commands.' : 'Gemini never asks: Trace allows whatever it would ask about. Use it only for work you trust.') + ' A running Gemini chat changes from its next message.';
   // Seen with agy 1.5.12: Ask starts its Default mode (asks before edits and commands), whatever agy itself is set to.
   if (engine === 'gemini') return level === 'ask' ? 'Gemini asks before edits and commands. Trace starts it in its Default mode for this channel, whatever Gemini is set to.' : level === 'edits' ? 'Gemini edits files in the project without asking; it asks before commands.' : 'Gemini never asks: any command, any file (its own blocked-command list still applies). Use it only for work you trust.';
   const when = engine === 'codex' ? ' A running Codex chat changes from its next message.' : '';
   // Accurate for both cases: started at Ask, the CLI's own settings apply; switched to Ask later, its plain default does.
   if (level === 'ask') return (engine === 'claude' ? 'Claude asks before edits and commands. A channel started at Ask follows Claude’s own permission settings; one switched to Ask while running uses Claude’s plain default.' : 'Codex asks when it needs to and writes only in the project. A channel started at Ask follows Codex’s own settings; one switched to Ask while running uses that default.') + when;
-  if (level === 'edits') return (engine === 'claude' ? 'Claude edits files without asking; it still asks before other commands.' : 'Codex edits and runs commands in the project without asking; it asks before anything outside it.') + when;
+  if (level === 'edits') return (engine === 'claude' ? 'Claude edits files and runs safe commands (looking at the project, its tests and build) without asking; it asks before anything else.' : 'Codex edits and runs commands in the project without asking; it asks before anything outside it.') + when;
   return (engine === 'claude' ? 'Claude never asks: any command, any file. Use it only for work you trust.' : 'Codex never asks and runs without a sandbox: any command, any file. Use it only for work you trust.') + when;
 }
 

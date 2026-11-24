@@ -1,9 +1,11 @@
-import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest } from './remote';
+import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest, ScheduledRunRequest } from './remote';
 import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
 import type { CoachingRequest, CoachingResponse, LiveTip } from './coaching';
 import type { AutoCheckStatus } from './auto-checks';
+import type { UndoStatus } from './undo';
+import type { PreviewEvent } from './app-preview';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
@@ -120,6 +122,10 @@ export interface CodingHubHost {
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
   onAutoCheckEvent(listener: (status: AutoCheckStatus) => void): () => void;
+  /** Undo last turn changed for a channel (a snapshot, an undo or a redo). */
+  onUndoEvent(listener: (status: UndoStatus) => void): () => void;
+  /** App preview (1.39.0): a channel printed a dev server's address, its run ended, or the open preview loaded or stopped. */
+  onPreviewEvent(listener: (event: PreviewEvent) => void): () => void;
   /** The Tasks board changed outside the window (an agent's task tools, a plugin): read it again. */
   onTasksChanged(listener: () => void): () => void;
   /** A desktop notification was clicked: open what it is about. */
@@ -131,6 +137,8 @@ export interface CodingHubHost {
   onRemoteControl(listener: (request: RemoteControlRequest) => void): () => void;
   /** A phone allowed to start agents resumes a CLI conversation here in a new channel; answer with finishRemoteControl. */
   onRemoteResume(listener: (request: RemoteResumeRequest) => void): () => void;
+  /** A scheduled job's run is due: open and start its channel here, answer with finishRemoteControl, then send its task. */
+  onScheduledRun(listener: (request: ScheduledRunRequest) => void): () => void;
   finishRemoteControl(result: { requestId: string; error?: string }): Promise<HostResult<null>>;
   /** The local path of a file dropped on the page, or '' when it has none. */
   pathForFile(file: File): string;
@@ -199,6 +207,8 @@ export const IPC_CHANNELS = {
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
   autoCheckEvent: 'coding-hub:auto-check-event',
+  undoEvent: 'coding-hub:undo-event',
+  previewEvent: 'coding-hub:preview-event',
   tasksChanged: 'coding-hub:tasks-changed',
   alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
@@ -206,4 +216,5 @@ export const IPC_CHANNELS = {
   remoteControl: 'coding-hub:remote-control',
   finishRemoteControl: 'coding-hub:finish-remote-control',
   remoteResume: 'coding-hub:remote-resume',
+  scheduledRun: 'coding-hub:scheduled-run',
 } as const;

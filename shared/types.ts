@@ -41,16 +41,20 @@ export interface CodexCLIEngineConfig {
 }
 
 /**
- * Gemini CLI (`agy`): a terminal channel, with no chat channel of its own, shared memory or tasks. From 1.28 it can
- * also sit at a Round Table (`chat`), as the person asked on 2026-11-22 (1.20 had a fixed Gemini seat, removed in 1.21).
+ * Gemini (`agy`): a terminal channel, or from 1.39 a chat channel that leads a Round Table. Shared memory and the
+ * channel tools come from Trace's agy plugin (gemini-plugin.ts; the person's decision of 2026-11-24), always with the
+ * folder's own memory key (no `memoryKey`). From 1.28 it can also sit at a Round Table (`chat`), as the person asked on
+ * 2026-11-22 (1.20 had a fixed Gemini seat, removed in 1.21); from 1.39 it can lead a table and be the seat that edits
+ * (the person's decision of 2026-11-24).
  * `model` is an agy model ID, which names its effort too (gemini-4-neon-high); empty uses agy's own default.
  */
 export interface GeminiCLIEngineConfig {
   engine: 'gemini';
   /**
-   * A Round Table seat (from 1.28): Gemini CLI's agent protocol server (`agy acp`) instead of its terminal, always in
-   * its plan mode. Only ever a hidden seat that reviews or plans: never a channel of its own, the table's lead, or the
-   * seat that edits. It has no shared memory or tasks (isChatEngineConfig stays false for it).
+   * A chat run: Gemini's agent protocol server (`agy acp`) instead of its terminal (GeminiStream). A Round Table seat
+   * (from 1.28), or from 1.39 the chat channel that leads a table (it stays a chat channel once the table closes). Plan
+   * mode while it is read-only at a table, else the mode of its permission level. Its memory tools come from Trace's agy
+   * plugin; as a chat it takes tasks, read from its chat thread (isChatEngineConfig stays false for it); + Channel does not offer it.
    */
   chat?: boolean;
   /** agy's conversation ID (`--conversation`). */
@@ -63,8 +67,10 @@ export interface GeminiCLIEngineConfig {
 export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig | GeminiCLIEngineConfig;
 /** The engines with chat channels, shared memory, tasks and Round Table seats. */
 export type ChatEngine = 'claude' | 'codex';
-/** The agents that can sit at a Round Table: the chat engines, and Gemini CLI as a seat that reviews or plans. */
+/** The agents that can sit at a Round Table, in any seat: the chat engines, and Gemini CLI. */
 export type SeatEngine = ChatEngine | 'gemini';
+/** The seat engine of a channel's config (a terminal reads as Claude, as the table code always took it). */
+export const seatEngineOf = (config: ChannelConfig): SeatEngine => config.engine === 'codex' ? 'codex' : config.engine === 'gemini' ? 'gemini' : 'claude';
 /** A run driven through its structured protocol and drawn (or seated) by Trace, not a terminal: a chat channel, or a Gemini seat. */
 export const isChatRun = (config: ChannelConfig): boolean => config.engine !== 'shell' && config.chat === true;
 export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
@@ -87,7 +93,7 @@ export type WorkspaceBinding =
   | { mode: 'independent'; cwd: string };
 
 /** A Round Table this chat channel leads, kept with the workspace so it is opened again when both chats run after a restart. */
-export interface SavedRoundTable { partner: string; driver: 'claude' | 'codex'; rounds: number;
+export interface SavedRoundTable { partner: string; driver: SeatEngine; rounds: number;
   /** From 1.26: every seat (the lead too) with its name, instructions and duties, and the discussion seat that edits; absent in a table saved before (shared/table-seats.ts savedSeats). `partner` stays the first other seat. */
   seats?: import('./table-seats').SavedSeat[]; driverSeat?: string;
   /** A hierarchy table: its planner session, and where its work stands. */ kind?: 'hierarchy'; planner?: string; chain?: import('./chat').SavedChain; /** Kept across restarts: the review record, and a message that was waiting for the agents (its text only). */ findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: import('./chat').ChatImage[] }

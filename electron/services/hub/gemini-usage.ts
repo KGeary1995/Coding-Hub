@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { openGeminiDatabase } from '../cli/gemini-conversations';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -15,9 +16,9 @@ import { DatabaseSync } from 'node:sqlite';
  */
 export interface GeminiRequest { model: string; input: number; output: number; cached: number; thinking: number; /** Seconds since 1970, or null when its step has no time. */ at: number | null }
 
-type Visit = (field: number, wire: number, value: number, length: number) => void;
+export type Visit = (field: number, wire: number, value: number, length: number) => void;
 /** Walks one protobuf message's fields: `value` is a varint's value, or where a length-delimited field's bytes start. Throws on bytes that are no message. */
-function fields(buffer: Uint8Array, start: number, end: number, visit: Visit) {
+export function fields(buffer: Uint8Array, start: number, end: number, visit: Visit) {
   let at = start;
   const varint = () => { let result = 0; let shift = 0; for (;;) { if (at >= end) throw new Error('Cut short.'); const byte = buffer[at++]; result += (byte & 127) * 2 ** shift; if (!(byte & 128)) return result; shift += 7; if (shift > 63) throw new Error('Not a number.'); } };
   while (at < end) {
@@ -28,7 +29,7 @@ function fields(buffer: Uint8Array, start: number, end: number, visit: Visit) {
   }
 }
 const count = (value: number | undefined) => value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-const text = (buffer: Uint8Array, start: number, length: number) => Buffer.from(buffer.buffer, buffer.byteOffset + start, length).toString('utf8');
+export const text = (buffer: Uint8Array, start: number, length: number) => Buffer.from(buffer.buffer, buffer.byteOffset + start, length).toString('utf8');
 
 /** One `gen_metadata.data`: the request's tokens and model, and the step it followed; null when it holds no usage. */
 export function parseGeminiRequest(data: Uint8Array): (Omit<GeminiRequest, 'at'> & { step: number | null }) | null {
@@ -78,7 +79,8 @@ export function geminiUsageFiles(home: string, since: number, limit = 2000): { f
 export function readGeminiRequests(file: string, from = 0): { rows: number; requests: (GeminiRequest & { row: number })[] } | null {
   let database: DatabaseSync | null = null;
   try {
-    database = new DatabaseSync(file, { readOnly: true });
+    // As agy's own list is opened: a resting database read plainly would get -wal/-shm files beside agy's.
+    database = openGeminiDatabase(file);
     const total = Number(database.prepare('SELECT COUNT(*) AS rows FROM gen_metadata').get()?.rows ?? 0);
     const stepTime = database.prepare('SELECT metadata FROM steps WHERE idx = ?'); const requests: (GeminiRequest & { row: number })[] = [];
     const rows = database.prepare('SELECT data FROM gen_metadata ORDER BY idx LIMIT -1 OFFSET ?').all(Math.max(0, from));

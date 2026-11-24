@@ -4,7 +4,7 @@ import { startSession } from './use-native-host';
 import { watchOutput, writeTerminal } from './terminals';
 import { sendToChannel } from './send-to-channel';
 import { DEFAULT_WAIT_SECONDS, outputMatcher, startOrder } from '../../shared/start-order';
-import { isAgentConfig, isChatRun } from '../../shared/types';
+import { isAgentConfig, isChatRun, type Session } from '../../shared/types';
 
 /** Where Start in order is: shown on its button while it runs, and why it stopped when it did not finish. */
 export interface StartProgress { step: number; steps: number; channel: number; waiting: string | null }
@@ -17,19 +17,20 @@ export const READY_QUIET_MS = 3000; export const READY_LIMIT_MS = 120_000;
 /**
  * Sends an agent its first request once it is ready: a chat at once, a terminal once its output has gone quiet with
  * nothing waiting for the person (a trust prompt is answered first). Still not ready in time, or not taken: the request
- * is offered on its tile instead, sent with one press.
+ * is offered on its tile instead, sent with one press. `send` types it another way (a scheduled job sends its task). Whether it was sent.
  */
-export async function sendWhenReady(id: string, prompt: string) {
+export async function sendWhenReady(id: string, prompt: string, send: (session: Session) => Promise<boolean> = (session) => sendToChannel(session, prompt)): Promise<boolean> {
   const runId = sessionOf(id)?.runId; let last = Date.now();
   const unwatch = watchOutput(id, () => { last = Date.now(); });
   try {
     for (const end = Date.now() + READY_LIMIT_MS; Date.now() < end;) {
-      const session = sessionOf(id); if (session?.status !== 'running' || session.runId !== runId) return;
-      if (isChatRun(session.config) || (!session.attention && Date.now() - last >= READY_QUIET_MS)) { if (await sendToChannel(session, prompt)) return; break; }
+      const session = sessionOf(id); if (session?.status !== 'running' || session.runId !== runId) return false;
+      if (isChatRun(session.config) || (!session.attention && Date.now() - last >= READY_QUIET_MS)) { if (await send(session)) return true; break; }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   } finally { unwatch(); }
   if (sessionOf(id)?.runId === runId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === id ? { ...item, preparedRequest: { prompt, label: 'Send first request' } } : item) }));
+  return false;
 }
 
 /** Start in order on its own when a workspace opens (or a template is applied): only when no channel is running yet. */

@@ -42,6 +42,17 @@ const TICK = '[\u2705\u2714\u2611]\uFE0F?';
  * signal. Marks around it are allowed (emphasis, code ticks, a heading, a full stop after the bold, a tick mark), but no
  * words, no question mark after TASK COMPLETE, and no mark that says otherwise (an unticked "[ ]", "~~", a cross).
  */
+/**
+ * A task's signal as a terminal shows it (Gemini, whose conversation Trace cannot read): after the task's prompt (`mark`),
+ * the last line that is the signal alone. The screen goes on below the reply (the input box, the status line), so the
+ * reply's last line is not the screen's.
+ */
+export function screenSignal(lines: string[], mark: string): string | null {
+  const text = lines.join('\n'); const at = text.lastIndexOf(mark); const after = (at < 0 ? text : text.slice(at + mark.length)).split('\n');
+  // The prompt's own lines ("end with TASK COMPLETE") are sentences, never the signal alone.
+  for (let i = after.length - 1; i >= 0; i--) if (taskSignal(after[i])) return after[i];
+  return null;
+}
 export function taskSignal(reply: string): TaskSignal {
   const lines = reply.split(/\r?\n/).map((line) => line.trim().replace(/^[*_`>\s-]+|[*_`\s]+$/g, '')).filter(Boolean).slice(-1);
   for (const line of lines) {

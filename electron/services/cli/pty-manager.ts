@@ -331,7 +331,7 @@ export class PtyManager {
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
       if (held) run.held = true;
       this.runs.set(request.sessionId, run); prepared = null;
-      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model } } : {}, level);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } } : {}, level);
       else this.watchTerminal(run);
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
@@ -394,7 +394,7 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string; model: string } }, permissions: PermissionLevel) {
+  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string; model: string; resumeId?: string } }, permissions: PermissionLevel) {
     const { sessionId, runId } = run.session;
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
@@ -512,7 +512,7 @@ export class PtyManager {
   /** Hierarchy Round Tables (plan, build, review, fix, final review), on the same chat runs. */
   private readonly chains = new ReviewChains(this.tableHost());
   private tableHost(): TableHost { return {
-    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex' | 'gemini', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
     send: (runId, text, images) => { const run = this.chatRun(runId); if (!run?.chat) return; run.turnOpen = true; run.chat.send(text, images); },
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },

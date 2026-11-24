@@ -257,6 +257,9 @@ body.offline .terminal, body.offline .keys, body.offline .compose { opacity: 0.4
 .settings-form > button { align-self: flex-start; min-width: 120px; }
 .copy-text { flex: 1; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-tile); background: var(--tr-term); color: var(--tr-fg); font: 400 12px/16px var(--tr-font-mono); white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .conversation { white-space: normal; font: var(--tr-t-body); }
+/* App preview (1.39.0): the computer's picture of the app, fitted to the phone's width. */
+.preview-frame { flex: 1; min-height: 0; overflow: auto; }
+.preview-picture { display: block; width: 100%; height: auto; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-panel); background: #fff; }
 .conversation .said { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .conversation .said.you { padding: 8px 12px; border-radius: var(--tr-r-panel); background: var(--tr-raised); color: var(--tr-fg-strong); }
 .conversation .said.tool { margin-bottom: 4px; font: var(--tr-t-meta); }

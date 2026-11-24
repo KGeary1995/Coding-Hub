@@ -19,6 +19,7 @@ import type RFB from '@novnc/novnc';
 import type { ChannelEngine } from '../shared/types';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteChannelChange, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { modelLabel } from '../shared/model-name';
+import { previewLabel } from '../shared/app-preview';
 import { addChannel, changeChannel, channelSettings, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 import { atPhoneSize, FIT_KEY, takenBack } from './size';
 import { switcherOrder } from './switcher';
@@ -196,8 +197,39 @@ function listen(sessionId: string | null) {
  * may do becomes known (before 1.31.4 they stayed as first drawn: Start on a channel already running). The box takes
  * no room of its own (phone.css), so the header's layout is the buttons'.
  */
-const controlsKey = (channel: RemoteChannel) => `${channel.running}|${me?.canRun ?? ''}|${me?.computer ?? ''}`;
-function controlsBox(channel: RemoteChannel) { return h('span', { className: 'channel-controls', id: 'channel-controls', dataset: { key: controlsKey(channel) } }, ...channelControls(channel)); }
+const controlsKey = (channel: RemoteChannel) => `${channel.running}|${me?.canRun ?? ''}|${me?.computer ?? ''}|${channel.preview ?? ''}`;
+function controlsBox(channel: RemoteChannel) { return h('span', { className: 'channel-controls', id: 'channel-controls', dataset: { key: controlsKey(channel) } }, ...previewButton(channel), ...channelControls(channel)); }
+/** Preview (1.39.0), on a channel of the computer this phone talks to that printed its app's address. Fixed markup: lucide's AppWindow. */
+function previewButton(channel: RemoteChannel): Node[] {
+  if (!channel.preview || (channel.computer && channel.computer.id !== me?.computer)) return [];
+  const button = h('button', { className: 'small icon-only', type: 'button', title: `See the app at ${previewLabel(channel.preview)}`, onclick: () => showPreview(channel), aria: { label: `See the app CH${channel.channel} runs` } });
+  button.innerHTML = iconSvg('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>'); return [button];
+}
+/**
+ * A picture of the app a channel runs, taken on the computer (view only): a new one every two seconds while it is open
+ * and the phone is in front, and at once with Reload.
+ */
+function showPreview(channel: RemoteChannel) {
+  const status = h('span', { className: 'dim', aria: { live: 'polite' } }, 'Taking a picture…');
+  const picture = h('img', { className: 'preview-picture', alt: `The app at ${previewLabel(channel.preview ?? '')}`, hidden: true });
+  const problem = h('p', { className: 'error', hidden: true, aria: { role: 'alert' } });
+  let timer: ReturnType<typeof setTimeout> | null = null; let open = true;
+  const close = () => { open = false; if (timer) clearTimeout(timer); sheet.remove(); };
+  const take = async () => {
+    if (timer) { clearTimeout(timer); timer = null; } if (!open) return;
+    if (document.visibilityState === 'visible') try {
+      const response = await api(`/api/preview?sessionId=${encodeURIComponent(channel.sessionId)}`); const body = await response.json() as { image?: string; error?: string };
+      if (!open) return;
+      if (!response.ok || !body.image?.startsWith('data:image/jpeg;base64,')) throw new Error(body.error ?? 'The app could not be pictured.');
+      picture.src = body.image; picture.hidden = false; problem.hidden = true; status.textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+    } catch (error) { if (!open) return; problem.textContent = (error as Error).message; problem.hidden = false; status.textContent = ''; }
+    timer = setTimeout(() => void take(), 2000);
+  };
+  const sheet = h('div', { className: 'copy-sheet', aria: { role: 'dialog', modal: 'true', label: 'App preview' } },
+    h('div', { className: 'copy-bar' }, h('strong', {}, 'App preview'), status, h('button', { className: 'icon small', type: 'button', onclick: () => { status.textContent = 'Taking a picture…'; void take(); } }, 'Reload'), h('button', { className: 'icon small', type: 'button', onclick: close }, 'Done')),
+    h('p', { className: 'dim' }, 'A picture of the app on the computer. It updates by itself.'), problem, h('div', { className: 'preview-frame' }, picture));
+  document.body.append(sheet); void take();
+}
 /** Start, Stop and Restart for a channel on this computer, when this phone may start and stop agents. */
 function channelControls(channel: RemoteChannel): Node[] {
   // Only this computer's own channels: the server does not start or stop another computer's.
@@ -556,13 +588,14 @@ function showChannel(sessionId: string) {
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
   // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
-  if (channel?.chat && (channel.engine === 'claude' || channel.engine === 'codex')) {
+  // A Gemini chat too (one that leads a Round Table, from 1.39); only Claude Code and Codex chats open a table from here.
+  if (channel?.chat && channel.engine !== 'shell') {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
     // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.
     app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), controlsBox(channel)), h('p', { id: 'control-error', className: 'error control-error', hidden: true, aria: { role: 'alert' } }), container);
     unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
-      ...(me?.canRun && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
+      ...(me?.canRun && channel.engine !== 'gemini' && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
       follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
     renderChannel(); listen(sessionId);
     return;
@@ -594,7 +627,7 @@ function showChannel(sessionId: string) {
   more.onclick = () => { const open = extra.hidden; extra.hidden = !open; tools.hidden = !open; more.setAttribute('aria-expanded', String(open)); localStorage.setItem(MORE_KEY, open ? 'open' : 'closed'); fit && requestAnimationFrame(() => requestSize()); };
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
   const tools = h('div', { className: 'tools', hidden: localStorage.getItem(MORE_KEY) !== 'open', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
-    channel && (channel.engine === 'claude' || channel.engine === 'codex') ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
+    channel && (channel.engine === 'claude' || channel.engine === 'codex' || channel.engine === 'gemini') ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
@@ -734,7 +767,7 @@ function showCopy() {
 }
 
 /**
- * A Claude Code or Codex channel's whole conversation, from its CLI's transcript on the computer: the screen shows only
+ * A Claude Code, Codex or Gemini channel's whole conversation, from its CLI's transcript on the computer: the screen shows only
  * the current run, so this is where what was said before a restart can be read again.
  */
 async function showConversation(sessionId: string) {

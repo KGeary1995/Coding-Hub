@@ -7,7 +7,8 @@ import type { ClaudeProfiles } from '../cli/claude-profiles';
 import { HubError } from '../cli/engine-adapter';
 import { directory } from './local-store';
 import { geminiConversationFile, geminiConversations } from '../cli/gemini-conversations';
-import { historyOf } from '../chat/transcript';
+import type { ChatHistoryMessage } from '../../../shared/chat';
+import { geminiHistory, historyOf } from '../chat/transcript';
 import { findWords, mayContain } from './native-search';
 /** At most this many conversations are listed, the most recent first. */
 const LISTED = 500;
@@ -105,19 +106,23 @@ export class NativeSessions {
     return this.candidates(home, id).filter((candidate) => candidate.id === id).sort((a, b) => b.modified - a.modified)[0]?.file;
   }
   /**
-   * The listed Claude Code and Codex conversations whose messages contain `query` (ignoring case), newest first, with where.
-   * Only what the person and the agent wrote is searched, not tool output; Gemini CLI's conversations are a database, not searched.
-   * Each file is read once, without blocking the app, and the search stops at the limits, saying so with `partial`.
+   * The listed Claude Code, Codex and Gemini conversations whose messages contain `query` (ignoring case), newest first, with where.
+   * Only what the person and the agent wrote is searched, not tool output. Each file is read once, Claude's and Codex's
+   * without blocking the app (Gemini's is a small database, read at once), and the search stops at the limits, saying so with `partial`.
    */
   async search(query: string, limits = SEARCH_LIMITS): Promise<NativeSearch> {
     const deadline = Date.now() + limits.ms; const items = await this.list(); const read = new Set<string>(); const results: NativeSearch['results'] = []; let skipped = 0; let partial = false;
     for (const item of items) {
-      if (item.engine === 'gemini') continue;
       if (results.length >= limits.results || Date.now() >= deadline) { partial = true; break; }
       const file = this.sources.get(item.key); if (!file || read.has(file)) continue; read.add(file);
-      let raw: string; try { if ((await fs.promises.stat(file)).size > limits.bytes) { skipped++; continue; } raw = await fs.promises.readFile(file, 'utf8'); } catch { continue; /* Removed meanwhile. */ }
-      if (!mayContain(raw, query)) continue;
-      const found = findWords(historyOf(item.engine, raw.split('\n')).messages, query); if (found.matches) results.push({ ...item, ...found });
+      let messages: ChatHistoryMessage[];
+      try {
+        if ((await fs.promises.stat(file)).size > limits.bytes) { skipped++; continue; }
+        // Gemini's words are inside protobuf in a database, so there is no raw text to check first with mayContain.
+        if (item.engine === 'gemini') { const history = geminiHistory(file); if (!history) continue; messages = history; }
+        else { const raw = await fs.promises.readFile(file, 'utf8'); if (!mayContain(raw, query)) continue; messages = historyOf(item.engine, raw.split('\n')).messages; }
+      } catch { continue; /* Removed meanwhile. */ }
+      const found = findWords(messages, query); if (found.matches) results.push({ ...item, ...found });
     }
     return { query, results, partial, skipped };
   }

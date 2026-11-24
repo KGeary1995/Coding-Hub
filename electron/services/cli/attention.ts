@@ -150,7 +150,7 @@ export class AttentionServer {
  * is followed. Claude Code skips HTTP hooks on SessionStart, so it is a command hook in exec form (no shell, no quoting)
  * that posts the hook's input as is.
  */
-export function claudeAttentionSettings(url: string, curl: string | null = null, statusLine = false) {
+export function claudeAttentionSettings(url: string, curl: string | null = null, statusLine = false, allow: readonly string[] = []) {
   const resolved = [{ hooks: [{ type: 'http', url: `${url}/resolved`, timeout: 5 }] }];
   const finished = [{ hooks: [{ type: 'http', url: `${url}/finished`, timeout: 5 }] }];
   const session = curl ? { SessionStart: [{ hooks: [{ type: 'command', command: curl, args: ['-s', '-m', '4', '-X', 'POST', '-H', 'Content-Type: application/json', '--data-binary', '@-', `${url}/session`], timeout: 5 }] }] } : {};
@@ -158,7 +158,8 @@ export function claudeAttentionSettings(url: string, curl: string | null = null,
   // empty). Only when the person has no status line of their own, which this would replace (see ownStatusLine).
   // A status line is one shell command; forward slashes and no quotes inside work in cmd and in Git Bash alike.
   const status = statusLine && curl ? { statusLine: { type: 'command', command: `"${curl.replace(/\\/g, '/')}" -s -m 2 -X POST --data-binary @- ${url}/status` } } : {};
-  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: finished, ...session }, ...status });
+  // Safe actions (shared/safe-actions.ts): permission rules join the person's own, which still apply (a deny there wins).
+  return JSON.stringify({ hooks: { Notification: [{ hooks: [{ type: 'http', url, timeout: 5 }] }], PostToolUse: resolved, Stop: finished, ...session }, ...status, ...(allow.length ? { permissions: { allow } } : {}) });
 }
 
 /**

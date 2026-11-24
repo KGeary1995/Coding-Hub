@@ -1,6 +1,9 @@
 import fs from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import { TOOL_RESULT_LIMIT, type ChatBlock, type ChatEvent, type ChatHistoryMessage } from '../../../shared/chat';
 import { nextTaskPrompt, SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
+import { openGeminiDatabase } from '../cli/gemini-conversations';
+import { fields, text as protobufText } from '../hub/gemini-usage';
 
 /** The end of a transcript that is read for a resumed conversation's earlier messages. */
 const READ_LIMIT = 8 * 1024 * 1024;
@@ -25,10 +28,75 @@ const parse = (line: string): Json | null => { try { return record(JSON.parse(li
 
 /**
  * A resumed conversation's earlier messages, from the CLI's own transcript: what the person wrote (with how many images)
- * and what the agent replied and ran, with the results of its tools. Context the CLI adds itself is left out.
+ * and what the agent replied and ran, with the results of its tools. Context the CLI adds itself is left out. Gemini's
+ * conversation is a database (geminiHistory), read without its tools' results.
  */
-export function chatHistory(engine: 'claude' | 'codex', file: string): Extract<ChatEvent, { type: 'history' }> {
+export function chatHistory(engine: 'claude' | 'codex' | 'gemini', file: string): Extract<ChatEvent, { type: 'history' }> {
+  if (engine === 'gemini') return { type: 'history', messages: (geminiHistory(file) ?? []).slice(-MESSAGES), results: {} };
   const history = historyOf(engine, tail(file)); return { ...history, messages: history.messages.slice(-MESSAGES) };
+}
+
+/** agy's kinds of step that hold what was said (geminiHistory): the person's input and the agent's turn. */
+const GEMINI_INPUT = 14; const GEMINI_TURN = 15;
+/**
+ * A Gemini conversation's messages, oldest first, from agy's own file (`conversations/<id>.db`, SQLite, opened read only
+ * so agy's live files are never changed). Each step is a row of `steps`, in `idx` order, whose `step_payload` is a
+ * protobuf message: field 1 the step's kind, then one field for that kind. agy publishes no schema; this was found in
+ * agy 1.5.15's files (2026-11-24) and checked with a prompt and reply of known words:
+ *   kind 14, the person's input: field 19 → 2 the text as typed; → 3 its parts (→ 1 text, → 2 a slash command's
+ *   expansion), read only when 2 is missing (as in steps agy has since compacted); → 9 an image (→ 1 its type, → 2 its bytes).
+ *   kind 15, the agent's turn: field 20 → 1 its reply (→ 8 the same again), → 3 its thinking, → 7 each tool it calls
+ *   (→ 1 id, → 2 name, → 3 input as JSON).
+ * Other kinds are left out: a tool's run and its output (132), messages between agents and agy's reminders (101).
+ * A step of another shape is skipped, never guessed at; null when the file cannot be read.
+ */
+export function geminiHistory(file: string): ChatHistoryMessage[] | null {
+  let database: DatabaseSync | null = null;
+  try {
+    database = openGeminiDatabase(file); const messages: ChatHistoryMessage[] = [];
+    for (const row of database.prepare('SELECT idx, step_type kind, step_payload payload FROM steps WHERE step_type IN (?, ?) ORDER BY idx').iterate(GEMINI_INPUT, GEMINI_TURN)) {
+      if (!(row.payload instanceof Uint8Array)) continue;
+      try { const message = geminiStep(Number(row.kind), row.payload, Number(row.idx)); if (message) messages.push(message); } catch { /* Bytes that are no message. */ }
+    }
+    return messages;
+  } catch { return null; } finally { try { database?.close(); } catch { /* Not open. */ } }
+}
+/** The first length-delimited `field` between `start` and `end`, as where its bytes start and how many; null when none. */
+function protobufPart(buffer: Uint8Array, start: number, end: number, field: number): [number, number] | null {
+  const found: [number, number][] = []; fields(buffer, start, end, (number, wire, value, length) => { if (number === field && wire === 2) found.push([value, length]); });
+  return found[0] ?? null;
+}
+/** One step as a message (geminiHistory); null when it holds nothing said. Each text is cut to TEXT_LIMIT (a character is at most 4 bytes). */
+function geminiStep(kind: number, payload: Uint8Array, idx: number): ChatHistoryMessage | null {
+  const body = protobufPart(payload, 0, payload.length, kind === GEMINI_INPUT ? 19 : 20); if (!body) return null;
+  const [start, length] = body; const words = (at: number, size: number) => text(protobufText(payload, at, Math.min(size, TEXT_LIMIT * 4)));
+  if (kind === GEMINI_INPUT) {
+    let typed = ''; const parts: string[] = []; let images = 0;
+    fields(payload, start, start + length, (field, wire, at, size) => {
+      if (wire !== 2) return;
+      if (field === 2 && !typed) typed = words(at, size);
+      else if (field === 3) { const part = protobufPart(payload, at, at + size, 1); if (part) parts.push(words(...part)); }
+      else if (field === 9) images++;
+    });
+    const said = typed || parts.join('').trim(); return said || images ? { role: 'user', text: said, images } : null;
+  }
+  let reply = ''; let thinking = ''; const tools: ChatBlock[] = [];
+  fields(payload, start, start + length, (field, wire, at, size) => {
+    if (wire !== 2) return;
+    if (field === 1 && !reply) reply = words(at, size);
+    else if (field === 3 && !thinking) thinking = words(at, size);
+    else if (field === 7) {
+      let id = ''; let name = ''; let input: Json = {};
+      fields(payload, at, at + size, (inner, innerWire, from, innerSize) => {
+        if (innerWire !== 2) return;
+        if (inner === 1) id = protobufText(payload, from, Math.min(innerSize, 200)); else if (inner === 2) name = protobufText(payload, from, Math.min(innerSize, 200));
+        else if (inner === 3) { const raw = words(from, innerSize); try { input = record(JSON.parse(raw)); } catch { input = { input: raw }; } }
+      });
+      if (name) tools.push({ type: 'tool', id, name, input });
+    }
+  });
+  const blocks: ChatBlock[] = [...(thinking ? [{ type: 'thinking' as const, text: thinking }] : []), ...(reply ? [{ type: 'text' as const, text: reply }] : []), ...tools];
+  return blocks.length ? { role: 'assistant', messageId: `step-${idx}`, blocks } : null;
 }
 
 /** The most a task read goes back through a transcript: far past any one task, short of holding a runaway file. */

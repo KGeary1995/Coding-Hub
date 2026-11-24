@@ -1,5 +1,5 @@
 import { BUILT_IN_PRESETS, checkSeats, isBuiltInPreset, seatNames, type SeatDuty, type TableKind, type TablePreset, type TablePresetSeat } from '../../../shared/table-seats';
-import type { ChatEngine, SeatEngine, Session } from '../../../shared/types';
+import type { SeatEngine, Session } from '../../../shared/types';
 import { modelValue } from '../../../shared/schemas';
 import type { EditableSeat, SeatPlan } from '../../runtime/round-table';
 import { leadIndex } from '../../state/table-presets';
@@ -26,7 +26,7 @@ const builtIn = (kind: TableKind) => BUILT_IN_PRESETS.find((preset) => preset.ki
 export const DEFAULT_TABLE_NAME = 'Round Table';
 
 /** A copy of the preset to edit; `lead` fixes the lead seat to a running chat (its agent and model). */
-export function draftFromPreset(preset: TablePreset, lead?: { engine: ChatEngine; model: string }): Draft {
+export function draftFromPreset(preset: TablePreset, lead?: { engine: SeatEngine; model: string }): Draft {
   const at = Math.max(0, leadIndex(preset));
   const seats = preset.seats.map((seat, index): DraftSeat => {
     const isLead = index === at; const draft = { key: newKey(), engine: seat.engine, model: seat.model, name: seat.name ?? '', instructions: seat.instructions ?? '', duties: [...(seat.duties ?? [])], lead: isLead, keepsAgent: false, keepsModel: false };
@@ -94,7 +94,7 @@ export function setDuty(draft: Draft, index: number, duty: SeatDuty, on: boolean
 }
 export const setDriver = (draft: Draft, index: number): Draft => ({ ...draft, driver: index });
 /** Another kind of table: the built-in (or last-used) preset of that kind, on the same fixed lead. */
-export const withKind = (draft: Draft, presets: TablePreset[], kind: TableKind, lead?: { engine: ChatEngine; model: string }): Draft => draft.kind === kind ? draft : draftFromPreset(pickPreset(presets, kind), lead);
+export const withKind = (draft: Draft, presets: TablePreset[], kind: TableKind, lead?: { engine: SeatEngine; model: string }): Draft => draft.kind === kind ? draft : draftFromPreset(pickPreset(presets, kind), lead);
 
 export interface SetupDeps {
   startTable: (preset: TablePreset) => Promise<string | null>;

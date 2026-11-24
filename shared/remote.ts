@@ -22,7 +22,9 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   /** A Round Table: this chat leads one, and `table` is the other agent at it (from 1.16.3). */
   table?: 'claude' | 'codex' | 'gemini';
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
-  account?: AccountLabel }
+  account?: AccountLabel;
+  /** The address of the app (a dev server) the running channel printed, which GET /api/preview pictures (from 1.39.0). */
+  preview?: string }
 /** `notifications` is whether the phone turned on alerts (Web Push) for channels that need the person. */
 /** `kind` is `computer` for another Trace linked to this one, which may also start and stop channels. */
 /** `canRun`: the phone may start, stop, restart and add channels (off unless turned on for it); always true for a computer. */
@@ -125,12 +127,17 @@ export type RemoteTaskStatus = 'todo' | 'working' | 'review' | 'done';
  */
 export interface RemoteHistoryItem { key: string; engine: 'claude' | 'codex' | 'gemini'; title: string; folder: string; modified: string }
 /** A project of this computer's channels and its newest handoff notes (GET /api/memory); `name` is its folder's last part. */
-export interface RemoteMemory { project: string; name: string; notes: { id: string; title: string; author: 'claude' | 'codex' | 'human'; createdAt: string; content: string }[] }
+export interface RemoteMemory { project: string; name: string; notes: { id: string; title: string; author: 'claude' | 'codex' | 'gemini' | 'human'; createdAt: string; content: string }[] }
 /**
  * A phone resuming a CLI conversation here: the window adds a channel that resumes it in `directory`, as Session
  * history's Resume does, and answers with finishRemoteControl.
  */
 export interface RemoteResumeRequest { requestId: string; engine: 'claude' | 'codex' | 'gemini'; id: string; profileId?: string; directory: string; title: string }
+/**
+ * A scheduled job's run (1.39.0): the window adds a channel with this id for the agent in that folder (closing `replace`,
+ * the job's previous channel, first), starts it, answers with finishRemoteControl, then sends the task once the agent is ready.
+ */
+export interface ScheduledRunRequest { requestId: string; taskId: string; sessionId: string; engine: 'claude' | 'codex' | 'gemini'; directory: string; title: string; replace?: string }
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;

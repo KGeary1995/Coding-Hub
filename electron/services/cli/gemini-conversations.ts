@@ -15,6 +15,16 @@ export function geminiTime(value: unknown): number {
 }
 
 /**
+ * One of agy's SQLite files, opened read only. Even so, SQLite makes the -wal and -shm files of a WAL database that lacks
+ * them (agy not running): then the file is opened as immutable, which writes nothing. With both there (agy's own), they
+ * hold its newest rows. Throws when the file cannot be opened.
+ */
+export function openGeminiDatabase(file: string): DatabaseSync {
+  const live = fs.existsSync(`${file}-wal`) && fs.existsSync(`${file}-shm`);
+  return new DatabaseSync(live ? file : `${pathToFileURL(file).href}?immutable=1`, { readOnly: true });
+}
+
+/**
  * The person's own Gemini CLI conversations, newest first, from agy's summary list (conversation_summaries.db, read
  * only): each one's ID, first folder and last change. Titles are not read (they can quote a prompt), and subagents'
  * conversations are left out. Seen with agy 1.5.12; another layout gives an empty list rather than an error.
@@ -23,10 +33,7 @@ export function geminiConversations(home = geminiHome(), limit = 500): GeminiCon
   const list = path.join(home, 'conversation_summaries.db'); if (!fs.existsSync(list)) return [];
   let database: DatabaseSync | null = null;
   try {
-    // Opened read only, SQLite still makes the -wal and -shm files of a WAL database that lacks them (agy not running):
-    // then the file is opened as immutable, which writes nothing. With both there (agy's own), they hold its newest rows.
-    const live = fs.existsSync(`${list}-wal`) && fs.existsSync(`${list}-shm`);
-    database = new DatabaseSync(live ? list : `${pathToFileURL(list).href}?immutable=1`, { readOnly: true });
+    database = openGeminiDatabase(list);
     const rows = database.prepare("SELECT conversation_id id, workspace_uris uris, last_modified_time modified FROM conversation_summaries WHERE nesting_depth = 0 AND parent_conversation_id = '' ORDER BY last_modified_time DESC LIMIT ?").all(limit) as { id: unknown; uris: unknown; modified: unknown }[];
     return rows.flatMap((row) => {
       if (typeof row.id !== 'string' || !UUID.test(row.id)) return [];

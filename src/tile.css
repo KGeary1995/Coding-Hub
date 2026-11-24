@@ -128,6 +128,8 @@
 .auto-check > svg { flex: none; color: var(--tone); } .auto-check > span { flex: 1; min-width: 0; }
 .auto-check .spin { animation: tr-auto-check-spin 1s linear infinite; } @keyframes tr-auto-check-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .auto-check .spin { animation: none; } }
+/* Undo last turn where it cannot work (not a Git folder): its reason is the tooltip. */
+.tr-detail-button[aria-disabled="true"] { opacity: .55; cursor: default; }
 .auto-check-output { flex-basis: 100%; max-height: 160px; overflow: auto; margin: 0 0 4px; padding: 6px 8px; border-radius: var(--tr-r-small); background: var(--tr-bg); font: 400 11px/16px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* The icon and a button are 24 px tall: one line of words is centred beside them, and more lines start at the top
    (`safe`, or the first lines of a long message would lie above the strip, out of reach of its scrolling). */

@@ -13,7 +13,7 @@ export const MAX_NOTES = 5000;
 const ARCHIVE = 'archive';
 const NOTE_FILE = /^[0-9a-f-]{36}\.json$/;
 export const projectSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/);
-export const noteSchema = z.object({ id: z.uuid(), project: projectSchema, title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'human']), createdAt: z.iso.datetime(), supersedes: z.uuid().optional() }).loose();
+export const noteSchema = z.object({ id: z.uuid(), project: projectSchema, title: z.string().trim().min(1).max(200), content: z.string().min(1).max(60000), author: z.enum(['claude', 'codex', 'gemini', 'human']), createdAt: z.iso.datetime(), supersedes: z.uuid().optional() }).loose();
 const MAX_NOTE_BYTES = 512000;
 /** Notes read or written at once by the asynchronous paths: enough to overlap a slow Drive folder, few enough to leave the process free. */
 const AT_ONCE = 8;

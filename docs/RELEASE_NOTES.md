@@ -1,5 +1,29 @@
 ## What's new
 
+1.39.0 adds a safety net and more automation, and makes Gemini a full peer of Claude Code and Codex.
+
+- **Undo last turn.** Before each turn, Trace keeps a hidden copy of the project's files for every agent channel in a Git project: Claude Code, Codex and Gemini. **Undo last turn** on the channel puts every file back as it was before that turn, and **Redo** takes it back. Files your .gitignore leaves out are never touched, and Trace never changes your commits, branches or staged files.
+- **A finished task becomes a pull request.** When a task moves to Ready for review in a project on GitHub, Trace waits for the project's checks to pass, then saves the changes on a new branch, pushes it and opens a pull request. The description has a plain summary, and the link appears on the task. If something is missing, such as no GitHub sign-in or failing checks, nothing is sent and the task says why. It never pushes to the main branch. Turn it off in Settings → Preferences → **Open a pull request when a task is ready for review**.
+- **See your app inside Trace.** When a channel starts a dev server that prints a local address (`http://localhost:5173`), Trace opens the app beside your channels in a locked-down view. The channel's **Preview** button reopens it. On the phone, the channel's preview shows a live picture of the app.
+- **Scheduled jobs.** Tasks → **Scheduled jobs**: give Claude Code, Codex or Gemini a request every day at a time, on chosen weekdays, or every few hours, for example "update dependencies and run the tests". Each run opens a fresh channel and shows on the Tasks board. Trace must be running; closing its window keeps it running in the tray.
+- **Fewer approval prompts.** At Allow edits, Claude Code and Gemini run commands that only look at the project (git status, diff and log) or run its own tests, typecheck, lint and build without asking first. Anything else still asks. Gemini's rules match a command exactly as written. Turn it off in Settings → Preferences → **Let agents run safe commands without asking**.
+- **Getting started.** A small guide at the bottom right ticks itself off as you open a project, start an agent, ask it something, see your project checked and set up the phone. Hide it with ×; the command menu shows it again.
+- **Gemini, like the others:**
+  - **Shared memory:** handoff notes at launch, and the memory, channel and task tools, through a small "trace" plugin that Trace keeps for agy. Your own agy settings are untouched.
+  - **Search:** its past conversations are searchable in Session history, and its **Conversation** view works on the computer and the phone.
+  - **Tasks:** it takes tasks, in a terminal (Trace reads TASK COMPLETE from its screen) and in a chat.
+  - **Round Tables:** it can lead a Round Table and be the seat that edits. A table led by Gemini shows in a Gemini chat channel, and its edits follow the table's permission level. At Ask, Gemini's own settings decide whether it asks before an edit.
+  - **Everything else from 1.38 and 1.39** works with Gemini too: the automatic checks, Start in order, Undo last turn and safe commands.
+- **Tried:**
+  - Unit tests for every change.
+  - With the real Gemini (agy 1.5.15 and 1.5.16): its permission rules, the plugin's memory tools and launch notes, where its conversations are stored, its agent-protocol modes and approvals.
+  - All desktop smoke tests, including a new app-preview step.
+- **Not tried yet:**
+  - A Gemini-led Round Table with the real Gemini inside Trace.
+  - A pull request opened on github.com.
+  - Scheduled jobs and Undo with the real agents over a day's work.
+  - The phone's app preview on a real phone.
+
 1.38.0 does more on its own and shows less you don't need, with ideas taken from herdr's plugins.
 
 - **Simple by default.** Menus, the command menu and Settings show only the everyday parts. AI coaching, verification profiles, shared memory and rules, MCP servers, event hooks, engine and worktree details, model pricing and a few preferences come back with **Settings → Show advanced tools**. Nothing was removed.

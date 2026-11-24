@@ -22,19 +22,29 @@ const schema = z.discriminatedUnion('action', [
  z.object({ action: z.literal('flow-git-push'), ...reference, remote: z.string().min(1).max(100) }).strict(),
  z.object({ action: z.literal('flow-git-pr'), ...reference, title: z.string().trim().min(1).max(200), body: z.string().max(10000), base: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/).max(150), draft: z.boolean() }).strict(),
 ]);
+/** Runs git or gh for a delivery (Ship, and a task's automatic pull request in task-pr.ts), with no prompts and a time limit. */
+export async function deliveryCommand(cwd: string, file: string, args: string[], timeout = 15000) {
+ // A commit hook or push that runs past the limit is ended with everything it started (execFileTree).
+ try { return (await execFileTree(file, args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 })).stdout; }
+ catch (error) {
+  const code = (error as NodeJS.ErrnoException).code; if (code === 'ENOENT') throw new HubError('DELIVERY_FAILED', `${file} was not found on PATH.`);
+  // What Git or gh said (a hook's message, a refused push, an existing pull request), so nobody has to rerun it in a terminal.
+  const said = redact(Buffer.concat([Buffer.from((error as { stderr?: Buffer }).stderr ?? []), Buffer.from((error as { stdout?: Buffer }).stdout ?? [])]).toString('utf8')).trim().slice(-1500);
+  throw new HubError('DELIVERY_FAILED', `${(error as { killed?: boolean }).killed ? 'The command timed out.' : 'The command failed.'} Check local Git/GitHub authentication, hooks, branch protection, and remote access. Refresh before retrying.${said ? `\n\n${file} said:\n${said}` : ''}`);
+ }
+}
+/** The pull request `gh pr create` printed on its last line, or null. */
+export function pullRequestUrl(output: string) { const candidate = output.trim().split('\n').at(-1) ?? ''; return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(candidate) ? candidate : null; }
+/** Opens a pull request with gh, its body from a private temp file (no command-line length or quoting limits); what gh printed. */
+export async function createPullRequest(cwd: string, request: { head: string; base: string; title: string; body: string; draft: boolean }) {
+ const temp = fs.mkdtempSync(path.join(os.tmpdir(),'hub-pr-'));
+ try { const body = path.join(temp,'body.md'); fs.writeFileSync(body, request.body, { mode: 0o600 }); return redact((await deliveryCommand(cwd,'gh',['pr','create','--head',request.head,'--base',request.base,'--title',request.title,...(request.draft ? ['--draft'] : []),'--body-file',body],120000)).toString().slice(-4096)); }
+ finally { fs.rmSync(temp,{ recursive:true,force:true }); }
+}
 export class Delivery {
  private busy = new Set<string>();
  constructor(private confirm: (title: string, detail: string) => Promise<boolean>, private ready: () => void) {}
- private async command(cwd: string, file: string, args: string[], timeout = 15000) {
-  // A commit hook or push that runs past the limit is ended with everything it started (execFileTree).
-  try { return (await execFileTree(file, args, { cwd, env: { ...hostEnvironment(), GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' }, windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 })).stdout; }
-  catch (error) {
-   const code = (error as NodeJS.ErrnoException).code; if (code === 'ENOENT') throw new HubError('DELIVERY_FAILED', `${file} was not found on PATH.`);
-   // What Git or gh said (a hook's message, a refused push, an existing pull request), so nobody has to rerun it in a terminal.
-   const said = redact(Buffer.concat([Buffer.from((error as { stderr?: Buffer }).stderr ?? []), Buffer.from((error as { stdout?: Buffer }).stdout ?? [])]).toString('utf8')).trim().slice(-1500);
-   throw new HubError('DELIVERY_FAILED', `${(error as { killed?: boolean }).killed ? 'The command timed out.' : 'The command failed.'} Check local Git/GitHub authentication, hooks, branch protection, and remote access. Refresh before retrying.${said ? `\n\n${file} said:\n${said}` : ''}`);
-  }
- }
+ private command(cwd: string, file: string, args: string[], timeout = 15000) { return deliveryCommand(cwd, file, args, timeout); }
  /** Streams command output into the review hash; whole-repository diffs can exceed any reasonable buffer. */
  private hashOutput(cwd: string, args: string[], hash: ReturnType<typeof createHash>, timeout = 15000) {
   return new Promise<void>((resolve, reject) => {
@@ -79,9 +89,8 @@ export class Delivery {
   if (this.busy.has(cwd)) throw new HubError('DELIVERY_BUSY', 'Another delivery operation is running for this repository.');
   if (request.revision !== status.revision) throw new HubError('DELIVERY_STALE', 'Changes have moved since review. Refresh and review again.');
   if (!status.branch && ['flow-git-push','flow-git-pr'].includes(request.action)) throw new HubError('DELIVERY_BRANCH', 'Check out a named branch before delivering it.');
-  this.busy.add(cwd);
-  try {
-   let args: string[]; let detail: string; let file = 'git'; let temp: string | null = null;
+  return this.hold(cwd, async () => {
+   let args: string[] = []; let detail: string;
    if (request.action === 'flow-git-stage' || request.action === 'flow-git-unstage') {
     for (const item of request.paths) { validateRelativePath(item); if (!(request.action === 'flow-git-stage' ? status.unstaged : status.staged).includes(item)) throw new HubError('DELIVERY_PATH', 'A selected path is no longer in this change list.'); }
     // Unstaging a rename must reset both sides; staging only names the new path (the old one no longer exists).
@@ -95,18 +104,18 @@ export class Delivery {
     args = ['push','--',request.remote,`HEAD:refs/heads/${status.branch}`]; detail = `Push current HEAD to ${request.remote}/${status.branch}. No force push. Remote hooks and local Git configuration apply.`;
    } else if (request.action === 'flow-git-pr') {
     if (status.staged.length || status.unstaged.length) throw new HubError('DELIVERY_DIRTY', 'Commit or otherwise review pending changes before creating a pull request.');
-    file = 'gh'; args = ['pr','create','--head',status.branch!,'--base',request.base,'--title',request.title,...(request.draft ? ['--draft'] : [])]; detail = `Create ${request.draft ? 'draft ' : ''}pull request using your local gh account. Push the branch first.\n${status.branch} → ${request.base}\n${request.title}\n\n${request.body}`;
+    detail = `Create ${request.draft ? 'draft ' : ''}pull request using your local gh account. Push the branch first.\n${status.branch} → ${request.base}\n${request.title}\n\n${request.body}`;
    } else { throw new HubError('INVALID_REQUEST', 'Unknown delivery action.'); }
    if (!await this.confirm('Review Git delivery', `${cwd}\n\n${detail}`)) return null;
    this.ready(); if ((await this.inspect(cwd)).revision !== status.revision) throw new HubError('DELIVERY_STALE', 'The repository changed while confirmation was open. Nothing was executed.');
-   try {
-    if (request.action === 'flow-git-pr') { temp = fs.mkdtempSync(path.join(os.tmpdir(),'hub-pr-')); const body = path.join(temp,'body.md'); fs.writeFileSync(body, request.body, { mode: 0o600 }); args.push('--body-file',body); }
-    const output = redact((await this.command(cwd,file,args,120000)).toString().slice(-4096));
-    const candidate = request.action === 'flow-git-pr' ? output.trim().split('\n').at(-1) ?? '' : '';
-    const url = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(candidate) ? candidate : null;
-    return { output: output || 'Command completed successfully. Refresh to review current state.', url };
-   } finally { if (temp) fs.rmSync(temp,{ recursive:true,force:true }); }
-  } finally { this.busy.delete(cwd); }
+   const output = request.action === 'flow-git-pr' ? await createPullRequest(cwd, { head: status.branch!, base: request.base, title: request.title, body: request.body, draft: request.draft }) : redact((await this.command(cwd,'git',args,120000)).toString().slice(-4096));
+   return { output: output || 'Command completed successfully. Refresh to review current state.', url: request.action === 'flow-git-pr' ? pullRequestUrl(output) : null };
+  });
+ }
+ /** One delivery at a time per repository, Ship's or a task's automatic pull request (task-pr.ts); updates and backups wait for it (running). */
+ async hold<T>(cwd: string, work: () => Promise<T>): Promise<T> {
+  if (this.busy.has(cwd)) throw new HubError('DELIVERY_BUSY', 'Another delivery operation is running for this repository.');
+  this.busy.add(cwd); try { return await work(); } finally { this.busy.delete(cwd); }
  }
  get running() { return this.busy.size > 0; }
 }

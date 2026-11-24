@@ -24,9 +24,9 @@ function repository(root: string, name: string, origin?: string) {
   if (origin) git(directory, 'remote', 'add', 'origin', origin);
   return directory;
 }
-const info = (engine: 'claude' | 'codex'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.310', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, supportsAppendSystemPrompt: true, supportsMcpConfig: true, error: null });
+const info = (engine: 'claude' | 'codex' | 'gemini'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.310', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, supportsAppendSystemPrompt: true, supportsMcpConfig: true, error: null });
 const track = (auto: AutoMemory) => { pending.push(auto); return auto; };
-const run = (engine: 'claude' | 'codex', cwd: string): AgentRunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 });
+const run = (engine: 'claude' | 'codex' | 'gemini', cwd: string): AgentRunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 });
 
 describe('memory keys', () => {
   it('normalizes SSH and HTTPS remotes to the same identity', () => {
@@ -90,6 +90,15 @@ describe('launch context', () => {
     expect(chosen.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify(['/app/memory-server.js', memory.root, 'chosen-project', 'codex', project])}`);
     expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).toContain('Chosen note'); expect(chosen.args.find((arg) => arg.startsWith('developer_instructions='))).not.toContain('Earlier decision');
     expect((await memory.projectsLater()).map((item) => item.key).sort()).toEqual(['chosen-project', key].sort());
+  });
+  it('gives a Gemini launch the run’s notes in its environment, for Trace’s agy plugin, with no arguments', () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
+    const key = projectMemoryKey(project); memory.write(key, 'Earlier decision', 'Use the existing router.', 'codex');
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/app/memory-server.js', executable: '/app/electron', scratch: path.join(root, 'scratch') }));
+    const launch = { args: ['--mode', 'accept-edits'], env: { AGY_CLI_OSC7501: 'on' } as Record<string, string> }; auto.prepare(run('gemini', project), '', info('gemini'), launch);
+    expect(launch.args).toEqual(['--mode', 'accept-edits']); expect(launch.env).toMatchObject({ AGY_CLI_OSC7501: 'on', CODING_HUB_MEMORY_ROOT: memory.root, CODING_HUB_MEMORY_KEY: key, CODING_HUB_MEMORY_ENGINE: 'gemini', CODING_HUB_MEMORY_DIR: project });
+    expect(launch.env.CODING_HUB_MEMORY_CONTEXT).toContain('Use the existing router.'); expect(launch.env.CODING_HUB_MEMORY_CONTEXT).toContain('Use the trace_memory MCP tools');
+    expect(fs.existsSync(path.join(root, 'scratch'))).toBe(false); expect(git(project, 'status', '--porcelain')).toBe('');
   });
   it('waits for other computers’ notes and reads them before the launch, without reading notes while it prepares', async () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory')); const key = projectMemoryKey(project);
@@ -173,6 +182,14 @@ describe('session summaries', () => {
     const committed = run('claude', project); auto.prepare(committed, '', info('claude'), { args: [] }); await auto.settled();
     fs.writeFileSync(path.join(project, 'app.txt'), 'committed\n'); git(project, 'commit', '-am', 'Small fix');
     const note = await auto.finish(committed.runId, said('Done.')); expect(note?.content).toContain('Small fix'); expect(note?.content).toContain('Done.');
+  });
+  it('writes a Gemini session’s summary from Git, without reading its conversation', async () => {
+    const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));
+    const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch') }));
+    const gemini = run('gemini', project); auto.prepare(gemini, 'gemini-4-neon-high', info('gemini'), { args: [], env: {} }); await auto.settled();
+    fs.writeFileSync(path.join(project, 'parser.ts'), 'export {}'); const conversation = path.join(root, 'conversation.db'); fs.writeFileSync(conversation, 'SQLite format 3');
+    const note = await auto.finish(gemini.runId, conversation);
+    expect(note?.author).toBe('gemini'); expect(note?.title).toMatch(/^Session summary: Gemini, /); expect(note?.content).toContain('Gemini session (gemini-4-neon-high)'); expect(note?.content).toContain('?? parser.ts'); expect(note?.content).not.toContain('Last message');
   });
   it('writes no summary for a Round Table seat, and still writes the leading channel’s', async () => {
     const root = temp(); const project = repository(root, 'project'); const memory = new MemoryService(path.join(root, 'memory'));

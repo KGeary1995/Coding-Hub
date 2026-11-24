@@ -5,6 +5,7 @@ import { Search } from 'lucide-react';
 import { channelsOf, useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
 import { ADVANCED_VIEWS, useAdvanced } from '../state/simple-mode';
+import { showGettingStarted } from './GettingStarted';
 import { refreshEngines, startSession, stopSession } from '../runtime/use-native-host';
 import { workbench } from '../runtime/workbench';
 import { COMMAND_SCOPES, matchRange, parseQuery, searchesFiles, type CommandScope } from '../runtime/command-search';
@@ -110,6 +111,7 @@ export function CommandMenu() {
       { id: 'connectors', label: 'Manage MCP servers', run: go('connectors') },
       { id: 'skills', label: 'Inspect skills and plugins', run: go('skills') },
       { id: 'help', label: 'Open help and AI guide', run: go('help') },
+      { id: 'getting-started', label: 'Show the getting started guide', run: () => showGettingStarted() },
       { id: 'settings', label: 'Open settings', run: go('settings') },
       { id: 'tasks', label: 'Open tasks', run: go('tasks') },
       { id: 'coaching', label: 'Open AI coaching', run: go('coaching') },

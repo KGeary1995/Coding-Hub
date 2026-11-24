@@ -15,7 +15,7 @@ import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } f
 import type { PermissionLevel } from '../../../shared/types';
 import { permissionLevel } from '../../../shared/schemas';
 import { AGENT, type BarSeat, ChainBar, type ChainSeat, EMPTY, modelName, readImage, seatState, type SeatThread, TableBar, ThreadItems, useHint, useMergedThread, useSeatAnswers, workingText } from './ChatParts';
-import { isAgentConfig } from '../../../shared/types';
+import { isAgentConfig, seatEngineOf } from '../../../shared/types';
 import { joinNames, seatViews, tableSeatIds, type SeatView } from './seat-view';
 import { TableSetup } from './TableSetup';
 import type { SetupMode } from './table-setup-model';
@@ -25,13 +25,13 @@ const live = (session: Session | null | undefined) => session?.status === 'runni
 function savedViews(sessions: Session[], leadId: string): SeatView[] {
   const hierarchy = sessions.find((item) => item.id === leadId)?.roundTable?.kind === 'hierarchy'; const labels = seatLabels(sessions, leadId);
   return seatsOf(sessions, leadId).map(({ seat, session }, index) => {
-    const engine = session?.config.engine === 'codex' ? 'codex' as const : 'claude' as const; const duties = hierarchy ? seat.duties ?? [] : []; const name = labels[index].name;
+    const engine = session ? seatEngineOf(session.config) : 'claude' as const; const duties = hierarchy ? seat.duties ?? [] : []; const name = labels[index].name;
     return { id: seat.session, engine, lead: seat.session === leadId, name, working: name, duties, driver: false, colour: duties.includes('plan') ? 'planner' as const : engine };
   });
 }
 
 /**
- * A chat channel: Claude Code's or Codex's conversation drawn by Trace, with the person's images in the thread, formatted
+ * A chat channel: Claude Code's, Codex's or (leading a Round Table, from 1.39) Gemini's conversation drawn by Trace, with the person's images in the thread, formatted
  * replies, tool calls as cards with their results, and approvals as buttons. The CLI runs in structured mode in the
  * channel's folder with the channel's account, rules, memory and tools, as a terminal channel does. A chat that leads a
  * Round Table shows every agent at it in one thread, each labelled, and sends the person's messages to all of them. Its
@@ -55,7 +55,7 @@ export function ChatView({ session }: { session: Session }) {
   /** This chat sits at another channel's table: it is written to from there. */
   const seatedAt = useChatStore((state) => Object.entries(state.threads).find(([, thread]) => thread.table?.partner.sessionId === session.id || thread.table?.planner?.sessionId === session.id || thread.table?.seats?.some((seat, index) => index > 0 && seat.sessionId === session.id))?.[0] ?? null);
   const channels = useWorkspaceStore((state) => state.sessions.length);
-  const engine = session.config.engine === 'codex' ? 'codex' as const : 'claude' as const;
+  const engine = seatEngineOf(session.config);
   const permissions: PermissionLevel = isAgentConfig(session.config) ? permissionLevel(session.config) : 'ask';
   const agent = AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
@@ -164,7 +164,7 @@ export function ChatView({ session }: { session: Session }) {
   const placeholder = useHint(input, hints);
   /** A saved table's stub, drawn by the hierarchy bar with no host behind it: its seats as saved (a table before 1.26 as its partner and planner). */
   const savedTable = !table && hierarchy && record ? { kind: 'hierarchy' as const, partner: { sessionId: record.partner, runId: '', engine: 'codex' as const }, driver: 'claude' as const, rounds: record.rounds, round: 0, phase: 'idle' as const, agreed: false,
-    ...(record.seats?.length ? { seats: seatsOf(useWorkspaceStore.getState().sessions, session.id).map(({ seat, session: found }) => ({ sessionId: seat.session, runId: '', engine: found?.config.engine === 'codex' ? 'codex' as const : 'claude' as const, ...(seat.name ? { name: seat.name } : {}), ...(seat.duties ? { duties: seat.duties } : {}) })) } : {}),
+    ...(record.seats?.length ? { seats: seatsOf(useWorkspaceStore.getState().sessions, session.id).map(({ seat, session: found }) => ({ sessionId: seat.session, runId: '', engine: found ? seatEngineOf(found.config) : 'claude' as const, ...(seat.name ? { name: seat.name } : {}), ...(seat.duties ? { duties: seat.duties } : {}) })) } : {}),
     ...(record.chain ? { chain: record.chain } : {}), ...(record.findings ? { findings: record.findings } : {}) } : null;
 
   return <div className={`chat-view ${table ? 'at-table' : ''}`} data-chat-session={session.id} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={onDrop}>
@@ -195,12 +195,12 @@ export function ChatView({ session }: { session: Session }) {
     <div className="chat-composer">
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
       {error && <p className="chat-notice error" role="alert">{error}</p>}
-      {confirmFull && <div className="ui-banner warning chat-confirm" role="alertdialog" aria-label="Turn on Full access?"><TriangleAlert aria-hidden="true" /><div><p><strong>Turn on Full access?</strong> {permissionHelp(engine, 'full')}{tableNote}</p>
+      {confirmFull && <div className="ui-banner warning chat-confirm" role="alertdialog" aria-label="Turn on Full access?"><TriangleAlert aria-hidden="true" /><div><p><strong>Turn on Full access?</strong> {permissionHelp(engine, 'full', true)}{tableNote}</p>
         <div className="ui-actions"><button className="button danger solid small" onClick={() => choose('full', true)}>Turn on Full access</button><button className="button secondary small" onClick={() => setConfirmFull(false)}>Cancel</button></div></div></div>}
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         {!table && !seatedAt && !showable && <button className="chat-icon" aria-label="Round Table: add agents" title={channels >= MAX_CHANNELS ? TABLE_FULL : 'Round Table: bring other agents into this conversation, in this channel'} disabled={!running || channels >= MAX_CHANNELS} onClick={() => setSetup({ type: 'chat', leadId: session.id })}><Users size={16} /></button>}
-        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions)}${tableNote}`} value={permissions} onChange={(event) => choose(event.target.value as PermissionLevel)}>
+        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions, true)}${tableNote}`} value={permissions} onChange={(event) => choose(event.target.value as PermissionLevel)}>
           {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
         </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />

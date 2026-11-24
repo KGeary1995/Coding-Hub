@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('a workspace saved with Gemini (1.19, 1.20)', () => {
-  it('keeps the project folder when only 1.20’s hidden Gemini seats were saved, and a Gemini channel as it is', () => {
+  it('loads a Gemini channel as it is, and from 1.39 a Gemini chat with a tile too (up to 1.38 it was taken for 1.20’s seat and dropped)', () => {
     const { root, storage } = open(); storage.close(); databases.splice(databases.indexOf(storage), 1);
     const at = new Date().toISOString();
     const gemini = { version: 1, rootDirectory: '/projects/root', layoutMode: 'columns', focusedSessionId: null, sessions: [{ id: 'gem', title: 'Gemini', config: { engine: 'gemini', model: 'gemini-4-argon-high' }, binding: { mode: 'workspace' }, createdAt: at }], tiles: [{ sessionId: 'gem', x: 0, y: 0, w: 12, h: 12, minW: 3, minH: 10 }] };
@@ -48,8 +48,7 @@ describe('a workspace saved with Gemini (1.19, 1.20)', () => {
     const again = new DatabaseSync(path.join(root, 'storage.db')); again.prepare('UPDATE workspace SET snapshot=? WHERE id=1').run(JSON.stringify(seat)); again.close();
     // A read is kept (loadMigrated caches it), so the changed row is read by a storage opened again.
     reopened.close(); databases.splice(databases.indexOf(reopened), 1); const seated = new WorkspaceStorage(root); databases.push(seated);
-    expect(seated.loadMigrated()).toEqual({ workspace: null, removedChannels: 1, rootDirectory: '/projects/root' });
-    expect(seated.load()).toBeNull();
+    expect(seated.loadMigrated()).toEqual({ workspace: seat, removedChannels: 0, rootDirectory: '/projects/root' });
   });
 });
 
