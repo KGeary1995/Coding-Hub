@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
+import { listenLoopback, savedToken } from './loopback';
 
 /** Strips control characters and bounds the length of a CLI-provided message before it reaches the UI. */
 export function cleanMessage(text: string) {
@@ -93,15 +93,17 @@ export class AttentionServer {
   /** `onContextWindow` hears the window size from Trace's status line in a terminal run (see claudeAttentionSettings). */
   constructor(private onAttention: (runId: string, message: string) => void, private onResolved: (runId: string, finished: boolean) => void = () => {}, private onSession: (runId: string, conversationId: string) => void = () => {}, private onContextWindow: (runId: string, size: number) => void = () => {}) {}
 
-  /** Starts listening on a random loopback port. Sessions started before it is ready run without attention hooks. */
-  start() {
-    return new Promise<void>((resolve, reject) => {
-      const server = http.createServer((request, response) => this.handle(request, response));
-      // Kept for the server's life: a later error with no listener would be thrown in the main process.
-      server.on('error', (error) => { if (this.server !== server) reject(error); });
-      server.listen(0, '127.0.0.1', () => { this.server = server; this.port = (server.address() as AddressInfo).port; resolve(); });
-    });
+  /**
+   * Starts listening on loopback: on `port` (the one it had last time) when free, so agents still running from before
+   * reach it, and on any other otherwise. Sessions started before it is ready run without attention hooks.
+   */
+  async start(port?: number | null) {
+    const server = http.createServer((request, response) => this.handle(request, response));
+    this.port = await listenLoopback(server, port); this.server = server;
+    // Kept for the server's life: a later error with no listener would be thrown in the main process.
+    server.on('error', () => {});
   }
+  get listening() { return this.port; }
 
   private handle(request: http.IncomingMessage, response: http.ServerResponse) {
     const done = (status: number) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end('{}'); };
@@ -134,6 +136,10 @@ export class AttentionServer {
     return `http://127.0.0.1:${this.port}/hook/${runId}/${token.toString('hex')}`;
   }
   unregister(runId: string) { this.runs.delete(runId); }
+  /** A run's token, kept with its terminal in the background runner. */
+  token(runId: string) { return this.runs.get(runId)?.toString('hex') ?? null; }
+  /** A run the background runner kept while Trace was closed: its agent still calls with the token it was started with. */
+  restore(runId: string, hex: unknown) { const token = savedToken(hex); if (token) this.runs.set(runId, token); }
   close() { this.runs.clear(); this.server?.close(); this.server = null; this.port = null; }
 }
 

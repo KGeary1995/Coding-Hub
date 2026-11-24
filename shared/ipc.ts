@@ -48,7 +48,8 @@ export interface RunningSession extends RunReference { accountProfileId?: string
 export type AgentRunningSession = RunningSession & { engine: CLIEngine };
 export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
-  | ({ type: 'data'; data: string } & RunReference)
+  /** `replay`: output a terminal wrote before Trace opened again, kept by the background runner; it is drawn, not saved again. */
+  | ({ type: 'data'; data: string; replay?: true } & RunReference)
   | ({ type: 'exit'; diagnostic?: string; exitCode: number; signal?: number } & RunReference)
   | ({ type: 'error'; message: string } & RunReference)
   /** The CLI is waiting for the person (for example a permission prompt). Cleared by their next input. */

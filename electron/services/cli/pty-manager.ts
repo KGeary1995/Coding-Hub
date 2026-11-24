@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { CLIEngineConfig, PermissionLevel } from '../../../shared/types';
+import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
 import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../../shared/types';
 import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
@@ -88,11 +88,22 @@ export function shellProgram(env: Record<string, string>, platform: NodeJS.Platf
 
 type Spawn = (file: string, args: string[], options: IPtyForkOptions) => IPty;
 
+/** What the background runner keeps with a terminal so a Trace that opens again knows its channel (docs/background-runner.md). */
+export interface HeldMeta { session: RunningSession; nativeKey?: string; config: ChannelConfig; [extra: string]: unknown }
+/** The background runner, for terminal runs: they start there and outlive Trace. */
+export interface HeldTerminals {
+  spawn(file: string, args: string[], options: IPtyForkOptions, meta: HeldMeta): Promise<IPty>;
+  /** The terminal this channel ran before Trace closed, still running there, with its kept output; null when none. */
+  take(sessionId: string): Promise<{ pty: IPty; meta: HeldMeta; tail: string } | null>;
+}
+
 /**
  * Flow control (xterm.js's flow-control guide): output the window has not yet drawn is counted, and past HIGH_WATER
  * the CLI is paused (it simply waits to write, nothing is lost) until the window's acknowledgements bring it under
  * LOW_WATER. A window that stops acknowledging cannot freeze a channel: after STALL_MS the CLI resumes regardless.
  */
+/** A title the CLI gives its terminal (OSC 0 or 2): Claude Code's task summary, for phones. */
+const TITLE = /\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g;
 export const HIGH_WATER = 1024 * 1024; export const LOW_WATER = 256 * 1024; const STALL_MS = 5000;
 interface ManagedRun {
   owner: number;
@@ -120,6 +131,8 @@ interface ManagedRun {
   chat?: ChatStream;
   /** A chat run was sent a message and has not ended that turn yet (its `done` has not come). */
   turnOpen?: boolean;
+  /** Its terminal is in the background runner: quitting Trace leaves it running (docs/background-runner.md). */
+  held?: boolean;
 }
 
 export class PtyManager {
@@ -149,7 +162,10 @@ export class PtyManager {
       /** The Gemini CLI conversation a run in `cwd` started at `since` (ms) wrote to, when agy did not print it. */
       geminiConversation?: (cwd: string, since: number, known: ReadonlySet<string>) => string | null;
       /** The IDs of the conversations agy already had when a run started: none of them is that run's (tests replace it). */
-      geminiKnown?: () => string[] } = {},
+      geminiKnown?: () => string[];
+      held?: HeldTerminals;
+      /** A terminal the runner kept while Trace was closed was taken up again: what prepareLaunch set up for it is restored. */
+      onAdopted?: (session: RunningSession, meta: HeldMeta, owner: number) => void } = {},
   ) {
     this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
     this.discover = dependencies.discover ?? discoverEngine;
@@ -255,6 +271,9 @@ export class PtyManager {
     let prepared: AgentRunningSession | null = null;
     this.pending.set(request.sessionId, reservation);
     try {
+      // The channel's terminal kept running in the background runner while Trace was closed: it is taken up, not started.
+      const kept = !isChatRun(request.config) ? await this.dependencies.held?.take(request.sessionId).catch(() => null) : null;
+      if (kept) { if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.'); return this.adopt(owner, kept); }
       if (!path.isAbsolute(request.cwd)) throw new HubError('INVALID_DIRECTORY', 'Choose an absolute local working folder.');
       let cwd: string;
       try {
@@ -292,34 +311,21 @@ export class PtyManager {
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
         file = engine.executable.file; args = [...engine.executable.prefixArgs, ...(codexChat ? ['app-server'] : geminiSeat ? [] : chat ? CHAT_ARGS : []), ...launch.args];
       }
-      let pty: IPty;
+      let pty: IPty; const options: IPtyForkOptions = { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env };
+      // A terminal run starts in the background runner when there is one; without it (it failed to start), here.
+      const held = !chat && this.dependencies.held ? await this.dependencies.held.spawn(file, args, options, { session: { ...session }, ...(nativeKey ? { nativeKey } : {}), config: request.config }).catch(() => null) : null;
+      if (reservation.cancelled || this.closing) { if (held) try { held.kill(); } catch { /* Gone. */ } throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.'); }
       try {
-        pty = (chat ? this.dependencies.spawnChat ?? spawnChatProcess : this.spawn)(file, args, { name: 'xterm-256color', cwd, cols: request.cols, rows: request.rows, env });
+        pty = held ?? (chat ? this.dependencies.spawnChat ?? spawnChatProcess : this.spawn)(file, args, options);
       } catch (error) { throw new HubError('PTY_START_FAILED', `The terminal process could not start (${String((error as Error).message ?? error).split('\n')[0].slice(0, 200)}). Run npm run rebuild:native, then verify the CLI runs in your system terminal.`); }
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
+      if (held) run.held = true;
       this.runs.set(request.sessionId, run); prepared = null;
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model } } : {}, level);
-      else pty.onData((data) => {
-        if (run.finished) return;
-        run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
-        run.screen?.write(data);
-        if (data.includes('\x1b]')) for (const match of data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g)) run.title = match[1];
-        run.pendingData += data;
-        if (run.pendingData.length >= 32 * 1024) this.flush(run);
-        else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
-        if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
-        if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
-      });
-      // Claude Code and Codex terminals: their screen is read too, to catch an approval their own signal missed and to
-      // clear a "needs you" once they work again (rules after herdr's).
-      if (!chat && (session.engine === 'claude' || session.engine === 'codex') && !process.env.CODING_HUB_NO_SCREEN_STATE) run.screen = new ScreenReader(session.engine, pty.cols, pty.rows, () => run.title ?? '', (change, message) => {
-        if (run.finished) return;
-        if (change === 'resolved') { this.notifyResolved(run.session.runId); return; }
-        this.flush(run); this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId: run.session.runId, message: message ?? 'Waiting for your answer', at: new Date().toISOString() });
-      });
+      else this.watchTerminal(run);
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
       this.send(owner, { type: 'started', ...session });
@@ -334,6 +340,47 @@ export class PtyManager {
     } finally {
       if (this.pending.get(request.sessionId) === reservation) this.pending.delete(request.sessionId);
     }
+  }
+
+  /**
+   * A terminal the background runner kept running while Trace was closed, for the channel now starting: it gets the
+   * same watching as a new run, and its tile is drawn from the output the runner kept (sent as a replay, not saved again).
+   */
+  private adopt(owner: number, held: { pty: IPty; meta: HeldMeta; tail: string }): RunningSession {
+    const session: RunningSession = { ...held.meta.session, pid: held.pty.pid };
+    let resolveExit!: () => void; const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
+    const run: ManagedRun = { owner, session, pty: held.pty, ...(held.meta.nativeKey ? { nativeKey: held.meta.nativeKey } : {}), outputTail: held.tail.slice(-OUTPUT_TAIL), pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
+    run.held = true; this.runs.set(session.sessionId, run);
+    this.watchTerminal(run); held.pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
+    // The screen as it is now, read from the kept output, and its title.
+    run.screen?.write(held.tail); for (const match of held.tail.matchAll(TITLE)) run.title = match[1];
+    try { this.dependencies.onAdopted?.(session, held.meta, owner); } catch { this.dependencies.onEventError?.(); }
+    this.send(owner, { type: 'started', ...session });
+    for (let offset = 0; offset < held.tail.length; offset += 16 * 1024) this.send(owner, { type: 'data', sessionId: session.sessionId, runId: session.runId, data: held.tail.slice(offset, offset + 16 * 1024), replay: true });
+    return session;
+  }
+
+  /** A terminal run's output: to the window in batches, and read for its title, approvals and status. */
+  private watchTerminal(run: ManagedRun) {
+    const { pty, session } = run;
+    pty.onData((data) => {
+      if (run.finished) return;
+      run.outputTail = (run.outputTail + data).slice(-OUTPUT_TAIL);
+      run.screen?.write(data);
+      if (data.includes('\x1b]')) for (const match of data.matchAll(TITLE)) run.title = match[1];
+      run.pendingData += data;
+      if (run.pendingData.length >= 32 * 1024) this.flush(run);
+      else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
+      if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
+      if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
+    });
+    // Claude Code and Codex terminals: their screen is read too, to catch an approval their own signal missed and to
+    // clear a "needs you" once they work again (rules after herdr's).
+    if ((session.engine === 'claude' || session.engine === 'codex') && !process.env.CODING_HUB_NO_SCREEN_STATE) run.screen = new ScreenReader(session.engine, pty.cols, pty.rows, () => run.title ?? '', (change, message) => {
+      if (run.finished) return;
+      if (change === 'resolved') { this.notifyResolved(run.session.runId); return; }
+      this.flush(run); this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId: run.session.runId, message: message ?? 'Waiting for your answer', at: new Date().toISOString() });
+    });
   }
 
   /**
@@ -590,9 +637,17 @@ export class PtyManager {
     }
   }
 
-  async dispose() {
+  /**
+   * Trace is quitting. Runs in the background runner are let go of, still running, unless `stopHeld` (the tray's Stop
+   * all channels and quit); the next Trace takes them up again. Every other run is stopped.
+   */
+  async dispose(stopHeld = true) {
     this.closing = true;
     for (const reservation of this.pending.values()) reservation.cancelled = true;
+    if (!stopHeld) for (const run of [...this.runs.values()]) if (run.held && !run.finished) {
+      run.finished = true; if (run.stall) clearTimeout(run.stall); if (run.flushTimer) clearTimeout(run.flushTimer); run.screen?.dispose();
+      this.runs.delete(run.session.sessionId); run.resolveExit();
+    }
     await Promise.all([...new Set([...this.runs.values()].map((run) => run.owner))].map((owner) => this.stopOwner(owner)));
   }
 }

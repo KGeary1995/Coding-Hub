@@ -565,3 +565,59 @@ describe('Gemini CLI terminal runs', () => {
     expect((spawn.mock.calls[0] as unknown[])[2]).toMatchObject({ env: expect.objectContaining({ AGY_CLI_OSC7501: 'on' }) });
   });
 });
+
+describe('the background runner', () => {
+  function heldFixture(kept: { sessionId: string; tail: string } | null = null) {
+    const processes: FakePty[] = []; const events: SessionEvent[] = []; const metas: unknown[] = []; const adopted: unknown[] = [];
+    const local = vi.fn(() => new FakePty() as unknown as IPty);
+    const held = {
+      spawn: vi.fn(async (_file: string, _args: string[], _options: unknown, meta: unknown) => { metas.push(meta); const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; }),
+      take: vi.fn(async (sessionId: string) => {
+        if (!kept || kept.sessionId !== sessionId) return null;
+        const pty = new FakePty(); pty.pid = 4321; processes.push(pty); const found = kept; kept = null;
+        return { pty: pty as unknown as IPty, tail: found.tail, meta: { session: { sessionId, runId: '55555555-5555-4555-8555-555555555555', engine: 'shell' as const, pid: 0, cwd: process.cwd() }, config: { engine: 'shell' as const } } };
+      }),
+    };
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn: local, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), held, onAdopted: (session, meta) => adopted.push({ session, meta }) });
+    managers.push(manager);
+    return { manager, processes, events, metas, adopted, local, held };
+  }
+
+  it('starts a terminal run there, with the channel it belongs to', async () => {
+    const { manager, metas, local, events, processes } = heldFixture();
+    const session = await manager.start(1, request('tile-a'));
+    expect(local).not.toHaveBeenCalled();
+    expect(metas[0]).toMatchObject({ session: { sessionId: 'tile-a', runId: session.runId, engine: 'codex' }, config: { engine: 'codex' } });
+    processes[0].data('hello'); await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(events.filter((event) => event.type === 'data').map((event) => (event as { data: string }).data).join('')).toBe('hello');
+  });
+
+  it('takes up the terminal a channel left running when Trace closed, and draws what it wrote meanwhile', async () => {
+    const { manager, events, adopted, local, held, processes } = heldFixture({ sessionId: 'tile-a', tail: 'before\r\nwhile closed\r\n' });
+    const session = await manager.start(1, { ...request('tile-a'), config: { engine: 'shell' as const } });
+    expect(session).toMatchObject({ sessionId: 'tile-a', runId: '55555555-5555-4555-8555-555555555555', pid: 4321 });
+    expect(local).not.toHaveBeenCalled(); expect(held.spawn).not.toHaveBeenCalled(); expect(adopted).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'started', runId: '55555555-5555-4555-8555-555555555555' });
+    expect(events.slice(1)).toEqual([{ type: 'data', sessionId: 'tile-a', runId: '55555555-5555-4555-8555-555555555555', data: 'before\r\nwhile closed\r\n', replay: true }]);
+    // It is a run like any other from here: typing reaches it, and its exit ends the channel.
+    manager.write(1, { sessionId: 'tile-a', runId: '55555555-5555-4555-8555-555555555555', data: 'ls\r' }); expect(processes[0].write).toHaveBeenCalledWith('ls\r');
+    processes[0].exit({ exitCode: 0 }); expect(events.at(-1)).toMatchObject({ type: 'exit', runId: '55555555-5555-4555-8555-555555555555', exitCode: 0 });
+  });
+
+  it('starts a terminal here when the runner cannot', async () => {
+    const { manager, local, held } = heldFixture(); held.spawn.mockRejectedValueOnce(new Error('The background runner is not connected.'));
+    await manager.start(1, request('tile-a')); expect(local).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('quitting with the background runner', () => {
+  it('lets go of runs the runner holds, still running', async () => {
+    const events: SessionEvent[] = []; const heldPty = new FakePty();
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn: () => new FakePty() as unknown as IPty, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), held: { spawn: async () => heldPty as unknown as IPty, take: async () => null } });
+    managers.push(manager);
+    await manager.start(1, request('tile-held'));
+    await manager.dispose(false);
+    expect(heldPty.kill).not.toHaveBeenCalled(); expect(manager.processIds()).toEqual([]); expect(manager.hasSessions).toBe(false);
+    expect(events.some((event) => event.type === 'exit')).toBe(false);
+  });
+});
