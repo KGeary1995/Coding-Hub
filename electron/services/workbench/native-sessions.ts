@@ -2,15 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import type { NativeConversation, NativeResume } from '../../../shared/workbench';
+import type { NativeConversation, NativeResume, NativeSearch } from '../../../shared/workbench';
 import type { ClaudeProfiles } from '../cli/claude-profiles';
 import { HubError } from '../cli/engine-adapter';
 import { directory } from './local-store';
 import { geminiConversationFile, geminiConversations } from '../cli/gemini-conversations';
+import { historyOf } from '../chat/transcript';
+import { findWords, mayContain } from './native-search';
 /** At most this many conversations are listed, the most recent first. */
 const LISTED = 500;
 /** Each CLI home (and Claude profile) is searched through at most this many folder entries. */
 const VISITED_PER_SOURCE = 20000;
+/** A search inside conversations stops at this many that match, skips files larger than `bytes`, and returns what it has after `ms`. */
+export const SEARCH_LIMITS = { results: 50, bytes: 20 * 1024 * 1024, ms: 8000 };
 interface Source { engine: 'claude' | 'codex' | 'gemini'; root: string; profileId?: string }
 interface Candidate { source: Source; file: string; id: string; modified: number }
 
@@ -100,8 +104,26 @@ export class NativeSessions {
     const home = this.roots().find((source) => source.engine === engine && source.profileId === profileId); if (!home) return undefined;
     return this.candidates(home, id).filter((candidate) => candidate.id === id).sort((a, b) => b.modified - a.modified)[0]?.file;
   }
-  async execute(input: unknown): Promise<NativeConversation[] | NativeResume> {
-    const request = z.discriminatedUnion('action', [z.object({ action: z.literal('native-list') }).strict(), z.object({ action: z.literal('native-resume'), key: z.string().max(200), directory: z.string().max(4096).optional() }).strict()]).parse(input);
+  /**
+   * The listed Claude Code and Codex conversations whose messages contain `query` (ignoring case), newest first, with where.
+   * Only what the person and the agent wrote is searched, not tool output; Gemini CLI's conversations are a database, not searched.
+   * Each file is read once, without blocking the app, and the search stops at the limits, saying so with `partial`.
+   */
+  async search(query: string, limits = SEARCH_LIMITS): Promise<NativeSearch> {
+    const deadline = Date.now() + limits.ms; const items = await this.list(); const read = new Set<string>(); const results: NativeSearch['results'] = []; let skipped = 0; let partial = false;
+    for (const item of items) {
+      if (item.engine === 'gemini') continue;
+      if (results.length >= limits.results || Date.now() >= deadline) { partial = true; break; }
+      const file = this.sources.get(item.key); if (!file || read.has(file)) continue; read.add(file);
+      let raw: string; try { if ((await fs.promises.stat(file)).size > limits.bytes) { skipped++; continue; } raw = await fs.promises.readFile(file, 'utf8'); } catch { continue; /* Removed meanwhile. */ }
+      if (!mayContain(raw, query)) continue;
+      const found = findWords(historyOf(item.engine, raw.split('\n')).messages, query); if (found.matches) results.push({ ...item, ...found });
+    }
+    return { query, results, partial, skipped };
+  }
+  async execute(input: unknown): Promise<NativeConversation[] | NativeResume | NativeSearch> {
+    const request = z.discriminatedUnion('action', [z.object({ action: z.literal('native-list') }).strict(), z.object({ action: z.literal('native-resume'), key: z.string().max(200), directory: z.string().max(4096).optional() }).strict(), z.object({ action: z.literal('native-search'), query: z.string().trim().min(2, 'Type at least 2 characters to search inside conversations.').max(200) }).strict()]).parse(input);
+    if (request.action === 'native-search') return this.search(request.query);
     const items = await this.list(); if (request.action === 'native-list') return items;
     const conversation = items.find((item) => item.key === request.key); if (!conversation) throw new HubError('NATIVE_SESSION', 'The CLI conversation is no longer available. Refresh the list.');
     const selected = request.directory ?? conversation.directory; if (!selected) throw new HubError('NATIVE_SESSION', 'Choose a project folder for this conversation.');

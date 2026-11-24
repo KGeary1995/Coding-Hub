@@ -1,15 +1,29 @@
 import type { ConversationLabel } from '../../shared/productivity';
 import { createElement, useEffect, useState } from 'react';
-import { History, Search, SearchX, CircleAlert } from 'lucide-react';
+import { History, Search, SearchX, CircleAlert, Info, TriangleAlert } from 'lucide-react';
 import { ENGINE_ICONS } from './tile/engine-icons';
-import type { NativeConversation, NativeResume } from '../../shared/workbench';
+import type { NativeConversation, NativeResume, NativeSearch, NativeSnippet } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { createSession, arrangeTiles, resumeConfig, RESUMED_TITLE, useWorkspaceStore } from '../state/workspace-store';
 import { MAX_CHANNELS } from '../../shared/schemas';
 const AGENT_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+/** What a search inside conversations found, in words, saying plainly when it stopped early or left files out. */
+export function searchSummary({ query, results, partial, skipped }: NativeSearch): string {
+  return [results.length ? `${plural(results.length, 'conversation')} ${results.length === 1 ? 'mentions' : 'mention'} “${query}”, newest first.` : `No conversation${partial ? ' searched so far' : ''} mentions “${query}”.`,
+    partial ? 'The search stopped early (it reads for up to 8 seconds and lists up to 50 conversations), so older ones may match too. More specific words narrow it.' : '',
+    skipped ? `${plural(skipped, 'file')} over 20 MB ${skipped === 1 ? 'was' : 'were'} not searched.` : ''].filter(Boolean).join(' ');
+}
+/** Where a conversation mentions the searched words, the words themselves marked. */
+export function SearchSnippets({ engine, snippets }: { engine: NativeConversation['engine']; snippets: NativeSnippet[] }) {
+  return <ul className="native-history-snippets">{snippets.map((snippet, index) => <li key={index}><span className="native-history-role">{snippet.role === 'user' ? 'You' : AGENT_NAME[engine]}:</span> {snippet.before}<mark>{snippet.match}</mark>{snippet.after}</li>)}</ul>;
+}
 export function NativeHistory({ onBack }: { onBack: () => void }) {
   const [labels, setLabels] = useState<ConversationLabel[]>([]);
   const [items, setItems] = useState<NativeConversation[]>([]); const [search, setSearch] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(true); /* The list is read on opening, so the page starts out looking, not empty. */
+  /** The last search inside conversations; cleared when the words change, which returns to the filtered list. */
+  const [found, setFound] = useState<NativeSearch | null>(null); const [searching, setSearching] = useState(false);
+  async function searchInside() { setSearching(true); setBusy(true); setError(''); try { setFound(await workbench<NativeSearch>({ action: 'native-search', query: search.trim() })); } catch (e) { setError((e as Error).message); } finally { setSearching(false); setBusy(false); } }
   async function refresh() { setBusy(true); setError(''); try { const [conversations, saved] = await Promise.all([workbench<NativeConversation[]>({ action: 'native-list' }), workbench<ConversationLabel[]>({ action: 'flow-conversations' })]); setItems(conversations); setLabels(saved); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
   useEffect(() => { void refresh(); }, []);
   async function resume(item: NativeConversation, chooseDirectory: boolean) {
@@ -24,20 +38,23 @@ export function NativeHistory({ onBack }: { onBack: () => void }) {
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   // The agent's name is searched too ("codex" finds Codex's conversations).
-  const shown = items.filter((item) => `${labels.find((label) => label.key === item.key)?.name ?? item.title} ${item.directory} ${item.id} ${AGENT_NAME[item.engine]}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => Number(labels.find((label) => label.key === b.key)?.pinned ?? false) - Number(labels.find((label) => label.key === a.key)?.pinned ?? false));
+  const shown: (NativeConversation & Partial<NativeSearch['results'][number]>)[] = found ? found.results : items.filter((item) => `${labels.find((label) => label.key === item.key)?.name ?? item.title} ${item.directory} ${item.id} ${AGENT_NAME[item.engine]}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => Number(labels.find((label) => label.key === b.key)?.pinned ?? false) - Number(labels.find((label) => label.key === a.key)?.pinned ?? false));
   return <section className="ui-page wide native-history">
     <header className="ui-page-head"><span className="ui-page-icon" aria-hidden="true"><History /></span><div><h1>CLI conversation history</h1><p>Conversations Claude Code and Codex saved on this computer, named profiles included.</p></div>
       <div className="ui-page-actions"><button className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh native conversations</button><button className="quiet-button" onClick={onBack}>Back to recorded output</button></div></header>
-    <div className="native-history-search"><Search aria-hidden="true" /><input aria-label="Search native conversations" placeholder="Search project, engine, ID…" value={search} onChange={(event) => setSearch(event.target.value)} />
-      <p className="ui-hint">Not claude.ai or Claude desktop chats. Scans up to 4,000 entries and 500 conversations; incomplete files may be skipped.</p></div>
+    <div className="native-history-search"><Search aria-hidden="true" /><form className="native-history-query" onSubmit={(event) => { event.preventDefault(); if (search.trim().length >= 2) void searchInside(); }}><input aria-label="Search native conversations" placeholder="Search project, engine, ID…" value={search} onChange={(event) => { setSearch(event.target.value); setFound(null); }} />
+      <button className="button secondary" disabled={busy || search.trim().length < 2}>{searching ? 'Searching conversations…' : 'Search inside conversations'}</button></form>
+      <p className="ui-hint">Not claude.ai or Claude desktop chats. Scans up to 4,000 entries and 500 conversations; incomplete files may be skipped. Search inside conversations (or Enter) reads what you and Claude Code or Codex wrote, not tool output.</p></div>
+    {found && <p role="status" className={`ui-banner ${found.partial || found.skipped ? 'warning' : 'info'} native-history-found`}>{found.partial || found.skipped ? <TriangleAlert aria-hidden="true" /> : <Info aria-hidden="true" />}<span>{searchSummary(found)}</span><button className="quiet-button" onClick={() => setFound(null)}>Show all conversations</button></p>}
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
     <div className="ui-stack">{shown.map((item) => <article className="ui-card" key={item.key}>
       <div className="ui-card-head"><span className={`ui-avatar small ${item.engine}`} aria-hidden="true">{createElement(ENGINE_ICONS[item.engine])}</span><h2>{labels.find((label) => label.key === item.key)?.pinned ? '★ ' : ''}{labels.find((label) => label.key === item.key)?.name ?? item.title}</h2><span className="ui-card-actions native-history-date">{new Date(item.modifiedAt).toLocaleString()}</span></div>
-      <code className="native-history-path">{item.directory ?? 'Folder not found in metadata'}</code><p className="native-history-meta">{item.profileId ? 'Named Claude profile' : 'Default local CLI account'} · Conversation {item.id}</p>
+      <code className="native-history-path">{item.directory ?? 'Folder not found in metadata'}</code><p className="native-history-meta">{item.profileId ? 'Named Claude profile' : 'Default local CLI account'} · Conversation {item.id}{item.matches !== undefined ? ` · ${item.matches} match${item.matches === 1 ? '' : 'es'}` : ''}</p>
+      {item.snippets && <SearchSnippets engine={item.engine} snippets={item.snippets} />}
       <div className="ui-actions"><button className="button primary" disabled={busy} onClick={() => void resume(item, false)}>Resume in new channel</button><button className="button secondary" disabled={busy} onClick={() => void resume(item, true)}>Choose folder and resume</button></div>
       <ConversationPreferences key={item.key} conversation={item} saved={labels.find((label) => label.key === item.key)} onSave={(label) => setLabels([...labels.filter((item) => item.key !== label.key), label])} /></article>)}
       {!items.length && <div className="ui-card ui-empty"><History aria-hidden="true" /><h3>{busy ? 'Looking for conversations…' : 'No native CLI conversations found'}</h3><p>{busy ? 'Reading the Claude Code and Codex logs on this computer.' : 'Conversations appear here once Claude Code or Codex has saved one on this computer.'}</p></div>}
-      {items.length > 0 && !shown.length && <div className="ui-card ui-empty"><SearchX aria-hidden="true" /><h3>No conversations match</h3><p>Search by name, folder or conversation ID.</p></div>}</div>
+      {items.length > 0 && !found && !shown.length && <div className="ui-card ui-empty"><SearchX aria-hidden="true" /><h3>No conversations match</h3><p>Search by name, folder or conversation ID, or use Search inside conversations to look through what was said.</p></div>}</div>
   </section>;
 }
 
