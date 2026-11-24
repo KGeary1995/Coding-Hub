@@ -5,7 +5,7 @@ import { savedWorkspaceSchema } from '../../shared/schemas';
 import { arrangeTiles, channelNumber, channelsFullNote, channelsOf, createSession, savedWorkspace, tableDirectory, useWorkspaceStore } from '../state/workspace-store';
 import { channelAlerts } from '../state/channel-state';
 import { useChatStore } from '../state/chat-store';
-import { changeSeats, forgetTable, hierarchyDetached, openHierarchy, openRoundTable, openTable, rememberTable, restoreTables, seatRoom, tableDetached, tableSeats } from './round-table';
+import { changeSeats, forgetTable, hierarchyDetached, openHierarchy, openRoundTable, openTable, rememberTable, restoreTables, seatRoom, startTable, tableDetached, tableSeats } from './round-table';
 import type { TablePreset } from '../../shared/table-seats';
 import { closeChannel, remoteControl, startSession, stopSession } from './use-native-host';
 import { useTaskStore } from '../state/task-store';
@@ -331,6 +331,18 @@ describe('Round Tables of any number of seats', () => {
     expect(await openTable(lead.id, { id: 'g', name: 'With Gemini', kind: 'discussion', rounds: 1, driver: 0, seats: [{ engine: 'claude', model: '' }, { engine: 'codex', model: '' }, { engine: 'gemini', model: 'gemini-4-neon-high' }] })).toBeNull();
     const hidden = useWorkspaceStore.getState().sessions.filter((session) => session.id !== lead.id);
     expect(hidden.map((session) => [session.config.engine, (session.config as { permissions?: string }).permissions])).toEqual([['codex', 'full'], ['gemini', 'full']]);
+  });
+  it('+ Channel: a table Gemini leads and drives is a Gemini chat channel, seated with the others and saved as driving (from 1.39)', async () => {
+    const { chats, codingHub } = host(); useWorkspaceStore.setState({ sessions: [], tiles: [] });
+    expect(await startTable({ id: 'g', name: 'Gemini leads', kind: 'discussion', rounds: 1, driver: 0, seats: [{ engine: 'gemini', model: 'gemini-4-neon-high' }, { engine: 'claude', model: '' }] })).toBeNull();
+    const [lead, seat] = useWorkspaceStore.getState().sessions;
+    expect(lead.config).toEqual({ engine: 'gemini', model: 'gemini-4-neon-high', chat: true }); expect(seat.config).toMatchObject({ engine: 'claude', chat: true });
+    expect(startedModel(codingHub, lead.id)).toBe('gemini-4-neon-high');
+    expect(lastOpen(chats)).toMatchObject({ sessionId: lead.id, driver: 'gemini', driverSeat: lead.id, partner: { sessionId: seat.id } });
+    expect(find(lead.id)!.roundTable).toMatchObject({ driver: 'gemini', driverSeat: lead.id, partner: seat.id });
+    // Only the lead has a tile, and the saved workspace holds the Gemini chat as it is.
+    expect(channelsOf(useWorkspaceStore.getState().sessions).map((session) => session.id)).toEqual([lead.id]); expect(savedWorkspaceSchema.safeParse(savedWorkspace()).success).toBe(true);
+    expect(tableSeats(lead.id).map((item) => [item.engine, item.lead, item.driver])).toEqual([['gemini', true, true], ['claude', false, false]]);
   });
   it('opens a hierarchy without a final reviewer: the planner and the extra seats named, the builder the lead', async () => {
     const { chats } = host(); const lead = await runningLead(); expect(await openTable(lead.id, hierarchy)).toBeNull();

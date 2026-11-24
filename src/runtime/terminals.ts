@@ -301,6 +301,17 @@ export function routeTerminalEvent(event: SessionEvent) {
   }
 }
 
+/** A terminal channel's last `count` lines as text, a line the terminal wrapped kept whole; null for a channel with no terminal. */
+export function terminalLines(id: string, count = 2000): string[] | null {
+  const terminal = terminals.get(id)?.terminal; if (!terminal) return null;
+  const buffer = terminal.buffer.active; const lines: string[] = [];
+  for (let y = Math.max(0, buffer.length - count); y < buffer.length; y++) {
+    const line = buffer.getLine(y); if (!line) continue; const text = line.translateToString(true);
+    if (line.isWrapped && lines.length) lines[lines.length - 1] += text; else lines.push(text);
+  }
+  return lines;
+}
+
 export function terminalDimensions(id: string) {
   const terminal = terminals.get(id)?.terminal;
   return { cols: Math.min(500, Math.max(2, terminal?.cols ?? 100)), rows: Math.min(300, Math.max(1, terminal?.rows ?? 24)) };

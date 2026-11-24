@@ -29,7 +29,8 @@ describe('Gemini CLI channels, and the Gemini seat removed after 1.20', () => {
     expect(chatRequestSchema.safeParse({ action: 'table-continue', ...run, skipGemini: true }).success).toBe(false);
     expect(chatRequestSchema.safeParse({ action: 'table-open', ...run, partner: run, driver: 'claude', rounds: 2, kind: 'hierarchy', planner: run }).success).toBe(true);
     expect(chatRequestSchema.safeParse({ action: 'table-open', ...run, partner: run, driver: 'claude', rounds: 2, kind: 'hierarchy', planner: run, challenger: run }).success).toBe(false);
-    expect(chatRequestSchema.safeParse({ action: 'table-open', ...run, partner: run, driver: 'gemini', rounds: 2 }).success).toBe(false);
+    // From 1.39 a Gemini seat may drive.
+    expect(chatRequestSchema.safeParse({ action: 'table-open', ...run, partner: run, driver: 'gemini', rounds: 2 }).success).toBe(true);
   });
   it('a workspace saved by 1.20 is refused as it is, but loads with its Gemini channel, without the seat, and the table at reviewing', () => {
     const saved = workspace120();
@@ -55,10 +56,13 @@ describe('Gemini CLI channels, and the Gemini seat removed after 1.20', () => {
     const only = { ...workspace120(), sessions: [workspace120().sessions[4]], tiles: [{ ...workspace120().tiles[1], x: 0 }], focusedSessionId: null };
     expect(migrateWorkspace(legacyWorkspaceSchema.parse(only))).toEqual({ workspace: only, removedChannels: 0, rootDirectory: '/p' });
   });
-  it('drops a Gemini chat that has a tile, and lays the rest out again', () => {
-    const saved = workspace120(); (saved.sessions[4].config as Record<string, unknown>).chat = true;
+  it('keeps a Gemini chat that has a tile (from 1.39 one leads a table); drops 1.20’s seat even with a tile, and lays the rest out again', () => {
+    const kept = workspace120(); (kept.sessions[4].config as Record<string, unknown>).chat = true;
+    const own = migrateWorkspace(legacyWorkspaceSchema.parse(kept));
+    expect(own.removedChannels).toBe(0); expect(own.workspace!.sessions.find((session) => session.id === 'gem')!.config).toMatchObject({ engine: 'gemini', chat: true });
+    const saved = workspace120(); saved.tiles.push({ sessionId: 'seat', x: 8, y: 0, w: 4, h: 12, minW: 3, minH: 10 });
     const { workspace, removedChannels } = migrateWorkspace(legacyWorkspaceSchema.parse(saved));
-    expect(removedChannels).toBe(1); expect(workspace!.tiles.map((tile) => tile.sessionId)).toEqual(['lead']); expect(workspace!.focusedSessionId).toBeNull();
+    expect(removedChannels).toBe(1); expect(workspace!.tiles.map((tile) => tile.sessionId)).toEqual(['lead', 'gem']);
   });
 });
 

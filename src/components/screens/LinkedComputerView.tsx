@@ -40,7 +40,7 @@ const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', s
  * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read
  * once as it opens (and for each new run); after that they arrive with the computer's other events.
  */
-function LinkedChat({ computer, channel, engine }: { computer: LinkedComputer; channel: RemoteChannel; engine: 'claude' | 'codex' }) {
+function LinkedChat({ computer, channel, engine }: { computer: LinkedComputer; channel: RemoteChannel; engine: 'claude' | 'codex' | 'gemini' }) {
   const keyOf = linkedChatKey(computer.id);
   useEffect(() => { void workbench<ChatReplay>({ action: 'linked-chat-history', id: computer.id, sessionId: channel.sessionId }).then((replay) => receiveReplay(replay, keyOf)).catch(() => {}); }, [computer.id, channel.sessionId, channel.runId]);
   return <RemoteChat sessionId={channel.sessionId} runId={channel.runId} engine={engine} running={channel.running} keyOf={keyOf} className="linked-chat"
@@ -109,7 +109,7 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
     {channel.attention && <div className="session-attention" role="alert"><span aria-hidden="true">◆</span><span>{channel.attention}</span></div>}
     {state === 'failed' && <div className="session-error failure" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{channel.failed}</span></div>}
     {error && <div className="session-error" role="alert"><span>{error}</span></div>}
-    {channel.chat && (channel.engine === 'claude' || channel.engine === 'codex')
+    {channel.chat && channel.engine !== 'shell'
       ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}

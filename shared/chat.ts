@@ -3,7 +3,7 @@
  * --output-format stream-json`) instead of its terminal screen, so Trace draws the conversation itself, with images.
  * These are the events the host turns Claude's messages into, and the requests the window sends back.
  */
-import type { PermissionLevel } from './types';
+import type { PermissionLevel, SeatEngine } from './types';
 import type { SeatReference, TableSeatState } from './table-seats';
 export interface ChatImage { mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string }
 export type ChatBlock =
@@ -115,7 +115,8 @@ export interface RoundTableState {
   stopping?: boolean;
   /** `gemini` from 1.28: a Gemini CLI seat can be the first other seat. */
   partner: { sessionId: string; runId: string; engine: 'claude' | 'codex' | 'gemini' };
-  driver: 'claude' | 'codex'; rounds: number; round: number;
+  /** `gemini` from 1.39: a Gemini seat can lead and edit. */
+  driver: SeatEngine; rounds: number; round: number;
   /** joining: the leading agent summarizes for the newcomer; answering: both answer the person; discussing: they answer each other. */
   /** `acting`: the discussion is over and the driver is carrying out what the person asked (from 1.29). */
   phase: 'joining' | 'answering' | 'discussing' | 'acting' | 'idle';
@@ -140,7 +141,7 @@ export type ChatRequest =
   /** What the agent may do without asking, from now on (this computer's window only). */
   | { action: 'permissions'; sessionId: string; runId: string; level: PermissionLevel }
   /** Seats a partner chat run (another engine, same folder) at this chat's Round Table. */
-  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: 'claude' | 'codex'; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain;
+  | { action: 'table-open'; sessionId: string; runId: string; partner: { sessionId: string; runId: string }; driver: SeatEngine; rounds: number; findings?: import('./findings').Finding[]; waiting?: string; waitingImages?: ChatImage[]; kind?: 'hierarchy'; planner?: { sessionId: string; runId: string }; chain?: SavedChain;
     /** From 1.26: every seat, the lead's own entry included (in any place), with what the person set for each; `partner` and `planner` are then not read. Absent: Claude Code with Codex, or planner, builder and reviewer, as before 1.26. */
     seats?: SeatReference[]; driverSeat?: string;
     /** A saved table seated again (after a restart, or a seat started again): both conversations resumed, so no joining summary. */
@@ -155,7 +156,7 @@ export type ChatRequest =
   | { action: 'table-next-drop'; sessionId: string; runId: string; index: number; head: string }
   | { action: 'table-send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
   /** `seat`: the session of the seat that edits from now on (from 1.26; `driver`, its engine, is read only without it). */
-  | { action: 'table-driver'; sessionId: string; runId: string; driver: 'claude' | 'codex'; seat?: string }
+  | { action: 'table-driver'; sessionId: string; runId: string; driver: SeatEngine; seat?: string }
   /**
    * The table's seats from now on (from 1.26): seats added (running chats in the same folder and window) or removed,
    * and each one's name, instructions and duties. Refused while the table works: a discussion table must be idle, a

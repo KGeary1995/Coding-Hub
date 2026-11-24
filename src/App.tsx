@@ -12,10 +12,12 @@ import { useViewShortcuts } from './runtime/view-shortcuts';
 import { SessionHistory } from './components/SessionHistory';
 import { RepositoryPanel } from './components/RepositoryPanel';
 import { WorkspaceExplorer } from './components/WorkspaceExplorer';
+import { AppPreviewPanel } from './components/AppPreviewPanel';
 import { Topbar } from './components/shell/Topbar';
 import { StatusBar } from './components/shell/StatusBar';
 import { Toasts } from './components/shell/Toasts';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { GettingStarted } from './components/GettingStarted';
 
 /** Channels, or the empty screen until a project is chosen. Mounted per visit, so setup state is re-read each time. */
 function WorkspaceView({ explorer, onCloseExplorer }: { explorer: boolean; onCloseExplorer: () => void }) {
@@ -25,6 +27,7 @@ function WorkspaceView({ explorer, onCloseExplorer }: { explorer: boolean; onClo
     <div className="workspace-canvas">
       {explorer && <WorkspaceExplorer onClose={onCloseExplorer} />}
       <SessionGrid />
+      <AppPreviewPanel />
     </div>
   </section>;
 }
@@ -53,6 +56,7 @@ export function App() {
               : <FeaturePanel />}
         </ErrorBoundary>
       </main>
+      <GettingStarted />
       <StatusBar />
       <Toasts />
     </div>

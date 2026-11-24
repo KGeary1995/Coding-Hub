@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILT_IN_PRESETS, checkSeats, GEMINI_SEAT_RULE, defaultSeatName, hiddenSeatIds, isBuiltInPreset, savedSeats, seatNames, type SeatSettings } from './table-seats';
+import { BUILT_IN_PRESETS, checkSeats, defaultSeatName, hiddenSeatIds, isBuiltInPreset, savedSeats, seatNames, type SeatSettings } from './table-seats';
 import { chatRequestSchema, savedWorkspaceSchema, tablePresetSchema } from './schemas';
 
 const RUN = '11111111-1111-4111-8111-111111111111';
@@ -15,15 +15,19 @@ describe('Round Table seats', () => {
     expect(isBuiltInPreset('mine')).toBe(false);
   });
 
-  it('seats Gemini CLI as a seat that reviews or plans: never the lead, the seat that edits, or the builder', () => {
+  it('seats Gemini in any seat (from 1.39): it may lead, be the seat that edits, and build', () => {
     const claude = { engine: 'claude' as const }; const gemini = { engine: 'gemini' as const };
-    // A discussion: Gemini reviews beside the lead; it cannot lead, and cannot be the seat that edits.
+    // A discussion: Gemini reviews beside the lead, leads, or edits.
     expect(checkSeats('discussion', [claude, gemini], 0, 0)).toBeNull(); expect(checkSeats('discussion', [claude, gemini, gemini], 0, 0)).toBeNull();
-    expect(checkSeats('discussion', [gemini, claude], 0, 1)).toBe(GEMINI_SEAT_RULE); expect(checkSeats('discussion', [claude, gemini], 0, 1)).toBe(GEMINI_SEAT_RULE);
-    // A hierarchy: it may plan, challenge, review and give the final review; it does not build.
+    expect(checkSeats('discussion', [gemini, claude], 0, 0)).toBeNull(); expect(checkSeats('discussion', [gemini, claude], 0, 1)).toBeNull(); expect(checkSeats('discussion', [claude, gemini], 0, 1)).toBeNull();
+    // The seat that edits must be one of the seats.
+    expect(checkSeats('discussion', [gemini, claude], 0, 2)).toBe('Choose the agent that edits files.');
+    // A hierarchy: it may plan, challenge, review, give the final review, and build (leading the table).
     const builder = { engine: 'claude' as const, duties: ['build' as const] };
     expect(checkSeats('hierarchy', [builder, { ...gemini, duties: ['plan', 'final'] }, { ...gemini, duties: ['challenge', 'review'] }], 0)).toBeNull();
-    expect(checkSeats('hierarchy', [{ ...gemini, duties: ['build'] }, { ...claude, duties: ['plan', 'final'] }], 0)).toBe(GEMINI_SEAT_RULE);
+    expect(checkSeats('hierarchy', [{ ...gemini, duties: ['build'] }, { ...claude, duties: ['plan', 'final'] }], 0)).toBeNull();
+    // Building is still the lead's alone, whatever its agent.
+    expect(checkSeats('hierarchy', [{ ...claude, duties: ['plan'] }, { ...gemini, duties: ['build'] }], 0)).toMatch(/builder leads/);
     expect(defaultSeatName(gemini, 'discussion')).toBe('Gemini'); expect(seatNames([claude, gemini, gemini], 'discussion')).toEqual(['Claude Code', 'Gemini', 'Gemini 2']);
   });
   it('takes any number of discussion seats from two to eight', () => {

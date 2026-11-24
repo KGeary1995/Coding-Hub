@@ -86,7 +86,7 @@ const savedSeat = z.object({ session: identifier, ...seatSettings }).strict();
 const seatReference = runReferenceSchema.extend(seatSettings).strict();
 /** A table preset (shared/table-seats.ts TablePreset), kept in the preferences. Whether its seats make a table (checkSeats) is checked where it is used. */
 export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex', 'gemini']), model, ...seatSettings }).strict()).min(2).max(MAX_CHANNELS) }).strict();
-const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
+const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex', 'gemini']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
 const tileSchema = z.object({
   sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),
   w: z.number().int().min(3).max(12), h: z.number().int().min(10).max(1000),
@@ -145,14 +145,14 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
   runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional(), seats: z.array(seatReference).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex', 'gemini']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional(), seats: z.array(seatReference).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-seats'), seats: z.array(seatReference).min(2).max(MAX_CHANNELS), driverSeat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-continue'), skipChallenge: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-next-drop'), index: z.number().int().min(0).max(9), head: z.string().min(1).max(200) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex']), seat: identifier.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex', 'gemini']), seat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-stop') }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-close') }).strict(),

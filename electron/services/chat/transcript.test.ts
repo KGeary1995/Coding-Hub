@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chatHistory, chatText, taskHistory } from './transcript';
+import { chatHistory, chatText, geminiHistory, taskHistory } from './transcript';
+import { field, writeGeminiConversation } from './gemini-conversation.fixture';
 
 /** transcript.ts READ_LIMIT: the most read after a task's prompt. */
 const READ_BYTES = 8 * 1024 * 1024;
@@ -77,5 +78,42 @@ describe('chat transcripts', () => {
     expect(chatText({ type: 'assistant', messageId: 'm', blocks: [{ type: 'thinking', text: 'x' }, { type: 'text', text: 'Hi' }, { type: 'tool', id: 't', name: 'Bash', input: {} }] })).toBe('\r\nHi\r\n  ⏺ Bash\r\n');
     expect(chatText({ type: 'delta', messageId: 'm', text: 'H' })).toBe('');
     expect(chatText({ type: 'done', isError: true, error: 'Interrupted.' })).toBe('\r\nInterrupted.\r\n');
+  });
+});
+
+/** Each test writes a real SQLite conversation (250 steps in one): longer than the 5 s default on a busy Windows runner. */
+describe('Gemini conversations', { timeout: 60_000 }, () => {
+  const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-transcript-'));
+  it('reads what the person typed and what Gemini replied, thought and ran, not its tools\' output or agy\'s own messages', () => {
+    const file = writeGeminiConversation(home(), [
+      // A slash command's expansion is a part of its own (field 3 → 2), not text; the text as typed is field 2.
+      { input: '/plan Make it fast', parts: [' Make it fast'], images: 2 },
+      { thinking: 'Looking at the code.', tools: [{ id: 'call_1', name: 'read_file', input: '{"Path":"C:/a.ts"}' }, { id: 'call_2', name: 'run_command', input: 'not json' }] },
+      { toolOutput: 'what the command printed' }, { agentMessage: '[Message] a reminder from agy' },
+      { reply: 'Done: it is fast now.', thinking: 'Wrapping up.' },
+      // A step compacted by agy keeps only its parts.
+      { parts: ['Second ', 'question'] },
+      { raw: Uint8Array.from([0xff, 0xff, 0xff]), kind: 15 }, { raw: field(1, 14), kind: 14 }, { reply: '' },
+    ]);
+    expect(geminiHistory(file)).toEqual([
+      { role: 'user', text: '/plan Make it fast', images: 2 },
+      { role: 'assistant', messageId: 'step-1', blocks: [{ type: 'thinking', text: 'Looking at the code.' }, { type: 'tool', id: 'call_1', name: 'read_file', input: { Path: 'C:/a.ts' } }, { type: 'tool', id: 'call_2', name: 'run_command', input: { input: 'not json' } }] },
+      { role: 'assistant', messageId: 'step-4', blocks: [{ type: 'thinking', text: 'Wrapping up.' }, { type: 'text', text: 'Done: it is fast now.' }] },
+      { role: 'user', text: 'Second question', images: 0 },
+    ]);
+    expect(chatHistory('gemini', file)).toEqual({ type: 'history', messages: geminiHistory(file), results: {} });
+  });
+  it('keeps the latest messages and cuts long texts, and gives null for a file it cannot read', () => {
+    const file = writeGeminiConversation(home(), Array.from({ length: 250 }, (_, index) => index % 2 ? { reply: `Reply ${index}` } : { input: index === 248 ? 'é'.repeat(30000) : `Prompt ${index}` }));
+    const history = chatHistory('gemini', file); expect(history.messages).toHaveLength(200); expect(history.messages.at(-1)).toMatchObject({ messageId: 'step-249' });
+    expect(history.messages.at(-2)).toEqual({ role: 'user', text: 'é'.repeat(20000), images: 0 });
+    expect(geminiHistory(path.join(home(), 'missing.db'))).toBeNull();
+    const notDatabase = path.join(home(), 'conversation.db'); fs.writeFileSync(notDatabase, 'not a database'); expect(geminiHistory(notDatabase)).toBeNull();
+    expect(chatHistory('gemini', notDatabase)).toEqual({ type: 'history', messages: [], results: {} });
+  });
+  it('writes nothing beside agy\'s file, which can be a write-ahead-log database at rest', () => {
+    const root = home(); const file = writeGeminiConversation(root, [{ input: 'Hello' }], undefined, true);
+    expect(geminiHistory(file)).toEqual([{ role: 'user', text: 'Hello', images: 0 }]);
+    expect(fs.readdirSync(path.dirname(file))).toEqual([path.basename(file)]);
   });
 });

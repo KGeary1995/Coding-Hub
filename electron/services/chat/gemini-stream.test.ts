@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ChatEvent } from '../../../shared/chat';
 const GEMINI_MODEL = 'gemini-4-argon-high';
-import { GeminiStream } from './gemini-stream';
+import { GEMINI_MODE, GeminiStream } from './gemini-stream';
 
 /** What agy 1.5.6's ACP server said in a real session (paths and account details taken out): scripts/fixtures/agy-acp-1.5.6.jsonl. */
 type Recorded = { file: string; dir: 'in' | 'out'; message: Record<string, unknown> };
@@ -13,9 +13,11 @@ const session = recorded.filter((item) => item.file === 'log2');
 function replyTo(method: string) { const sent = session.find((item) => item.dir === 'out' && item.message.method === method)!; return session.find((item) => item.dir === 'in' && item.message.id === sent.message.id && !item.message.method)!.message; }
 const updates = (kind: string) => session.filter((item) => item.dir === 'in' && item.message.method === 'session/update' && (item.message.params as { update: { sessionUpdate: string } }).update.sessionUpdate === kind).map((item) => item.message);
 
+/** A Round Table's reviewer seat, read-only (plan mode) as the table makes it; agy's side recorded with 1.5.6. */
 function setup(confirmMs?: number) {
   const written: Record<string, unknown>[] = []; const events: ChatEvent[] = [];
   const stream = new GeminiStream((line) => written.push(JSON.parse(line)), (event) => events.push(event), { cwd: '/project', model: GEMINI_MODEL, permissions: 'full', ...(confirmMs ? { confirmMs } : {}) });
+  stream.setReadOnly(true);
   /** agy answers Trace's latest request with what it said in the recording. */
   const answer = (method: string, override?: Record<string, unknown>) => { const request = written.filter((item) => item.method === method).at(-1)!; stream.push(JSON.stringify({ ...(override ?? replyTo(method)), id: request.id }) + '\n'); };
   const feed = (message: Record<string, unknown>) => stream.push(JSON.stringify(message) + '\n');
@@ -122,3 +124,101 @@ describe('Gemini seat over ACP (agy acp)', () => {
   });
 });
 
+
+/**
+ * A Gemini chat that may edit (a Round Table's lead or driver, from 1.39), against a fake agy that opens sessions as agy
+ * 1.5.16 did on 2026-11-24: modes default, accept-edits, auto and plan, a new or loaded session starting at default, and
+ * `current_mode_update` after a mode is set. Permission options were allow (allow_once) and deny (reject_once).
+ */
+describe('a Gemini chat that may edit (lead or driver)', () => {
+  const OPENED = { sessionId: 's1', modes: { currentModeId: 'default', availableModes: ['default', 'accept-edits', 'auto', 'plan'].map((id) => ({ id, name: id })) }, configOptions: [{ id: 'model', currentValue: 'gemini-4-neon' }, { id: 'thought_level', currentValue: 'high' }, { id: 'mode', currentValue: 'default' }] };
+  const REQUEST = { sessionId: 's1', toolCall: { toolCallId: 't1', name: 'run_command', kind: 'execute', title: 'git status --short', rawInput: { CommandLine: 'git status --short' } }, options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] };
+  function peer(options: { permissions?: 'ask' | 'edits' | 'full'; resumeId?: string; confirmMs?: number } = {}) {
+    const written: Record<string, unknown>[] = []; const events: ChatEvent[] = [];
+    const stream = new GeminiStream((line) => written.push(JSON.parse(line)), (event) => events.push(event), { cwd: '/project', permissions: options.permissions ?? 'edits', ...(options.resumeId ? { resumeId: options.resumeId } : {}), ...(options.confirmMs ? { confirmMs: options.confirmMs } : {}) });
+    const sent = (method: string) => written.filter((item) => item.method === method);
+    const push = (message: Record<string, unknown>) => stream.push(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
+    const reply = (method: string, result: Record<string, unknown> = {}) => push({ id: sent(method).at(-1)!.id, result });
+    const update = (body: Record<string, unknown>) => push({ method: 'session/update', params: { sessionId: 's1', update: body } });
+    /** agy sets the mode Trace asked for last, and reports it. */
+    const switched = () => { const mode = (sent('session/set_mode').at(-1)!.params as { modeId: string }).modeId; reply('session/set_mode'); update({ sessionUpdate: 'current_mode_update', currentModeId: mode }); return mode; };
+    const open = () => { stream.start(); reply('initialize'); reply('session/new', OPENED); return switched(); };
+    const ask = (id: number) => push({ id, method: 'session/request_permission', params: REQUEST });
+    return { stream, written, events, sent, push, reply, update, switched, open, ask };
+  }
+
+  it('runs in the mode of its level (Ask: default, Allow edits: accept-edits, Full access: auto), and is ready only once agy reports it', () => {
+    expect(GEMINI_MODE).toEqual({ ask: 'default', edits: 'accept-edits', full: 'auto' });
+    for (const level of ['ask', 'edits', 'full'] as const) {
+      const { stream, events, sent, reply, update } = peer({ permissions: level });
+      stream.start(); reply('initialize'); reply('session/new', OPENED);
+      // At Ask a new session is in default already, as agy reports: not asked for again (agy 1.5.16 reports no change then).
+      expect(sent('session/set_mode').map((item) => item.params)).toEqual(level === 'ask' ? [] : [{ sessionId: 's1', modeId: GEMINI_MODE[level] }]);
+      stream.send('Hello', []);
+      if (level !== 'ask') { reply('session/set_mode'); expect(sent('session/prompt')).toHaveLength(0); expect(events.some((event) => event.type === 'ready')).toBe(false); update({ sessionUpdate: 'current_mode_update', currentModeId: GEMINI_MODE[level] }); }
+      expect(events).toContainEqual({ type: 'ready', conversationId: 's1', model: 'gemini-4-neon-high' });
+      expect(sent('session/prompt')).toHaveLength(1);
+    }
+  });
+  it('goes into plan mode while a table keeps it read-only, holds a message until agy reports it, and may edit again after', () => {
+    const { stream, sent, open, reply, switched } = peer(); expect(open()).toBe('accept-edits');
+    stream.setReadOnly(true); expect((sent('session/set_mode').at(-1)!.params as { modeId: string }).modeId).toBe('plan');
+    stream.send('Discuss it first.', []); expect(sent('session/prompt')).toHaveLength(0);
+    expect(switched()).toBe('plan'); expect(sent('session/prompt')).toHaveLength(1);
+    // The discussion is over: the driver carries it out, in its own level's mode again.
+    reply('session/prompt', { stopReason: 'end_turn' });
+    stream.setReadOnly(false); stream.send('Now carry it out.', []); expect(sent('session/prompt')).toHaveLength(1);
+    expect(switched()).toBe('accept-edits'); expect(sent('session/prompt')).toHaveLength(2);
+  });
+  it('changes its mode between turns, never during one', () => {
+    const { stream, sent, open, reply, switched } = peer(); open();
+    stream.send('Work.', []); stream.setPermissions('full'); expect(stream.permissions()).toBe('full');
+    expect(sent('session/set_mode')).toHaveLength(1);
+    reply('session/prompt', { stopReason: 'end_turn' }); expect(switched()).toBe('auto');
+  });
+  it('asks the person at Allow edits and answers with agy’s own option; at Full access answers itself, but not for a read-only seat', () => {
+    const asking = peer(); asking.open(); asking.stream.send('Check the status.', []);
+    asking.ask(7); const permission = asking.events.find((event) => event.type === 'permission') as Extract<ChatEvent, { type: 'permission' }>;
+    expect(permission).toMatchObject({ toolName: 'Shell', description: 'git status --short', canAllowEdits: false });
+    expect(asking.stream.answer(permission.requestId, true)).toBe(true); expect(asking.written.at(-1)).toEqual({ jsonrpc: '2.0', id: 7, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    const full = peer({ permissions: 'full' }); full.open(); full.stream.send('Check the status.', []);
+    full.ask(8); expect(full.written.at(-1)).toEqual({ jsonrpc: '2.0', id: 8, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
+    expect(full.events.some((event) => event.type === 'permission' || event.type === 'permission-done')).toBe(false);
+    // Read-only at Full access: the table decides (it declines edits and allows the rest), so the request is passed on.
+    full.reply('session/prompt', { stopReason: 'end_turn' }); full.stream.setReadOnly(true); full.switched(); full.stream.send('Review.', []);
+    full.ask(9); expect(full.events.at(-1)).toMatchObject({ type: 'permission', toolName: 'Shell' });
+  });
+  it('says nothing about its writes while it may edit; a read-only seat’s writes are said', () => {
+    const { stream, events, open, update, reply, switched } = peer(); open(); stream.send('Write it.', []);
+    const write = { sessionUpdate: 'tool_call', toolCallId: 'w1', name: 'write_file', kind: 'edit', title: 'File hello.txt', locations: [{ path: '/project/hello.txt' }] };
+    update(write); expect(events.some((event) => event.type === 'notice')).toBe(false);
+    reply('session/prompt', { stopReason: 'end_turn' }); stream.setReadOnly(true); switched(); stream.send('Review.', []);
+    update({ ...write, toolCallId: 'w2' }); expect(events.at(-1)).toMatchObject({ type: 'notice', text: expect.stringContaining('Gemini writes /project/hello.txt') });
+  });
+  it('resumes a saved conversation with session/load and shows its messages again', () => {
+    const resumeId = '70253404-1a63-473e-8348-dd2f445bd93c';
+    const { stream, events, sent, reply, update, switched } = peer({ resumeId });
+    stream.start(); reply('initialize');
+    expect(sent('session/load')).toEqual([expect.objectContaining({ params: { sessionId: resumeId, cwd: '/project', mcpServers: [] } })]); expect(sent('session/new')).toHaveLength(0);
+    // agy replays the conversation before it answers (seen with 1.5.16): the person's words in pieces, then the reply.
+    update({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '/plan' } }); update({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: ' Make hello.txt' } });
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Made ' } }); update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'it.' } });
+    reply('session/load', { ...OPENED, sessionId: resumeId });
+    expect(events.find((event) => event.type === 'history')).toEqual({ type: 'history', results: {}, messages: [{ role: 'user', text: '/plan Make hello.txt', images: 0 }, { role: 'assistant', messageId: 'gemini-replay-1', blocks: [{ type: 'text', text: 'Made it.' }] }] });
+    switched(); expect(events).toContainEqual({ type: 'ready', conversationId: resumeId, model: 'gemini-4-neon-high' });
+  });
+  it('says why when agy cannot load the conversation, or will not switch mode', () => {
+    const lost = peer({ resumeId: '70253404-1a63-473e-8348-dd2f445bd93c' }); lost.stream.start(); lost.reply('initialize');
+    lost.push({ id: lost.sent('session/load')[0].id, error: { code: -32603, message: 'conversation not found' } });
+    expect(lost.events.at(-1)).toMatchObject({ type: 'notice', text: expect.stringContaining('could not open this conversation again (conversation not found)') });
+    const stuck = peer(); stuck.stream.start(); stuck.reply('initialize'); stuck.reply('session/new', OPENED); stuck.stream.send('Hi', []);
+    stuck.push({ id: stuck.sent('session/set_mode')[0].id, error: { code: -32602, message: 'unknown mode' } });
+    expect(stuck.events.slice(-2)).toEqual([{ type: 'notice', text: 'Gemini would not switch to accept-edits mode (unknown mode).' }, { type: 'done', isError: true, error: 'Gemini would not switch to accept-edits mode (unknown mode).' }]);
+  });
+  it('stops using a session that does not report the new mode in time', async () => {
+    const { stream, events, open, reply, sent } = peer({ confirmMs: 10 }); open();
+    stream.setReadOnly(true); reply('session/set_mode'); stream.send('Review.', []);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent('session/prompt')).toHaveLength(0); expect(events.at(-1)).toMatchObject({ type: 'done', isError: true, error: expect.stringContaining('did not confirm plan mode') });
+  });
+});

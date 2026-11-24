@@ -11,9 +11,10 @@ describe('a workspace saved with Gemini channels', () => {
     const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: 'g', sessions: [session('a', 'claude'), session('g', 'gemini')], tiles: [tile('a', 0), tile('g', 4)] });
     expect(migrateWorkspace(saved)).toEqual({ workspace: saved, removedChannels: 0, rootDirectory: '/p' });
   });
-  it('lays the channels left out again, so no gap is left where a Gemini chat’s tile was', () => {
+  it('lays the channels left out again, so no gap is left where 1.20’s Gemini seat had a tile', () => {
     const chat = { ...session('g', 'gemini'), config: { engine: 'gemini', model: '', chat: true } };
-    const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), chat, session('c', 'codex')], tiles: [tile('a', 0), tile('g', 4), tile('c', 8)] });
+    const lead = { ...session('a', 'claude'), roundTable: { partner: 'c', planner: 'c', challenger: 'g', kind: 'hierarchy', driver: 'claude', rounds: 1 } };
+    const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [lead, chat, session('c', 'codex')], tiles: [tile('a', 0), tile('g', 4), tile('c', 8)] });
     const { workspace } = migrateWorkspace(saved);
     expect(workspace!.tiles.map(({ sessionId, x, w }) => ({ sessionId, x, w }))).toEqual([{ sessionId: 'a', x: 0, w: 6 }, { sessionId: 'c', x: 6, w: 6 }]);
     expect(savedWorkspaceSchema.safeParse(workspace).success).toBe(true);
@@ -25,9 +26,10 @@ describe('a workspace saved with Gemini channels', () => {
     const { workspace, removedChannels } = migrateWorkspace(saved);
     expect(removedChannels).toBe(0); expect(workspace!.sessions.map((item) => item.id)).toEqual(['a', 'g']); expect(workspace!.sessions[0].roundTable?.seats).toEqual([{ session: 'a' }, { session: 'g' }]);
     expect(savedWorkspaceSchema.safeParse(workspace).success).toBe(true);
-    // The same Gemini chat with no table to seat it (its lead closed) is not a channel of its own, and goes.
-    const orphan = savedWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), seat], tiles: [tile('a', 0), tile('g', 4)] });
-    expect(migrateWorkspace(orphan).workspace!.sessions.map((item) => item.id)).toEqual(['a']);
+    // The same Gemini chat with no table to seat it is a channel of its own from 1.39 (a table's lead, or a seat that would
+    // not stop when its table closed), and stays; up to 1.38 it was dropped.
+    const shown = savedWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), seat], tiles: [tile('a', 0), tile('g', 4)] });
+    expect(migrateWorkspace(shown)).toEqual({ workspace: shown, removedChannels: 0, rootDirectory: '/p' });
   });
   it('keeps the tiles as they were when no tile was removed', () => {
     const saved = legacyWorkspaceSchema.parse({ version: 1, rootDirectory: '/p', layoutMode: 'columns', focusedSessionId: null, sessions: [session('a', 'claude'), session('c', 'codex')], tiles: [tile('a', 0), tile('c', 4)] });

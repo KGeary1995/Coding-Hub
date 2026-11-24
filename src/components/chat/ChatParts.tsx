@@ -228,7 +228,7 @@ export function seatState(partner: Pick<Session, 'status' | 'error'> & { attenti
 }
 
 /** The controls of a Round Table: who sits there and who drives, how many rounds, where it is, Seats, stop and close. */
-export type TableAction = { action: 'table-waiting'; send: boolean } | { action: 'table-driver'; driver: 'claude' | 'codex'; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
+export type TableAction = { action: 'table-waiting'; send: boolean } | { action: 'table-driver'; driver: 'claude' | 'codex' | 'gemini'; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
 /** A seat as the bar shows it: `state` (seatState) for a seat that has no tile, and its new tokens today, when the caller has them (the desktop does). */
 /** `tokens`: null when the seat's usage is not measured (a Gemini CLI seat before its first request is read), shown as "—". */
@@ -239,7 +239,7 @@ const counts = (seat: BarSeat) => seat.tokens === null || seat.tokens === undefi
  * phone, a linked computer). `onShow` (the desktop, where hidden seats have no tile) switches the thread to a seat's own
  * conversation, `showing` is that seat's id; `onSeats` opens the seat editor (not on a phone or linked computer).
  */
-export function TableBar({ leadEngine, table, busy, onRequest, seats: given, showing = null, onShow, onSeats }: { leadEngine: 'claude' | 'codex'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; seats?: BarSeat[]; showing?: string | null; onShow?: (seat: string | null) => void; onSeats?: () => void }) {
+export function TableBar({ leadEngine, table, busy, onRequest, seats: given, showing = null, onShow, onSeats }: { leadEngine: 'claude' | 'codex' | 'gemini'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; seats?: BarSeat[]; showing?: string | null; onShow?: (seat: string | null) => void; onSeats?: () => void }) {
   const seats: BarSeat[] = given ?? seatViews(table, leadEngine); const many = seats.length > 2;
   const driver = seats.find((seat) => seat.driver) ?? seats[0]; const others = seats.filter((seat) => seat !== driver); const hidden = seats.filter((seat) => !seat.lead);
   const run = onRequest; const images = waitingImageCount(table); const counted = seats.filter((seat) => seat.tokens !== undefined);
@@ -254,7 +254,7 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
   // and each has a tooltip, as every control that shows only an icon has.
   const roles = `${driver.name} drives · ${joinNames(others.map((seat) => seat.name))} ${others.length === 1 ? 'reviews' : 'review'}`;
   const about = counted.length ? `${roles}. New tokens today: ${counted.map((seat) => `${seat.name} ${counts(seat)}`).join(' · ')}${counted.some((seat) => seat.tokens === null) ? ' (—: not measured yet)' : ''}` : roles;
-  const swap = others[0]; const swapEngine = swap && swap.engine !== 'gemini' ? swap.engine : null; const stopAll = many ? 'all' : 'both';
+  const swap = others[0]; const stopAll = many ? 'all' : 'both';
   // Grouped, so a narrow tile wraps whole groups (who sits there; how the others are doing; who drives and Rounds; where it is and its buttons), never one control alone.
   return <div className="table-bar" role="group" aria-label="Round Table">
     <span className="table-group" title={about}>
@@ -265,8 +265,8 @@ export function TableBar({ leadEngine, table, busy, onRequest, seats: given, sho
       {hidden.map((seat) => seat.state && <span key={seat.id} className={`table-partner ${seat.state === 'needs approval' ? 'waiting' : ''}`} title={`${seat.name} runs in the background in this channel`}><b className={`seat-text-${seat.colour}`}>{seat.name}</b> {seat.state}</span>)}
       {counted.length > 0 && <span className="table-tokens tnum" title="New tokens today in each agent's channel">{counted.map((seat, index) => <Fragment key={seat.id || index}>{index > 0 && ' · '}<b className={`seat-text-${seat.colour}`}>{seat.name} {counts(seat)}</b></Fragment>)}</span>}</span>}
     <span className="table-group">
-      {!many && swap && swapEngine && <button className="quiet-button small" title={`Let ${swap.name} edit files and make ${driver.name} the reviewer`} onClick={() => run({ action: 'table-driver', driver: swapEngine, ...(table.seats && swap.id ? { seat: swap.id } : {}) })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>}
-      {many && <label className="table-rounds" title="The agent that edits files; the others review and stay read-only"><span className="table-label">Edits files</span><select aria-label="Agent that edits files" value={driver.id} onChange={(event) => { const next = seats.find((seat) => seat.id === event.target.value); if (next && next.engine !== 'gemini') run({ action: 'table-driver', driver: next.engine, seat: next.id }); }}>{seats.filter((seat) => seat.engine !== 'gemini').map((seat) => <option key={seat.id} value={seat.id}>{seat.name}</option>)}</select></label>}
+      {!many && swap && <button className="quiet-button small" title={`Let ${swap.name} edit files and make ${driver.name} the reviewer`} onClick={() => run({ action: 'table-driver', driver: swap.engine, ...(table.seats && swap.id ? { seat: swap.id } : {}) })}><ArrowLeftRight size={13} /><span className="table-swap">Swap</span></button>}
+      {many && <label className="table-rounds" title="The agent that edits files; the others review and stay read-only"><span className="table-label">Edits files</span><select aria-label="Agent that edits files" value={driver.id} onChange={(event) => { const next = seats.find((seat) => seat.id === event.target.value); if (next) run({ action: 'table-driver', driver: next.engine, seat: next.id }); }}>{seats.map((seat) => <option key={seat.id} value={seat.id}>{seat.name}</option>)}</select></label>}
       <label className="table-rounds" title={`Rounds: how many times each agent replies to the ${many ? 'others' : 'other'}`}><span className="table-label">Rounds</span><select value={table.rounds} onChange={(event) => run({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[0, 1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
       {onSeats && <button className="quiet-button small" disabled={busy} title={busy ? 'Seats can be changed when the Round Table is not working' : 'Add or remove agents, and change their names, instructions and models'} onClick={onSeats}><Settings2 size={13} /><span className="table-label">Seats</span></button>}</span>
     <span className="table-group table-end">

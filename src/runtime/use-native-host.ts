@@ -37,7 +37,16 @@ function chatTurnDone(sessionId: string, failed: boolean) {
  * An agent's turn ended (Claude Code's Stop hook, or a chat turn; for a Round Table, the driver's reply). Unless the person
  * is looking at that channel (Trace in front, on the channels, with that tile focused), it shows Done until they look.
  */
+/**
+ * Coming back to Trace with focus in a channel's tile is looking at it: no focus event reaches the tile then, so a
+ * turn that ended while Trace was in the background stayed Done (and in Needs you) until the tile was clicked again.
+ */
+export function seenOnReturn() {
+  const state = useWorkspaceStore.getState(); if (state.activeView !== 'workspace') return;
+  const id = document.activeElement?.closest('.session-tile')?.getAttribute('data-session'); if (id) state.markSeen(id);
+}
 function turnDone(sessionId: string) {
+  guideTurnEnded();
   const state = useWorkspaceStore.getState(); if (!channelsOf(state.sessions).some((session) => session.id === sessionId)) return;
   const looking = document.hasFocus() && state.activeView === 'workspace' && document.activeElement?.closest('.session-tile')?.getAttribute('data-session') === sessionId;
   if (!looking) state.markDone(sessionId);
@@ -49,6 +58,10 @@ import type { UsageRecord, HubPreferences } from '../../shared/hub';
 import { isAgentConfig, isChatRun } from '../../shared/types';
 import { autoStartInOrder } from './start-order';
 import { receiveAutoCheck } from '../state/auto-check-store';
+import { guideTurnEnded } from '../state/guide-store';
+import { receiveUndo } from '../state/undo-store';
+import { scheduledRun } from './scheduled-run';
+import { loadPreviews, receivePreview } from '../state/preview-store';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -122,13 +135,18 @@ export function useNativeHost() {
     // Another computer's chat channels: their events, into this window's chat store, kept apart by computer.
     const unsubscribeLinkedChat = host.onLinkedChatEvent((event) => { const keyOf = linkedChatKey(event.id); if (event.type === 'chat') receiveChat(event.envelope, keyOf); else receiveReplay(event.replay, keyOf); });
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
-    const unsubscribeChecks = host.onAutoCheckEvent(receiveAutoCheck);
+    window.addEventListener('focus', seenOnReturn);
+    const unsubscribeChecks = host.onAutoCheckEvent(receiveAutoCheck); const unsubscribeUndo = host.onUndoEvent(receiveUndo);
+    // App preview (1.39.0): addresses channels printed, and the open preview's state; read once for a reloaded window.
+    const unsubscribePreview = host.onPreviewEvent(receivePreview); void loadPreviews();
     // An agent (task tools) or a plugin changed the Tasks board: shown at once.
     const unsubscribeTasks = host.onTasksChanged(() => { void loadTasks().then(() => refreshTaskWatch()); });
     // A clicked desktop notification opens what it is about.
     const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView(target.view); });
     // A phone resumed a conversation from its History: a channel for it here, as Session history's Resume makes.
     const unsubscribeResume = host.onRemoteResume((request) => { const error = remoteResume(request); host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) }); });
+    // A scheduled job's run is due (1.39.0): its channel opens here, and its task is sent once the agent is ready.
+    const unsubscribeScheduled = host.onScheduledRun((request) => { void scheduledRun(request).catch(() => 'The channel could not be opened.').then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {}); });
     const unsubscribeControl = host.onRemoteControl((request) => {
       void ('settings' in request ? remoteSettings(request.settings) : 'add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
@@ -167,7 +185,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; window.removeEventListener('focus', seenOnReturn); onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeUndo(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); unsubscribeScheduled(); unsubscribePreview(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }

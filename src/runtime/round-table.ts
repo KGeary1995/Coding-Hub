@@ -1,7 +1,7 @@
 import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ChatImage, RoundTableState } from '../../shared/chat';
-import type { ChatEngine, Session } from '../../shared/types';
-import { BUILT_IN_PRESETS, checkSeats, GEMINI_SEAT_RULE, MAX_SEATS, savedSeats, type SavedSeat, type SeatReference, type SeatSettings, type TablePreset, type TablePresetSeat } from '../../shared/table-seats';
+import type { SeatEngine, Session } from '../../shared/types';
+import { BUILT_IN_PRESETS, checkSeats, MAX_SEATS, savedSeats, type SavedSeat, type SeatReference, type SeatSettings, type TablePreset, type TablePresetSeat } from '../../shared/table-seats';
 import { createSession, fitTiles, hiddenSeats, seatsOf, useWorkspaceStore } from '../state/workspace-store';
 import { tableOpenFailed } from '../state/hierarchy-state';
 export { hierarchyDetached, tableDetached } from '../state/hierarchy-state';
@@ -11,7 +11,7 @@ import { hubCall } from '../state/hub-store';
 import { itemTitle } from '../../shared/memory-items';
 import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatRun, seatEngineOf } from '../../shared/types';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
@@ -36,7 +36,7 @@ const seatReference = (seat: SavedSeat, session: Session): SeatReference => ({ s
 /** A hidden seat's chat: this agent and model, in the lead's folder, with the lead's permissions and memory project (one table, one setting). */
 function seatSession(lead: Session, seat: TablePresetSeat, cwd: string): Session {
   const added = createSession(seat.engine, { mode: 'independent', cwd }); const from = lead.config;
-  // A Gemini CLI seat: its agent protocol server, in plan mode, with its own model; it has no shared memory, and what it may do is the table's to decline.
+  // A Gemini seat: its agent protocol server (plan mode while read-only), with its own model; its memory tools come from Trace's agy plugin, and what a reviewer may do is the table's to decline.
   // It takes the lead's permissions like every seat: at Full access the table answers its commands for it. Up to 1.29.0
   // it was seated without them, so it asked before every command whatever the table was set to.
   if (added.config.engine === 'gemini') { added.config = { engine: 'gemini', chat: true, model: seat.model ?? '', ...('permissions' in from && from.permissions ? { permissions: from.permissions } : {}) }; return added; }
@@ -48,7 +48,7 @@ function seatSession(lead: Session, seat: TablePresetSeat, cwd: string): Session
 }
 /** Whether a seat's session is up: running, with a run to name in a request. */
 const up = (session: Session | undefined): session is Session & { runId: string } => session?.status === 'running' && Boolean(session.runId);
-const engineOf = (session: Session | undefined): ChatEngine => session?.config.engine === 'codex' ? 'codex' : 'claude';
+const engineOf = (session: Session | undefined): SeatEngine => session ? seatEngineOf(session.config) : 'claude';
 
 /** How many seats a table led by this channel (or, with no channel, a new table) can have now, from the eight CLIs Trace runs and the channels that exist. */
 export function seatRoom(leadId?: string): number {
@@ -64,7 +64,7 @@ export function seatRoom(leadId?: string): number {
  */
 export async function openTable(leadId: string, preset: TablePreset): Promise<string | null> {
   const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
-  if (!lead || !isChatEngineConfig(lead.config) || !lead.config.chat || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
+  if (!lead || !isChatRun(lead.config) || lead.status !== 'running' || !lead.runId || !lead.runningCwd) return 'Start this chat first.';
   if (tableOf(leadId) || opening.has(leadId)) return null;
   const refused = checkPreset(preset); if (refused) return refused;
   // A table saved earlier whose seats did not come back: replaced by a new one.
@@ -79,7 +79,7 @@ export async function openTable(leadId: string, preset: TablePreset): Promise<st
   const planner = hierarchy ? records.find((seat) => seat.duties?.includes('plan'))?.session : undefined;
   // At a discussion table the seat that edits: the preset's, the first when it names none.
   const driverId = hierarchy ? undefined : ids[preset.driver ?? 0];
-  const driver = driverId === leadId || !driverId ? lead.config.engine : engineOf(added.find((session) => session.id === driverId));
+  const driver = driverId === leadId || !driverId ? engineOf(lead) : engineOf(added.find((session) => session.id === driverId));
   useWorkspaceStore.setState((state) => ({ sessions: [...state.sessions, ...added].map((session) => session.id === leadId ? { ...session, roundTable: { partner: added[0].id, driver, rounds: preset.rounds, ...(hierarchy ? { kind: 'hierarchy' as const, ...(planner ? { planner } : {}) } : {}), seats: records, ...(driverId ? { driverSeat: driverId } : {}) } } : session) }));
   opening.add(leadId);
   try {
@@ -94,7 +94,7 @@ export async function openTable(leadId: string, preset: TablePreset): Promise<st
     await retire(leadId); return result?.error.message ?? 'The Round Table could not be opened.';
   } finally { opening.delete(leadId); }
 }
-/** The discussion table with Claude Code and Codex at a running chat channel: the other agent seats at it, this channel's own agent driving first. */
+/** The discussion table with Claude Code and Codex at a running chat channel: the other agent seats at it (Claude Code at a Gemini chat), this channel's own agent driving first. */
 export const openRoundTable = (leadId: string): Promise<string | null> => {
   const engine = engineOf(useWorkspaceStore.getState().sessions.find((session) => session.id === leadId));
   return openTable(leadId, { ...builtIn('discussion'), seats: [{ engine, model: '' }, { engine: engine === 'claude' ? 'codex' : 'claude', model: '' }] });
@@ -115,9 +115,11 @@ const findingLine = (finding: Finding) => [`${finding.id} (${finding.severity}),
 export async function keepFindings(lead: Session): Promise<number> {
   const findings = lead.roundTable?.findings ?? []; const open = findings.filter((finding) => finding.status !== 'verified');
   const directory = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
-  if (!findings.length || !isChatEngineConfig(lead.config)) return 0;
-  if (!lead.config.memoryKey && !directory) throw new Error('This channel has no folder to find its memory project from.');
-  const project = lead.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
+  // A Gemini lead has no memory project of its own: its folder's is used.
+  if (!findings.length || !isAgentConfig(lead.config)) return 0;
+  const memoryKey = 'memoryKey' in lead.config ? lead.config.memoryKey : undefined;
+  if (!memoryKey && !directory) throw new Error('This channel has no folder to find its memory project from.');
+  const project = memoryKey ?? await hubCall<string>({ action: 'memory-key', directory: directory! });
   const notes = [{ title: `Round Table review record: ${findings.length} ${findings.length === 1 ? 'finding' : 'findings'}, ${findings.length - open.length} verified`, content: ['Saved by Trace when the Round Table closed.', ...findings.map((finding) => `- ${findingLine(finding)}`)].join('\n') },
     ...open.map((finding) => ({ title: itemTitle(`Round Table ${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}`), content: [`Round Table finding ${finding.id} (${finding.severity}), ${finding.status}${finding.evidence ? `, at ${finding.evidence}` : ''}: ${finding.text}`, finding.response && `Driver: ${finding.response}`, finding.check && `Reviewer: ${finding.check}`, finding.reviewedAt && `Reviewed on files ${finding.reviewedAt}${finding.filesChanged ? ' (files changed while it was reviewed)' : ''}.`, 'Saved by Trace when the Round Table closed, because it was not verified.'].filter(Boolean).join('\n') }))]
     .map((note) => ({ ...note, project, author: 'human' as const, key: `${project}\n${note.title}\n${note.content}` }));
@@ -174,7 +176,7 @@ async function retire(leadId: string): Promise<string | null> {
 /** Leads whose table is being closed, so a close from the window and the host's `closed` event stop the partner once. */
 const retiring = new Set<string>();
 
-type TableRequest = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: 'claude' | 'codex'; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-next-drop'; index: number; head: string };
+type TableRequest = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-waiting'; send: boolean } | { action: 'table-send'; text: string; images: ChatImage[] } | { action: 'table-driver'; driver: SeatEngine; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-next-drop'; index: number; head: string };
 /** A request to the table a running chat channel leads; the error message, or null. */
 export async function tableRequest(leadId: string, request: TableRequest): Promise<string | null> {
   const lead = useWorkspaceStore.getState().sessions.find((session) => session.id === leadId);
@@ -247,8 +249,8 @@ export async function startTable(preset: TablePreset): Promise<string | null> {
   const before = new Set(useWorkspaceStore.getState().sessions.map((session) => session.id));
   const refused = checkPreset(preset); if (refused) return refused;
   if (before.size + preset.seats.length > MAX_CHANNELS) return tableFull(preset.seats.length);
+  // A Gemini lead is a Gemini chat channel (from 1.39), as Claude Code's and Codex's are theirs.
   const seat = preset.seats[Math.max(0, leadIndex(preset))];
-  if (seat.engine === 'gemini') return GEMINI_SEAT_RULE;
   useWorkspaceStore.getState().addChatSession(seat.engine);
   const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!lead || lead.config.engine !== seat.engine) return 'The Round Table could not be added.';
@@ -289,7 +291,7 @@ export function tableSeats(leadId: string): EditableSeat[] {
   const seats = seatsOf(sessions, leadId).flatMap(({ seat, session }) => session && isAgentConfig(session.config) ? [{ seat, session, model: session.config.model }] : []);
   // A table saved before seats were named has no driverSeat: the seat of the driver's agent.
   const driverId = table.kind === 'hierarchy' ? undefined : table.driverSeat ?? seats.find(({ session }) => session.config.engine === table.driver)?.seat.session;
-  return seats.map(({ seat, session, model }) => ({ engine: session.config.engine === 'gemini' ? 'gemini' as const : engineOf(session), model, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
+  return seats.map(({ seat, session, model }) => ({ engine: engineOf(session), model, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
 }
 
 /** A plan for the seats of a table that is already open or saved: `session` names a seat that stays (with what the person now set), none a seat to add; seats not listed go. */
@@ -304,7 +306,7 @@ export interface SeatPlan { seats: (TablePresetSeat & { session?: string })[]; d
  */
 export async function changeSeats(leadId: string, plan: SeatPlan): Promise<string | null> {
   const sessions = useWorkspaceStore.getState().sessions; const lead = sessions.find((session) => session.id === leadId); const table = lead?.roundTable;
-  if (!lead || !table || !isChatEngineConfig(lead.config)) return 'This channel has no Round Table to change.';
+  if (!lead || !table || !isChatRun(lead.config)) return 'This channel has no Round Table to change.';
   if (opening.has(leadId) || retiring.has(leadId)) return 'The Round Table is opening or closing. Try again in a moment.';
   const hierarchy = table.kind === 'hierarchy'; const kind = hierarchy ? 'hierarchy' as const : 'discussion' as const;
   const current = seatsOf(sessions, leadId); const known = new Map(current.map(({ seat, session }) => [seat.session, session]));
@@ -332,7 +334,7 @@ export async function changeSeats(leadId: string, plan: SeatPlan): Promise<strin
   const driverId = hierarchy ? undefined : plan.driver !== undefined ? idOf(plan.seats[plan.driver]) : previousDriver && (previousDriver === leadId || named.includes(previousDriver)) ? previousDriver : leadId;
   const driverSession = driverId === leadId ? lead : added.find((session) => session.id === driverId) ?? sessions.find((session) => session.id === driverId);
   // Only what this change sets: the rest of the record (the work, the review record) is kept as it is when it is saved.
-  const before = table; const next: Partial<NonNullable<Session['roundTable']>> = { partner: records[1].session, driver: driverSession && isChatEngineConfig(driverSession.config) ? engineOf(driverSession) : table.driver, rounds: plan.rounds ?? table.rounds, ...(planner ? { planner } : {}), seats: records, ...(driverId ? { driverSeat: driverId } : {}) };
+  const before = table; const next: Partial<NonNullable<Session['roundTable']>> = { partner: records[1].session, driver: driverSession && isAgentConfig(driverSession.config) ? engineOf(driverSession) : table.driver, rounds: plan.rounds ?? table.rounds, ...(planner ? { planner } : {}), seats: records, ...(driverId ? { driverSeat: driverId } : {}) };
   const undo = async () => {
     const gone = new Set(added.map((session) => session.id));
     for (const session of added) { const now = useWorkspaceStore.getState().sessions.find((item) => item.id === session.id); if (live(now)) { await settled([session.id], 'starting'); await stopSession(session.id); await settled([session.id]); } }

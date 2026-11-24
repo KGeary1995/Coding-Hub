@@ -163,7 +163,8 @@ interface WorkspaceState {
   /** A plugin tile: a Terminal channel that runs a plugin's tile program (docs/plugins.md). */
   addPluginTile: (plugin: { id: string; tile: string }, title: string) => void;
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
-  addChatSession: (engine: 'claude' | 'codex') => void;
+  /** `gemini`: a Gemini chat, made only to lead a Round Table (+ Channel offers Gemini as a terminal). */
+  addChatSession: (engine: 'claude' | 'codex' | 'gemini') => void;
   removeSession: (id: string) => void;
   updateConfig: (id: string, config: CLIEngineConfig) => void;
   resetCodexConfig: (id: string) => void;
@@ -202,7 +203,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   hydrate: (saved, storageInfo, removedByHost = 0, keptRoot) => {
     const migrated = saved ? migrateWorkspace(saved) : { workspace: null, removedChannels: 0, rootDirectory: keptRoot ?? null }; const first = firstUnderRule();
     const removed = removedByHost + migrated.removedChannels;
-    const loadNotice = removed ? `${removed === 1 ? 'A Gemini chat was' : `${removed} Gemini chats were`} removed from this workspace: Gemini runs only in a terminal now.` : null;
+    const loadNotice = removed ? `${removed === 1 ? 'A Gemini chat was' : `${removed} Gemini chats were`} removed from this workspace: they were Trace 1.20’s Gemini seat, which Trace no longer runs.` : null;
     // Nothing but Gemini seats was saved (here, or already dropped by the host): the default channels, in the saved folder.
     const workspace = migrated.workspace;
     if (!workspace && migrated.rootDirectory) { set({ rootDirectory: migrated.rootDirectory, loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null }); return; }

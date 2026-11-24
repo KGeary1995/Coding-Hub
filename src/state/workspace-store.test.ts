@@ -275,22 +275,24 @@ describe('a workspace saved with Gemini (1.19, 1.20)', () => {
   });
   it('says so for Gemini chats dropped with a tile, here or by the host, and says nothing for a workspace without them', () => {
     const plain = savedWorkspace();
-    useWorkspaceStore.getState().hydrate(plain, info, 2); expect(useWorkspaceStore.getState().loadNotice).toBe('2 Gemini chats were removed from this workspace: Gemini runs only in a terminal now.');
+    useWorkspaceStore.getState().hydrate(plain, info, 2); expect(useWorkspaceStore.getState().loadNotice).toBe('2 Gemini chats were removed from this workspace: they were Trace 1.20’s Gemini seat, which Trace no longer runs.');
     useWorkspaceStore.getState().hydrate(plain, info); expect(useWorkspaceStore.getState().loadNotice).toBeNull();
+    // A Gemini chat with a tile is a channel of its own (one that led a table, from 1.39): kept, and nothing to say.
     const seen = workspace120(); (seen.sessions[4].config as Record<string, unknown>).chat = true;
-    useWorkspaceStore.getState().hydrate(seen as never, info); expect(useWorkspaceStore.getState().loadNotice).toBe('A Gemini chat was removed from this workspace: Gemini runs only in a terminal now.');
+    useWorkspaceStore.getState().hydrate(seen as never, info); expect(useWorkspaceStore.getState().loadNotice).toBeNull();
+    expect(useWorkspaceStore.getState().sessions.find((session) => session.id === 'gem')?.config).toMatchObject({ engine: 'gemini', chat: true });
   });
-  it('keeps the folder when only Gemini chats were saved', () => {
+  it('loads a workspace of one Gemini chat as it is: from 1.39 that is a channel of its own (up to 1.38 it was dropped)', () => {
     const only = { ...workspace120(), rootDirectory: '/only', sessions: [{ ...workspace120().sessions[4], config: { engine: 'gemini', model: '', chat: true } }], tiles: [{ ...workspace120().tiles[1], x: 0 }], focusedSessionId: null };
-    const before = useWorkspaceStore.getState().sessions;
     useWorkspaceStore.getState().hydrate(only as never, info);
-    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/only', sessions: before, persistenceReady: true }); expect(useWorkspaceStore.getState().loadNotice).toContain('A Gemini chat was removed');
+    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/only', persistenceReady: true, loadNotice: null });
+    expect(useWorkspaceStore.getState().sessions.map((session) => [session.id, session.config])).toEqual([['gem', { engine: 'gemini', model: '', chat: true }]]);
   });
   it('keeps the folder the host sends when the host already dropped every channel', () => {
     useWorkspaceStore.setState({ rootDirectory: null });
     const before = useWorkspaceStore.getState().sessions;
     useWorkspaceStore.getState().hydrate(null, info, 1, '/kept');
-    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/kept', sessions: before, persistenceReady: true, loadNotice: 'A Gemini chat was removed from this workspace: Gemini runs only in a terminal now.' });
+    expect(useWorkspaceStore.getState()).toMatchObject({ rootDirectory: '/kept', sessions: before, persistenceReady: true, loadNotice: 'A Gemini chat was removed from this workspace: they were Trace 1.20’s Gemini seat, which Trace no longer runs.' });
     useWorkspaceStore.getState().hydrate(null, info); expect(useWorkspaceStore.getState().loadNotice).toBeNull();
   });
 });

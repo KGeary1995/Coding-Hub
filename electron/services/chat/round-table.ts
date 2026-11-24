@@ -2,7 +2,7 @@ import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../
 import { HubError } from '../cli/engine-adapter';
 import type { PermissionLevel } from '../../../shared/types';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
-import { checkSeats, GEMINI_SEAT_RULE, seatNames, type SeatSettings, type TableKind } from '../../../shared/table-seats';
+import { checkSeats, seatNames, type SeatSettings, type TableKind } from '../../../shared/table-seats';
 
 type Engine = 'claude' | 'codex' | 'gemini';
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
@@ -102,7 +102,7 @@ interface Table {
 }
 
 /**
- * Round Tables: the person and two or more agents (Claude Code or Codex chats, in any mix) in one conversation. Each
+ * Round Tables: the person and two or more agents (Claude Code, Codex or Gemini chats, in any mix) in one conversation. Each
  * table is led by the chat run it was opened on and seats the other chat runs in the same folder. Trace passes messages
  * between them: the person's go to every seat; when all have answered, each gets the others' answers, for up to
  * `rounds` rounds or until all say AGREE. Then the driver carries out what the person asked, with the whole discussion
@@ -142,18 +142,17 @@ export class RoundTables {
   private nameOf(table: Table, seat: Seat) { return this.names(table).get(seat)!; }
   /** The seat that edits: a seat's session id, or (as before 1.26) an engine, meaning the first seat of that agent. */
   private driverOf(seats: Seat[], driver: string): Seat {
+    // Any agent may drive, a Gemini seat too (from 1.39): GeminiStream lets it edit once it is no longer read-only.
     const seat = seats.find((each) => each.sessionId === driver) ?? seats.find((each) => each.engine === driver);
-    // A Gemini CLI seat runs in plan mode and has its edits declined: it is never the seat that edits.
-    if (seat?.engine === 'gemini') throw new HubError('TABLE_DRIVER', GEMINI_SEAT_RULE);
     if (seat) return seat;
     // An engine no seat has (a table of two Claudes asked for Codex): the lead drives, as the table's own channel.
-    if (driver === 'claude' || driver === 'codex') return seats[0];
+    if (driver === 'claude' || driver === 'codex' || driver === 'gemini') return seats[0];
     throw new HubError('TABLE_DRIVER', 'The seat that edits files must sit at this Round Table. Choose one of its seats.');
   }
   private state(table: Table): RoundTableState {
     const partner = table.seats[1];
     return { seats: table.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, ...settings(seat) })), driverSeat: table.driver.sessionId,
-      partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, driver: table.driver.engine as 'claude' | 'codex', rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
+      partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, driver: table.driver.engine, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
   }
   /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64; beyond that they are counted as dropped. */
   private keptImages(images: ChatImage[]) {

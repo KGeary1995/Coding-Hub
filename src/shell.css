@@ -328,3 +328,11 @@ button.tr-sb-channel { padding: 0 calc(8px - var(--sb-tight) * 4); }
 [data-contrast="high"] :is(.tr-statusbar, .tr-sb-tokens, .tr-sb-window small, .tr-statusbar .storage-status, .tr-sb-inner > svg, .command-trigger) { color: var(--tr-fg); }
 [data-contrast="high"] button.tr-sb-cell:not(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limit)), :is(.warning, .critical) > .tr-sb-today-button) { border-color: var(--tr-line-strong); }
 [data-contrast="high"] :is(.tr-tabs > button, .tr-menu-button:not(.button)) { color: var(--tr-fg-strong); }
+
+/* Getting started (1.39.0): a small panel over the bottom right of the workspace, above the status bar; folds to its title. */
+.getting-started { position: fixed; right: 16px; bottom: 40px; z-index: 20; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 140px); overflow: auto; padding: 12px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); font: 400 13px/18px var(--tr-font-ui); }
+.getting-started-head { display: flex; align-items: center; gap: 8px; } .getting-started-head > strong { flex: 1; }
+.getting-started ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.getting-started li { display: flex; gap: 8px; } .getting-started li > svg { flex: none; margin-top: 1px; color: var(--tr-fg-muted, var(--tr-fg)); }
+.getting-started li.done > svg { color: var(--tr-success); } .getting-started li.done strong { text-decoration: line-through; opacity: 0.7; }
+.getting-started li p { margin: 2px 0 6px; }

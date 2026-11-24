@@ -8,8 +8,10 @@ const { removeFolder } = require('./lib/cleanup.cjs');
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'coding-hub-memory-')));
   const children = new Set();
-  async function connect(engine) {
-    const child = spawn(require('electron'), [path.resolve(__dirname, '../dist-electron/electron/services/hub/memory-server.js'), root, 'shared-project', ...(engine ? [engine] : [])], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] }); children.add(child);
+  // Started with arguments (Claude Code, Codex), or with none and the run's details in the environment (Gemini's agy plugin).
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('CODING_HUB_MEMORY_')));
+  async function connect(engine, environment) {
+    const child = spawn(require('electron'), [path.resolve(__dirname, '../dist-electron/electron/services/hub/memory-server.js'), ...(environment ? [] : [root, 'shared-project', ...(engine ? [engine] : [])])], { env: { ...inherited, ELECTRON_RUN_AS_NODE: '1', ...environment }, stdio: ['pipe', 'pipe', 'pipe'] }); children.add(child);
     const pending = new Map(); let next = 0;
     readline.createInterface({ input: child.stdout }).on('line', (line) => { const message = JSON.parse(line); const callback = pending.get(message.id); if (callback) { pending.delete(message.id); callback(message); } });
     child.stderr.on('data', () => {});
@@ -17,9 +19,9 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     // Malformed JSON envelopes must not crash the standalone server.
     child.stdin.write('null\n[]\n42\n');
     const initialized = await call('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } }); assert.equal(initialized.result.protocolVersion, '2025-06-18');
-    const tools = await call('tools/list'); assert.deepEqual(tools.result.tools.map((t) => t.name), ['read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item']); assert.deepEqual(tools.result.tools[1].inputSchema.required, engine ? ['title', 'content'] : ['title', 'content', 'author']);
+    const tools = await call('tools/list'); if (environment && !environment.CODING_HUB_MEMORY_KEY) assert.deepEqual(tools.result.tools, []); else { assert.deepEqual(tools.result.tools.map((t) => t.name), [...(environment ? ['memory_context'] : []), 'read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item']); assert.deepEqual(tools.result.tools.find((t) => t.name === 'write_handoff').inputSchema.required, engine || environment ? ['title', 'content'] : ['title', 'content', 'author']); }
     const close = () => new Promise((resolve) => { child.once('exit', () => { children.delete(child); resolve(); }); child.stdin.end(); });
-    return { call, close };
+    return { call, close, initialized };
   }
   try {
     const claude = await connect(); const written = await claude.call('tools/call', { name: 'write_handoff', arguments: { title: 'Claude handoff', content: 'Implement the remaining task; validation passed.', author: 'claude' } }); assert.equal(written.result.isError, undefined);
@@ -27,7 +29,7 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     const codex = await connect(); const read = await codex.call('tools/call', { name: 'read_memory', arguments: {} }); const notes = JSON.parse(read.result.content[0].text); assert.equal(notes.length, 2); assert.equal(notes[0].author, 'claude'); assert.equal(notes.find((note) => note.title === 'Escaped handoff').content.length, 60000);
     const rejected = await codex.call('tools/call', { name: 'write_handoff', arguments: { title: '', content: 'Invalid note', author: 'codex' } }); assert.equal(rejected.result.isError, true); assert.match(rejected.result.content[0].text, /^Handoff rejected: title: /);
     // A missing author says so, instead of the generic storage message (which sent a session looking at file permissions).
-    const anonymous = await codex.call('tools/call', { name: 'write_handoff', arguments: { title: 'No author', content: 'Note' } }); assert.equal(anonymous.result.isError, true); assert.match(anonymous.result.content[0].text, /author must be "claude" or "codex"/); await codex.close();
+    const anonymous = await codex.call('tools/call', { name: 'write_handoff', arguments: { title: 'No author', content: 'Note' } }); assert.equal(anonymous.result.isError, true); assert.match(anonymous.result.content[0].text, /author must be "claude", "codex" or "gemini"/); await codex.close();
     // A revision names the note it replaces; reading marks the old one, and a query finds notes by their words.
     const third = await connect(); const original = notes.find((note) => note.title === 'Claude handoff');
     const revised = await third.call('tools/call', { name: 'write_handoff', arguments: { title: 'Claude handoff, corrected', content: 'Validation failed after all.', author: 'codex', supersedes: original.id } }); assert.equal(revised.result.isError, undefined); const revision = JSON.parse(revised.result.content[0].text); assert.equal(revision.supersedes, original.id);
@@ -52,6 +54,15 @@ const { removeFolder } = require('./lib/cleanup.cjs');
     const retired = JSON.parse((await started.call('tools/call', { name: 'retire_decision', arguments: { id: pinned[0].id, reason: 'The person allowed SRK/T as a fallback.' } })).result.content[0].text); assert.equal(retired.supersedes, pinned[0].id); assert.equal(retired.title, 'Retired decision: Predictions from Barrett only');
     assert.deepEqual(JSON.parse((await started.call('tools/call', { name: 'list_decisions', arguments: {} })).result.content[0].text), []);
     const badCommits = await started.call('tools/call', { name: 'write_handoff', arguments: { title: 'Bad', content: 'x', commits: ['not a hash'] } }); assert.equal(badCommits.result.isError, true); assert.match(badCommits.result.content[0].text, /commit hashes/); await started.close();
-    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search, default author, open items, pinned decisions, and named commits.');
+    // Gemini: the run's details come from the environment, the launch context is a tool (the instructions point at it), and
+    // agy's first request (server/discover, which this server does not know) is answered with an error, not a crash.
+    const gemini = await connect(undefined, { CODING_HUB_MEMORY_ROOT: root, CODING_HUB_MEMORY_KEY: 'shared-project', CODING_HUB_MEMORY_ENGINE: 'gemini', CODING_HUB_MEMORY_DIR: root, CODING_HUB_MEMORY_CONTEXT: '# Shared project memory (Trace)\nNotes.' });
+    assert.match(gemini.initialized.result.instructions, /call memory_context before you start/); assert.equal((await gemini.call('tools/call', { name: 'memory_context', arguments: {} })).result.content[0].text, '# Shared project memory (Trace)\nNotes.'); assert.equal((await gemini.call('server/discover')).error.code, -32601);
+    const byGemini = JSON.parse((await gemini.call('tools/call', { name: 'write_handoff', arguments: { title: 'From Gemini', content: 'Checked the parser.' } })).result.content[0].text); assert.equal(byGemini.author, 'gemini');
+    assert.equal(JSON.parse((await gemini.call('tools/call', { name: 'read_memory', arguments: { limit: 1 } })).result.content[0].text)[0].id, byGemini.id); await gemini.close();
+    // agy started outside Trace starts the plugin's server too: with nothing in the environment it offers no tools and says nothing.
+    const outside = await connect(undefined, {}); assert.equal(outside.initialized.result.instructions, undefined);
+    assert.equal((await outside.call('tools/call', { name: 'read_memory', arguments: {} })).error.code, -32602); await outside.close();
+    console.log('PASS: standalone MCP negotiation, tool discovery, malformed-envelope recovery, escaped handoff persistence, Codex read after restart, validation rejection with the reason, revisions and search, default author, open items, pinned decisions, named commits, Gemini from the environment with its launch context, and no tools outside Trace.');
   } finally { for (const child of children) child.kill(); await removeFolder(root); }
 })().catch((e) => { console.error(e); process.exitCode = 1; });

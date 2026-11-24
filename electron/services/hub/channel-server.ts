@@ -4,7 +4,10 @@
 import readline from 'node:readline';
 
 const base = process.env.CODING_HUB_CHANNEL_TOOLS_URL ?? '';
-if (!/^http:\/\/127\.0\.0\.1:\d+\/channels\/[0-9a-f-]{36}\/[0-9a-f]{64}$/.test(base)) { process.stderr.write('channel-server needs CODING_HUB_CHANNEL_TOOLS_URL from Trace.\n'); process.exit(2); }
+// Gemini (agy) starts it from Trace's agy plugin (gemini-plugin.ts) whether or not Trace started that agy: without the
+// address (agy started elsewhere, or the tools are off) it starts all the same and offers no tools.
+const idle = !base;
+if (!idle && !/^http:\/\/127\.0\.0\.1:\d+\/channels\/[0-9a-f-]{36}\/[0-9a-f]{64}$/.test(base)) { process.stderr.write('channel-server needs CODING_HUB_CHANNEL_TOOLS_URL from Trace.\n'); process.exit(2); }
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
 const channel = { type: 'integer', minimum: 1, maximum: 64, description: 'The channel number, as CH1, CH2… in Trace (list_channels).' };
 const TOOLS = [
@@ -38,10 +41,11 @@ lines.on('line', async (line) => {
     let result: unknown;
     if (message.method === 'initialize') result = { protocolVersion: ['2024-11-05', '2025-03-26', '2025-06-18'].includes(message.params?.protocolVersion ?? '') ? message.params!.protocolVersion : '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'trace-channels', version: '1.0.0' } };
     else if (message.method === 'ping') result = {};
+    else if (message.method === 'tools/list' && idle) result = { tools: [] };
     else if (message.method === 'tools/list') { const on = await call('tools', {}).catch((error: Error) => { send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: error.message } }); return null; }) as { channels?: boolean; tasks?: boolean } | null; if (!on) return; result = { tools: [...(on.channels ? TOOLS : []), ...(on.tasks ? TASK_TOOLS : [])] }; }
     else if (message.method === 'tools/call') {
       const route = ROUTES[String(message.params?.name)];
-      if (!route) { send({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: `Unknown tool: ${String(message.params?.name).slice(0, 100)}` } }); return; }
+      if (!route || idle) { send({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: `Unknown tool: ${String(message.params?.name).slice(0, 100)}` } }); return; }
       result = { content: [{ type: 'text', text: JSON.stringify(await call(route, message.params?.arguments)) }] };
     } else { send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Unknown method' } }); return; }
     send({ jsonrpc: '2.0', id: message.id, result });

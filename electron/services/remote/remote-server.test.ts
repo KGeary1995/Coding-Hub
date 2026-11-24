@@ -435,6 +435,22 @@ describe('channel transcripts', () => {
   });
 });
 
+describe('app preview', () => {
+  it('names a running channel’s app and gives a paired phone its picture, and nobody else', async () => {
+    const { server } = await remote(); const host = (server as unknown as { host: RemoteHost }).host;
+    host.preview = (sessionId) => sessionId === 's1' ? 'http://localhost:5173/' : null;
+    host.previewPicture = async (sessionId) => { if (sessionId !== 's1') throw new HubError('PREVIEW_UNKNOWN', 'This channel is not running an app Trace can show.'); return Buffer.from([0xff, 0xd8, 0xff]); };
+    await server.setEnabled(true);
+    const channels = server.channels(); expect(channels.find((channel) => channel.sessionId === 's1')?.preview).toBe('http://localhost:5173/'); expect(channels.find((channel) => channel.sessionId === 's2')?.preview).toBeUndefined();
+    const read = async (sessionId: string, token?: string) => { const response = await fetch(base(server) + `/api/preview?sessionId=${sessionId}`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}); return { status: response.status, body: await response.json() as { image?: string; error?: string } }; };
+    const token = await paired(server);
+    expect(await read('s1', token)).toEqual({ status: 200, body: { image: 'data:image/jpeg;base64,/9j/', url: 'http://localhost:5173/' } });
+    expect(await read('s2', token)).toEqual({ status: 409, body: { error: 'This channel is not running an app Trace can show.' } });
+    expect((await read('nope', token)).status).toBe(400);
+    expect((await read('s1')).status).toBe(401);
+  });
+});
+
 describe('phone screen', () => {
   it('opens this computer\'s screen server for a phone with a one-time ticket, and nobody else', async () => {
     const received: Buffer[] = [];

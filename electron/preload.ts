@@ -3,11 +3,13 @@ import type { AlertTarget, CodingHubHost, SessionEvent } from '../shared/ipc';
 import type { AccountEvent } from '../shared/accounts';
 import type { UpdateStatus } from '../shared/updates';
 import type { UsageRecord } from '../shared/hub';
-import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest } from '../shared/remote';
+import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, RemoteResumeRequest, ScheduledRunRequest } from '../shared/remote';
 import type { ChatEnvelope } from '../shared/chat';
 import type { ScreenEvent } from '../shared/screen';
 import type { LiveTip } from '../shared/coaching';
 import type { AutoCheckStatus } from '../shared/auto-checks';
+import type { UndoStatus } from '../shared/undo';
+import type { PreviewEvent } from '../shared/app-preview';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
@@ -106,6 +108,16 @@ const host: CodingHubHost = {
     ipcRenderer.on('coding-hub:auto-check-event', receive);
     return () => ipcRenderer.removeListener('coding-hub:auto-check-event', receive);
   },
+  onUndoEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: UndoStatus) => listener(value);
+    ipcRenderer.on('coding-hub:undo-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:undo-event', receive);
+  },
+  onPreviewEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: PreviewEvent) => listener(value);
+    ipcRenderer.on('coding-hub:preview-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:preview-event', receive);
+  },
   onCoachingEvent: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: LiveTip) => listener(value);
     ipcRenderer.on('coding-hub:coaching-event', receive);
@@ -120,6 +132,11 @@ const host: CodingHubHost = {
     const receive = (_event: Electron.IpcRendererEvent, value: RemoteResumeRequest) => listener(value);
     ipcRenderer.on('coding-hub:remote-resume', receive);
     return () => ipcRenderer.removeListener('coding-hub:remote-resume', receive);
+  },
+  onScheduledRun: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: ScheduledRunRequest) => listener(value);
+    ipcRenderer.on('coding-hub:scheduled-run', receive);
+    return () => ipcRenderer.removeListener('coding-hub:scheduled-run', receive);
   },
   finishRemoteControl: (result) => ipcRenderer.invoke('coding-hub:finish-remote-control', result),
   chat: (request) => ipcRenderer.invoke('coding-hub:chat', request),

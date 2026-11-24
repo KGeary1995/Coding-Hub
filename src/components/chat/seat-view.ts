@@ -1,4 +1,5 @@
 import type { RoundTableState } from '../../../shared/chat';
+import type { SeatEngine } from '../../../shared/types';
 import { defaultSeatName, seatNames, type SeatDuty } from '../../../shared/table-seats';
 
 /**
@@ -34,7 +35,7 @@ function dutyRole(seat: { engine: 'claude' | 'codex' | 'gemini'; duties: SeatDut
 }
 
 /** The seats of an open table, the lead first. */
-export function seatViews(table: RoundTableState, leadEngine: 'claude' | 'codex', legacy: LegacyNames = {}, leadId = ''): SeatView[] {
+export function seatViews(table: RoundTableState, leadEngine: SeatEngine, legacy: LegacyNames = {}, leadId = ''): SeatView[] {
   const hierarchy = table.kind === 'hierarchy';
   if (table.seats?.length) {
     const kind = hierarchy ? 'hierarchy' as const : 'discussion' as const; const names = seatNames(table.seats, kind);

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { ClaudeProfiles } from '../cli/claude-profiles';
 import { NativeSessions, SEARCH_LIMITS } from './native-sessions';
 import type { NativeSearch } from '../../../shared/workbench';
+import { writeGeminiConversation } from '../chat/gemini-conversation.fixture';
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })); });
@@ -57,5 +58,18 @@ describe('searching inside CLI conversations', () => {
     await expect(search.execute({ action: 'native-search', query: 'c' })).rejects.toThrow('at least 2 characters');
     await expect(search.execute({ action: 'native-search', query: 'x'.repeat(201) })).rejects.toThrow();
     await expect(search.execute({ action: 'native-search', query: 'common', extra: true })).rejects.toThrow();
+  });
+  it('finds words in Gemini\'s conversations too, in what was said only, alongside the other CLIs\' and within the size limit', async () => {
+    const { root, claude, claudeChat } = homes(); const gemini = path.join(root, 'gemini'); const project = path.join(root, 'project');
+    const said = writeGeminiConversation(gemini, [{ input: 'Where is the Zebra crossing set up?' }, { thinking: 'zebra thoughts', tools: [{ id: 'c1', name: 'run_command', input: '{"CommandLine":"rg zebra"}' }] }, { toolOutput: 'zebra.ts:1' }, { reply: `${'a'.repeat(100)} The zebra crossing is in map.ts.` }]);
+    const unsaid = writeGeminiConversation(gemini, [{ input: 'Run the tests.' }, { thinking: 'zebra', tools: [{ id: 'c2', name: 'run_command', input: '{"CommandLine":"echo zebra"}' }] }, { toolOutput: 'zebra' }, { agentMessage: 'zebra' }]);
+    const missing = path.join(gemini, 'conversations', `${randomUUID()}.db`); const older = claudeChat([user('A zebra in Claude.')]);
+    const conversations = [{ file: said, at: 3e12 }, { file: unsaid, at: 2.5e12 }, { file: missing, at: 2e12 }].map(({ file, at }) => ({ id: path.basename(file, '.db'), directory: project, modified: at, file }));
+    const sessions = (bytes = SEARCH_LIMITS.bytes) => new NativeSessions(new ClaudeProfiles(root), [], claude, { list: () => conversations, file: () => undefined }).search('ZEBRA', { ...SEARCH_LIMITS, bytes });
+    const found = await sessions();
+    expect(found.results.map((item) => item.id)).toEqual([path.basename(said, '.db'), older]);
+    expect(found.results[0]).toMatchObject({ engine: 'gemini', key: `gemini:default:${path.basename(said, '.db')}`, directory: project, matches: 2, snippets: [{ role: 'user', before: 'Where is the ', match: 'Zebra', after: ' crossing set up?' }, { role: 'assistant', match: 'zebra', after: ' crossing is in map.ts.' }] });
+    expect(found.results[0].snippets[1].before).toMatch(/^…a+ The $/);
+    const limit = fs.statSync(said).size - 1; expect(await sessions(limit)).toMatchObject({ skipped: [said, unsaid].filter((file) => fs.statSync(file).size > limit).length, results: [{ id: older }] });
   });
 });

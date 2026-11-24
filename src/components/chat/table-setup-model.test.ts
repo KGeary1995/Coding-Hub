@@ -25,6 +25,14 @@ describe('picking a preset', () => {
     const builderLast: TablePreset = { ...mine, seats: [mine.seats[1], mine.seats[2], mine.seats[0]] };
     expect(draftFromPreset(builderLast, { engine: 'claude', model: '' }).seats.map((seat) => seat.lead)).toEqual([false, false, true]);
   });
+  it('lets Gemini lead, drive and build (from 1.39): on a Gemini chat, as a new table’s lead, and as the seat that edits', () => {
+    const onGemini = draftFromPreset(discussion, { engine: 'gemini', model: 'gemini-4-neon-high' });
+    expect(onGemini.seats[0]).toMatchObject({ engine: 'gemini', lead: true, keepsAgent: true }); expect(draftProblem(onGemini)).toBeNull();
+    expect(toPreset(onGemini)).toMatchObject({ driver: 0, seats: [{ engine: 'gemini', model: 'gemini-4-neon-high' }, { engine: 'codex' }] });
+    const drives = setDriver(patchSeat(draftFromPreset(discussion), 1, { engine: 'gemini' }), 1); expect(draftProblem(drives)).toBeNull(); expect(toPlan(drives).driver).toBe(1);
+    const builds = withKind(onGemini, BUILT_IN_PRESETS as TablePreset[], 'hierarchy', { engine: 'gemini', model: '' });
+    expect(builds.seats[0]).toMatchObject({ engine: 'gemini', duties: ['build'], lead: true }); expect(draftProblem(builds)).toBeNull();
+  });
   it('switches kind to the other built-in table on the same lead', () => {
     const draft = withKind(draftFromPreset(discussion, { engine: 'codex', model: '' }), BUILT_IN_PRESETS as TablePreset[], 'hierarchy', { engine: 'codex', model: '' });
     expect(draft.kind).toBe('hierarchy'); expect(draft.seats[0]).toMatchObject({ engine: 'codex', duties: ['build'] }); expect(withKind(draft, [], 'hierarchy')).toBe(draft);

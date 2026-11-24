@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import type { Task, TaskOutcome, TaskSent, TaskWatch } from '../../shared/workbench';
 import type { ChannelTranscript } from '../../shared/remote';
 import type { ChatBlock, RoundTableState } from '../../shared/chat';
-import { promptMark, replyToTask, taskSignal } from '../../shared/task-signal';
+import { promptMark, replyToTask, screenSignal, taskSignal } from '../../shared/task-signal';
+import { terminalLines } from '../runtime/terminals';
 import { workbench } from '../runtime/workbench';
 import { useWorkspaceStore } from './workspace-store';
 import { activitySamples } from './activity-store';
@@ -10,7 +11,7 @@ import { sendMark } from './task-evidence';
 import { useChatStore } from './chat-store';
 import { sendToChannel } from '../runtime/send-to-channel';
 import { hierarchyDetached } from './hierarchy-state';
-import { isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -50,8 +51,8 @@ export async function sendTask(id: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task?.sessionId) throw new Error('Choose the channel to give this task to first.');
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
-  // A task's outcome is read back from the CLI's transcript, which Gemini CLI keeps in a form Trace does not read.
-  if (!isChatEngineConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini.');
+  // A task's outcome is read back from the chat's own thread, the CLI's transcript, or for a Gemini terminal from its screen.
+  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code, Codex or Gemini channels, not terminals.');
   // A terminal waiting on an approval would take the prompt's Enter as the answer (often Yes): the person answers first.
   if (!session.config.chat && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
@@ -124,9 +125,11 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
   const active = activeOn(sessionId).filter((task) => !waiting.includes(promptMark(task))); if (!active.length) return;
   // A terminal turn ending within seconds of every send (see below) is not read at all: the transcript can be 8 MB.
   if (!from && active.every((task) => Date.now() - Date.parse(task.sentAt!) <= 5000)) return;
-  const given = from && 'text' in from ? from.text : null;
-  const said = from && 'text' in from ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
+  // Gemini's conversation is not readable: its signal is read from its screen, after the task's prompt (screenSignal).
+  const gemini = !from && useWorkspaceStore.getState().sessions.find((session) => session.id === sessionId)?.config.engine === 'gemini';
+  const said = gemini || (from && 'text' in from) ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
   const task = taskOfTurn(active, said); if (!task) return;
+  const given = from && 'text' in from ? from.text : gemini ? screenSignal(terminalLines(sessionId) ?? [], promptMark(task)) : null;
   // A terminal turn that ends within seconds of the send is the CLI taking the message, not the work (Claude Code's
   // Stop hook fires then too). A chat's turn end is a real reply, however quick ("TASK BLOCKED: which file?").
   if (!from && Date.now() - Date.parse(task.sentAt!) <= 5000) return;

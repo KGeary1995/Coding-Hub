@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { DUTY_LABEL, isBuiltInPreset, MAX_PRESET_NAME, MAX_SEAT_INSTRUCTIONS, MAX_SEAT_NAME, MAX_SEATS, SEAT_DUTIES, type TableKind } from '../../../shared/table-seats';
 import { MAX_CHANNELS, MAX_MODEL_LENGTH } from '../../../shared/schemas';
-import { isChatEngineConfig } from '../../../shared/types';
+import { isAgentConfig, isChatRun, seatEngineOf } from '../../../shared/types';
 import type { CodexModelCatalog, GeminiModelCatalog } from '../../../shared/workbench';
 import { openTable, seatRoom, changeSeats, startTable, tableSeats } from '../../runtime/round-table';
 import { workbench } from '../../runtime/workbench';
@@ -68,7 +68,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   const sessions = useWorkspaceStore((state) => state.sessions); const rootDirectory = useWorkspaceStore((state) => state.rootDirectory);
   const lead = mode.type === 'new' ? null : sessions.find((session) => session.id === mode.leadId) ?? null;
   /** A table started on a chat: that chat leads, with its own agent and model. */
-  const fixed = useMemo(() => mode.type === 'chat' && lead && isChatEngineConfig(lead.config) ? { engine: lead.config.engine === 'codex' ? 'codex' as const : 'claude' as const, model: lead.config.model } : undefined, [mode.type, lead?.id]);
+  const fixed = useMemo(() => mode.type === 'chat' && lead && isChatRun(lead.config) && isAgentConfig(lead.config) ? { engine: seatEngineOf(lead.config), model: lead.config.model } : undefined, [mode.type, lead?.id]);
   const [draft, setDraft] = useState<Draft>(() => {
     if (mode.type === 'edit') return draftFromTable(tableSeats(mode.leadId), lead?.roundTable?.kind === 'hierarchy' ? 'hierarchy' : 'discussion', lead?.roundTable?.rounds ?? 2);
     return draftFromPreset(pickPreset(presets, mode.type === 'new' ? mode.table ?? 'discussion' : 'discussion'), fixed);
@@ -129,7 +129,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
             return <li key={seat.key}><fieldset>
               <legend>{label}{seat.lead ? ' · leads the table' : ''}{seat.status && seat.status !== 'running' ? ` · ${seat.status}` : ''}</legend>
               <div className="table-setup-row">
-                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={seat.engine} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { engine: agentOf(event.target.value), model: '' }))}>{AGENTS.filter((agent) => agent.engine !== 'gemini' || !seat.lead).map((agent) => <option key={agent.engine} value={agent.engine}>{agent.label}</option>)}</select></label>
+                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={seat.engine} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { engine: agentOf(event.target.value), model: '' }))}>{AGENTS.map((agent) => <option key={agent.engine} value={agent.engine}>{agent.label}</option>)}</select></label>
                 <label className="ui-field">Model<SeatModel key={seat.engine} label={label} describedBy={`${base}-model`} invalid={Boolean(why)} model={seat.model} models={list} disabled={Boolean(seat.keepsModel)} onChange={(model) => change(patchSeat(draft, index, { model }))} /></label>
                 <label className="ui-field">Name<input aria-label={`${label} name`} placeholder={names[index]} maxLength={MAX_SEAT_NAME} value={seat.name} onChange={(event) => change(patchSeat(draft, index, { name: event.target.value }))} /></label>
               </div>
@@ -138,7 +138,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
                 <small className="ui-hint tnum">{seat.instructions.length.toLocaleString('en-US')} of {MAX_SEAT_INSTRUCTIONS.toLocaleString('en-US')} characters</small></label>
               {hierarchy
                 ? <div role="group" aria-label={`${label} duties`} className="table-setup-duties">{SEAT_DUTIES.map((duty) => <label key={duty} className="ui-check"><input type="checkbox" checked={seat.duties.includes(duty)} disabled={duty === 'build' || seat.lead} onChange={(event) => change(setDuty(draft, index, duty, event.target.checked))} />{DUTY_LABEL[duty]}</label>)}</div>
-                : <label className="ui-check"><input type="radio" name={`${id}-driver`} checked={draft.driver === index} disabled={seat.engine === 'gemini'} onChange={() => change(setDriver(draft, index))} />Edits files <span className="ui-hint">{seat.engine === 'gemini' ? '(a Gemini seat reviews or plans; it does not edit)' : '(the others review and stay read-only)'}</span></label>}
+                : <label className="ui-check"><input type="radio" name={`${id}-driver`} checked={draft.driver === index} onChange={() => change(setDriver(draft, index))} />Edits files <span className="ui-hint">(the others review and stay read-only)</span></label>}
               {hierarchy && seat.lead && <small className="ui-hint">The builder leads the table and only builds; the other seats stay read-only.</small>}
               {!seat.lead && <button type="button" className="quiet-button small" aria-label={`Remove ${label}`} onClick={() => change(removeSeat(draft, index))}><Trash2 size={13} />Remove seat</button>}
             </fieldset></li>; })}

@@ -84,7 +84,7 @@ export class HubService {
     } finally { this.ticking = false; }
   }
   preferences(): HubPreferences {
-    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: defaultDriveDirectory(), prices: [] };
+    const cfg = readConfig(this.preferencesPath); if (!cfg.text) return { ...DEFAULT_PREFERENCES, driveDirectory: defaultDriveDirectory(), prices: [], ...(process.env.CODING_HUB_TEST_NO_GUIDE === '1' ? { guideSeen: true } : {}) };
     const result = preferencesSchema.safeParse(cfg.data); if (!result.success) throw new HubError('PREFERENCES_INVALID', 'Saved preferences are invalid. Existing file was preserved.'); return result.data;
   }
   /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { promptMark, replyToTask, SIGNAL_INSTRUCTION, taskSignal } from './task-signal';
+import { promptMark, replyToTask, screenSignal, SIGNAL_INSTRUCTION, taskSignal } from './task-signal';
 
 describe('the reply that belongs to one send of a task', () => {
   it('finds a send by its id, so the same title sent again, or another task with that title, never counts', () => {
@@ -55,5 +55,17 @@ describe('the task completion line', () => {
     expect(taskSignal('TASK COMPLETE\n\nShould I continue?')).toBeNull(); expect(taskSignal('TASK BLOCKED: key?\nOr should I guess?')).toBeNull();
     expect(taskSignal('I will write TASK COMPLETE when done.')).toBeNull();
     expect(taskSignal('')).toBeNull();
+  });
+});
+
+describe('a task signal on a terminal screen (Gemini)', () => {
+  const mark = 'Task t-0000abcd: Add a dark mode';
+  it('is the last line after the task’s prompt that is the signal alone, with the input box below it', () => {
+    const screen = ['old work', 'TASK COMPLETE', `> ${mark}`, 'When done, end your reply with TASK COMPLETE on its own line.', '✦ I added the toggle.', '  TASK COMPLETE', '', '╭──────────────╮', '│ >            │', '╰──────────────╯', ' gemini-4 · accept edits'];
+    expect(screenSignal(screen, mark)).toBe('  TASK COMPLETE');
+  });
+  it('is nothing when the reply after the prompt has no signal (one from an earlier task does not count)', () => {
+    expect(screenSignal(['TASK COMPLETE', `> ${mark}`, 'Working on it…'], mark)).toBeNull();
+    expect(screenSignal([`> ${mark}`, 'TASK BLOCKED: which file?'], mark)).toBe('TASK BLOCKED: which file?');
   });
 });

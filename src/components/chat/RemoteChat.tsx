@@ -33,7 +33,8 @@ export function receiveReplay(replay: ChatReplay, keyOf: (sessionId: string) => 
 export const linkedChatKey = (computerId: string) => (sessionId: string) => `${computerId}:${sessionId}`;
 
 export interface RemoteChatProps {
-  sessionId: string; runId: string | null; engine: 'claude' | 'codex'; running: boolean;
+  /** `gemini`: a Gemini chat that leads a Round Table (from 1.39). */
+  sessionId: string; runId: string | null; engine: 'claude' | 'codex' | 'gemini'; running: boolean;
   send: (request: ChatRequest) => Promise<void>;
   /** Follows another channel's chat events (every other seat of a Round Table) until the returned function is called; none when they all arrive anyway. */
   follow?: (sessionId: string) => () => void;

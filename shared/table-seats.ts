@@ -18,12 +18,11 @@ export const DUTY_LABEL: Record<SeatDuty, string> = { plan: 'Plans', challenge: 
 /** A seat's default name at a hierarchy table, from the first of its duties in this order. */
 const DUTY_NAME: [SeatDuty, string][] = [['build', 'Builder'], ['plan', 'Planner'], ['review', 'Reviewer'], ['challenge', 'Challenger'], ['final', 'Final reviewer']];
 const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
-/**
- * A Gemini CLI seat reviews or plans and never edits: Trace runs it in Gemini CLI's plan mode and declines its file
- * changes. So it cannot lead a table (the lead's channel shows it, and a hierarchy's lead builds), be the discussion
- * seat that edits, or build.
+/*
+ * A Gemini seat takes any seat (from 1.39, the person's decision of 2026-11-24): before, 1.28 to 1.38 held it to reviewing
+ * or planning (GEMINI_SEAT_RULE), as it ran only in plan mode and had no chat channel to lead from. GeminiStream now runs
+ * it in plan mode only while it is read-only, and a Gemini chat channel can lead.
  */
-export const GEMINI_SEAT_RULE = 'A Gemini seat reviews or plans: it cannot lead the table, edit files or build.';
 export const MAX_SEAT_NAME = 40;
 export const MAX_SEAT_INSTRUCTIONS = 4000;
 export const MAX_TABLE_PRESETS = 20;
@@ -84,10 +83,10 @@ export function savedSeats(table: { partner: string; planner?: string; kind?: 'h
  * exactly one builder (the lead, who does nothing else: it is the only seat that edits) and exactly one planner; at most
  * one seat gives the final review; challengers and reviewers are as many as the person likes, or none.
  */
-/** `driver`: the index of the discussion seat that edits, when the caller knows it. A seat's `engine`, when given, is held to GEMINI_SEAT_RULE. */
+/** `driver`: the index of the discussion seat that edits, when the caller knows it (any agent may: from 1.39 Gemini too). */
 export function checkSeats(kind: TableKind, seats: readonly (SeatSettings & { engine?: SeatEngine })[], lead = 0, driver?: number): string | null {
   if (seats.length < MIN_SEATS) return 'A Round Table needs at least two agents.';
-  if (seats[lead]?.engine === 'gemini' || (kind === 'discussion' && driver !== undefined && seats[driver]?.engine === 'gemini') || seats.some((seat) => seat.engine === 'gemini' && seat.duties?.includes('build'))) return GEMINI_SEAT_RULE;
+  if (kind === 'discussion' && driver !== undefined && !seats[driver]) return 'Choose the agent that edits files.';
   if (seats.length > MAX_SEATS) return `A Round Table seats at most ${MAX_SEATS} agents.`;
   for (const seat of seats) {
     if ((seat.name?.length ?? 0) > MAX_SEAT_NAME) return `A seat's name is at most ${MAX_SEAT_NAME} characters.`;

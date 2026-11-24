@@ -82,6 +82,9 @@ export interface RemoteHost {
   memoryNotes?(project: string): MemoryNote[] | Promise<MemoryNote[]>;
   /** A handoff the person wrote on a phone, as the desktop's Memory saves one. */
   writeMemory?(project: string, title: string, content: string): void;
+  /** The address of the app a channel printed while running (1.39.0, app preview), or null; and a JPEG picture of it. */
+  preview?(sessionId: string): string | null;
+  previewPicture?(sessionId: string): Promise<Buffer>;
 }
 /** One-time tickets a phone opens its screen with: a browser's WebSocket cannot send the Authorization header. */
 const SCREEN_TICKET_MS = 30000; const MAX_SCREENS = 2;
@@ -279,7 +282,7 @@ export class RemoteServer {
   private channelLabel(sessionId: string) {
     const seated = this.tileOf(sessionId) !== sessionId; const channel = this.channels().find((item) => item.sessionId === this.tileOf(sessionId));
     const engine = seated ? this.host.sessions().find((session) => session.id === sessionId)?.engine : undefined;
-    return channel ? `CH${channel.channel} · ${channel.title}${engine ? ` (${engine === 'codex' ? 'Codex' : 'Claude'})` : ''}` : 'A channel';
+    return channel ? `CH${channel.channel} · ${channel.title}${engine ? ` (${engine === 'codex' ? 'Codex' : engine === 'gemini' ? 'Gemini' : 'Claude'})` : ''}` : 'A channel';
   }
   /** The channel a session is shown as: a Round Table's partner goes by the lead it sits with. */
   private tileOf(sessionId: string) { return this.host.sessions().find((session) => session.id === sessionId)?.seatedAt ?? sessionId; }
@@ -634,9 +637,9 @@ export class RemoteServer {
       const run = running.get(session.id); const own = this.attention.get(session.id);
       const seats = sessions.filter((item) => item.seatedAt === session.id); const seat = seats.find((item) => { const seatRun = running.get(item.id); return seatRun && this.attention.get(item.id)?.runId === seatRun.runId; }) ?? seats[0];
       const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
-      const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : 'Claude'}: ${seatWaiting.message}` } : undefined;
+      const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : seat.engine === 'gemini' ? 'Gemini' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seats[0] && (seats[0].engine === 'claude' || seats[0].engine === 'codex') ? { table: seats[0].engine } : {}), ...(session.account ? { account: session.account } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seats[0] && seats[0].engine !== 'shell' ? { table: seats[0].engine } : {}), ...(session.account ? { account: session.account } : {}), ...(run && this.host.preview?.(session.id) ? { preview: this.host.preview(session.id)! } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.
@@ -946,6 +949,13 @@ export class RemoteServer {
         catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'That conversation could not be read.' }); }
       }
       return this.send(response, 400, { error: 'Unknown channel.' });
+    }
+    // A picture of the app a channel of this computer runs (1.39.0), as a data URL: the phone's page allows data: images only.
+    if (request.method === 'GET' && url.pathname === '/api/preview') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (!this.local(sessionId) || !this.host.previewPicture) return this.send(response, 400, { error: 'Unknown channel.' });
+      try { const picture = await this.host.previewPicture(sessionId); return this.send(response, 200, { image: `data:image/jpeg;base64,${picture.toString('base64')}`, url: this.host.preview?.(sessionId) ?? null }); }
+      catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The app could not be pictured.' }); }
     }
     if (request.method === 'GET' && url.pathname === '/api/screen-state') {
       // A locked Mac sends its screen to viewers other than Apple's as black: the linked computer says so instead.
