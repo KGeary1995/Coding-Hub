@@ -14,6 +14,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:pty": "npm run build:host && node scripts/run-pty-smoke.cjs",
+    "test:runner": "npm run build:host && node scripts/runner-smoke.cjs",
     "test:desktop": "npm run build && node scripts/desktop-smoke.cjs",
     "rebuild:native": "npm rebuild node-pty",
     "postinstall": "install-electron && node scripts/check-native.cjs",

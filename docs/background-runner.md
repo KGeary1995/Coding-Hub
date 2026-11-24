@@ -1,6 +1,6 @@
 # Background runner: plan for review
 
-Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Nothing here is built yet.
+Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Step 1 (spike) and step 2 (runner and protocol) are built; Trace does not use the runner yet.
 
 **Goal:** channels keep running when Trace quits, crashes or updates, and Trace finds them again when it opens. 1.34.0
 covers closing the window (Trace stays in the tray); this covers the rest.
@@ -92,7 +92,7 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
 ## 7. Order of work
 
 1. **Spike:** start a detached runner from the packaged app on Windows and Mac; check it survives quitting and killing Trace.
-2. **Runner and protocol,** with unit tests (frames, tail ring, DRAIN).
+2. **Runner and protocol,** with unit tests (frames, tail ring, DRAIN). Built: `electron/services/runner/` (`protocol.ts`, `tail.ts`, `runner.ts`, the process `runner-main.ts`), `runner.test.ts`, and `npm run test:runner` with real processes. Beyond the table: `spawned` answers a spawn with the terminal number, `forget` drops an ended terminal from the list, and `error` names a failed spawn by its id. A Trace on another protocol may only `drain`. The runner leaves by itself after 60 s with nothing running and no Trace connected.
 3. `PtyManager` on the runner for terminal channels; reattach on open; the kill-and-reopen smoke.
 4. Chat channels on the runner (pipe runs).
 5. Windows job objects and Ctrl+C (the native helper).
