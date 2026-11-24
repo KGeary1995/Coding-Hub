@@ -88,6 +88,11 @@ const host: CodingHubHost = {
     ipcRenderer.on('coding-hub:screen-event', receive);
     return () => ipcRenderer.removeListener('coding-hub:screen-event', receive);
   },
+  onTasksChanged: (listener) => {
+    const receive = () => listener();
+    ipcRenderer.on('coding-hub:tasks-changed', receive);
+    return () => ipcRenderer.removeListener('coding-hub:tasks-changed', receive);
+  },
   onAlertClick: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: AlertTarget) => listener(value);
     ipcRenderer.on('coding-hub:alert-click', receive);

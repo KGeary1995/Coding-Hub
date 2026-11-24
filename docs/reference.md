@@ -330,6 +330,16 @@ From 1.37.0, **Skills & plugins → Trace plugins** installs plugins from GitHub
 
 Claude Code asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access. Codex takes the three that only look (list, read, wait) without asking (from 1.33.2), and asks before **send_to_channel**; a Codex chat, which has no such prompt, therefore refuses to send but can list, read and wait. Turning the setting off stops them at once, even in running channels. Each run reaches Trace through its own secret address on 127.0.0.1, which also tells Trace which channel is asking. Gemini CLI channels get no tools (agy takes MCP servers only from its global settings).
 
+### Task tools
+
+**Settings → Preferences → Let agents read and update Tasks** (off by default, per computer, separate from the channel tools). When on, each Claude Code and Codex channel started afterwards gets three more tools from the same `trace-channels` server (either setting adds the server; it lists only the tools whose setting is on):
+
+- **list_tasks**: the Tasks board's tasks for the project the channel works in (tasks whose folder is the channel's folder or contains it), optionally one status (`queued`, `active`, `review`, `done`): id, title, details, status, notes.
+- **add_task**: a task in To do, in the channel's folder, with title (up to 150 characters) and details (up to 2,000). Its notes say *Added by the agent in CHn (name).* It goes to no channel until you send it.
+- **update_task**: moves one of the project's tasks to Working (`active`) or Ready for review (`review`), adds a note (up to 1,000 characters) on a line of its own signed *CHn:*, or both. Refused: moving a task to Done or out of Done, a task in another project (it reads as missing), and a note that would take the task's notes past 2,000 characters.
+
+Only you move a task to Done, remove a task, or change its title, details, files, channel or check: there are no tools for those. The Tasks board shows an agent's change at once. Codex takes **list_tasks** without asking and asks before **add_task** and **update_task** (so a Codex chat can list but not change tasks); Claude Code asks for each, unless the channel runs at Full access. Turning the setting off stops them at once, even in running channels.
+
 ## Trace plugins
 
 **Agent setup → Skills & plugins → Trace plugins** (from 1.35.0; the design is in [plugins.md](plugins.md)). A plugin is a folder with a `trace-plugin.json` manifest and the programs it names, in any language. It runs as you, without a shell and without a sandbox, and nobody reviews it.

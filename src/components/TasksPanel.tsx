@@ -122,7 +122,7 @@ export function TasksPanel() {
           {warnings.map((warning) => <p key={warning.text} className="error-message">{warning.text}</p>)}
           {task.outcome && OUTCOME_TEXT[task.outcome] && <p className={task.outcome === 'quiet' || task.outcome === 'unconfirmed' ? 'muted' : 'error-message'} role="status">{OUTCOME_TEXT[task.outcome]}{task.outcome === 'blocked' && task.outcomeNote ? ` It says: ${task.outcomeNote}` : ''}</p>}
           {task.verificationId && checkText(task) && <small className={fresh[task.verificationId] === 'current' ? '' : 'muted'}>{checkText(task)}</small>}
-          {task.notes && <small>{task.notes}</small>}
+          {task.notes && <small className="task-notes">{task.notes}</small>}
           <TaskEverything task={task} channel={channelLabel(task.sessionId)} changed={changed} check={task.verificationId ? checkText(task) : ''} />
           <div className="task-actions">
             {/* A To do task's one primary action: Send when it has a channel, otherwise starting it in a worktree of its own. */}
