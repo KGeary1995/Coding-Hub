@@ -110,6 +110,8 @@ export interface RemoteRelay {
  * computer's stream (`all`) carries every channel's output; phones follow one channel at a time.
  */
 interface Stream { device: string; kind: RemoteDeviceKind; response: http.ServerResponse; sessionId: string | null; all?: boolean; held?: string[];
+  /** Its channel's output is held back until it catches up, when it gets the screen as it is then (`repaint`). */
+  behind?: boolean;
   /** What the opening replay left unsent: allowed on top of STREAM_BUFFER until the stream has drained once. */
   opening?: number }
 
@@ -178,6 +180,8 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 /** Screens kept for replay: one per channel, and no more than this many in all (oldest started first out). */
 const REPLAY_CHANNELS = 32;
 const PAIRING_MINUTES = 5; const PAIRING_ATTEMPTS = 10; const STREAM_BUFFER = 2 * 1024 * 1024;
+/** A phone this far behind on one channel's output is sent no more of it, only a fresh screen once it catches up (herdr's repaint). */
+const STREAM_BEHIND = 256 * 1024;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -661,10 +665,23 @@ export class RemoteServer {
   private local(sessionId: string) { return this.host.sessions().some((session) => session.id === sessionId); }
   private write(stream: Stream, text: string) {
     if (stream.held) { stream.held.push(text); return; }
+    // A phone on a slow link or busy channel: rather than a backlog of old output (which it would draw seconds late, or
+    // which would get it dropped), the output stops and, once it has caught up, the screen as it is now is sent (herdr).
+    if (stream.sessionId && !stream.all && text.startsWith('event: output')) {
+      if (stream.behind) return;
+      if (stream.response.writableLength > (stream.opening ?? 0) + STREAM_BEHIND) { stream.behind = true; stream.response.once('drain', () => this.repaint(stream)); return; }
+    }
     // A phone that stops reading (asleep, out of signal) is dropped; it reconnects and gets the replay. What the opening
     // replay sent in one go does not count: two long chats can be more than STREAM_BUFFER on their own.
     if (stream.response.writableLength > (stream.opening ?? 0) + STREAM_BUFFER) { stream.response.destroy(); this.streams.delete(stream); return; }
     stream.response.write(text);
+  }
+  /** A stream that was behind caught up: its channel's screen as it is now. */
+  private repaint(stream: Stream) {
+    stream.behind = false; const sessionId = stream.sessionId; if (!sessionId || !this.streams.has(stream)) return;
+    const send = (screen: { runId: string; cols: number; rows: number; data: string }) => this.write(stream, `event: replay\ndata: ${eventJSON({ sessionId, ...screen })}\n\n`);
+    const mirror = this.replay.get(sessionId);
+    if (mirror) mirror.snapshot((screen) => send({ runId: mirror.runId, ...screen })); else if (this.relay && !this.local(sessionId)) this.relay.snapshot(sessionId, send);
   }
   /** Part of a stream's opening replay (channel list, chat threads, screens): sent whole, and allowed for until it drains. */
   private opening(stream: Stream, text: string) {

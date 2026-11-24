@@ -197,12 +197,27 @@ footer { padding: 0 16px 16px; text-align: center; }
 .channel-view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; padding: 12px 16px 16px; }
 .channel-view .banner { margin: 0; }
 /* The well, not xterm's own element inside it (xterm names that "terminal" too, which drew a second frame in the first). */
-.terminal:not(.xterm) { flex: 1; min-height: 240px; overflow: auto; padding: 4px; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); }
+.terminal:not(.xterm) { flex: 1; min-height: 160px; overflow: auto; padding: 4px; border: 1px solid var(--tr-tile-border); border-radius: var(--tr-r-tile); background: var(--tr-term); }
 .terminal .xterm-viewport { background: var(--tr-term) !important; }
 .terminal .xterm-screen { -webkit-touch-callout: none; }
 /* The channel's tools, then every key in view: rows whose keys share the width, rather than one row that scrolls sideways.
    A key is a 44 px target both ways (section 6); the rows are short enough that a 320 px phone still fits each. */
 .tools, .keys > div { display: flex; gap: 4px; }
+.tools[hidden], .keys[hidden] { display: none; }
+.keys .more { flex-basis: auto; padding: 0 10px; }
+.computer-size { margin: 0; font-size: 13px; }
+/* While no computer answers, the last screen stays, dimmed, and typing waits. */
+body.offline .terminal, body.offline .keys, body.offline .compose { opacity: 0.45; pointer-events: none; }
+.switcher { position: relative; flex: none; min-width: 40px; padding: 0 8px; font: 600 16px/16px var(--tr-font-ui); }
+.switcher .count { font-size: 12px; }
+.switcher .count { margin-left: 4px; padding: 0 6px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.switcher .count.waiting { background: var(--tr-st-waiting); color: var(--tr-term); }
+.switch-sheet { position: fixed; inset: 0; z-index: 30; display: flex; align-items: flex-end; background: rgb(0 0 0 / 0.5); }
+.switch-panel { width: 100%; max-height: 80dvh; overflow: auto; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 16px 16px 0 0; background: var(--tr-surface); display: flex; flex-direction: column; gap: 6px; }
+.switch-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 4px; }
+.switch-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; text-align: left; }
+.switch-row .switch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switch-row.current { outline: 2px solid var(--tr-accent-solid); }
 .keys { display: flex; flex-direction: column; gap: 4px; }
 .tools button, .keys button { flex: 1 1 0; min-width: 0; padding: 0 4px; font: 600 13px/16px var(--tr-font-ui); }
 .keys button { min-width: 44px; }

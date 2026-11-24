@@ -1,6 +1,6 @@
 ## What's new
 
-1.36.0 keeps terminal channels running after Trace quits, crashes or updates, and brings them back when it opens.
+1.36.0 keeps terminal channels running after Trace quits, crashes or updates, brings them back when it opens, and makes the phone app usable.
 
 - **Closing Trace by mistake no longer stops your agents.** Claude Code, Codex and Gemini CLI terminals, and shells, now run in a small background part of Trace (the runner). Quit, a crash or an update leaves them working; when Trace opens again each one is back in its tile, still running, with what it wrote meanwhile on screen. Settings → Preferences → **Keep channels running after Trace quits** (on by default, the installed app only) turns it off.
 - **Stopping them:** each channel's **Stop**, or **Stop all channels and quit** in the tray menu. Restarting the computer stops them, and **Start channels again when Trace opens** brings the agents back on their conversations, as before.
@@ -8,6 +8,12 @@
 - **Not followed again for such a channel:** its per-run usage entry and a session token limit. The run's log also lacks what it wrote while Trace was closed. Chat channels still stop when Trace quits.
 - **On Windows, updates install while channels run:** they no longer wait for channels in the runner to stop, and the updated Trace takes them up. A Mac update still waits for them.
 - **Stopping a channel on Windows ends everything it started,** including programs that left its process tree, which a process-tree stop missed: the runner puts each channel's program in a Windows job object, through a small helper that ships with Trace (`trace-jobs.exe`, built from `native/trace-jobs.c`).
+- **The phone app, after herdr:**
+  - **No more unreadable text.** A channel on the phone is drawn at the phone's size whenever you use it there (open, touch, type). If you then use it at the computer, the phone shows the wider screen at your text size, to swipe sideways, and a touch brings it back. **Desktop size** and **Fit to phone** are gone.
+  - **Nothing takes the size by itself:** waking the phone, reconnecting or the screen turning waits for a touch.
+  - **More room for the terminal:** one row of keys (Enter, Esc, Ctrl C, ↑, ↓, **More**). More holds the rest of the keys and the tools, and stays as you leave it.
+  - **☰ switcher** in a channel's header: every channel, those that need you first, with their count on the button.
+  - **Busy channels:** a phone that falls behind gets the screen as it is when it catches up, instead of a backlog. While no computer answers, the last screen stays, dimmed, and typing waits.
 - **Plugin tiles:** **New channel** lists the tiles of the plugins that are on (a plugin's `tiles` in its manifest). A plugin tile is a channel running that plugin's program, which Trace finds in the installed manifest; the window only names the plugin and the tile. It starts, stops, moves and shows on the phone like a Terminal channel, and is saved with the workspace; if its plugin is gone or off, starting it says so.
 - **Why a copy:** the runner runs from its own copy of the files it needs in `~/.coding-hub/runner/kits/` (about 265 MB on Windows), because Trace's installer stops everything running from its install folder before an update.
 - **Tried:** unit tests for the runner's protocol, its output buffer, the runner, Trace's connection to it, the copy, PtyManager taking a channel up, and the hook servers' ports; `npm run test:runner` (a real terminal kept while nothing is connected, from a real copy, with the runner leaving when idle); and a new end-to-end test that kills Trace's main process while a channel runs, opens Trace again, and finds the channel back with its screen, answering, and then stopped from Trace. On Windows, the runner test also stops a program whose detached child left its process tree and checks the child ended. The desktop smoke test passes with the runner off.

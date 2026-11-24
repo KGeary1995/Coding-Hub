@@ -31,7 +31,7 @@ ${terminalFixture}
     } else await fs.writeFile(path.join(bin, engine), '#!/usr/bin/env node\n' + fixture, { mode: 0o755 });
   }
   // The computer counts as in use (no idle time): opening a channel on the phone still draws it at the phone's size at
-  // once, as Fit to phone does. A phone's automatic request, which the desktop wins, is covered by linked-computers.test.ts.
+  // once. A phone's automatic request, which the desktop wins, is covered by linked-computers.test.ts.
   const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_DESKTOP_IDLE: '0', CODING_HUB_TEST_REMOTE_PORT: String(PORT) }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
@@ -89,9 +89,13 @@ ${terminalFixture}
     // Opening a terminal channel takes it at the phone's size: the text is at the chosen size (13 px) from the start,
     // never shrunk to the desktop's width, and the CLI is redrawn at the phone's columns.
     const textSize = () => phone.locator('#output .xterm-rows').evaluate((element) => getComputedStyle(element).fontSize);
-    const fitButton = () => phone.locator('#fit-phone').textContent();
+    const computerLine = () => phone.locator('#computer-size').isVisible();
     assert.equal(await textSize(), '13px', 'a channel opens with its text at the chosen size');
-    assert.equal(await fitButton(), 'Desktop size', 'a channel opens at the phone\'s size');
+    assert.equal(await computerLine(), false, 'a channel opens at the phone\'s size');
+    // One row of keys (1.36.0, after herdr): the rest and the channel's tools wait under More, so the terminal keeps the screen.
+    assert.equal(await phone.getByRole('button', { name: 'y', exact: true }).isVisible(), false, 'the extra keys start under More');
+    await phone.getByRole('button', { name: 'More keys and tools', exact: true }).click(); await phone.getByRole('button', { name: 'y', exact: true }).waitFor();
+    assert.equal(await phone.evaluate(() => localStorage.getItem('trace-remote-more')), 'open', 'More stays as left on this phone');
     const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
     const reported = () => phone.evaluate(() => Number([...document.getElementById('output').textContent.matchAll(/SIZE:(\d+)x/g)].at(-1)?.[1]));
     for (let i = 0; i < 50 && (await reported()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
@@ -138,7 +142,9 @@ ${terminalFixture}
     // size, as when the address bar hides), only when it is used.
     await tile.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('z'); await page.keyboard.press('Backspace');
     for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) > 60, `typing at the desktop gives the desktop its size back (${await width()} columns; the phone's button says "${await fitButton()}")`);
+    assert.ok((await width()) > 60, `typing at the desktop gives the desktop its size back (${await width()} columns)`);
+    // The phone then shows the computer's screen at its own text size, panned, never shrunk, and says how to take it back.
+    await phone.locator('#computer-size').waitFor(); assert.equal(await textSize(), '13px', 'the computer\'s screen is shown at the chosen text size');
     await app.evaluate(({ BrowserWindow }, port) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().startsWith(`http://127.0.0.1:${port}`))?.setSize(390, 700), PORT); await phone.waitForTimeout(600);
     assert.ok((await width()) > 60, 'a phone screen change does not take the channel back');
     await phone.locator('#output').click();
@@ -152,30 +158,26 @@ ${terminalFixture}
     await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) <= 60, 'touching the channel again draws it at the phone\'s size');
-    // A locked phone (or one showing another app) gives it back; coming back takes it again.
+    // A locked phone (or one showing another app) gives it back; coming back takes nothing until the phone is touched
+    // (herdr: only use moves the size).
     const visibility = (state) => phone.evaluate((value) => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value }); document.dispatchEvent(new Event('visibilitychange')); }, state);
     await visibility('hidden');
     for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) > 60, 'a locked phone gives the desktop its size back');
-    await visibility('visible');
+    await visibility('visible'); await phone.waitForTimeout(800);
+    assert.ok((await width()) > 60, 'unlocking the phone takes nothing by itself');
+    await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) <= 60, 'unlocking the phone draws the channel at its size again');
-    // Desktop size gives the channel back and is remembered on this phone: the channel opens at the desktop's size next
-    // time, with its text shrunk to the screen's width, and touching it does not take it. Fit to phone takes it again.
-    await phone.getByRole('button', { name: 'Desktop size', exact: true }).click();
-    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) > 60, 'Desktop size gives the desktop its size back');
-    assert.equal(await fitButton(), 'Fit to phone');
-    assert.equal(await phone.evaluate(() => localStorage.getItem('trace-remote-fit')), 'desktop', 'the choice is remembered on this phone');
-    await phone.getByRole('button', { name: 'Back to channels' }).click(); await phone.locator('#channel-list button').filter({ hasText: 'CH2' }).click();
-    await phone.locator('#output').filter({ hasText: 'READY' }).waitFor(); await phone.locator('#output').click(); await phone.waitForTimeout(600);
-    assert.ok((await width()) > 60, 'after Desktop size, the channel opens at the desktop\'s size');
-    assert.equal(await fitButton(), 'Fit to phone'); assert.ok(parseFloat(await textSize()) < 13, 'the desktop\'s layout is shown with its text shrunk to fit');
-    await phone.getByRole('button', { name: 'Fit to phone', exact: true }).click();
-    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) <= 60, 'Fit to phone draws the channel at the phone\'s size');
-    assert.equal(await fitButton(), 'Desktop size'); assert.equal(await textSize(), '13px');
-    assert.equal(await phone.evaluate(() => localStorage.getItem('trace-remote-fit')), null, 'Fit to phone clears the remembered choice');
+    assert.ok((await width()) <= 60, 'touching it after unlocking draws the channel at its size again');
+    // The switcher (herdr's agents-first switch) lists every channel, one tap away, from inside a channel.
+    await phone.getByRole('button', { name: /^Switch channel/ }).click();
+    const switcher = phone.getByRole('dialog', { name: 'Switch channel' }); await switcher.waitFor();
+    assert.match(await switcher.textContent(), /CH1.*CH2|CH2.*CH1/s, 'the switcher lists the channels');
+    await switcher.getByRole('button', { name: 'Close', exact: true }).click(); await switcher.waitFor({ state: 'detached' });
+    // With no computer answering, the last screen stays, dimmed, and typing waits.
+    await phone.evaluate(() => document.body.classList.add('offline'));
+    assert.ok(Number(await phone.locator('#output').evaluate((element) => getComputedStyle(element).opacity)) < 1, 'an offline phone dims the screen');
+    await phone.evaluate(() => document.body.classList.remove('offline'));
     // A message that cannot be delivered stays in the field instead of being lost.
     const long = 'x'.repeat(5000); await phone.locator('#text').fill(long); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#send-error').filter({ hasText: 'at most 4,095 characters' }).waitFor();
