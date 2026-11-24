@@ -1094,7 +1094,9 @@ else app.whenReady().then(() => {
     const made = result as { directory?: string; branch?: string } | null; if ((payload as { action?: string })?.action === 'worktree-create' && made?.directory) plugins?.fire('worktree.created', made.directory, { project: storage?.load()?.rootDirectory ?? null, folder: made.directory, branch: made.branch ?? null });
     return result;
   });
-  busyJobs = () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
+  // On Windows an update leaves the background runner's channels running (it runs outside the install folder), so they do
+  // not hold an update back. A Mac's runner still runs from the app an update replaces.
+  busyJobs = () => (background && process.platform === 'win32' ? manager.hasLocalSessions : manager.hasSessions) || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR), macUpdates()),

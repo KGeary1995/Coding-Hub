@@ -621,3 +621,12 @@ describe('quitting with the background runner', () => {
     expect(events.some((event) => event.type === 'exit')).toBe(false);
   });
 });
+
+describe('updates with the background runner', () => {
+  it('counts only runs an update would stop', async () => {
+    const manager = new PtyManager(() => {}, { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn: () => new FakePty() as unknown as IPty, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), held: { spawn: async () => new FakePty() as unknown as IPty, take: async () => null } });
+    managers.push(manager);
+    await manager.start(1, request('tile-held'));
+    expect(manager.hasSessions).toBe(true); expect(manager.hasLocalSessions).toBe(false);
+  });
+});

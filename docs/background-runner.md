@@ -105,7 +105,12 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
    - Jobs are deliberately not set to kill on close, so a fault in the helper never stops every channel.
    - A source run without the build tools works without it. `build-windows.cjs` refuses to package without it.
    - Ctrl+C needed nothing: written as 0x03, it reached a program started by the detached runner (it exited with STATUS_CONTROL_C_EXIT, checked 2026-11-24), so no inherited "ignore Ctrl+C" reaches agents.
-6. Updates with DRAIN; the tray's **Quit and stop**; Settings.
+6. Updates with DRAIN; the tray's **Quit and stop**; Settings. **Partly built (1.36.0):**
+   - On Windows, channels in the runner no longer hold an update back (`PtyManager.hasLocalSessions`). The update quits Trace, which lets go of them, and the new Trace takes them up.
+   - A Mac update still waits, because its runner runs from the app bundle the update replaces.
+   - The tray has **Stop all channels and quit**, and Settings has the switch.
+   - Not built yet: DRAIN of a runner on an older protocol. There is only protocol 1 so far, and each protocol has its own address, so a later protocol must drain protocol 1's runner at its address.
+   - Not tried: a real update of an installed Trace while channels run.
 
 Each step is its own release.
 
