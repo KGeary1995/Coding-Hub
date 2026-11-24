@@ -195,13 +195,13 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       await page.getByRole('button', { name: /^Needs you · \d+$/ }).waitFor(); await page.mouse.move(1, 1);
       // The asking tile is on screen, so no notice is drawn: its strip, its badge and Answer say it, and the status bar.
       const notice = page.locator('.tr-toast.waiting');
-      await tile(2).locator('.session-attention').waitFor(); await notice.waitFor({ state: 'detached' });
+      await tile(2).locator('.session-attention').waitFor(); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting'));
       await shot('09-needs-you');
       // Its notice is drawn while that tile is not on screen: on another page, and behind a maximised channel.
-      if (wanted('09-needs-you-other-page')) { await open('Changes'); await notice.waitFor(); await page.getByRole('button', { name: 'Unstaged src/greet.ts', exact: true }).waitFor(); await shot('09-needs-you-other-page'); await open('Workspace'); await notice.waitFor({ state: 'detached' }); }
+      if (wanted('09-needs-you-other-page')) { await open('Changes'); await notice.waitFor(); await page.getByRole('button', { name: 'Unstaged src/greet.ts', exact: true }).waitFor(); await page.locator('[aria-label="Git diff"] .diff-line').first().waitFor(); await shot('09-needs-you-other-page'); await open('Workspace'); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting')); }
       if (wanted('09-needs-you-behind')) {
         await (await tileControl(tile(1), 'Isolate channel 1')).click(); await page.mouse.move(1, 1); await notice.waitFor(); await shot('09-needs-you-behind');
-        await (await tileControl(tile(1), 'Restore grid')).click(); await page.mouse.move(1, 1); await notice.waitFor({ state: 'detached' });
+        await (await tileControl(tile(1), 'Restore grid')).click(); await page.mouse.move(1, 1); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting'));
       }
       await page.getByRole('button', { name: /^Needs you · \d+$/ }).click(); await page.getByRole('dialog', { name: 'Needs you' }).waitFor();
       await shot('10-needs-you-list'); await page.keyboard.press('Escape');
@@ -209,7 +209,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
       // grid at its end that channel has a notice (in a short window the second row is cut as well, and has one too).
       // Answer on it brings the tile back, and the notices leave.
       if (wanted('09-needs-you-scrolled')) {
-        await typeIn(1, 'need-approval'); await tile(1).locator('.session-attention').waitFor(); await notice.waitFor({ state: 'detached' });
+        await typeIn(1, 'need-approval'); await tile(1).locator('.session-attention').waitFor(); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting'));
         await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click(); await page.mouse.move(1, 1);
         await page.locator('.session-grid-container').evaluate((grid) => { grid.scrollTop = grid.scrollHeight; }); await notice.filter({ hasText: 'CH1 needs approval' }).waitFor(); await shot('09-needs-you-scrolled');
         await page.getByRole('button', { name: 'Answer CH1 in its terminal', exact: true }).click(); await page.waitForFunction(() => !document.querySelector('.tr-toast.waiting'));

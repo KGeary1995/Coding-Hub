@@ -61,6 +61,8 @@ function requestApproval() {
 function endTurn(later) {
   const settingsIndex = process.argv.indexOf('--settings');
   const hook = settingsIndex >= 0 ? JSON.parse(process.argv[settingsIndex + 1]).hooks?.Stop?.[0]?.hooks?.[0] : null;
+  // Codex: the end of its turn is an OSC 9 notification with the reply's first words.
+  if (hook?.type !== 'http' && process.argv.includes('tui.notifications=["approval-requested","agent-turn-complete"]')) { setTimeout(() => { process.stdout.write('\x1b]9;The tests pass now.\x07'); console.log('TURN:ended'); }, later ? 1500 : 0); return; }
   if (hook?.type !== 'http') { console.log('TURN:unsupported'); return; }
   setTimeout(() => { void fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hook_event_name: 'Stop' }) }).then(() => console.log('TURN:ended'), () => console.log('TURN:failed')); }, later ? 1500 : 0);
 }

@@ -159,7 +159,7 @@ The state badge is a dot and a word, in the state's colour:
 | starting | Starting (pulses) | — |
 | working | Working (in the engine's colour) | — |
 | waiting | Needs you (frame turns magenta) | **Answer** jumps to the terminal |
-| done | Done (blue, from 1.32.1): the agent finished its turn while you were elsewhere; it is still running. Also listed last in **Needs you** as *CHn finished its turn*. Clicking the tile or moving into its terminal clears it. Set by Claude Code terminals (its Stop hook) and by chat channels and Round Tables (the driver's reply); not yet by Codex or Gemini CLI terminals | **Open channel** in Needs you |
+| done | Done (blue, from 1.32.1): the agent finished its turn while you were elsewhere; it is still running. Also listed last in **Needs you** as *CHn finished its turn*. Clicking the tile or moving into its terminal clears it. Set by Claude Code terminals (its Stop hook), Codex terminals (from 1.33.2: Codex's own end-of-turn notice, told from its approval requests by their wording), Gemini CLI terminals (agy's status, working then idle or done), and chat channels and Round Tables (the driver's reply) | **Open channel** in Needs you |
 | finished | Finished | **Review changes** (G C) |
 | failed | Failed (frame turns red) | **Retry** and **Open log** |
 | limit | Near limit (context or budget ≥ 80%) | **Write handoff** opens Shared memory |
@@ -305,10 +305,10 @@ Every Claude Code and Codex channel started in Trace gets shared project memory 
 
 - **list_channels**: this computer's channels (a Round Table counts as its lead's channel): number, name, CLI, whether it runs, the approval it waits for, its folder, and which one is the caller's.
 - **read_channel**: another channel's last replies (1 to 20, from its CLI's own conversation; none for terminals or Gemini CLI).
-- **send_to_channel**: types a message into another channel as you would, starting *[Message from CHn (name): an agent, not the person]*. Refused for the caller's own channel, a stopped one, and one waiting for you to answer an approval (its Enter would answer it). A chat gets it as a chat message (at a Round Table, the lead's only), a terminal as a line.
+- **send_to_channel**: types a message into another channel as you would, starting *[Message from CHn (name): an agent, not the person]*. Refused for the caller's own channel, a stopped one, and one waiting for you to answer an approval (its Enter would answer it). A chat gets it as a chat message (from 1.33.2, at a Round Table the whole table gets it, as a message typed there does), a terminal as a line.
 - **wait_for_channel**: waits until another channel's turn ends (Claude Code's end-of-turn hook, or a chat turn), it asks for an approval, or it stops, up to 30 minutes; says which.
 
-The CLI asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access; in a Codex chat, which has no such prompt, the tools are refused. Turning the setting off stops them at once, even in running channels. Each run reaches Trace through its own secret address on 127.0.0.1, which also tells Trace which channel is asking. Gemini CLI channels get no tools (agy takes MCP servers only from its global settings).
+Claude Code asks your permission for each tool as it does for any MCP tool, unless the channel runs at Full access. Codex takes the three that only look (list, read, wait) without asking (from 1.33.2), and asks before **send_to_channel**; a Codex chat, which has no such prompt, therefore refuses to send but can list, read and wait. Turning the setting off stops them at once, even in running channels. Each run reaches Trace through its own secret address on 127.0.0.1, which also tells Trace which channel is asking. Gemini CLI channels get no tools (agy takes MCP servers only from its global settings).
 
 ## Event hooks
 

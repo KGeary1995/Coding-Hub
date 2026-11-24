@@ -1,5 +1,15 @@
 ## What's new
 
+1.33.2 closes the items left open by the herdr work:
+
+- **Codex terminals say Done too.** Trace now asks Codex for its end-of-turn notice as well as its approval requests, and tells them apart by the approval requests' fixed wording ("Approval requested: …", "Approval requested by …", "Codex wants to edit …"). Only a reply that itself began with one of those would be taken for an approval. A Codex turn's end also reaches event hooks and the channel tools' wait.
+- **Correction:** 1.32.1's notes said Gemini CLI terminals do not say Done. They do: Trace already read agy's own status (working, then idle or done) as the end of a turn.
+- **Channel tools:** a message to a Round Table goes to the whole table, as one typed there does (before, its lead alone got it). Codex takes the three tools that only look (list, read, wait) without asking, so a Codex chat can use them; sending a message still asks, so a Codex chat still cannot send.
+- **GitHub Actions** now run the Node.js 24 versions of checkout, setup-node, upload-artifact and download-artifact (each pinned to its exact commit). The changes in between were read first; none affects Trace's workflows.
+- **Smaller:** the design tour waits for a diff before its Needs you picture, and for no notice at all where two can be drawn; one circular import between two Settings components is gone.
+- **Tried:** the unit tests (Codex's approval wordings and other notices; which run leads a table); the real codex-cli 0.171.0 reading Trace's exact channel-tool settings; and the desktop smoke test, where a stand-in Codex ends its turn while you are in another channel and its tile says Done, not Needs you. The design, workbench, enterprise, table seats, remote, productivity and channel-tools smoke tests pass.
+- **Not tried:** the design tour's changed waits. Seven of its scenes fail before reaching them, on main too (a tile's Restore grid control is not found after it is isolated), so the tour needs its own repair.
+
 1.33.1 is the last idea from herdr for now, a careful version of its plugins:
 
 - **Event hooks:** Settings → **Event hooks** runs a program of your own when a channel needs you, ends its turn, or fails, such as a script that sends a message to your phone. It is told which channel and why in environment variables (TRACE_CHANNEL, TRACE_CHANNEL_NAME, TRACE_MESSAGE, TRACE_FOLDER, TRACE_EVENT). Trace asks you to confirm the exact command in a system dialog before saving it. It runs without a shell and is stopped after 30 seconds; one hook runs at most once every 10 seconds for a channel. **Test** runs it once.

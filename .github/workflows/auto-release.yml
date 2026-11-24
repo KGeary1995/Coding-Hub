@@ -26,7 +26,7 @@ jobs:
     # The candidate takes about 20 minutes, and one rerun of a timed-out job fits.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Start the Windows release candidate, wait for it, then start Release

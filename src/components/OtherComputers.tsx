@@ -8,7 +8,7 @@ import { workbench } from '../runtime/workbench';
 import { refreshLinked } from '../runtime/linked-terminals';
 import { useLinkedStore } from '../state/linked-store';
 import { useWorkspaceStore } from '../state/workspace-store';
-import { HowThisWorks } from './HubPanels';
+import { HowThisWorks } from './HowThisWorks';
 
 const left = (iso: string, now: number) => { const seconds = Math.max(0, Math.round((Date.parse(iso) - now) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; };
 

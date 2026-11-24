@@ -39,6 +39,14 @@ export class OscSequences {
  * Extracts OSC 9 desktop notifications (Codex's approval requests) from terminal output.
  * `OSC 9;4` is ConEmu/Windows Terminal progress, not a notification, and is ignored.
  */
+/**
+ * Whether a Codex notification asks for an approval. Its approval notices have three wordings (codex-rs/tui chatwidget
+ * notifications.rs): "Approval requested: …" (a command), "Approval requested by …" (an MCP server) and "Codex wants to
+ * edit …". The end of a turn shows the reply's first words instead, or "Agent turn complete", so anything else is that.
+ * Only a reply that itself began with one of those wordings would be taken for an approval.
+ */
+export const codexApproval = (message: string) => /^(Approval requested(: | by )|Codex wants to edit )/.test(message);
+
 export class OscNotifications {
   private sequences = new OscSequences('9');
   push(chunk: string): string[] { return this.sequences.push(chunk).filter((body) => !/^4;/.test(body)).map(cleanMessage).filter(Boolean); }
@@ -171,8 +179,11 @@ export function systemCurl(platform: NodeJS.Platform = process.platform, env: Re
  */
 export function supportsSessionHook(version: string | null) { return atLeast(version, 2, 1, 319); }
 
-/** Codex config that reports approval requests as OSC 9 notifications in its terminal. */
-export const CODEX_ATTENTION_CONFIG = ['tui.notifications=["approval-requested"]', 'tui.notification_method="osc9"', 'tui.notification_condition="always"'];
+/**
+ * Codex config that reports approval requests and the end of each turn as OSC 9 notifications in its terminal (the
+ * turn's end from 1.33.2, for Done, event hooks and the channel tools). codexApproval tells them apart.
+ */
+export const CODEX_ATTENTION_CONFIG = ['tui.notifications=["approval-requested","agent-turn-complete"]', 'tui.notification_method="osc9"', 'tui.notification_condition="always"'];
 
 /** HTTP hooks arrived in Claude Code 2.1.63; older versions do not document how they treat an unknown hook type. */
 export function supportsHttpHooks(version: string | null) { return atLeast(version, 2, 1, 63); }

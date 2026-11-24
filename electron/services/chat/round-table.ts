@@ -119,6 +119,8 @@ export class RoundTables {
 
   /** Whether a run sits at a discussion table (as its lead or another seat). */
   isSeated(runId: string) { return this.tableOf(runId) !== null; }
+  /** Whether a run leads an open discussion table. */
+  leads(runId: string) { return this.tables.has(runId); }
   /** The table a run sits at, as its leading run id. */
   private tableOf(runId: string): Table | null {
     const own = this.tables.get(runId); if (own) return own;

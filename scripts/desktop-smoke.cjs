@@ -157,6 +157,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       await page.waitForFunction((count) => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length > count, before);
       await page.waitForTimeout(300); assert.notEqual(await first.getAttribute('data-state'), 'done', 'a turn the person watched end is not Done');
     } else console.log('desktop smoke: the window could not be brought to the front, so the watched-turn check was skipped');
+    // A Codex terminal says Done too (1.33.2): the end of its turn is an OSC 9 notice with the reply's first words.
+    await second.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('end-turn-later'); await page.keyboard.press('Enter');
+    await first.locator('.xterm-helper-textarea').focus();
+    await page.waitForFunction(() => document.querySelectorAll('.session-tile')[1]?.getAttribute('data-state') === 'done');
+    assert.equal(await second.locator('.session-attention').count(), 0, 'the end of a Codex turn is not an approval request');
+    await second.locator('.xterm-helper-textarea').focus(); await page.waitForFunction(() => document.querySelectorAll('.session-tile')[1]?.getAttribute('data-state') !== 'done');
     await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line');
     // Trace's own menu has no Reload, Force Reload or Close Window, so Ctrl+R and Ctrl+W (Cmd on a Mac) cannot stop every
     // channel. Checked on the menu itself: Playwright's synthetic keys may never reach Electron's menu accelerators.
