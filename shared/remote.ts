@@ -1,4 +1,5 @@
 import type { ChannelEngine } from './types';
+import type { AgentLook } from './agent-look';
 
 /** A channel's engine as phones and linked computers see it. */
 export type RemoteEngine = ChannelEngine;
@@ -19,6 +20,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
   coaching?: { id: string; tips: string[]; review: { advice: string; rewrite: string } | null };
   /** A chat channel: its events arrive on the stream as `chat` (with a `chat-replay` first) and it is answered through /api/chat. */
   chat?: true;
+  /** A custom agent's channel: how its agent looks (1.40.0). */
+  agent?: AgentLook;
   /** A Round Table: this chat leads one, and `table` is the other agent at it (from 1.16.3). */
   table?: 'claude' | 'codex' | 'gemini';
   /** Whose Claude account the channel runs on (personal, work…), named and coloured as on its own computer. */
@@ -31,7 +34,8 @@ export interface RemoteChannel { sessionId: string; channel: number; title: stri
 export interface RemoteDevice { id: string; name: string; createdAt: string; lastSeen: string | null; notifications: boolean; kind: RemoteDeviceKind; canRun: boolean }
 /** What GET /api/me (and the stream's `me` event) tells a phone or computer about its own key. */
 /** `computer`: this computer's sync identity, so a phone can tell its channels from those passed on by linked computers. */
-export interface RemoteMe { id: string; name: string; kind: RemoteDeviceKind; canRun: boolean; computer: string | null }
+/** `agents`: the custom agents turned on there, for + Channel (1.40.0; absent from older computers). */
+export interface RemoteMe { id: string; name: string; kind: RemoteDeviceKind; canRun: boolean; computer: string | null; agents?: AgentLook[] }
 /**
  * A chat channel's recent events (the stream's `chat-replay` event): its current run's last
  * 300 events or 2 MB, streamed text folded into its finished message. `runId` is null when nothing was kept.
@@ -44,7 +48,7 @@ export type ChannelControl = 'start' | 'stop' | 'restart' | 'close';
 /** What a linked computer asks this window to do: start, stop or restart a channel, or add a new one. */
 /** `chat` asks for a chat channel (Claude Code or Codex) rather than a terminal one. */
 /** `settings` changes a channel's name, permissions, model or effort (a phone's channel settings). */
-export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true; like?: string } | { requestId: string; settings: RemoteChannelChange };
+export type RemoteControlRequest = { requestId: string; sessionId: string; control: ChannelControl } | { requestId: string; add: ChannelEngine; chat?: true; like?: string; /** A custom agent's id, with `add: 'custom'`. */ agent?: string } | { requestId: string; settings: RemoteChannelChange };
 /**
  * One of this computer's channels' settings, as a phone that may start and stop agents sees them (GET
  * /api/channel-settings): its name and, for an agent, what it may do without asking, its model and (Codex) its
@@ -137,7 +141,7 @@ export interface RemoteResumeRequest { requestId: string; engine: 'claude' | 'co
  * A scheduled job's run (1.39.0): the window adds a channel with this id for the agent in that folder (closing `replace`,
  * the job's previous channel, first), starts it, answers with finishRemoteControl, then sends the task once the agent is ready.
  */
-export interface ScheduledRunRequest { requestId: string; taskId: string; sessionId: string; engine: 'claude' | 'codex' | 'gemini'; directory: string; title: string; replace?: string }
+export interface ScheduledRunRequest { requestId: string; taskId: string; sessionId: string; engine: 'claude' | 'codex' | 'gemini' | 'custom'; /** A custom agent's id, with engine 'custom'. */ agent?: string; directory: string; title: string; replace?: string }
 /** The URL fragment a pairing link carries; it never reaches a server log. */
 export const PAIRING_PREFIX = '#pair=';
 export const REMOTE_PORT = 47821;

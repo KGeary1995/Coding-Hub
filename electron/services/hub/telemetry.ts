@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { CLIEngineConfig } from '../../../shared/types';
 import { timed } from '../storage/host-health';
-import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
+import type { BuiltInRunningSession, EngineInfo } from '../../../shared/ipc';
 import { localDay, newTokens, type UsageRecord, type PriceRate } from '../../../shared/hub';
 import { baseModel, builtInRate } from '../../../shared/model-prices';
 import { readGeminiRequests } from './gemini-usage';
@@ -113,7 +113,7 @@ export function repriced(usage: UsageRecord, rates: PriceRate[]): UsageRecord {
 export function totalTokens(usage: UsageRecord) { return newTokens(usage); }
 /** Where a subagent transcript was read to; `grown`: when it last gained something (only recent ones are read between walks). */
 interface SubagentState { offset: number; partial: Buffer; file?: string; grown?: number }
-interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: AgentRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string;
+interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHome: string; run: BuiltInRunningSession; config: CLIEngineConfig; start: number; file: string | null; offset: number; partial: Buffer; model: string;
   /** Claude subagent transcripts read so far, by their path under `subagents/`; `walked`: when every one was last checked. */
   subagents?: Map<string, SubagentState>; walked?: number; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
   /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
@@ -129,7 +129,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * A Gemini CLI run. It writes no log of its own: its requests are rows of its conversation's file (gemini-usage.ts), so
  * the run is tied to a conversation, and counts that file's rows from `baseline` on.
  */
-interface GeminiWatch { run: AgentRunningSession; config: CLIEngineConfig; start: number; timer?: ReturnType<typeof setInterval>; stopped: boolean;
+interface GeminiWatch { run: BuiltInRunningSession; config: CLIEngineConfig; start: number; timer?: ReturnType<typeof setInterval>; stopped: boolean;
   /** The conversation the run writes to, once known: a chat seat says it when it is ready, a resumed channel has it from the start, and a terminal's new one is looked for. */
   conversation: string | null;
   /** Rows the file held before this run could have written any: an earlier run's, or the person's own use. */
@@ -180,7 +180,7 @@ export class TelemetryService {
    * A Gemini CLI run started. Its usage is counted from its conversation's file once that is known; a resumed
    * conversation counts only the rows it gains from here.
    */
-  startGemini(run: AgentRunningSession, config: CLIEngineConfig) {
+  startGemini(run: BuiltInRunningSession, config: CLIEngineConfig) {
     const start = Date.now(); const home = this.geminiHome(); let names: string[] = []; try { if (home) names = fs.readdirSync(path.join(home, 'conversations')); } catch { /* No conversations yet. */ }
     const known = new Set(names.filter((name) => name.endsWith('.db') && UUID.test(name.slice(0, -3))).map((name) => name.slice(0, -3).toLowerCase()));
     const watch: GeminiWatch = { run, config, start, stopped: false, conversation: null, baseline: 0, rows: 0, stamp: '', known, looked: 0 };
@@ -254,12 +254,12 @@ export class TelemetryService {
     const usage = this.runUsage(runId); if (usage) this.publish(usage);
   }
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
-  onError: (run: AgentRunningSession, message: string) => void = () => {};
+  onError: (run: BuiltInRunningSession, message: string) => void = () => {};
   /** Each new line of a run's own transcript (not a subagent's), for live coaching; never the lines before a resume. */
-  onLine: (run: AgentRunningSession, config: CLIEngineConfig, raw: Json) => void = () => {};
+  onLine: (run: BuiltInRunningSession, config: CLIEngineConfig, raw: Json) => void = () => {};
   /** A run's terminal switched conversation (see `follow`) and its transcript was found: resume and history go there now. */
-  onConversation: (run: AgentRunningSession, conversationId: string) => void = () => {};
-  constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: AgentRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
+  onConversation: (run: BuiltInRunningSession, conversationId: string) => void = () => {};
+  constructor(readonly root: string, private rates: () => PriceRate[], private publish: (usage: UsageRecord) => void, private stopAtLimit: (run: BuiltInRunningSession) => void, private claudeHome = process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), '.claude'), private codexHome = process.env.CODEX_HOME ?? path.join(homedir(), '.codex')) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 }); this.database = new DatabaseSync(path.join(root, 'usage.db'));
     // With WAL, NORMAL keeps the database whole after a crash and skips a disk flush per commit on the main process; a power cut can lose the last few reads, which the next start reads again from the logs.
     this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS usage(run TEXT NOT NULL, event TEXT NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(run,event)); CREATE TABLE IF NOT EXISTS metadata(run TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE INDEX IF NOT EXISTS usage_event ON usage(event);');
@@ -269,11 +269,11 @@ export class TelemetryService {
     let left: fs.Dirent[] = []; try { left = fs.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && UUID.test(entry.name)); } catch { /* Nothing to remove. */ }
     for (const entry of left) void fs.promises.rm(path.join(root, entry.name), { recursive: true, force: true }).catch(() => { /* Still locked: tried again next start. */ });
   }
-  prepare(run: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
+  prepare(run: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) {
     if (config.engine === 'claude' && !config.resumeId && info.supportsSessionId) launch.args.push('--session-id', run.runId);
     if (config.engine === 'codex' && info.supportsConfig) { const logDir = path.join(this.root, run.runId); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); launch.args.push('--config', `log_dir=${JSON.stringify(logDir.replace(/\\/g, '/'))}`); }
   }
-  start(run: AgentRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
+  start(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
     const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId), ...(baseline?.subagents?.size ? { subagents: new Map([...baseline.subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])) } : {}) };
     this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() })); this.totals.delete(run.runId);

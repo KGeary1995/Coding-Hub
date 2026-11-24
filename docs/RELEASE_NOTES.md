@@ -1,5 +1,34 @@
 ## What's new
 
+1.40.0 lets you add any command-line agent to Trace yourself, without waiting for a new version of Trace.
+
+- **Add an agent.** Agent setup → **Agents** → **Add an agent**. There are three ways:
+  - **Draft it for me:** Trace reads the program's help, and your Claude Code writes the description.
+  - Fill in a short form.
+  - Paste a definition.
+- **Before it's saved:**
+  - **Test start** shows what the program prints.
+  - A system dialog shows the exact program and arguments Trace will run. Nothing is saved until you confirm.
+- **What the new agent gets:**
+  - Its own **New channel** entry, colour and initials, on the computer and the phone.
+  - A model list and permission levels, when its program has them.
+  - Needs you and Done.
+  - The automatic checks, Undo last turn, Start in order, scheduled jobs and Tasks.
+  - Shared memory and the task tools, when the program accepts MCP servers.
+- **Safe by default:**
+  - Trace runs the program directly, never through a batch file or a shell.
+  - A definition changed by hand, or copied in from elsewhere, stays **Off** until you confirm it again.
+- **Tried:**
+  - Unit tests.
+  - The desktop and productivity smoke tests, with a stand-in agent program.
+  - **Draft it for me** with the real Claude Code against the real Gemini (agy): it wrote a correct definition, with models, permission levels and resume, and it needed no fixes.
+- **Not tried yet:**
+  - A real third-party agent program running as a custom channel.
+- **Not in this version** (planned):
+  - A shared list of ready-made definitions.
+  - Syncing definitions between your computers.
+  - Usage and cost, a chat view, and Round Table seats for custom agents.
+
 1.39.1 puts chats in **New channel**.
 
 - **Claude Code chat, Codex chat and Gemini chat** are now in **New channel**, on the computer and the phone, beside the terminal versions. A chat shows the conversation in Trace's own view, with approvals as cards. Before, a chat came only from a Round Table, a task or a scheduled job. A Gemini chat follows its permission level as a Gemini seat does; at Ask, Gemini's own settings decide whether it asks before edits.

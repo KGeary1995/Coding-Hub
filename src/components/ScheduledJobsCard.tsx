@@ -4,10 +4,14 @@ import type { JobRun, JobSchedule, ScheduledJob, ScheduledJobData, WorkbenchRequ
 import { workbench } from '../runtime/workbench';
 import { loadTasks } from '../state/task-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { lookOf, useAgentStore } from '../state/agent-store';
+import type { AgentEntry } from '../../shared/agents';
 import { ConfirmStep } from './ConfirmStep';
 
 type Engine = ScheduledJob['engine'];
-export const JOB_AGENTS: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
+export const JOB_AGENTS: Record<Exclude<Engine, 'custom'>, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
+/** A job's agent by name: a custom agent's own (docs/custom-agents.md). */
+const jobAgent = (job: Pick<ScheduledJob, 'engine' | 'agent'>, agents: AgentEntry[]) => job.engine === 'custom' ? lookOf(agents, job.agent ?? '').name : JOB_AGENTS[job.engine];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = [1, 2, 3, 4, 6, 8, 12];
 /** Ready-made jobs to start from: the person can change any of it. */
@@ -29,14 +33,14 @@ export function lastRunText(run: JobRun) { return `${when(run.at)}: ${run.result
 /** Brings a task's card on the board into view. */
 function showTask(id: string) { const card = document.getElementById(`task-${id}`); card?.scrollIntoView({ behavior: 'smooth', block: 'center' }); card?.focus(); }
 
-const EMPTY = { id: '', name: '', engine: 'claude' as Engine, directory: '', prompt: '', kind: 'daily' as JobSchedule['kind'], time: '08:00', days: [1, 2, 3, 4, 5], every: 6 };
+const EMPTY = { id: '', name: '', engine: 'claude' as Engine, agent: '', directory: '', prompt: '', kind: 'daily' as JobSchedule['kind'], time: '08:00', days: [1, 2, 3, 4, 5], every: 6 };
 
 /**
  * Tasks → Scheduled jobs (1.39.0): a request an agent gets by itself at set times. The host keeps the clock and the jobs
  * (electron/services/workbench/scheduled-jobs.ts); each run opens a channel here and shows on the board as a task.
  */
 export function ScheduledJobsCard() {
-  const rootDirectory = useWorkspaceStore((state) => state.rootDirectory);
+  const rootDirectory = useWorkspaceStore((state) => state.rootDirectory); const agents = useAgentStore((state) => state.agents);
   const [data, setData] = useState<ScheduledJobData>({ jobs: [] }); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(EMPTY); const [open, setOpen] = useState(false); const [removing, setRemoving] = useState<string | null>(null);
   const refresh = () => workbench<ScheduledJobData>({ action: 'job-list' }).then(setData).catch((e: Error) => setError(e.message));
@@ -44,9 +48,9 @@ export function ScheduledJobsCard() {
   useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 30000); const unsubscribe = window.codingHub?.onTasksChanged(() => void refresh()); return () => { clearInterval(timer); unsubscribe?.(); }; }, []);
   const act = async (request: WorkbenchRequest, after?: () => void) => { setBusy(true); setError(''); try { setData(await workbench<ScheduledJobData>(request)); after?.(); await loadTasks(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const schedule = (): JobSchedule => form.kind === 'daily' ? { kind: 'daily', time: form.time } : form.kind === 'weekdays' ? { kind: 'weekdays', time: form.time, days: form.days } : { kind: 'hours', every: form.every, time: form.time };
-  const edit = (job: ScheduledJob) => { setForm({ ...EMPTY, id: job.id, name: job.name, engine: job.engine, directory: job.directory, prompt: job.prompt, kind: job.schedule.kind, time: job.schedule.time, ...(job.schedule.kind === 'weekdays' ? { days: job.schedule.days } : {}), ...(job.schedule.kind === 'hours' ? { every: job.schedule.every } : {}) }); setOpen(true); };
+  const edit = (job: ScheduledJob) => { setForm({ ...EMPTY, id: job.id, name: job.name, engine: job.engine, agent: job.agent ?? '', directory: job.directory, prompt: job.prompt, kind: job.schedule.kind, time: job.schedule.time, ...(job.schedule.kind === 'weekdays' ? { days: job.schedule.days } : {}), ...(job.schedule.kind === 'hours' ? { every: job.schedule.every } : {}) }); setOpen(true); };
   const close = () => { setForm(EMPTY); setOpen(false); };
-  const submit = () => act({ action: 'job-save', ...(form.id ? { id: form.id } : {}), name: form.name, engine: form.engine, directory: form.directory, prompt: form.prompt, schedule: schedule() }, close);
+  const submit = () => act({ action: 'job-save', ...(form.id ? { id: form.id } : {}), name: form.name, engine: form.engine, ...(form.engine === 'custom' ? { agent: form.agent } : {}), directory: form.directory, prompt: form.prompt, schedule: schedule() }, close);
 
   return <section className="ui-card scheduled-jobs" aria-labelledby="scheduled-jobs-title">
     <div className="ui-card-head"><AlarmClock aria-hidden="true" /><h2 id="scheduled-jobs-title">Scheduled jobs</h2><span className={`ui-count ${data.jobs.length ? 'accent' : 'neutral'}`}>{data.jobs.length}</span>
@@ -55,7 +59,7 @@ export function ScheduledJobsCard() {
     {error && <p className="error-message" role="alert">{error}</p>}
     {data.jobs.length > 0 && <ul className="ui-list">{data.jobs.map((job) => <li key={job.id} className="ui-row scheduled-job">
       <span className="ui-row-main"><strong>{job.name}</strong>
-        <small>{JOB_AGENTS[job.engine]} · {describeSchedule(job.schedule)} · <code title={job.directory}>{job.directory}</code></small>
+        <small>{jobAgent(job, agents)} · {describeSchedule(job.schedule)} · <code title={job.directory}>{job.directory}</code></small>
         <small>{job.paused ? 'Paused' : job.running ? 'Running now' : job.nextAt ? `Next run: ${when(job.nextAt)}` : ''}</small>
         {job.lastRun && <small className={job.lastRun.result === 'failed' ? 'error-message' : 'ui-hint'}>Last run {lastRunText(job.lastRun)}{job.lastRun.taskId && <> <button type="button" className="quiet-button small" onClick={() => showTask(job.lastRun!.taskId!)}>Show its task</button></>}</small>}</span>
       <span className="scheduled-job-actions">
@@ -69,7 +73,7 @@ export function ScheduledJobsCard() {
       <label className="ui-field">Name<input aria-label="Job name" required maxLength={150} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="For example: Update dependencies and run the tests" /></label>
       <label className="ui-field">What should the agent do?<textarea aria-label="Job request" required rows={3} maxLength={2000} value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} /></label>
       <div className="task-form-pair">
-        <label className="ui-field">Agent<select aria-label="Job agent" value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value as Engine })}>{Object.entries(JOB_AGENTS).map(([engine, label]) => <option key={engine} value={engine}>{label}</option>)}</select></label>
+        <label className="ui-field">Agent<select aria-label="Job agent" value={form.engine === 'custom' ? `custom:${form.agent}` : form.engine} onChange={(e) => { const value = e.target.value; setForm(value.startsWith('custom:') ? { ...form, engine: 'custom', agent: value.slice(7) } : { ...form, engine: value as Engine, agent: '' }); }}>{Object.entries(JOB_AGENTS).map(([engine, label]) => <option key={engine} value={engine}>{label}</option>)}{agents.filter((agent) => agent.active || agent.id === form.agent).map((agent) => <option key={agent.id} value={`custom:${agent.id}`}>{agent.look.name}</option>)}</select></label>
         <label className="ui-field">Project folder<div className="input-with-button"><input aria-label="Job folder" required value={form.directory} onChange={(e) => setForm({ ...form, directory: e.target.value })} /><button type="button" className="button secondary" onClick={() => void window.codingHub?.pickDirectory().then((value) => { if (value) setForm((current) => ({ ...current, directory: value })); })}><FolderOpen aria-hidden="true" />Choose folder</button></div></label>
       </div>
       <div className="scheduled-job-when">

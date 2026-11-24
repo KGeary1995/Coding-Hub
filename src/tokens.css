@@ -58,6 +58,7 @@
   --tr-ch-claude: #ffb547;
   --tr-ch-codex: #5fe1ff;
   --tr-ch-gemini: #8c9cff;     /* Gemini CLI channels (agy), as in 1.19 */
+  --tr-ch-custom: #c4b5fd;     /* custom agents (1.40), when no colour of their own is set on the tile */
   --tr-ch-shell: #9fc3b8;      /* Terminal channels: a plain shell, kept quieter than the agents */
   --tr-ch-planner: #c6f26b;    /* a hierarchy Round Table's planner (a second Claude seat), told apart from the builder's amber */
   --tr-you: #b9a7ff;

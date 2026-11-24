@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import type { ChatEngine, CLIEngine } from '../../../shared/types';
-import type { EngineInfo, AgentRunningSession } from '../../../shared/ipc';
+import type { EngineInfo, BuiltInRunningSession } from '../../../shared/ipc';
 import type { MemoryNote } from '../../../shared/hub';
 import type { MemoryService } from './memory';
 import { decisions, isItemNote, openItems } from '../../../shared/memory-items';
@@ -288,7 +288,7 @@ export class AutoMemory {
   }
 
   /** Adds memory arguments to a launch. Failures leave the session to start without memory. */
-  prepare(run: AgentRunningSession, model: string, info: EngineInfo, launch: { args: string[]; env?: Record<string, string> }, chosenKey?: string) {
+  prepare(run: BuiltInRunningSession, model: string, info: EngineInfo, launch: { args: string[]; env?: Record<string, string> }, chosenKey?: string) {
     if (!this.options.enabled()) return;
     let key: string; let context: string; const tools = run.engine === 'gemini' ? GEMINI_MEMORY_SERVER : SERVER;
     try {
@@ -296,11 +296,7 @@ export class AutoMemory {
       key = chosenKey ?? projectMemoryKey(run.cwd);
       // The home folder is no project: everything started there would share (and mix) one set of notes.
       if (!chosenKey && samePath(run.cwd, os.homedir())) this.notice(`home:${run.cwd}`, `A channel runs in your home folder, so its shared memory (${key}) holds notes from everything started there. ${run.engine === 'gemini' ? 'Start it' : 'Open that channel\'s Settings and choose its project under Shared memory project, or start it'} in the project's own folder.`);
-      // ready() already pulled newer handoffs from other computers and read the notes. Without it, the notes are read here
-      // and the sync only starts (its notes reach the next launch); offline Drive leaves the local notes.
-      const readied = this.readied.get(key);
-      if (readied && Date.now() - readied.at < READY_FOR_MS) context = memoryContext(key, readied.notes, tools);
-      else { try { this.options.refresh?.(key); } catch { /* Local notes only. */ } context = memoryContext(key, this.options.memory.list(key), tools); }
+      context = this.launchContext(key, tools);
     } catch { return; }
     // Gemini (agy): the memory server of Trace's agy plugin (gemini-plugin.ts) takes the run's notes from agy's environment,
     // and answers its memory_context tool with the context, which the plugin's rule asks the agent to call first (agy has
@@ -343,8 +339,31 @@ export class AutoMemory {
     if (!extra.length) return;
     launch.args.push(...extra); this.track(run, model, key);
   }
+  /**
+   * ready() already pulled newer handoffs from other computers and read the notes. Without it, the notes are read here
+   * and the sync only starts (its notes reach the next launch); offline Drive leaves the local notes.
+   */
+  private launchContext(key: string, tools: string) {
+    const readied = this.readied.get(key);
+    if (readied && Date.now() - readied.at < READY_FOR_MS) return memoryContext(key, readied.notes, tools);
+    try { this.options.refresh?.(key); } catch { /* Local notes only. */ }
+    return memoryContext(key, this.options.memory.list(key), tools);
+  }
+  /**
+   * A custom agent's shared memory (docs/custom-agents.md): the folder's notes as its launch context, and the memory
+   * server started from its environment, as agy's plugin starts it. No engine is named, so the agent says which author
+   * it writes as (notes keep the authors older Traces on the person's other computers read). No session summary is
+   * written for it. Null when automatic memory is off or the notes can't be read.
+   */
+  customMemory(cwd: string): { context: string; server: { command: string; args: string[]; env: Record<string, string> } } | null {
+    if (!this.options.enabled()) return null;
+    try {
+      const key = projectMemoryKey(cwd);
+      return { context: this.launchContext(key, SERVER), server: { command: this.options.executable, args: [this.options.server], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_MEMORY_ROOT: this.options.memory.root, CODING_HUB_MEMORY_KEY: key, CODING_HUB_MEMORY_DIR: cwd } } };
+    } catch { return null; }
+  }
   /** A run that gets memory: what Git shows at its start, for the summary when it ends. */
-  private track(run: AgentRunningSession, model: string, key: string) {
+  private track(run: BuiltInRunningSession, model: string, key: string) {
     const tracked: Tracked = { engine: run.engine, cwd: run.cwd, key, model, startedAt: Date.now(), files: [], head: null };
     this.runs.set(run.runId, tracked);
     tracked.ready = Promise.all([changedFiles(run.cwd), git(run.cwd, ['rev-parse', 'HEAD'])]).then(([files, head]) => { tracked.files = files; tracked.head = head[0] ?? null; });

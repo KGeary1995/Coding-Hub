@@ -276,6 +276,7 @@ progress::-webkit-progress-value { border-radius: var(--tr-r-chip); background: 
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).claude { --tone: var(--tr-ch-claude); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).codex { --tone: var(--tr-ch-codex); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).gemini { --tone: var(--tr-ch-gemini); }
+:is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).custom { --tone: var(--tr-ch-custom); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).shell { --tone: var(--tr-ch-shell); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).planner { --tone: var(--tr-ch-planner); }
 :is(.ui-badge, .ui-count, .ui-avatar, .ui-meter).you { --tone: var(--tr-you); }

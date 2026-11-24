@@ -147,6 +147,7 @@ button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limi
 .tr-sb-dot.claude { background: var(--tr-ch-claude); }
 .tr-sb-dot.codex { background: var(--tr-ch-codex); }
 .tr-sb-dot.gemini { background: var(--tr-ch-gemini); }
+.tr-sb-dot.custom { background: var(--tr-ch-custom); }
 .tr-sb-dot.shell { background: var(--tr-ch-shell); }
 .tr-sb-dot.online { background: var(--tr-success); }
 /* A channel's state colour by class: the state, or the engine while it works. The command menu's glyphs use it too. */
@@ -160,6 +161,7 @@ button.tr-sb-cell:is(.needs-you-cell, :has(.tr-state:is(.waiting, .failed, .limi
 .tr-state.claude { color: var(--tr-ch-claude); }
 .tr-state.codex { color: var(--tr-ch-codex); }
 .tr-state.gemini { color: var(--tr-ch-gemini); }
+.tr-state.custom { color: var(--tr-ch-custom); }
 .tr-state.shell { color: var(--tr-ch-shell); }
 .tr-sb-channel, .tr-sb-plan, .tr-sb-project { color: var(--tr-fg-muted); }
 .tr-sb-channel { font-weight: 500; }

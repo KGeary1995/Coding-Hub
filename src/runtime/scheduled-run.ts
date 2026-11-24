@@ -13,7 +13,8 @@ const sessionOf = (id: string) => useWorkspaceStore.getState().sessions.find((it
 /**
  * A scheduled job's run (1.39.0, electron/services/workbench/scheduled-jobs.ts): closes the job's previous channel when
  * the host says it is done with, adds a channel with the run's id for the agent in the job's folder, and starts it.
- * Claude Code and Codex get a chat channel, which takes the task at once (as Start in worktree does); Gemini a terminal.
+ * Claude Code and Codex get a chat channel, which takes the task at once (as Start in worktree does); Gemini and a custom
+ * agent a terminal.
  * Returns why it could not, for the run's line and its task. The task is sent afterwards, once the agent is ready.
  */
 export async function scheduledRun(request: ScheduledRunRequest): Promise<string | undefined> {
@@ -22,7 +23,8 @@ export async function scheduledRun(request: ScheduledRunRequest): Promise<string
   if (request.replace && sessionOf(request.replace)) await closeChannel(request.replace).catch(() => false);
   const state = useWorkspaceStore.getState();
   const full = channelsFullNote(state.sessions); if (full) return full;
-  const session = createSession(request.engine, { mode: 'independent', cwd: request.directory });
+  const session = createSession(request.engine, { mode: 'independent', cwd: request.directory }, request.engine === 'custom' && request.agent ? { id: request.agent, name: request.title } : undefined);
+  if (request.engine === 'custom' && !request.agent) return 'The job names no agent.';
   session.id = request.sessionId; session.title = request.title;
   if (isChatEngineConfig(session.config)) session.config = { ...session.config, chat: true };
   // In the layout the desktop already uses: the person may be elsewhere.

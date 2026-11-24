@@ -22,11 +22,13 @@ function useRoute<T>(path: string): [T | null, string, () => void] {
 }
 
 /** An engine's mark, as on the desktop's tiles (lucide's Asterisk, SquareTerminal, Sparkle and SquareChevronRight). Fixed markup, not data. */
-export const ENGINE_ICON: Record<'claude' | 'codex' | 'gemini' | 'shell', string> = {
+export const ENGINE_ICON: Record<'claude' | 'codex' | 'gemini' | 'custom' | 'shell', string> = {
   claude: '<path d="M12 6v12"/><path d="M17.196 9 6.804 15"/><path d="m6.804 9 10.392 6"/>',
   codex: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
   gemini: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>',
   shell: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="m10 8 4 4-4 4"/>',
+  // lucide's Bot, for a custom agent wherever its initials are not shown.
+  custom: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
 };
 export const iconSvg = (paths: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 function EngineMark({ engine }: { engine: 'claude' | 'codex' | 'gemini' | 'shell' }) { return <span className={`avatar small ${engine}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(ENGINE_ICON[engine]) }} />; }

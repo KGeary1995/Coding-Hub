@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { closeSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import type { CLIEngineConfig, RunLog, SavedWorkspace, SessionHistoryRun, StorageInfo } from '../../../shared/types';
+import type { AgentConfig, RunLog, SavedWorkspace, SessionHistoryRun, StorageInfo } from '../../../shared/types';
 import type { AgentRunningSession } from '../../../shared/ipc';
 import { legacyWorkspaceSchema, readRunLogSchema, savedWorkspaceSchema } from '../../../shared/schemas';
 import { migrateWorkspace } from '../../../shared/workspace-migration';
@@ -84,7 +84,7 @@ export class WorkspaceStorage {
     this.saved = migrateWorkspace(result.data);
   }
 
-  beginRun(run: AgentRunningSession, config: CLIEngineConfig) {
+  beginRun(run: AgentRunningSession, config: AgentConfig) {
     const file = openSync(this.logPath(run.runId), 'wx', 0o600);
     try {
       this.database.prepare("INSERT INTO runs(runId,sessionId,engine,config,cwd,startedAt,status) VALUES(?,?,?,?,?,?,'running')").run(run.runId, run.sessionId, run.engine, JSON.stringify(config), run.cwd, new Date().toISOString());
@@ -158,7 +158,7 @@ export class WorkspaceStorage {
 
   history(): SessionHistoryRun[] {
     for (const runId of this.active.keys()) this.flush(runId, false, true);
-    return (this.database.prepare('SELECT * FROM runs ORDER BY startedAt DESC, rowid DESC LIMIT ?').all(this.info.maxCompletedRuns + Math.max(4, this.active.size)) as unknown as StoredRow[]).map((row) => ({ ...row, config: JSON.parse(row.config) as CLIEngineConfig, logTruncated: Boolean(row.logTruncated) }));
+    return (this.database.prepare('SELECT * FROM runs ORDER BY startedAt DESC, rowid DESC LIMIT ?').all(this.info.maxCompletedRuns + Math.max(4, this.active.size)) as unknown as StoredRow[]).map((row) => ({ ...row, config: JSON.parse(row.config) as AgentConfig, logTruncated: Boolean(row.logTruncated) }));
   }
 
   readLog(payload: unknown): RunLog {

@@ -36,7 +36,7 @@ const MORE_KEYS: Key[][] = [
   [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
 const MORE_KEY = 'trace-remote-more';
-const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', shell: 'Terminal' } as const;
+const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent', shell: 'Terminal' } as const;
 
 type Child = Node | string | false | null | undefined;
 /** A DOM element with properties (`className`, `onclick`, …), `data-` and `aria-` attributes, and children. */
@@ -112,7 +112,12 @@ const word = { waiting: 'Needs you', running: 'Working', failed: 'Failed', idle:
 /** The state as a badge in its colour: working in the engine's, as on the computer's tiles. */
 const badge = (channel: RemoteChannel, className = '') => { const now = state(channel); return h('span', { className: `badge ${{ waiting: 'waiting', running: channel.engine, failed: 'danger', idle: 'neutral' }[now]} ${className}` }, word[now]); };
 /** An engine's avatar, as on the computer's tiles. The SVG is fixed markup, not data. */
-function avatar(engine: RemoteChannel['engine']) { const element = h('span', { className: `avatar ${engine}`, aria: { hidden: 'true' } }); element.innerHTML = iconSvg(ENGINE_ICON[engine]); return element; }
+/** A custom agent's is its initials on its colour (1.40.0), as on the computer's tiles; text, never markup. */
+function avatar(engine: RemoteChannel['engine'], agent?: RemoteChannel['agent']) {
+  const element = h('span', { className: `avatar ${engine}`, aria: { hidden: 'true' } });
+  if (engine === 'custom') { element.textContent = agent?.initials ?? '?'; if (agent) element.style.setProperty('--tone', agent.color); return element; }
+  element.innerHTML = iconSvg(ENGINE_ICON[engine]); return element;
+}
 
 /** Trace's mark: the keycap (as on the desktop's top bar) and the name. The SVG is fixed markup, not data. */
 function mark(big = false) {
@@ -334,11 +339,13 @@ function alertText(text: string) {
 
 /** + Channel on the phone: the same kinds as the computer's, in its order (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
 function addMenu() {
-  const kinds: { label: string; engine: ChannelEngine; chat: boolean }[] = [
+  // Then the custom agents turned on there (1.40.0), each by its name.
+  const kinds: { label: string; engine: ChannelEngine; chat: boolean; agent?: string }[] = [
     { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini', engine: 'gemini', chat: false },
-    { label: 'Claude Code chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true }, { label: 'Gemini chat', engine: 'gemini', chat: true }];
+    { label: 'Claude Code chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true }, { label: 'Gemini chat', engine: 'gemini', chat: true },
+    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id }))];
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
-    ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
+    ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat, undefined, kind.agent); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
   const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');
   return h('div', { id: 'add-wrap', className: 'add-wrap', hidden: !me?.canRun }, menu, button);
 }
@@ -493,7 +500,7 @@ function renderNeeds() {
     ...flagged.map((task) => h('li', {}, h('button', { type: 'button', className: `need ${task.outcome ?? 'review'}`, onclick: () => showTab('tasks') }, h('strong', {}, task.title), h('span', {}, `${task.channel ? `CH${task.channel} · ` : ''}${why(task)}`))))));
 }
 /** What a channel is, under its name: the engine (unless that is its name), a chat or a Round Table (two agents in one channel), and whose computer. */
-const meta = (channel: RemoteChannel, several: boolean) => [channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, channel.table ? 'Round Table' : channel.chat ? 'Chat' : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · ');
+const meta = (channel: RemoteChannel, several: boolean) => [channel.engine === 'custom' ? (channel.agent && channel.title !== channel.agent.name ? channel.agent.name : null) : channel.title !== ENGINE[channel.engine] ? ENGINE[channel.engine] : null, channel.table ? 'Round Table' : channel.chat ? 'Chat' : null, several && !shownComputer ? channel.computer?.name : null].filter(Boolean).join(' · ');
 /** "No channels" only while the computer answers: while it does not, the notice above the list says why nothing is listed. */
 function showEmpty() { const empty = document.getElementById('empty'); if (empty) empty.hidden = channels.length > 0 || !connected; }
 function renderList() {
@@ -504,13 +511,14 @@ function renderList() {
   const several = new Set(channels.map((channel) => channel.computer?.id)).size > 1;
   list.replaceChildren(...shown.map((channel) => h('li', {},
     h('button', { className: `channel ${state(channel)}`, dataset: tone(channel), onclick: () => showChannel(channel.sessionId) },
-      avatar(channel.engine),
+      avatar(channel.engine, channel.agent),
       h('span', { className: 'main' }, h('span', { className: 'line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('strong', {}, channel.title)), (meta(channel, several) || channel.account) && h('span', { className: 'line' }, meta(channel, several) && h('small', {}, meta(channel, several)), account(channel))),
       badge(channel, 'tag'),
       channel.topic && h('span', { className: 'topic' }, channel.topic),
       channel.attention ? h('span', { className: 'ask' }, channel.attention) : !channel.running && channel.failed && h('span', { className: 'ask failed' }, channel.failed)))));
   showEmpty();
-  const add = document.getElementById('add-wrap'); if (add) add.hidden = !me?.canRun;
+  // Built again when who this phone is (its custom agents among it) is known or changes.
+  const add = document.getElementById('add-wrap'); if (add && add.dataset.agents !== JSON.stringify(me?.agents ?? [])) { const fresh = addMenu(); fresh.dataset.agents = JSON.stringify(me?.agents ?? []); add.replaceWith(fresh); } else if (add) add.hidden = !me?.canRun;
 }
 
 function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
@@ -590,7 +598,7 @@ function showChannel(sessionId: string) {
   closeChat(); shownChat = null;
   // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
   // A Gemini chat too (one that leads a Round Table, from 1.39); only Claude Code and Codex chats open a table from here.
-  if (channel?.chat && channel.engine !== 'shell') {
+  if (channel?.chat && channel.engine !== 'shell' && channel.engine !== 'custom') {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
     // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.

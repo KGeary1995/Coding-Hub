@@ -644,3 +644,24 @@ describe('plugin tiles', () => {
     await expect(manager.start(1, { ...request('tile-bad'), config: { engine: 'shell' as const, plugin: { id: '../x', tile: 'board' } } })).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
   });
 });
+
+describe('custom agent runs (docs/custom-agents.md)', () => {
+  it('starts the program the host built, reads its screen for Needs you and Done, and refuses without the custom launch', async () => {
+    const processes: FakePty[] = []; const events: SessionEvent[] = []; const started: string[] = [];
+    const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
+    const discover = vi.fn(async (engine: CLIEngine) => engines(engine));
+    const customLaunch = vi.fn(async () => ({ file: '/bin/agent', args: ['--yes'], env: { PATH: '/bin', AGENT: '1' }, status: { waiting: ['Allow\?'], turnEnd: ['^> $'] } }));
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover, customLaunch, onStarted: (session) => started.push(session.engine), environment: () => ({ PATH: '/bin' }) }); managers.push(manager);
+    const config = { engine: 'custom' as const, agentId: 'aider', model: '' };
+    const session = await manager.start(1, { sessionId: 'c1', cwd: process.cwd(), config, cols: 80, rows: 24 });
+    expect(session.engine).toBe('custom'); expect(discover).not.toHaveBeenCalled(); expect(started).toEqual(['custom']);
+    expect(spawn).toHaveBeenCalledWith('/bin/agent', ['--yes'], expect.objectContaining({ env: expect.objectContaining({ AGENT: '1', TERM: 'xterm-256color' }) }));
+    processes[0].data('Allow? (y/n)'); await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(events.find((event) => event.type === 'attention')).toMatchObject({ message: 'Allow? (y/n)' });
+    manager.write(1, { sessionId: 'c1', runId: session.runId, data: 'y\r' }); processes[0].data('\x1b[2J\x1b[H');
+    await new Promise((resolve) => setTimeout(resolve, 300)); processes[0].data('Done.\r\n> '); await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(events.filter((event) => event.type === 'answered').map((event) => (event as { finished?: true }).finished ?? false)).toEqual([false, true]);
+    const bare = new PtyManager(() => {}, { spawn, discover, environment: () => ({ PATH: '/bin' }) }); managers.push(bare);
+    await expect(bare.start(1, { sessionId: 'c2', cwd: process.cwd(), config, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'CUSTOM_AGENTS' });
+  });
+});

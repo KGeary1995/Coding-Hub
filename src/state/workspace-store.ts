@@ -1,13 +1,13 @@
 import { create } from 'zustand';
-import type { ChannelEngine, CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
+import type { AgentConfig, ChannelEngine, CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
-import { isAgentConfig } from '../../shared/types';
+import { isAgentConfig, isBuiltInAgent } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
 import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
 import { hiddenSeatIds, savedSeats, type SavedSeat } from '../../shared/table-seats';
 
-export type NavigationView = 'computer' | 'workspace' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'search';
+export type NavigationView = 'computer' | 'workspace' | 'agents' | 'coaching' | 'tasks' | 'verification' | 'projects' | 'accounts' | 'history' | 'files' | 'diff' | 'usage' | 'connectors' | 'skills' | 'memory' | 'rules' | 'help' | 'settings' | 'search';
 export type LayoutMode = 'columns' | 'rows' | 'grid';
 
 /** A channel's settings for resuming a CLI's own conversation (from Session history, here or on a phone). */
@@ -17,13 +17,14 @@ export function resumeConfig(engine: CLIEngine, id: string, profileId?: string):
 }
 export const RESUMED_TITLE: Record<CLIEngine, string> = { claude: 'Claude · resumed', codex: 'Codex · resumed', gemini: 'Gemini · resumed' };
 
-export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }): Session {
+/** `agent`: the custom agent a 'custom' channel runs (docs/custom-agents.md), named by its definition's id and name. */
+export function createSession(engine: ChannelEngine, binding: WorkspaceBinding = { mode: 'workspace' }, agent?: { id: string; name: string }): Session {
   return {
     id: crypto.randomUUID(),
-    title: DEFAULT_TITLES[engine],
+    title: engine === 'custom' && agent ? agent.name : DEFAULT_TITLES[engine],
     config: engine === 'claude'
       ? { engine, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }
-      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : engine === 'gemini' ? { engine, model: '' } : { engine },
+      : engine === 'codex' ? { engine, model: '', reasoningEffort: null } : engine === 'gemini' ? { engine, model: '' } : engine === 'custom' ? { engine, agentId: agent?.id ?? '', model: '' } : { engine },
     binding,
     status: 'idle',
     pid: null,
@@ -159,14 +160,14 @@ interface WorkspaceState {
   setRootDirectory: (directory: string) => void;
   setView: (view: NavigationView) => void;
   restoreRun: (run: SessionHistoryRun) => boolean;
-  addSession: (engine: ChannelEngine, sourceSessionId?: string) => void;
+  addSession: (engine: ChannelEngine, sourceSessionId?: string, agent?: { id: string; name: string }) => void;
   /** A plugin tile: a Terminal channel that runs a plugin's tile program (docs/plugins.md). */
   addPluginTile: (plugin: { id: string; tile: string }, title: string) => void;
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
   /** `gemini`: a Gemini chat, made only to lead a Round Table (+ Channel offers Gemini as a terminal). */
   addChatSession: (engine: 'claude' | 'codex' | 'gemini') => void;
   removeSession: (id: string) => void;
-  updateConfig: (id: string, config: CLIEngineConfig) => void;
+  updateConfig: (id: string, config: AgentConfig) => void;
   resetCodexConfig: (id: string) => void;
   updateBinding: (id: string, binding: WorkspaceBinding) => void;
   setTiles: (tiles: GridTile[]) => void;
@@ -249,11 +250,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return true;
   },
   // Only the session just added becomes a chat: with eight already, none is added, and the last one is left as it was.
-  addChatSession: (engine) => { const before = new Set(get().sessions.map((session) => session.id)); get().addSession(engine); set((state) => { const added = state.sessions.find((session) => !before.has(session.id)); return added && added.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === added.id && isAgentConfig(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : state; }); },
-  addSession: (engine, sourceSessionId) => set((state) => {
+  addChatSession: (engine) => { const before = new Set(get().sessions.map((session) => session.id)); get().addSession(engine); set((state) => { const added = state.sessions.find((session) => !before.has(session.id)); return added && added.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === added.id && isBuiltInAgent(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : state; }); },
+  addSession: (engine, sourceSessionId, agent) => set((state) => {
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);
-    const session = createSession(engine, source ? { ...source.binding } : undefined);
+    // A custom channel names its agent: from + Channel, or the channel it duplicates.
+    if (engine === 'custom' && !agent && source?.config.engine !== 'custom') return state;
+    const session = createSession(engine, source ? { ...source.binding } : undefined, agent);
     if (source?.config.engine === engine) { session.config = structuredClone(source.config); if (isAgentConfig(session.config)) delete session.config.resumeId; }
     const sessions = [...state.sessions, session];
     return { sessions, tiles: arrangeTiles(sessions, 'grid'), layoutMode: 'grid', focusedSessionId: null };

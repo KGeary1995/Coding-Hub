@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { MemoryProject } from '../../shared/hub';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { refreshClaudeProfiles, useAccountStore } from '../state/account-store';
-import type { ChatEngineConfig, ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import type { AgentConfig, ChatEngineConfig, ClaudeCLIEngineConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import { CustomAgentControls } from './agents/CustomAgentControls';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, withPermissions } from '../runtime/permissions';
 import { CodexModelPicker } from './CodexModelPicker';
 import { GeminiModelPicker } from './GeminiModelPicker';
@@ -62,7 +63,11 @@ function MemoryProjectControl({ config, directory, onChange }: { config: ChatEng
   </label>;
 }
 
-export function EngineControls({ id, config, directory = null, onChange }: { id: string; config: CLIEngineConfig; directory?: string | null; onChange: (config: CLIEngineConfig) => void }) {
+/** A custom agent's channel has its own settings (docs/custom-agents.md); the built-in CLIs have theirs below. */
+export function EngineControls({ id, config, directory = null, onChange }: { id: string; config: AgentConfig; directory?: string | null; onChange: (config: AgentConfig) => void }) {
+  return config.engine === 'custom' ? <CustomAgentControls config={config} onChange={onChange} /> : <BuiltInControls id={id} config={config} directory={directory} onChange={onChange} />;
+}
+function BuiltInControls({ id, config, directory, onChange }: { id: string; config: CLIEngineConfig; directory: string | null; onChange: (config: CLIEngineConfig) => void }) {
   const { profiles, error } = useAccountStore();
   useEffect(() => { void refreshClaudeProfiles(); }, []);
   const permissions = permissionLevel(config);

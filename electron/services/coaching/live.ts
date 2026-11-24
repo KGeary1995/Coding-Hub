@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { coachable, coachingWeek, LIVE_PROMPT_LIMIT, LIVE_TIPS, promptAdvice, type LiveCoaching, type LiveReview, type LiveTip } from '../../../shared/coaching';
 import { z } from 'zod';
 import type { CLIEngineConfig } from '../../../shared/types';
-import type { AgentRunningSession } from '../../../shared/ipc';
+import type { BuiltInRunningSession } from '../../../shared/ipc';
 import { advertisesFlag, probeCLI, type Executable } from '../cli/discovery';
 import { HubError } from '../cli/engine-adapter';
 
@@ -131,7 +131,7 @@ export class LiveCoach {
   list(): LiveCoaching { return { enabled: this.enabled(), tips: this.tips.slice(0, LIVE_TIPS), week: coachingWeek(this.tips, this.now()) }; }
   /** A channel's last coached prompt, while live coaching is on. */
   latest(sessionId: string): LiveTip | null { return this.enabled() ? this.tips.find((tip) => tip.sessionId === sessionId) ?? null : null; }
-  observe(run: AgentRunningSession, config: CLIEngineConfig, raw: Json) {
+  observe(run: BuiltInRunningSession, config: CLIEngineConfig, raw: Json) {
     // Prompts are read from Claude's and Codex's own logs; Gemini CLI keeps none Trace reads.
     if (run.engine === 'gemini') return;
     const turn = conversationTurn(run.engine, raw); if (!turn) return;

@@ -5,6 +5,7 @@ import type { ScheduledRunRequest } from '../../../shared/remote';
 import { MAX_CHANNELS } from '../../../shared/schemas';
 import { load, save, directory } from './local-store';
 import { HubError } from '../cli/engine-adapter';
+import { AGENT_ID } from '../../../shared/agent-definition';
 
 /**
  * Scheduled jobs (1.39.0): an agent request that Trace sends by itself at set times ("every morning, update dependencies
@@ -22,7 +23,7 @@ const schedule = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('weekdays'), time, days: z.array(z.number().int().min(0).max(6)).min(1, 'Choose at least one day.').max(7).refine((days) => new Set(days).size === days.length, 'Choose each day once.') }).strict(),
   z.object({ kind: z.literal('hours'), every: z.number().int().refine((value) => (HOUR_STEPS as readonly number[]).includes(value), 'Choose 1, 2, 3, 4, 6, 8 or 12 hours.'), time }).strict(),
 ]);
-const fields = { name: z.string().trim().min(1).max(150), directory: z.string().min(1).max(4096), engine: z.enum(['claude', 'codex', 'gemini']), prompt: z.string().trim().min(1).max(2000), schedule };
+const fields = { name: z.string().trim().min(1).max(150), directory: z.string().min(1).max(4096), engine: z.enum(['claude', 'codex', 'gemini', 'custom']), agent: z.string().regex(AGENT_ID).optional(), prompt: z.string().trim().min(1).max(2000), schedule };
 const run = z.object({ at: z.iso.datetime(), result: z.enum(['started', 'skipped', 'missed', 'failed']), note: z.string().max(500), taskId: z.uuid().optional(), sessionId: z.uuid().optional() }).strict();
 const job = z.object({ id: z.uuid(), ...fields, paused: z.boolean(), createdAt: z.iso.datetime(), checkedAt: z.iso.datetime(), lastRun: run.optional(), active: z.object({ taskId: z.uuid(), sessionId: z.uuid() }).strict().optional() }).strict();
 const dataSchema = z.object({ jobs: z.array(job).max(MAX_JOBS) }).strict();
@@ -108,10 +109,13 @@ export class ScheduledJobs {
     if (request.action === 'job-save') {
       const previous = jobs.find((item) => item.id === request.id);
       if (request.id && !previous) throw new HubError('JOB_MISSING', 'This scheduled job is no longer here.');
+      // A custom agent's job names its agent (docs/custom-agents.md); no other job names one.
+      if ((request.engine === 'custom') !== Boolean(request.agent)) throw new HubError('JOB_AGENT', 'Choose the agent for this job again.');
       if (!previous && jobs.length >= MAX_JOBS) throw new HubError('JOB_LIMIT', `Up to ${MAX_JOBS} scheduled jobs are kept. Delete one to add another.`);
       const { action: _action, id: _id, ...given } = request;
       // Checked from now: a time already passed today waits for its next turn instead of running at once.
-      const value: ScheduledJob = { ...previous, ...given, directory: directory(request.directory), id: previous?.id ?? randomUUID(), paused: previous?.paused ?? false, createdAt: previous?.createdAt ?? now, checkedAt: now };
+      const { agent: _agent, ...kept } = previous ?? ({} as Partial<ScheduledJob>);
+      const value: ScheduledJob = { ...kept, ...given, directory: directory(request.directory), id: previous?.id ?? randomUUID(), paused: previous?.paused ?? false, createdAt: previous?.createdAt ?? now, checkedAt: now };
       this.write(previous ? jobs.map((item) => item.id === value.id ? value : item) : [...jobs, value]); return this.data();
     }
     const found = jobs.find((item) => item.id === request.id); if (!found) throw new HubError('JOB_MISSING', 'This scheduled job is no longer here.');
@@ -157,10 +161,10 @@ export class ScheduledJobs {
         return record({ at: when, result: 'skipped', note: `Skipped: all ${MAX_CHANNELS} channels were in use.`, taskId: task.id });
       }
       const sessionId = randomUUID(); let task: Task;
-      try { task = await this.host.addTask({ ...base, sessionId, notes: `Scheduled run of “${item.name}”, ${localTime(at)}.${item.engine === 'gemini' ? ' Trace cannot read Gemini’s replies: read its channel, then move this task on.' : ''}` }); }
+      try { task = await this.host.addTask({ ...base, sessionId, notes: `Scheduled run of “${item.name}”, ${localTime(at)}.${item.engine === 'gemini' ? ' Trace cannot read Gemini’s replies: read its channel, then move this task on.' : item.engine === 'custom' ? ' Trace reads the agent’s screen for TASK COMPLETE; if it does not say so, read its channel, then move this task on.' : ''}` }); }
       catch (error) { return record({ at: when, result: 'failed', note: `Did not start: ${error instanceof HubError ? error.message : 'its task could not be saved.'}` }); }
       this.update(item.id, (current) => ({ ...current, active: { taskId: task.id, sessionId } }));
-      try { await this.host.open({ taskId: task.id, sessionId, engine: item.engine, directory: task.directory, title: item.name, ...(replace ? { replace } : {}) }); }
+      try { await this.host.open({ taskId: task.id, sessionId, engine: item.engine, ...(item.agent ? { agent: item.agent } : {}), directory: task.directory, title: item.name, ...(replace ? { replace } : {}) }); }
       catch (error) {
         const why = error instanceof HubError ? error.message : 'the channel could not be opened.';
         try { this.host.noteTask(task.id, `It did not start: ${why}`); } catch { /* The run's line says it. */ }

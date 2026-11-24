@@ -72,20 +72,33 @@ export type SeatEngine = ChatEngine | 'gemini';
 /** The seat engine of a channel's config (a terminal reads as Claude, as the table code always took it). */
 export const seatEngineOf = (config: ChannelConfig): SeatEngine => config.engine === 'codex' ? 'codex' : config.engine === 'gemini' ? 'gemini' : 'claude';
 /** A run driven through its structured protocol and drawn (or seated) by Trace, not a terminal: a chat channel, or a Gemini seat. */
-export const isChatRun = (config: ChannelConfig): boolean => config.engine !== 'shell' && config.chat === true;
+export const isChatRun = (config: ChannelConfig): boolean => isBuiltInAgent(config) && config.chat === true;
 export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
+
+/**
+ * A custom agent (docs/custom-agents.md, 1.40.0): a terminal running a CLI the person added as a definition
+ * (~/.coding-hub/agents/<agentId>.json). The window names only the agent; the host reads its definition and builds the
+ * launch. `model` is '' for the program's own default; `resumeId` is the conversation its resume arguments take.
+ */
+export interface CustomChannelConfig { engine: 'custom'; agentId: string; model: string; permissions?: PermissionLevel; resumeId?: string }
+/** Every agent a channel can run: the built-in CLIs and custom agents. */
+export type AgentConfig = CLIEngineConfig | CustomChannelConfig;
 
 /** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */
 /** `plugin`: a plugin tile (docs/plugins.md), which runs that plugin's tile program instead of a shell. The window names
  * only the plugin and the tile; the main process finds the command in the installed manifest. */
 export interface ShellChannelConfig { engine: 'shell'; plugin?: { id: string; tile: string } }
-export type ChannelEngine = CLIEngine | 'shell';
-export type ChannelConfig = CLIEngineConfig | ShellChannelConfig;
-/** An agent CLI (Claude Code, Codex or Gemini CLI): model, permissions, resume, usage and notices. */
-export const isAgentConfig = (config: ChannelConfig): config is CLIEngineConfig => config.engine === 'claude' || config.engine === 'codex' || config.engine === 'gemini';
+export type ChannelEngine = CLIEngine | 'custom' | 'shell';
+export type ChannelConfig = AgentConfig | ShellChannelConfig;
+/** An agent (Claude Code, Codex, Gemini CLI or a custom agent): model, permissions, resume and notices. */
+export const isAgentConfig = (config: ChannelConfig): config is AgentConfig => config.engine !== 'shell';
+/** One of the built-in agent CLIs, whose launch, usage and conversation files Trace knows. */
+export const isBuiltInAgent = (config: ChannelConfig): config is CLIEngineConfig => config.engine === 'claude' || config.engine === 'codex' || config.engine === 'gemini';
 /** Claude Code or Codex: an agent that also has chat, shared memory, tasks and Round Table seats. */
 export const isChatEngineConfig = (config: ChannelConfig): config is ChatEngineConfig => config.engine === 'claude' || config.engine === 'codex';
 export const isChatEngine = (engine: string): engine is ChatEngine => engine === 'claude' || engine === 'codex';
+/** An agent terminal whose conversation Trace can't read (Gemini CLI, a custom agent): a task's outcome is read from its screen. */
+export const readsFromScreen = (engine: ChannelEngine) => engine === 'gemini' || engine === 'custom';
 
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'waiting' | 'exited' | 'error';
 export type WorkspaceBinding =
@@ -209,8 +222,9 @@ export interface StorageInfo {
 export interface SessionHistoryRun {
   runId: string;
   sessionId: string;
-  engine: CLIEngine;
-  config: CLIEngineConfig;
+  /** From 1.40 also a custom agent's run (docs/custom-agents.md). */
+  engine: CLIEngine | 'custom';
+  config: AgentConfig;
   cwd: string;
   startedAt: string;
   endedAt: string | null;

@@ -15,6 +15,7 @@ const HelpPanel = lazy(() => import('./HelpPanel').then((module) => ({ default: 
 const ConfigurationPanel = lazy(() => import('./HubPanels').then((module) => ({ default: module.ConfigurationPanel })));
 const MemoryPanel = lazy(() => import('./HubPanels').then((module) => ({ default: module.MemoryPanel })));
 const SettingsPanel = lazy(() => import('./HubPanels').then((module) => ({ default: module.SettingsPanel })));
+const AgentsPanel = lazy(() => import('./agents/AgentsPanel').then((module) => ({ default: module.AgentsPanel })));
 const UsageScreen = lazy(() => import('./screens/UsageScreen').then((module) => ({ default: module.UsageScreen })));
 import { AgentSetup } from './screens/AgentSetup';
 import { SETUP_VIEWS } from './shell/Topbar';
@@ -32,6 +33,7 @@ function Panel() {
   if (view === 'coaching') return <CoachingPanel />;
   if (view === 'projects') return <ProjectsPanel />;
   if (view === 'accounts') return <AccountsPanel />;
+  if (view === 'agents') return <AgentsPanel />;
   if (view === 'connectors') return <ConfigurationPanel />;
   if (view === 'skills') return <ConfigurationPanel skills />;
   if (view === 'memory') return <MemoryPanel />;
