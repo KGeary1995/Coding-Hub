@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFileTree, type TreeError } from './process-tree';
 import { HubError } from '../cli/engine-adapter';
 import { hostEnvironment } from '../cli/discovery';
 
@@ -12,11 +12,12 @@ export const noHookGitOptions = () => ['-c', 'core.fsmonitor=false', '-c', `core
  * What a Git command printed; nothing when it exited non-zero (no repository, no match, no such blob). Fails closed when
  * the listing itself could not be read in full (too long, timed out, no Git): a filter missing from it would not be blanked.
  */
-const gitText = (args: string[]) => new Promise<string>((resolve, reject) => execFile('git', args, { timeout: 8000, maxBuffer: 256 * 1024, windowsHide: true, env: hostEnvironment() }, (error, stdout) => {
-  const failure = error as (NodeJS.ErrnoException & { killed?: boolean }) | null;
-  if (failure && (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || failure.code === 'ENOENT' || failure.killed)) reject(new HubError('GIT_UNSAFE_CONFIG', 'This repository’s Git configuration could not be read safely, so Trace did not run Git on it. Check that Git is installed, and that the repository’s .git/config is not unusually large.'));
-  else resolve(String(stdout ?? ''));
-}));
+// execFileTree, not execFile: at the output limit execFile ends only the direct child and returns at once, while Git (or the
+// git the Windows shim started) went on in the repository, and its folder could not be deleted (EBUSY on CI).
+const gitText = (args: string[]) => execFileTree('git', args, { timeout: 8000, maxBuffer: 256 * 1024, windowsHide: true, env: hostEnvironment() }).then((output) => output.stdout.toString(), (error: TreeError) => {
+  if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || error.code === 'ENOENT' || error.killed) throw new HubError('GIT_UNSAFE_CONFIG', 'This repository’s Git configuration could not be read safely, so Trace did not run Git on it. Check that Git is installed, and that the repository’s .git/config is not unusually large.');
+  return String(error.stdout ?? '');
+});
 const IGNORE = '^submodule\\..*\\.ignore$';
 /** `-c` splits at the first `=`: a name holding one (or a line break) cannot be overridden, so Trace does not read at all. */
 function setting(key: string, value: string) {
