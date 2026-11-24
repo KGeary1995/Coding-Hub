@@ -100,5 +100,5 @@ Each step is its own release.
 
 ## 8. Questions for the owner
 
-1. **Quitting.** When you choose Quit in the tray, should channels keep running in the background (and Trace reattach next time), or stop as now, with only crashes and updates leaving them running?
+1. **Quitting.** Answered 2026-11-24: Quit leaves channels running in the background until the owner stops them; Trace reattaches next time. Stopping is a channel's own Stop, or **Stop all channels** in the tray menu.
 2. **The native helper** for Windows job objects (step 5) means shipping a small compiled file. Is that acceptable, or should Trace keep `taskkill` for now?
