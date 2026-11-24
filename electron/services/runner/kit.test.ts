@@ -12,7 +12,7 @@ function write(file: string, text = 'x') { fs.mkdirSync(path.dirname(file), { re
 /** A stand-in app folder and Electron folder with the files a kit takes, and some it must not. */
 function fakeApp(platform: NodeJS.Platform) {
   const root = temp(); const app = path.join(root, 'app'); const electron = path.join(root, 'electron');
-  for (const name of ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js', 'client.js']) write(path.join(app, 'dist-electron', 'electron', 'services', 'runner', name));
+  for (const name of ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js', 'jobs.js', 'client.js']) write(path.join(app, 'dist-electron', 'electron', 'services', 'runner', name));
   write(path.join(app, 'dist-electron', 'electron', 'services', 'cli', 'native-pty.js')); write(path.join(app, 'dist-electron', 'electron', 'main.js'));
   const pty = path.join(app, 'node_modules', 'node-pty');
   write(path.join(pty, 'package.json'), '{}'); write(path.join(pty, 'lib', 'index.js')); write(path.join(pty, 'lib', 'worker', 'conoutSocketWorker.js'));
@@ -28,7 +28,7 @@ describe('runner kit', () => {
     const taken = kitFiles(app, exec, 'win32', 'x64').map((file) => file.to.split(path.sep).join('/')).sort();
     expect(taken).toEqual([
       'Trace Runner.exe', 'app/dist-electron/electron/services/cli/native-pty.js',
-      ...['protocol.js', 'runner-main.js', 'runner.js', 'tail.js'].map((name) => `app/dist-electron/electron/services/runner/${name}`),
+      ...['jobs.js', 'protocol.js', 'runner-main.js', 'runner.js', 'tail.js'].map((name) => `app/dist-electron/electron/services/runner/${name}`),
       'app/node_modules/node-pty/lib/index.js', 'app/node_modules/node-pty/lib/worker/conoutSocketWorker.js', 'app/node_modules/node-pty/package.json', 'app/node_modules/node-pty/prebuilds/win32-x64/pty.node',
       'ffmpeg.dll', 'icudtl.dat', 'snapshot_blob.bin', 'v8_context_snapshot.bin',
     ].sort());

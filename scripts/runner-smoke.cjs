@@ -68,6 +68,19 @@ const text = (frame) => frame.payload.toString('utf8');
   if (exited.exitCode !== 7) throw new Error(`Exit code ${exited.exitCode}`);
   console.log('input reached the program and its exit came back');
 
+  // Windows: stopping a channel ends what its program started outside its process tree too (the job helper).
+  if (process.platform === 'win32' && fs.existsSync(path.join(kit.folder, 'app', 'dist-electron', 'native', 'trace-jobs.exe'))) {
+    const escape = "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});c.unref();process.stdout.write('CHILD:'+c.pid+'\\r\\n');setInterval(()=>{},1000)";
+    second.send(Kind.spawn, 0, { id: 'smoke-escape', file: process.execPath, args: ['-e', escape], cwd: root, env: { PATH: process.env.PATH ?? '', SystemRoot: process.env.SystemRoot ?? '' }, cols: 80, rows: 24 });
+    const started = JSON.parse(text(await second.next(Kind.spawned)));
+    const child = Number(/CHILD:(\d+)/.exec(text(await second.next(Kind.output, (frame) => /CHILD:\d+/.test(text(frame)))))[1]);
+    second.send(Kind.signal, started.term, { signal: 'stop' }); await second.next(Kind.exited, () => true, 20000);
+    const until = Date.now() + 5000; while (alive(child) && Date.now() < until) await new Promise((wake) => setTimeout(wake, 100));
+    if (alive(child)) { process.kill(child); throw new Error('A child its program started detached outlived the stopped channel.'); }
+    second.send(Kind.forget, started.term);
+    console.log('stopping a channel ended a child that had left its process tree (job object)');
+  }
+
   // Nothing left to run: once Trace leaves too, the runner goes (idle after 60 s; the smoke forgets and waits).
   second.send(Kind.forget, term); second.socket.destroy();
   const until = Date.now() + 75000; while (alive(runner.pid) && Date.now() < until) await new Promise((wake) => setTimeout(wake, 500));

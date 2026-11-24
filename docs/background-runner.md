@@ -98,8 +98,13 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
    - **Pause and resume.** Its flow control pauses a CLI the window cannot keep up with (`pty.pause()`), so the protocol gains `pause` and `resume`. The runner resumes every terminal when Trace disconnects, so it never leaves a program paused with nobody to resume it.
    - **The channel's identity.** A spawn carries the channel's details (`meta`: its session, configuration and hook token), which the runner keeps without reading and gives back in `list`. Trace adopts a terminal when the reopened tile starts: the surviving terminals join 1.32.0's resume list, and `start` finds the one with that channel's id instead of launching.
    - **Hooks after a restart.** An adopted agent's hooks still post to the attention server address it was started with, but that server listens on a random port with tokens kept in memory (`attention.ts`). So it listens on the port it had last time when that port is free, and adopted runs get their tokens back from `meta`. The same goes for the channel tools server. If the port was taken, the screen check (1.35.3) still catches approvals, and the notice says hooks are off for those channels.
-4. Chat channels on the runner (pipe runs).
-5. Windows job objects and Ctrl+C (the native helper).
+4. Chat channels on the runner (pipe runs). **Not built; needs its own design (2026-11-24).** A chat channel is more than its process: Trace holds its live protocol state in the main process (Claude's message stream, a Codex chat's app-server thread and handshake, Gemini seats' session, pending approvals, and a Round Table's orchestration). A Trace that opens again cannot rebuild that state from 1 MB of output. What a chat loses on quit today is only a turn in progress: 1.32.0 already starts chats again on their conversations. The options are to move each chat protocol's state into the runner, or to make the protocols resumable mid-turn. Either is much larger than steps 1 to 3.
+5. Windows job objects and Ctrl+C (the native helper). **Built (1.36.0):**
+   - `native/trace-jobs.c` is built by `scripts/build-jobs-helper.cjs` (part of `build:host` on Windows, with Visual Studio's C++ build tools) into `dist-electron/native/trace-jobs.exe`, which the kit copies.
+   - The runner puts each program in a job when it starts. Stopping the channel ends the job after Trace's own process-tree stop, so a child that left the tree ends too.
+   - Jobs are deliberately not set to kill on close, so a fault in the helper never stops every channel.
+   - A source run without the build tools works without it. `build-windows.cjs` refuses to package without it.
+   - Ctrl+C needed nothing: written as 0x03, it reached a program started by the detached runner (it exited with STATUS_CONTROL_C_EXIT, checked 2026-11-24), so no inherited "ignore Ctrl+C" reaches agents.
 6. Updates with DRAIN; the tray's **Quit and stop**; Settings.
 
 Each step is its own release.

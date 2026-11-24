@@ -10,7 +10,7 @@ import { RUNNER_PROTOCOL } from './protocol';
  * from there: Electron's executable and the four files it needs as Node, the runner's scripts and node-pty are copied
  * into Trace's storage folder, into a folder named by their contents, once for each version of them.
  */
-const RUNNER_SCRIPTS = ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js'];
+const RUNNER_SCRIPTS = ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js', 'jobs.js'];
 /** Electron as Node needs only these beside its executable (checked 2026-11-24 with node-pty under Electron 39). */
 const WINDOWS_RUNTIME = ['ffmpeg.dll', 'icudtl.dat', 'snapshot_blob.bin', 'v8_context_snapshot.bin'];
 export const RUNNER_EXECUTABLE = 'Trace Runner.exe';
@@ -44,6 +44,8 @@ export function kitFiles(appPath: string, execPath: string, platform: NodeJS.Pla
   const pty = path.join(appPath, 'node_modules', 'node-pty');
   for (const part of ['package.json', 'lib', path.join('prebuilds', `${platform}-${arch}`), path.join('build', 'Release')]) for (const file of walk(path.join(pty, part))) files.push({ from: file, to: path.join('app', 'node_modules', 'node-pty', path.relative(pty, file)) });
   if (platform === 'win32') {
+    // The job-object helper (scripts/build-jobs-helper.cjs), when it was built: a source run without C++ tools has none.
+    const helper = path.join(appPath, 'dist-electron', 'native', 'trace-jobs.exe'); if (fs.existsSync(helper)) files.push({ from: helper, to: path.join('app', 'dist-electron', 'native', 'trace-jobs.exe') });
     files.push({ from: execPath, to: RUNNER_EXECUTABLE });
     for (const name of WINDOWS_RUNTIME) files.push({ from: path.join(path.dirname(execPath), name), to: name });
   }
