@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { hiddenSeatIds } from './table-seats';
 import { MAX_COMMAND, MAX_STEP, MAX_WAIT_SECONDS, MAX_WAIT_TEXT } from './start-order';
+import { AGENT_ID, AGENT_MODEL, AGENT_RESUME_ID } from './agent-definition';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -53,16 +54,18 @@ const chatEngineOptions = [
   z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ] as const;
 export const engineConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, geminiConfigSchema]);
+/** A custom agent's channel (docs/custom-agents.md): it names its definition, never a program. */
+const customConfigSchema = z.object({ engine: z.literal('custom'), agentId: z.string().regex(AGENT_ID), model: z.string().max(120).refine((value) => value === '' || AGENT_MODEL.test(value), 'Use a model name, or leave blank for the programâ€™s default.'), permissions, resumeId: z.string().regex(AGENT_RESUME_ID).optional() }).strict();
 // A plugin tile names its plugin and tile by the manifest's own id rules (electron/services/plugins/manifest.ts).
 const shellConfigSchema = z.object({ engine: z.literal('shell'), plugin: z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/), tile: z.string().regex(/^[A-Za-z0-9:_-]{1,64}$/) }).strict().optional() }).strict();
 /** Every channel type: the agents, and a plain terminal, which takes no settings. */
-export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, shellConfigSchema]);
+export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, customConfigSchema, shellConfigSchema]);
 /**
  * A Gemini channel, or Trace 1.20's hidden Gemini seat at a hierarchy table (`chat`). Loading only: migrateWorkspace
  * removes the seats, and nothing can start one.
  */
 const legacyGeminiConfigSchema = z.object({ ...geminiFields, chat: z.boolean().optional() }).strict();
-const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, legacyGeminiConfigSchema, shellConfigSchema]);
+const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, legacyGeminiConfigSchema, customConfigSchema, shellConfigSchema]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
 export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.'), config: channelConfigSchema, ...dimensions }).strict();

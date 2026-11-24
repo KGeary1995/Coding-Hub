@@ -11,7 +11,7 @@ import { sendMark } from './task-evidence';
 import { useChatStore } from './chat-store';
 import { sendToChannel } from '../runtime/send-to-channel';
 import { hierarchyDetached } from './hierarchy-state';
-import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun, readsFromScreen } from '../../shared/types';
 
 /** The columns, in the person's words. */
 export const TASK_COLUMNS: { status: Task['status']; label: string; hint: string }[] = [
@@ -52,9 +52,9 @@ export async function sendTask(id: string) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
   // A task's outcome is read back from the chat's own thread, the CLI's transcript, or for a Gemini terminal from its screen.
-  if (!isAgentConfig(session.config)) throw new Error('Give tasks to Claude Code, Codex or Gemini channels, not terminals.');
+  if (!isAgentConfig(session.config)) throw new Error('Give tasks to an agent’s channel (Claude Code, Codex, Gemini or one you added), not a terminal.');
   // A terminal waiting on an approval would take the prompt's Enter as the answer (often Yes): the person answers first.
-  if (!session.config.chat && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
+  if (!isChatRun(session.config) && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.
   const detached = hierarchyDetached(session.id); if (detached) throw new Error(detached);
   const { prompt } = await workbench<TaskSent>({ action: 'task-send', id });
@@ -125,11 +125,11 @@ export async function taskTurnDone(sessionId: string, failed = false, from?: { c
   const active = activeOn(sessionId).filter((task) => !waiting.includes(promptMark(task))); if (!active.length) return;
   // A terminal turn ending within seconds of every send (see below) is not read at all: the transcript can be 8 MB.
   if (!from && active.every((task) => Date.now() - Date.parse(task.sentAt!) <= 5000)) return;
-  // Gemini's conversation is not readable: its signal is read from its screen, after the task's prompt (screenSignal).
-  const gemini = !from && useWorkspaceStore.getState().sessions.find((session) => session.id === sessionId)?.config.engine === 'gemini';
-  const said = gemini || (from && 'text' in from) ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
+  // Gemini's and a custom agent's conversations are not readable: the signal is read from the screen, after the task's prompt (screenSignal).
+  const engine = useWorkspaceStore.getState().sessions.find((session) => session.id === sessionId)?.config.engine; const screen = !from && engine !== undefined && readsFromScreen(engine);
+  const said = screen || (from && 'text' in from) ? null : from ? chatOf(from.chat).filter((message) => message.role !== 'user' || delivered(message.text)) : await transcriptOf(sessionId);
   const task = taskOfTurn(active, said); if (!task) return;
-  const given = from && 'text' in from ? from.text : gemini ? screenSignal(terminalLines(sessionId) ?? [], promptMark(task)) : null;
+  const given = from && 'text' in from ? from.text : screen ? screenSignal(terminalLines(sessionId) ?? [], promptMark(task)) : null;
   // A terminal turn that ends within seconds of the send is the CLI taking the message, not the work (Claude Code's
   // Stop hook fires then too). A chat's turn end is a real reply, however quick ("TASK BLOCKED: which file?").
   if (!from && Date.now() - Date.parse(task.sentAt!) <= 5000) return;

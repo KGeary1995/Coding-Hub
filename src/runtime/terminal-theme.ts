@@ -6,7 +6,7 @@ import type { ITheme } from '@xterm/xterm';
  */
 export const TERMINAL_FONT = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
 /** The cursor is the engine's colour: --tr-ch-claude, --tr-ch-codex, --tr-ch-gemini, --tr-ch-shell. */
-export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', shell: '#9fc3b8' } as const;
+export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', custom: '#c4b5fd', shell: '#9fc3b8' } as const;
 export const TERMINAL_THEME: ITheme = {
   // --tr-term under --tr-fg; a selection is --tr-control-on.
   background: '#050912', foreground: '#dbe4f5', cursor: '#dbe4f5', cursorAccent: '#050912', selectionBackground: '#1b3260',

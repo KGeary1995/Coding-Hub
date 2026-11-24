@@ -6,7 +6,7 @@ import { UndoTurnLine } from './UndoTurnLine';
 import { useUndoStore } from '../state/undo-store';
 import { budgetAlerts } from '../../shared/productivity';
 import { peekCoachingPrompt, takeCoachingPrompt } from '../runtime/coaching';
-import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Folder, FolderOpen, GripVertical, OctagonPause, CircleAlert, TriangleAlert, LoaderCircle, Play, Square, Ellipsis, RotateCcw, Settings2, Copy, Maximize2, Minimize2, MessagesSquare, X, ClipboardList, ChevronDown, Undo2, AppWindow } from 'lucide-react';
 import { accountLabel, useAccountStore, refreshClaudeProfiles } from '../state/account-store';
 import type { Session } from '../../shared/types';
@@ -29,7 +29,8 @@ import { focusTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
-import { ENGINE_ICONS } from './tile/engine-icons';
+import { EngineAvatar } from './tile/EngineAvatar';
+import { useAgentLook } from '../state/agent-store';
 import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
 import { errorLines, errorText, setupTarget, SETUP_TARGETS, useErrorStrip } from './tile/error-strip';
@@ -81,6 +82,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const engine = session.config.engine;
   const claude = engine === 'claude';
   const shell = engine === 'shell';
+  // A custom agent (docs/custom-agents.md) goes by its own name and colour.
+  const agentId = session.config.engine === 'custom' ? session.config.agentId : ''; const look = useAgentLook(agentId); const custom = engine === 'custom';
   // Claude Code or Codex: usage, context, tasks and coaching. Terminal channels have none of these.
   /** Tasks and live coaching read Claude Code's and Codex's transcripts only; Gemini's tasks are read from its screen. */
   const tasked = isChatEngineConfig(session.config);
@@ -92,9 +95,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : engine === 'gemini' ? 'Gemini chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex CLI';
-  // The engine's mark, in its avatar: a shape as well as a colour.
-  const EngineIcon = ENGINE_ICONS[engine];
+  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : engine === 'gemini' ? 'Gemini chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex CLI';
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
   const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
@@ -154,12 +155,12 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // The row stands open while what it opened is in use: the settings, a conversation, the question Close asks.
   const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;
   return (
-    <article ref={tile} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${detailOpen ? 'detail-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
+    <article ref={tile} style={custom ? { '--ch': look.color } as CSSProperties : undefined} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${detailOpen ? 'detail-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
       data-session={session.id} onFocusCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); /* The desktop leads this channel's size again (1.35.2). */ if (session.status === 'running') void window.codingHub?.focusChannel?.({ sessionId: session.id }).catch(() => {}); }} onPointerDownCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDownCapture={() => { /* Typing in it (focus already there, so no focus event) is looking at it too. */ if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>
-          <span className={`ui-avatar small ${engine}`} title={engineName} aria-hidden="true"><EngineIcon /></span>
+          <EngineAvatar engine={engine} agentId={agentId} title={engineName} />
           {/* The engine's name stays in the badge for screen readers; the avatar shows it. */}
           <span className="tr-ch-badge" title={engineName}>CH{channel}<span className="tr-ch-engine">{engineName}</span></span>
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
@@ -207,8 +208,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
-        <span className={`welcome-engine ui-avatar large ${engine}`} aria-hidden="true"><EngineIcon /></span>
-        <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex'}</h3>
+        <EngineAvatar engine={engine} agentId={agentId} size="large" className="welcome-engine" />
+        <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex'}</h3>
         <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
         {/* The folder opens the channel's settings, where its folder is chosen; with no project yet, it opens Projects. */}
         <div className="welcome-actions">
@@ -217,8 +218,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
-      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
-        tokensTitle={engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={custom || engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
+        tokensTitle={custom ? 'Trace does not count a custom agent’s tokens.' : engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}

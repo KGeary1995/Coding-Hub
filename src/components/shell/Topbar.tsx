@@ -6,7 +6,7 @@ import { seatRoom } from '../../runtime/round-table';
 import type { TableKind } from '../../../shared/table-seats';
 import { TableSetup } from '../chat/TableSetup';
 import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
-import { BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
+import { Bot, BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
 import { StartOrderButton } from './StartOrderButton';
@@ -15,6 +15,8 @@ import { MenuButton, type MenuItem } from './MenuButton';
 import { TraceMark } from './TraceMark';
 import { ENGINE_ICONS } from '../tile/engine-icons';
 import { MAX_CHANNELS } from '../../../shared/schemas';
+import { refreshAgents, useAgentStore } from '../../state/agent-store';
+import { EngineAvatar } from '../tile/EngineAvatar';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
@@ -25,7 +27,7 @@ export const INSIGHT_VIEWS: { view: NavigationView; label: string; icon: LucideI
   { view: 'coaching', label: 'AI coaching', icon: GraduationCap }, { view: 'verification', label: 'Verification profiles', icon: ListChecks },
 ];
 export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIcon }[] = [
-  { view: 'accounts', label: 'Accounts & connections', icon: CircleUserRound }, { view: 'memory', label: 'Shared memory', icon: BookOpen }, { view: 'rules', label: 'Shared rules', icon: ShieldCheck }, { view: 'connectors', label: 'MCP servers', icon: Cable },
+  { view: 'accounts', label: 'Accounts & connections', icon: CircleUserRound }, { view: 'agents', label: 'Agents', icon: Bot }, { view: 'memory', label: 'Shared memory', icon: BookOpen }, { view: 'rules', label: 'Shared rules', icon: ShieldCheck }, { view: 'connectors', label: 'MCP servers', icon: Cable },
   { view: 'skills', label: 'Skills & plugins', icon: Sparkles }, { view: 'settings', label: 'Settings', icon: Settings2 },
 ];
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
@@ -75,6 +77,9 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   // The tiles of the plugins that are on (docs/plugins.md), read again when the view changes (after Skills & plugins).
   const [tiles, setTiles] = useState<{ plugin: string; tile: string; title: string; name: string }[]>([]);
+  // The custom agents turned on here (docs/custom-agents.md), read again the same way (after Agents).
+  const agents = useAgentStore((state) => state.agents).filter((agent) => agent.active);
+  useEffect(() => { void refreshAgents(); }, [activeView]);
   useEffect(() => { void workbench<PluginData>({ action: 'plugin-list' }).then((data) => setTiles(data.plugins.filter((plugin) => plugin.enabled && !plugin.problem).flatMap((plugin) => plugin.tiles.map((tile) => ({ plugin: plugin.id, tile: tile.id, title: tile.title, name: plugin.name }))))).catch(() => setTiles([])); }, [activeView]);
   const addPluginTile = useWorkspaceStore((state) => state.addPluginTile);
   const channelMenu: MenuItem[] = other
@@ -83,6 +88,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
       // The same agents as chats (1.39.0): the conversation in Trace's own view instead of the CLI's terminal.
       ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelItem(`${engine}Chat`, () => useWorkspaceStore.getState().addChatSession(engine))),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
+      ...agents.map((agent): MenuItem => ({ label: agent.look.name, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => addSession('custom', undefined, { id: agent.id, name: agent.look.name }) })),
       ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : []),
       ...tiles.map((item): MenuItem => ({ label: `${item.title} (${item.name})`, icon: <span className="ui-avatar small shell" aria-hidden="true"><Puzzle /></span>, onSelect: () => addPluginTile({ id: item.plugin, tile: item.tile }, item.title) }))];
   return <header className="tr-topbar">

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { AgentRunningSession, EngineInfo } from '../../../shared/ipc';
+import type { BuiltInRunningSession, EngineInfo } from '../../../shared/ipc';
 import { AutoMemory, isSessionSummary, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
 import type { MemoryNote } from '../../../shared/hub';
@@ -26,7 +26,7 @@ function repository(root: string, name: string, origin?: string) {
 }
 const info = (engine: 'claude' | 'codex' | 'gemini'): EngineInfo => ({ engine, available: true, executable: '/cli', version: '2.1.310', supportsModel: true, supportsConfig: true, supportsNoDaemon: false, supportsAppendSystemPrompt: true, supportsMcpConfig: true, error: null });
 const track = (auto: AutoMemory) => { pending.push(auto); return auto; };
-const run = (engine: 'claude' | 'codex' | 'gemini', cwd: string): AgentRunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 });
+const run = (engine: 'claude' | 'codex' | 'gemini', cwd: string): BuiltInRunningSession => ({ sessionId: 'tile', runId: randomUUID(), engine, cwd, pid: 1 });
 
 describe('memory keys', () => {
   it('normalizes SSH and HTTPS remotes to the same identity', () => {

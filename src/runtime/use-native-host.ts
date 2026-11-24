@@ -62,6 +62,7 @@ import { guideTurnEnded } from '../state/guide-store';
 import { receiveUndo } from '../state/undo-store';
 import { scheduledRun } from './scheduled-run';
 import { loadPreviews, receivePreview } from '../state/preview-store';
+import { lookOf, useAgentStore } from '../state/agent-store';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -148,7 +149,7 @@ export function useNativeHost() {
     // A scheduled job's run is due (1.39.0): its channel opens here, and its task is sent once the agent is ready.
     const unsubscribeScheduled = host.onScheduledRun((request) => { void scheduledRun(request).catch(() => 'The channel could not be opened.').then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {}); });
     const unsubscribeControl = host.onRemoteControl((request) => {
-      void ('settings' in request ? remoteSettings(request.settings) : 'add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like)) : remoteControl(request.sessionId, request.control))
+      void ('settings' in request ? remoteSettings(request.settings) : 'add' in request ? Promise.resolve(remoteAdd(request.add, request.chat === true, request.like, request.agent)) : remoteControl(request.sessionId, request.control))
         .then((error) => host.finishRemoteControl({ requestId: request.requestId, ...(error ? { error } : {}) })).catch(() => {});
     });
     const unsubscribeFlush = host.onWorkspaceFlush((requestId) => {
@@ -343,11 +344,12 @@ export async function remoteSettings(change: RemoteChannelChange): Promise<strin
   return undefined;
 }
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
-export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): string | undefined {
+/** `agent`: a custom agent's id, for a 'custom' channel; it is named as the Agents page lists it. */
+export function remoteAdd(engine: ChannelEngine, chat = false, like?: string, agent?: string): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
   const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
   // A chat channel (Claude, Codex or Gemini chat) when the phone or other computer asked for one.
-  if (chat && (engine === 'claude' || engine === 'codex' || engine === 'gemini')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
+  if (chat && (engine === 'claude' || engine === 'codex' || engine === 'gemini')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine, undefined, engine === 'custom' && agent ? { id: agent, name: lookOf(useAgentStore.getState().agents, agent).name } : undefined);
   // In the folder another channel works in (a Round Table's seat), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
   if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);

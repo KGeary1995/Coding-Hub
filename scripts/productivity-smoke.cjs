@@ -88,6 +88,23 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await board.locator('.xterm-rows').filter({hasText:'TILE READY fixture.sample'}).waitFor();await board.locator('.xterm-helper-textarea').focus();await page.keyboard.type('hi board');await page.keyboard.press('Enter');await board.locator('.xterm-rows').filter({hasText:'TILE GOT hi board'}).waitFor();
     await (await tileControl(board,'Stop')).click();await page.waitForFunction(()=>![...document.querySelectorAll('.session-tile')].some((tile)=>tile.textContent.includes('Sample board')&&tile.getAttribute('data-status')==='running'));
     await (await tileControl(board,'Close channel 3')).click();await board.waitFor({state:'detached'});
+    // A custom agent (1.40.0, docs/custom-agents.md): saved through the host (its system dialog is answered above), tested,
+    // listed on the Agents page, added from + Channel, given shared memory through its --mcp-config file, and read for Needs
+    // you (a waiting pattern) and Done (its ready prompt) from its screen.
+    const agentProgram=path.resolve(__dirname,'fixtures/custom-agent.cjs');
+    await wb(page,{action:'agent-save',definition:{schema:1,id:'fixture-agent',name:'Fixture agent',color:'#5ec4a8',program:{command:agentProgram,args:['--plain']},version:{args:['--version']},status:{waiting:['\\(Y\\)es/\\(N\\)o'],turnEnd:['^> $']},mcp:{format:'claude-json',args:['--mcp-config','{file}']}}});
+    assert.match((await wb(page,{action:'agent-test',definition:(await wb(page,{action:'agent-list'})).agents[0].definition})).output,/fixture-agent 1\.0/);
+    await openView(page,'Agents');await page.locator('.agents-panel .ui-row').filter({hasText:'Fixture agent'}).filter({hasText:'On'}).waitFor();await openView(page,'Workspace');
+    await addChannel(page,'Fixture agent');const agentTile=page.locator('.session-tile').filter({hasText:'Fixture agent'});await agentTile.getByRole('button',{name:'Start channel',exact:true}).click();
+    await page.waitForFunction(()=>[...document.querySelectorAll('.session-tile')].some((tile)=>tile.textContent.includes('Fixture agent')&&(tile.querySelector('.xterm-rows')?.textContent.includes('AGENT READY')||tile.querySelector('.session-error'))));
+    { const screen=await agentTile.locator('.xterm-rows').textContent(); const failed=await agentTile.locator('.session-error').allTextContents(); assert.match(screen,/AGENT READY MCP:coding-hub-memory(,trace-channels)? ARGS:--plain --mcp-config/,`custom agent start: ${screen} ${failed.join(' ')}`); }
+    const agentSession=await agentTile.getAttribute('data-session');
+    await agentTile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('fix the tests');await page.keyboard.press('Enter');
+    await page.waitForFunction((id)=>window.events.some((event)=>event.sessionId===id&&event.type==='answered'&&event.finished),agentSession);
+    await page.keyboard.type('ask');await page.keyboard.press('Enter');
+    await page.waitForFunction((id)=>window.events.some((event)=>event.sessionId===id&&event.type==='attention'&&event.message.includes('(Y)es/(N)o')),agentSession);
+    await (await tileControl(agentTile,'Stop')).click();await page.waitForFunction((id)=>!document.querySelector(`.session-tile[data-session="${id}"][data-status="running"]`),agentSession);
+    await (await tileControl(agentTile,'Close channel 3')).click();await agentTile.waitFor({state:'detached'});
     // Install from GitHub: a preview of everything it would run, then Install (the system dialog is answered above).
     await openView(page,'Skills & plugins');await page.getByLabel('GitHub repository',{exact:true}).fill('owner/board');await page.getByRole('button',{name:'Preview',exact:true}).click();
     const preview=page.getByRole('region',{name:'Preview of GitHub board'});await preview.waitFor();assert.match(await preview.textContent(),/Action: Hello: .*hello\.js[\s\S]*nobody has reviewed it|nobody has reviewed it[\s\S]*Action: Hello: .*hello\.js/);
@@ -155,6 +172,6 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // Failed runs in a narrow window too: no sideways scroll.
     await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})));await openView(page,'Session history');await page.getByRole('button',{name:'Failed runs',exact:true}).click();await page.getByRole('button',{name:'Run recovery checks',exact:true}).waitFor();assert.equal(await page.evaluate(()=>document.body.scrollWidth>innerWidth),false);
     const backup=await wb(page,{action:'backup-create',includeLogs:true});const restoredBackup=await wb(page,{action:'backup-restore',id:backup.record.id});await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'runtime'})).storagePath,restoredBackup.restoredPath);assert.equal((await wb(page,{action:'flow-conversations'}))[0].pinned,true);assert.equal((await wb(page,{action:'flow-templates'}))[0].name,'Paired implementation');
-    assert.deepEqual(errors,[]);console.log('PASS: named channels and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
+    assert.deepEqual(errors,[]);console.log('PASS: a custom agent saved, tested, started with shared memory and read for Needs you and Done, named channels and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
   } finally {await app?.close().catch(()=>{});await removeFolder(root);}
 })().catch((error)=>{console.error(error);process.exitCode=1;});

@@ -157,7 +157,7 @@ export const control = async (sessionId: string, value: ChannelControl) => { awa
 export const channelSettings = async (sessionId: string) => await (await api(`/api/channel-settings?sessionId=${encodeURIComponent(sessionId)}`)).json() as RemoteChannelSettings;
 export const changeChannel = async (change: RemoteChannelChange) => await (await api('/api/channel-settings', { method: 'POST', body: JSON.stringify(change) })).json() as RemoteChannelSettings;
 /** Adds a channel on this computer: a terminal channel, or Claude chat / Codex chat with `chat`. */
-export const addChannel = async (engine: ChannelEngine, chatChannel = false, like?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}) }) }); };
+export const addChannel = async (engine: ChannelEngine, chatChannel = false, like?: string, agent?: string) => { await api('/api/channel-add', { method: 'POST', body: JSON.stringify({ engine, ...(chatChannel ? { chat: true } : {}), ...(like ? { like } : {}), ...(agent ? { agent } : {}) }) }); };
 
 /** An open event stream: when it last heard from its computer, and how to replace it. */
 interface OpenStream { heard: number; restart: () => void }

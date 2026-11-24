@@ -151,3 +151,10 @@
 
 /* Higher contrast: the wells these pages draw themselves take the stronger line that shared rows take. */
 [data-contrast="high"] :is(.account-path, .account-command, .account-terminal, .server-command, .memory-project .memory-connection) { border-color: var(--tr-line-strong); }
+
+/* Agents (1.40.0, docs/custom-agents.md): the definition form in sections, its JSON tab and what Test start printed. */
+.agent-form-section { display: grid; gap: 8px; margin: 0 0 12px; padding: 10px 12px 12px; border: 1px solid var(--tr-line-faint); border-radius: var(--tr-r-control); }
+.agent-form-section legend { padding: 0 6px; font: 600 13px/1.4 var(--tr-font-ui); color: var(--tr-fg-strong); }
+.agent-form textarea, .agent-json { font-family: var(--tr-font-mono); font-size: 12px; }
+.agent-test pre { max-height: 220px; overflow: auto; margin: 4px 0 10px; padding: 8px 10px; border-radius: var(--tr-r-inset); background: var(--tr-well); white-space: pre-wrap; font: 12px/1.45 var(--tr-font-mono); }
+.agent-form .session-error ul { margin: 0; padding-left: 18px; }

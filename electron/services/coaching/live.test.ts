@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { coachable, promptTips, type LiveTip } from '../../../shared/coaching';
-import type { AgentRunningSession } from '../../../shared/ipc';
+import type { BuiltInRunningSession } from '../../../shared/ipc';
 import type { CLIEngineConfig } from '../../../shared/types';
 import { conversationTurn, LiveCoach, REVIEW_ARGS, reviewInput, runCodexReview } from './live';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
-const run = (cwd = '/repo', runId = 'run-1'): AgentRunningSession => ({ sessionId: 'session-1', runId, engine: 'claude', pid: 1, cwd });
+const run = (cwd = '/repo', runId = 'run-1'): BuiltInRunningSession => ({ sessionId: 'session-1', runId, engine: 'claude', pid: 1, cwd });
 const config = (resumeId?: string) => ({ engine: 'claude', model: '', ...(resumeId ? { resumeId } : {}) }) as unknown as CLIEngineConfig;
 const user = (content: unknown) => ({ type: 'user', message: { role: 'user', content } });
 const assistant = (text: string) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });

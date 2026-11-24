@@ -6,9 +6,11 @@ import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../../shared/types';
-import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../../shared/types';
-import type { AgentRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
+import type { AgentConfig, ChannelConfig, CLIEngineConfig, CustomChannelConfig, PermissionLevel } from '../../../shared/types';
+import type { AgentDefinition } from '../../../shared/agent-definition';
+import { CustomStatusReader, type CustomStatusChange } from '../agents/status';
+import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../../../shared/types';
+import type { AgentRunningSession, BuiltInRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
 import { buildGeminiSeatLaunch, buildLaunch, HubError, launchedLevel } from './engine-adapter';
@@ -113,6 +115,8 @@ interface ManagedRun {
   screen?: ScreenReader;
   /** Gemini CLI reports working, waiting (with the question) and done over OSC 7501; `since` is when the run started. */
   gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number; known: Set<string> };
+  /** A custom agent's run: Needs you and Done from the signals its definition names (agents/status.ts). */
+  custom?: CustomStatusReader;
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -145,12 +149,19 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: CLIEngineConfig, owner: number) => void; prepareLaunch?: (session: AgentRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /**
        * Work an agent launch waits for before prepareLaunch (a project's shared memory brought up to date), started with
        * discovery. Its errors are ignored, and a launch waits at most `beforeLaunchMilliseconds` (default 3 s) for it.
        */
-      beforeLaunch?: (cwd: string, config: CLIEngineConfig) => Promise<unknown>; beforeLaunchMilliseconds?: number;
+      beforeLaunch?: (cwd: string, config: AgentConfig) => Promise<unknown>; beforeLaunchMilliseconds?: number;
+      /**
+       * A custom agent's launch (docs/custom-agents.md), built by the host from its confirmed definition: the program,
+       * arguments and environment, and the status signals to read. Throws a HubError the person can act on.
+       */
+      customLaunch?: (session: AgentRunningSession, config: CustomChannelConfig, env: Record<string, string>) => Promise<{ file: string; args: string[]; env: Record<string, string>; status: AgentDefinition['status'] }>;
+      /** A custom agent's status signals, for a run taken up from the background runner. */
+      customStatus?: (agentId: string) => AgentDefinition['status'] | null;
       /** Windows' sudo setting, for Terminal channels (tests replace it). */
       sudoMode?: () => Promise<number>;
       /** A launch that was prepared but did not start: what prepareLaunch set up for it is released. */
@@ -175,7 +186,7 @@ export class PtyManager {
   }
 
   /** Waits for beforeLaunch, at most its time limit; never fails the launch. */
-  private beforeLaunch(cwd: string, config: CLIEngineConfig): Promise<void> {
+  private beforeLaunch(cwd: string, config: AgentConfig): Promise<void> {
     const work = this.dependencies.beforeLaunch; if (!work) return Promise.resolve();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const limit = new Promise<void>((resolve) => { timer = setTimeout(resolve, this.dependencies.beforeLaunchMilliseconds ?? 3000); });
@@ -223,6 +234,7 @@ export class PtyManager {
     if (run.chat) throw new HubError('CHAT_REMOTE', 'This is a chat channel: send messages and answers through the chat, not as typing.');
     try { run.pty.write(data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
+    run.custom?.input(data);
     if (isPersonInput(data)) this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId: run.session.runId, at: new Date().toISOString() });
   }
 
@@ -237,7 +249,7 @@ export class PtyManager {
 
   /** A run whose process just ended cannot be resized; that is not an error, its exit event follows. */
   private resizePty(run: ManagedRun, cols: number, rows: number) {
-    try { run.pty.resize(cols, rows); run.screen?.resize(cols, rows); }
+    try { run.pty.resize(cols, rows); run.screen?.resize(cols, rows); run.custom?.resize(cols, rows); }
     catch { if (!ptyProcessEnded(run.pty)) throw new HubError('RESIZE_FAILED', 'The terminal could not be resized.'); }
   }
 
@@ -285,10 +297,20 @@ export class PtyManager {
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working folder does not exist or is not accessible.'); }
       const baseEnvironment = await this.environment();
-      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask';
+      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask'; let customStatus: AgentDefinition['status'] | null = null;
       // A chat run: Claude Code or Codex in structured mode, or a Round Table's Gemini seat (agy's agent protocol server).
       const chat = isChatRun(request.config);
-      if (request.config.engine === 'shell') {
+      if (request.config.engine === 'custom') {
+        // A custom agent: the host builds its launch from the confirmed definition; no discovery, flags or telemetry of a built-in CLI.
+        if (!this.dependencies.customLaunch) throw new HubError('CUSTOM_AGENTS', 'Custom agents are unavailable: Traceâ€™s storage could not be opened.');
+        const ready = this.beforeLaunch(cwd, request.config);
+        const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: 'custom', pid: 0, cwd };
+        await ready; prepared = agent;
+        const launch = await this.dependencies.customLaunch(agent, request.config, baseEnvironment);
+        if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
+        session = agent; customStatus = launch.status; file = launch.file; args = launch.args;
+        env = { ...launch.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      } else if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
         const sudo = process.platform === 'win32' && existsSync(windowsSudoPath(baseEnvironment)) ? await (this.dependencies.sudoMode ?? windowsSudoMode)() : 0;
         // A plugin tile runs its plugin's program, looked up here, never named by the window.
@@ -312,7 +334,7 @@ export class PtyManager {
         const launch = codexChat ? { args: [] as string[], env: {} as Record<string, string> } : geminiSeat ? buildGeminiSeatLaunch(engine.info) : buildLaunch(request.config, engine.info);
         if (!engine.executable) throw new HubError('ENGINE_UNAVAILABLE', 'The CLI executable is unavailable.');
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
-        const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
+        const agent: BuiltInRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: request.config.engine, pid: 0, cwd, ...(profileId ? { accountProfileId: profileId } : {}) };
         prepared = agent; this.dependencies.prepareLaunch?.(agent, request.config, engine.info, launch); session = agent;
         const mergedEnvironment = { ...discoveryEnvironment, ...engine.executable.extraEnv, ...launch.env };
         env = { ...(profileEnvironment ? profileEnvironment(mergedEnvironment, profileId) : mergedEnvironment), TERM: 'xterm-256color', COLORTERM: 'truecolor' };
@@ -330,13 +352,14 @@ export class PtyManager {
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
       if (held) run.held = true;
+      if (request.config.engine === 'custom') run.custom = this.customReader(run, customStatus, request.cols, request.rows);
       this.runs.set(request.sessionId, run); prepared = null;
       if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } } : {}, level);
       else this.watchTerminal(run);
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
       this.send(owner, { type: 'started', ...session });
-      if (chat && isAgentConfig(request.config) && request.config.resumeId) {
+      if (chat && isBuiltInAgent(request.config) && request.config.resumeId) {
         let history: Extract<ChatEvent, { type: 'history' }> | null = null; try { history = this.dependencies.chatHistory?.(request.config) ?? null; } catch { /* Shown without its earlier messages. */ }
         if (history) try { this.dependencies.onChat?.(owner, { sessionId: session.sessionId, runId: session.runId, event: history }); } catch { this.dependencies.onEventError?.(); }
       }
@@ -358,6 +381,7 @@ export class PtyManager {
     let resolveExit!: () => void; const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
     const run: ManagedRun = { owner, session, pty: held.pty, ...(held.meta.nativeKey ? { nativeKey: held.meta.nativeKey } : {}), outputTail: held.tail.slice(-OUTPUT_TAIL), pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
     run.held = true; this.runs.set(session.sessionId, run);
+    if (held.meta.config.engine === 'custom') { let status: AgentDefinition['status'] | null = null; try { status = this.dependencies.customStatus?.(held.meta.config.agentId) ?? null; } catch { /* Read without signals. */ } run.custom = this.customReader(run, status, held.pty.cols, held.pty.rows); }
     this.watchTerminal(run); held.pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
     // The screen as it is now, read from the kept output, and its title.
     run.screen?.write(held.tail); for (const match of held.tail.matchAll(TITLE)) run.title = match[1];
@@ -380,6 +404,7 @@ export class PtyManager {
       else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
       if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
       if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
+      run.custom?.push(data);
     });
     // Claude Code and Codex terminals: their screen is read too, to catch an approval their own signal missed and to
     // clear a "needs you" once they work again (rules after herdr's).
@@ -569,6 +594,7 @@ export class PtyManager {
     if (run.chat) throw new HubError('CHAT_INPUT', 'This is a chat channel: send messages and interruptions through the chat.');
     try { run.pty.write(parsed.data.data); }
     catch { throw new HubError('WRITE_FAILED', 'Terminal input could not be delivered.'); }
+    run.custom?.input(parsed.data.data);
   }
 
   resize(owner: number, payload: unknown) {
@@ -604,11 +630,19 @@ export class PtyManager {
     else if (last === 'working' || last === 'blocked') this.notifyResolved(run.session.runId, true);
   }
 
+  /** A custom run's status reader: waiting is a notice, its going away answers it, and a turn's end is `finished`. */
+  private customReader(run: ManagedRun, status: AgentDefinition['status'] | null, cols: number, rows: number) {
+    return new CustomStatusReader(status ?? undefined, cols, rows, (change: CustomStatusChange) => {
+      if (change.kind === 'waiting') this.notifyAttention(run.session.runId, change.message);
+      else this.notifyResolved(run.session.runId, change.kind === 'turn-ended');
+    });
+  }
+
   private geminiKnown() { try { return new Set((this.dependencies.geminiKnown?.() ?? geminiConversations(undefined, 500).map((conversation) => conversation.id)).map((id) => id.toLowerCase())); } catch { return new Set<string>(); } }
 
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
-    run.screen?.dispose();
+    run.screen?.dispose(); run.custom?.dispose();
     // Gemini CLI prints the conversation to resume as it quits; stopped by Trace it prints none, so agy's list says.
     if (run.gemini && !run.chat) {
       const printed = [...run.outputTail.matchAll(/agy --conversation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)].at(-1)?.[1];
@@ -652,7 +686,7 @@ export class PtyManager {
     this.closing = true;
     for (const reservation of this.pending.values()) reservation.cancelled = true;
     if (!stopHeld) for (const run of [...this.runs.values()]) if (run.held && !run.finished) {
-      run.finished = true; if (run.stall) clearTimeout(run.stall); if (run.flushTimer) clearTimeout(run.flushTimer); run.screen?.dispose();
+      run.finished = true; if (run.stall) clearTimeout(run.stall); if (run.flushTimer) clearTimeout(run.flushTimer); run.screen?.dispose(); run.custom?.dispose();
       this.runs.delete(run.session.sessionId); run.resolveExit();
     }
     await Promise.all([...new Set([...this.runs.values()].map((run) => run.owner))].map((owner) => this.stopOwner(owner)));

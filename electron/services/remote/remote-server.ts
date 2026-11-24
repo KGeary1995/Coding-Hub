@@ -5,6 +5,8 @@ import type { Duplex } from 'node:stream';
 import { z } from 'zod';
 import type { RunReference, RunningSession, SessionEvent } from '../../../shared/ipc';
 import type { ChannelEngine } from '../../../shared/types';
+import type { AgentLook } from '../../../shared/agent-look';
+import { AGENT_ID } from '../../../shared/agent-definition';
 import type { AccountLabel } from '../../../shared/accounts';
 import { PAIRING_PREFIX, REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type ChatReplay, type RemoteChannel, type RemoteDevice, type RemoteDeviceKind, type RemoteMe, type RemoteStatus, type ServeProblem, type TailscaleState } from '../../../shared/remote';
 import type { ChatEnvelope, ChatRequest } from '../../../shared/chat';
@@ -31,14 +33,16 @@ const coached = (tip: import('../../../shared/coaching').LiveTip | null) => tip 
 export type RemoteUsageSource = { today: DayUsage; limits: PlanLimits[]; budget: Pick<HubPreferences, 'dailyTokens' | 'dailyCost' | 'limitWarning'> | null };
 export interface RemoteHost {
   /** `seatedAt`: a Round Table's partner, which has no channel of its own; the lead it sits with carries the table. */
-  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel; seatedAt?: string }[];
+  sessions(): { id: string; title: string; engine: ChannelEngine; chat?: true; account?: AccountLabel; seatedAt?: string; agent?: AgentLook }[];
   running(): (RunningSession & { cols?: number; rows?: number; title?: string })[];
   write(reference: RunReference, data: string): void;
   /** Starts, stops or restarts a channel for a linked computer, through the desktop window that runs it. */
   control?(sessionId: string, control: ChannelControl): Promise<void>;
   /** Adds a channel to this computer's workspace (a linked computer's + Channel); `chat` makes it a chat channel. */
   /** `like`: a channel on this computer whose folder the new one works in (a Round Table's partner). */
-  add?(engine: ChannelEngine, chat?: boolean, like?: string): Promise<void>;
+  add?(engine: ChannelEngine, chat?: boolean, like?: string, agent?: string): Promise<void>;
+  /** The custom agents turned on here, for a phone's + Channel (1.40.0). */
+  agents?(): AgentLook[];
   /** A channel's settings for a phone, and changing them through the window, as its engine settings do; null for a channel that is gone. */
   channelSettings?(sessionId: string): Promise<RemoteChannelSettings | null>;
   changeChannel?(change: RemoteChannelChange): Promise<void>;
@@ -157,7 +161,7 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
-const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'Only Claude Code, Codex and Gemini channels can be chats.');
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'custom', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional(), agent: z.string().regex(AGENT_ID).optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'custom')), 'Only Claude Code, Codex and Gemini channels can be chats.').refine((value) => (value.engine === 'custom') === Boolean(value.agent), 'A custom agent channel names its agent.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 /** How much of a body past its limit is read and dropped so the sender gets the 413; past that the connection is cut. */
@@ -463,7 +467,7 @@ export class RemoteServer {
     const payload = `event: me\ndata: ${eventJSON(this.me(device))}\n\n`; for (const stream of this.streams) if (stream.device === id) this.write(stream, payload);
     return this.status();
   }
-  private me(device: Device): RemoteMe { const kind = device.kind ?? 'phone'; return { id: device.id, name: device.name, kind, canRun: kind === 'computer' || device.canRun === true, computer: this.identity?.id ?? null }; }
+  private me(device: Device): RemoteMe { const kind = device.kind ?? 'phone'; return { id: device.id, name: device.name, kind, canRun: kind === 'computer' || device.canRun === true, computer: this.identity?.id ?? null, ...(this.host.agents ? { agents: this.host.agents() } : {}) }; }
   /** The device as stored now: a request whose body took a while is judged on the latest permission, or refused if removed. */
   private current(id: string) { return this.devices().find((item) => item.id === id) ?? null; }
   status(): RemoteStatus {
@@ -639,7 +643,7 @@ export class RemoteServer {
       const seatRun = seat ? running.get(seat.id) : undefined; const seatWaiting = seat ? this.attention.get(seat.id) : undefined;
       const waiting = run && own?.runId === run.runId ? own : seat && seatRun && seatWaiting?.runId === seatRun.runId ? { runId: run?.runId ?? '', message: `${seat.engine === 'codex' ? 'Codex' : seat.engine === 'gemini' ? 'Gemini' : 'Claude'}: ${seatWaiting.message}` } : undefined;
       const topic = run?.title ? sessionTopic(run.title, session.engine, session.title) : null;
-      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seats[0] && seats[0].engine !== 'shell' ? { table: seats[0].engine } : {}), ...(session.account ? { account: session.account } : {}), ...(run && this.host.preview?.(session.id) ? { preview: this.host.preview(session.id)! } : {}) };
+      return { sessionId: session.id, channel: index + 1, title: session.title, engine: session.engine, runId: run?.runId ?? null, running: Boolean(run), attention: run && waiting?.runId === run.runId ? waiting.message : null, ...(!run && this.failures.has(session.id) ? { failed: this.failures.get(session.id)! } : {}), ...coached(this.host.coaching?.(session.id) ?? null), cols: run?.cols ?? null, rows: run?.rows ?? null, ...(topic ? { topic } : {}), ...(session.chat ? { chat: true as const } : {}), ...(session.chat && seats[0] && seats[0].engine !== 'shell' && seats[0].engine !== 'custom' ? { table: seats[0].engine } : {}), ...(session.account ? { account: session.account } : {}), ...(session.agent ? { agent: session.agent } : {}), ...(run && this.host.preview?.(session.id) ? { preview: this.host.preview(session.id)! } : {}) };
     });
     if (kind !== 'phone') return local;
     // Phones are told which computer each channel is on, so one app can switch between them.
@@ -993,7 +997,8 @@ export class RemoteServer {
       if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
       if (parsed.data.like && !this.local(parsed.data.like)) return this.send(response, 400, { error: 'Unknown channel.' });
-      try { await this.host.add(parsed.data.engine, parsed.data.chat === true, parsed.data.like); }
+      if (parsed.data.agent && !this.host.agents?.().some((agent) => agent.id === parsed.data.agent)) return this.send(response, 400, { error: 'That agent is not turned on on this computer.' });
+      try { await this.host.add(parsed.data.engine, parsed.data.chat === true, parsed.data.like, parsed.data.agent); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
       return this.send(response, 200, { ok: true });
     }

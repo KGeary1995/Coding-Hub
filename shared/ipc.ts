@@ -47,8 +47,11 @@ export interface StartSessionRequest {
 }
 export interface RunReference { sessionId: string; runId: string }
 export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: ChannelEngine }
-/** A run of Claude Code or Codex, which usage, memory and history follow; Terminal channels never reach them. */
-export type AgentRunningSession = RunningSession & { engine: CLIEngine };
+/** A run of an agent (Claude Code, Codex, Gemini CLI or a custom agent), which history follows; Terminal channels never reach them. */
+export type AgentRunningSession = RunningSession & { engine: CLIEngine | 'custom' };
+/** A run of a built-in CLI, whose usage and memory files Trace reads. */
+export type BuiltInRunningSession = RunningSession & { engine: CLIEngine };
+export const isBuiltInRun = (run: AgentRunningSession): run is BuiltInRunningSession => run.engine !== 'custom';
 export type SessionEvent =
   | ({ type: 'started' } & RunningSession)
   /** `replay`: output a terminal wrote before Trace opened again, kept by the background runner; it is drawn, not saved again. */

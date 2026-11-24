@@ -18,7 +18,7 @@ import { CoachingService } from './services/coaching/service';
 import { LiveCoach } from './services/coaching/live';
 import { HandoffImport } from './services/design/handoff';
 import type { AccountLabel, AccountLabels } from '../shared/accounts';
-import type { ChannelEngine } from '../shared/types';
+import type { ChannelEngine, CustomChannelConfig } from '../shared/types';
 import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type RemoteResumeRequest, type ScheduledRunRequest } from '../shared/remote';
 import { CLAUDE_MODELS, modelLabel } from '../shared/model-name';
 import type { NativeResume, Task } from '../shared/workbench';
@@ -35,7 +35,7 @@ import os, { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText, taskHistory } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
-import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type HostResult, type SessionEvent } from '../shared/ipc';
+import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type AgentRunningSession, type HostResult, type SessionEvent } from '../shared/ipc';
 import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment } from './services/cli/discovery';
 import { geminiConversationSince, geminiHome } from './services/cli/gemini-conversations';
 import { HubError } from './services/cli/engine-adapter';
@@ -83,7 +83,10 @@ import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 import { GEMINI_PLUGIN, GEMINI_TOOL_RULES, geminiConfigRoot, geminiPluginOff, installGeminiPlugin } from './services/hub/gemini-plugin';
 import { setBackupRoot } from './services/hub/file-backups';
-import { isAgentConfig, isChatEngineConfig, isChatRun } from '../shared/types';
+import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../shared/types';
+import { CustomAgents } from './services/agents/agents';
+import { buildCustomLaunch, takesTools, type McpServer } from './services/agents/launch';
+import { isBuiltInRun } from '../shared/ipc';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -169,6 +172,8 @@ const repositoryGit = new RepositoryGit(repositoryFiles);
  */
 /** This computer's channels in order, a Round Table counted as its lead's (for the channel tools and plugins). */
 function channelList() { const running = new Map(manager.running().map((run) => [run.sessionId, run])); return workspaceChannels().filter((session) => !session.seatedAt).map((session, index) => ({ channel: index + 1, sessionId: session.id, name: session.title, engine: session.engine, running: running.has(session.id), waiting: null, folder: running.get(session.id)?.cwd ?? null })); }
+/** The agent a channel runs, by name: a custom agent's own (docs/custom-agents.md), else the engine's. */
+function agentName(sessionId: string, engine: ChannelEngine): string { return (engine === 'custom' ? workspaceChannels().find((session) => session.id === sessionId)?.agent?.name : undefined) ?? DEFAULT_TITLES[engine] ?? engine; }
 /** A channel's last `count` replies, from its CLI's own conversation, as text. */
 function channelReplies(sessionId: string, count: number) { return (channelTranscript(sessionId)?.messages ?? []).flatMap((message) => message.role === 'assistant' ? [message.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n').trim()] : []).filter(Boolean).slice(-count).map((text) => text.slice(-8000)); }
 /** Types a message into a running channel: a chat gets it as a message (a Round Table's lead passes it to the table), a terminal as a line. */
@@ -225,7 +230,7 @@ function previewEvent(event: SessionEvent) {
 }
 /** The VS Code extension's way in (1.38.0): it lists the running agent channels and sends one the code selected there. */
 const editorBridge = new EditorBridge({
-  channels: () => channelList().filter((channel) => channel.running && channel.engine !== 'shell').map((channel) => ({ channel: channel.channel, sessionId: channel.sessionId, name: channel.name, engine: DEFAULT_TITLES[channel.engine as ChannelEngine] ?? channel.engine, waiting: Boolean(channelTools.waitingOf(channel.sessionId)) })),
+  channels: () => channelList().filter((channel) => channel.running && channel.engine !== 'shell').map((channel) => ({ channel: channel.channel, sessionId: channel.sessionId, name: channel.name, engine: agentName(channel.sessionId, channel.engine as ChannelEngine), waiting: Boolean(channelTools.waitingOf(channel.sessionId)) })),
   send: (sessionId, text) => sendToChannel(sessionId, text),
 });
 /** Undo last turn (1.39.0): hidden snapshots of each agent channel's files before its turns, put back from its tile. */
@@ -341,7 +346,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
-  beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.engine === 'gemini' ? undefined : config.memoryKey) : Promise.resolve(), prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
+  beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.engine === 'gemini' || config.engine === 'custom' ? undefined : config.memoryKey) : Promise.resolve(),
+  customLaunch: (run, config, base) => customLaunch(run, config, base), customStatus: (agentId) => customAgents?.status(agentId) ?? null, prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
   // Gemini CLI resumes agy's own conversation. Its usage is read from that conversation's file once the run has started
   // (telemetry.startGemini). Shared memory and the channel tools come from Trace's agy plugin (gemini-plugin.ts), told
@@ -399,6 +405,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   runOwners.set(run.runId, owner);
   try { storage?.beginRun(run, config); }
   catch { reportStorageError('This run could not be recorded in local history. The CLI session is still available.'); }
+  // A custom agent has no usage files Trace reads (docs/custom-agents.md).
+  if (!isBuiltInRun(run) || !isBuiltInAgent(config)) return;
   if (config.engine === 'gemini') { try { hub?.telemetry?.startGemini(run, config); } catch { reportStorageError('Usage recording is unavailable for this run.'); } return; }
   try { hub?.telemetry?.start(run, config, config.engine === 'claude' && config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); }
   catch {
@@ -410,13 +418,38 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   }
 } });
 
+/** Custom agents (1.40.0, docs/custom-agents.md): built once storage is known, below. */
+let customAgents: CustomAgents | null = null;
+/**
+ * A custom agent's launch: its confirmed definition and program, the shared rules check, and, when the definition says
+ * how the program takes MCP servers, shared memory (with its notes as instructions) and the channel tools. A claude-json
+ * file goes where the channel tools' files go, and is removed with them when the run ends or does not start.
+ */
+async function customLaunch(run: AgentRunningSession, config: CustomChannelConfig, base: Record<string, string>) {
+  if (!customAgents) throw new HubError('CUSTOM_AGENTS', 'Custom agents are unavailable: Trace’s storage could not be opened.');
+  const { definition, executable } = await customAgents.launchable(config.agentId, base);
+  return timed('launch-prepare', () => {
+    hub?.rules.verifyLaunch(run.cwd);
+    const servers: Record<string, McpServer> = {}; let instructions: string | null = null;
+    if (takesTools(definition)) {
+      const memory = autoMemory?.customMemory(run.cwd) ?? null; if (memory) { servers['coding-hub-memory'] = memory.server; instructions = memory.context; }
+      const toolsUrl = channelTools.register(run.runId);
+      if (toolsUrl) servers['trace-channels'] = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
+    }
+    const folder = path.join(storageRoot, 'channel-tools'); const mcpFile = path.join(folder, `${run.runId}.mcp.json`);
+    const launch = buildCustomLaunch({ definition, config, servers, instructions, mcpFile });
+    if (launch.mcpConfig) { fs.mkdirSync(folder, { recursive: true, mode: 0o700 }); fs.writeFileSync(mcpFile, launch.mcpConfig, { mode: 0o600 }); channelToolFiles.set(run.runId, mcpFile); }
+    return { file: executable.file, args: [...executable.prefixArgs, ...launch.args], env: { ...base, ...executable.extraEnv, ...launch.env }, status: definition.status };
+  });
+}
+
 /** This computer's channels in tile order, named as their tiles name them (for phones, linked computers and alerts). */
 function workspaceChannels() {
   const saved = storage?.load(); const running = new Map(manager.running().map((run) => [run.sessionId, run.cwd]));
   // A Round Table's hidden seats (every seat but the lead's, as the window hides them) are marked, not listed as channels.
   const seats = new Map<string, string>(); for (const session of saved?.sessions ?? []) for (const seat of session.roundTable ? hiddenSeatIds(session.roundTable, session.id) : []) if (saved!.sessions.some((item) => item.id === seat)) seats.set(seat, session.id);
   return (saved?.sessions ?? []).map((session) => ({ id: session.id, engine: session.config.engine, ...(isChatRun(session.config) ? { chat: true as const } : {}), ...(seats.has(session.id) ? { seatedAt: seats.get(session.id)! } : {}),
-    ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
+    ...(channelAccount(session.config) ? { account: channelAccount(session.config)! } : {}), ...(session.config.engine === 'custom' && customAgents?.look(session.config.agentId) ? { agent: customAgents.look(session.config.agentId)! } : {}), title: channelName({ engine: session.config.engine, title: session.title, cwd: running.get(session.id) ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null) }) }));
 }
 /** A channel's folder: where it runs, else where it would start (Undo last turn works on a stopped channel too). */
 function channelFolder(sessionId: string) { const saved = storage?.load(); const session = saved?.sessions.find((item) => item.id === sessionId); return manager.running().find((run) => run.sessionId === sessionId)?.cwd ?? (!session ? null : session.binding.mode === 'independent' ? session.binding.cwd : saved?.rootDirectory ?? null); }
@@ -602,7 +635,7 @@ async function taskTranscript(sessionId: string, mark: string): Promise<ChannelT
 /** The CLI's own transcript file for a channel; null for terminals and channels never run. */
 function transcriptSource(sessionId: string) {
   const config = storage?.load()?.sessions.find((session) => session.id === sessionId)?.config;
-  if (!config || !isAgentConfig(config) || !config.resumeId) return null;
+  if (!config || !isBuiltInAgent(config) || !config.resumeId) return null;
   const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined);
   return file ? { engine: config.engine, file } : null;
 }
@@ -622,6 +655,8 @@ async function channelSettings(sessionId: string): Promise<RemoteChannelSettings
   const within = <T>(work: Promise<T>): Promise<T | null> => Promise.race([work.catch(() => null), new Promise<null>((resolve) => { setTimeout(() => resolve(null), 8000).unref(); })]);
   let models: RemoteChannelSettings['models'] = [];
   if (config.engine === 'claude') models = (hub?.catalog.current().claudeModels ?? [...CLAUDE_MODELS]).map((id) => ({ id, name: modelLabel(id) }));
+  // A custom agent: the models its definition lists (its program's own list is not run for a phone).
+  else if (config.engine === 'custom') models = (customAgents?.choices(config.agentId) ?? []).map((id) => ({ id, name: id }));
   else if (config.engine === 'codex') {
     const cwd = running?.cwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved.rootDirectory);
     const catalog = await within(Promise.resolve().then(() => modelCatalog.execute({ action: 'codex-models', directory: cwd ?? null })));
@@ -630,7 +665,7 @@ async function channelSettings(sessionId: string): Promise<RemoteChannelSettings
   return { ...base, permissions: permissionLevel(config), model: config.model, ...(config.engine === 'codex' ? { effort: config.reasoningEffort } : {}), models };
 }
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine, chat = false, like?: string): Promise<void> { return askWindow({ add: engine, ...(chat && (engine === 'claude' || engine === 'codex') ? { chat: true as const } : {}), ...(like ? { like } : {}) }); }
+function addChannel(engine: ChannelEngine, chat = false, like?: string, agent?: string): Promise<void> { return askWindow({ add: engine, ...(chat && (engine === 'claude' || engine === 'codex') ? { chat: true as const } : {}), ...(like ? { like } : {}), ...(engine === 'custom' && agent ? { agent } : {}) }); }
 /**
  * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
  * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
@@ -640,7 +675,7 @@ async function resumeConversation(key: string): Promise<void> {
   const label = workflows?.labels().find((item) => item.key === conversation.key)?.name;
   return askWindow({ engine: conversation.engine, id: conversation.id, ...(conversation.profileId ? { profileId: conversation.profileId } : {}), directory, title: label || `${({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const)[conversation.engine]} · resumed` }, IPC_CHANNELS.remoteResume);
 }
-function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true } | { settings: RemoteChannelChange } | Omit<RemoteResumeRequest, 'requestId'> | Omit<ScheduledRunRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
+function askWindow(request: { sessionId: string; control: ChannelControl } | { add: ChannelEngine; chat?: true; agent?: string } | { settings: RemoteChannelChange } | Omit<RemoteResumeRequest, 'requestId'> | Omit<ScheduledRunRequest, 'requestId'>, channel: string = IPC_CHANNELS.remoteControl): Promise<void> {
   if (!window || window.isDestroyed()) return Promise.reject(new HubError('REMOTE_NO_WINDOW', 'Trace’s window is closed on this computer, so its channels cannot be started or stopped from elsewhere.'));
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
@@ -979,6 +1014,12 @@ else app.whenReady().then(() => {
   const checkPlugins = () => void plugins?.checkUpdates().catch(() => hostHealth?.record('plugin-update-check-failed'));
   setTimeout(checkPlugins, 60_000).unref?.(); setInterval(checkPlugins, 24 * 60 * 60_000).unref?.();
   eventHooks = new EventHooks(storageRoot, async (item) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Save event hook', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run a program on an event', message: `When a channel ${item.event === 'needs-you' ? 'needs you' : item.event === 'turn-ended' ? 'ends its turn' : 'fails'}, Trace will run:`, detail: [item.program, ...item.args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ') + '\n\nIt runs as you, without a shell, with the channel\'s number, name, folder and message in TRACE_* environment variables. Save it only if you trust this program.' })).response === 0);
+  customAgents = new CustomAgents(storageRoot, {
+    confirmSave: async (agent) => (await dialog.showMessageBox(window!, { type: 'warning', buttons: [agent.activate ? 'Turn on agent' : 'Save agent', 'Cancel'], defaultId: 1, cancelId: 1, title: agent.activate ? 'Turn on a custom agent' : 'Add a custom agent', message: `${agent.activate ? 'Turn on' : 'Save'} ${agent.name}? Trace will run this program as you, in the folders of the channels you start with it:`, detail: `${agent.detail}
+
+It runs without a shell. Save it only if you trust this program.` })).response === 0,
+    confirmRun: async (run) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run', 'Cancel'], defaultId: 1, cancelId: 1, title: run.title, message: run.message, detail: run.detail })).response === 0,
+  });
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   const readyForBackup = async () => { if (manager.hasSessions || scheduledJobs.running || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all channels and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
@@ -996,7 +1037,7 @@ else app.whenReady().then(() => {
     enabled: () => { try { return hub?.preferences().taskPullRequests !== false; } catch { return false; } },
     checks: (folder, sessionId) => autoChecks.settled(folder, sessionId),
     // A reply is null when Trace cannot read the channel's conversation (transcriptSource), and the pull request says so.
-    agent: (sessionId) => { const engine = sessionId ? workspaceChannels().find((session) => session.id === sessionId)?.engine : undefined; return { name: engine && engine !== 'shell' ? DEFAULT_TITLES[engine as ChannelEngine] ?? null : null, reply: sessionId ? channelReplies(sessionId, 1)[0] ?? null : null }; },
+    agent: (sessionId) => { const engine = sessionId ? workspaceChannels().find((session) => session.id === sessionId)?.engine : undefined; return { name: sessionId && engine && engine !== 'shell' ? agentName(sessionId, engine as ChannelEngine) : null, reply: sessionId ? channelReplies(sessionId, 1)[0] ?? null : null }; },
     github: async () => { const { connection } = await inspectAccount('github'); return !connection.installed ? 'missing' : connection.state === 'authenticated' ? 'signed-in' : connection.state === 'not-authenticated' ? 'signed-out' : 'unknown'; },
   });
   workflows = hub && storage ? new Workflows(storageRoot, nativeSessions, verification, hub.rules, storage, confirmWorkflow) : null;
@@ -1010,14 +1051,14 @@ else app.whenReady().then(() => {
     write: (reference, data) => manager.writeRemote(reference, data),
     control: (sessionId, control) => controlChannel(sessionId, control),
     channelSettings, changeChannel: (change) => askWindow({ settings: change }),
-    add: (engine, chat, like) => addChannel(engine, chat, like),
+    add: (engine, chat, like, agent) => addChannel(engine, chat, like, agent), agents: () => customAgents?.looks() ?? [],
     chat: (request) => manager.chatRemote(request),
     // Claude Code and Codex take an image from this computer's clipboard when they get their image key (Alt+V on
     // Windows, Ctrl+V on a Mac), so the pasted image is put there first, as a paste here would.
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini.');
+      if (run.engine === 'shell' || run.engine === 'gemini' || run.engine === 'custom') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals, Gemini or agents you added.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -1231,6 +1272,7 @@ else app.whenReady().then(() => {
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('hook-')) return eventHooks!.execute(payload);
+    if (action.startsWith('agent-')) { if (!customAgents) throw new HubError('CUSTOM_AGENTS', 'Custom agents are unavailable: Trace’s storage could not be opened.'); return customAgents.execute(payload); }
     if (action.startsWith('undo-') || action === 'redo-turn') return undoRequest(payload);
     if (action === 'editor-status') return vscodeStatus();
     if (action === 'editor-connect') { await installVSCodeExtension(app.getVersion(), path.join(app.getPath('temp'), 'trace-vscode')); return vscodeStatus(); }

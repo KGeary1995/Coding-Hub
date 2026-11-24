@@ -93,7 +93,7 @@ details[open] > summary:where(:not(:has(> svg:first-child), .note > summary))::b
 /* Tones, as the desktop's: states, engines and the person. */
 .neutral { --tone: var(--tr-fg-dim); } .accent, .info { --tone: var(--tr-accent); } .success { --tone: var(--tr-success); } .warning { --tone: var(--tr-warning); }
 .danger { --tone: var(--tr-danger); } .waiting { --tone: var(--tr-st-waiting); } .near { --tone: var(--tr-st-limit); }
-.claude { --tone: var(--tr-ch-claude); } .codex { --tone: var(--tr-ch-codex); } .gemini { --tone: var(--tr-ch-gemini); } .shell { --tone: var(--tr-ch-shell); }
+.claude { --tone: var(--tr-ch-claude); } .codex { --tone: var(--tr-ch-codex); } .gemini { --tone: var(--tr-ch-gemini); } .custom { --tone: var(--tr-ch-custom); } .shell { --tone: var(--tr-ch-shell); }
 
 /* ---------- Top bar: the keycap and "Trace", or Back and the channel; the link to the computer at the right ---------- */
 .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0; border-bottom: 1px solid var(--tr-line); background: var(--tr-panel); }

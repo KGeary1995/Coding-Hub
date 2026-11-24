@@ -1,7 +1,7 @@
 import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
 import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store';
 import type { Session } from '../../shared/types';
-import { isAgentConfig, isChatRun } from '../../shared/types';
+import { isBuiltInAgent, isChatRun } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
@@ -22,7 +22,7 @@ export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: Per
 /** The config with this level, always written out: no setting means the default (Allow edits), not Ask. */
 export function withPermissions<T extends CLIEngineConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
 /** A channel whose level a table's control sets: Claude Code, Codex or a Gemini CLI seat. */
-const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isAgentConfig(config);
+const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isBuiltInAgent(config);
 
 /**
  * Every channel at the Round Table a channel leads or sits at: the lead and all its hidden seats. One table, one permission level; a channel at no table is alone.
