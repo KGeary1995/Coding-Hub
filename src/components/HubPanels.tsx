@@ -8,6 +8,7 @@ import type { ConfigInventory, DriveStatus, MemoryConflict, MemoryEntry, MemoryN
 import { useWorkspaceStore } from '../state/workspace-store';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { useAdvanced } from '../state/simple-mode';
+import { VSCodeCard } from './VSCodeCard';
 import { memoryKeySchema } from '../../shared/schemas';
 import { jsonField } from './json-field';
 import { AccessibilityControls } from './AccessibilityControls';
@@ -181,7 +182,7 @@ export function MemoryPanel() {
 }
 
 /** Settings is a long page: its cards sit under section headings in the order a person looks for them, and a row of links at the top jumps to each. */
-const SETTINGS_SECTIONS = [['settings-app', 'This app'], ['settings-preferences', 'Preferences'], ['settings-engines', 'Engines and worktrees'], ['settings-hooks', 'Event hooks'], ['settings-backup', 'Backup'], ['settings-sync', 'Sync'], ['settings-devices', 'Phone and other computers']] as const;
+const SETTINGS_SECTIONS = [['settings-app', 'This app'], ['settings-preferences', 'Preferences'], ['settings-engines', 'Engines and worktrees'], ['settings-hooks', 'Event hooks'], ['settings-backup', 'Backup'], ['settings-sync', 'Sync'], ['settings-devices', 'Phone and other computers'], ['settings-editor', 'VS Code']] as const;
 /** Shown only with Settings → Show advanced tools (src/state/simple-mode.ts). */
 const ADVANCED_SECTIONS: string[] = ['settings-engines', 'settings-hooks'];
 /** "On this page": moves to a section's heading, which takes focus (tabindex -1) so the keyboard continues from there. */
@@ -221,7 +222,8 @@ export function SettingsPanel() {
     {advanced && <SettingsSection id="settings-hooks"><EventHooksCard /></SettingsSection>}
     <SettingsSection id="settings-backup"><LocalBackupCard state={runtime} /></SettingsSection>
     <SettingsSection id="settings-sync"><DeviceSyncCard key={syncKey} /></SettingsSection>
-    <SettingsSection id="settings-devices"><PhoneAccessCard /><OtherComputersCard /></SettingsSection></section>;
+    <SettingsSection id="settings-devices"><PhoneAccessCard /><OtherComputersCard /></SettingsSection>
+    <SettingsSection id="settings-editor"><VSCodeCard /></SettingsSection></section>;
 }
 
 function PricingEditor({ rates, onChange }: { rates: PriceRate[]; onChange: (rates: PriceRate[]) => void }) {

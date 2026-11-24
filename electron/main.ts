@@ -47,6 +47,7 @@ import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
 import { AutoChecks } from './services/workbench/auto-checks';
+import { EditorBridge, installVSCodeExtension, vscodeStatus } from './services/editor/editor-bridge';
 import { Plugins, type PluginContext } from './services/plugins/plugins';
 import { PluginApi } from './services/plugins/plugin-api';
 import type { PluginEventName } from '../shared/plugins';
@@ -69,7 +70,7 @@ import { load, save } from './services/workbench/local-store';
 import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
-import { channelName } from '../shared/channel-name';
+import { channelName, DEFAULT_TITLES } from '../shared/channel-name';
 import { hiddenSeatIds } from '../shared/table-seats';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
@@ -194,9 +195,14 @@ const channelTools = new ChannelTools({
 /** Automatic project checks (1.38.0): the project's own checks after an agent's turn changes files; a failure goes back to that agent. */
 const autoChecks = new AutoChecks({
   enabled: () => { try { return hub?.preferences().autoChecks !== false; } catch { return false; } },
-  canMessage: (sessionId) => { const channel = channelList().find((item) => item.sessionId === sessionId); return Boolean(channel?.running && !channel.waiting); },
+  canMessage: (sessionId) => { const channel = channelList().find((item) => item.sessionId === sessionId); return Boolean(channel?.running && !channelTools.waitingOf(sessionId)); },
   send: (sessionId, text) => sendToChannel(sessionId, text),
   publish: (status) => { sendToRenderer(IPC_CHANNELS.autoCheckEvent, status); },
+});
+/** The VS Code extension's way in (1.38.0): it lists the running agent channels and sends one the code selected there. */
+const editorBridge = new EditorBridge({
+  channels: () => channelList().filter((channel) => channel.running && channel.engine !== 'shell').map((channel) => ({ channel: channel.channel, sessionId: channel.sessionId, name: channel.name, engine: DEFAULT_TITLES[channel.engine as ChannelEngine] ?? channel.engine, waiting: Boolean(channelTools.waitingOf(channel.sessionId)) })),
+  send: (sessionId, text) => sendToChannel(sessionId, text),
 });
 /** Passes an agent channel's start and turn ends to the automatic checks, by its folder; a seat's turn counts only as its table's. */
 function checkEvent(event: 'started' | 'turn-ended', sessionId: string) {
@@ -755,6 +761,7 @@ else app.whenReady().then(() => {
   const ports = savedPorts();
   void attention.start(ports.attention).then(() => savePorts()).catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   void channelTools.start(ports.tools).then(() => savePorts()).catch(() => hostHealth?.record('channel-tools-unavailable'));
+  void editorBridge.start().catch(() => hostHealth?.record('editor-bridge-unavailable'));
   // The tray icon from the start, so Quit is always within reach, once the preferences can be read.
   setTimeout(() => { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } }, 1500);
   hostHealth = new HostHealth(storageRoot);
@@ -1105,6 +1112,8 @@ else app.whenReady().then(() => {
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('hook-')) return eventHooks!.execute(payload);
+    if (action === 'editor-status') return vscodeStatus();
+    if (action === 'editor-connect') { await installVSCodeExtension(app.getVersion(), path.join(app.getPath('temp'), 'trace-vscode')); return vscodeStatus(); }
     if (action.startsWith('plugin-')) return plugins!.execute(payload);
     // A task the agent says is done: plugins hear it (task.ready-for-review).
     if (action === 'task-status') { const result = await tasks.execute(payload); const value = result as { status?: string; id?: string; title?: string } | null; if (value?.status === 'review') plugins?.fire('task.ready-for-review', value.id ?? '', { project: storage?.load()?.rootDirectory ?? null, message: value.title ?? '' }); return result; }
@@ -1285,7 +1294,7 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
-  quitting = true;
+  quitting = true; editorBridge.stop();
   // The channels running now start again on their conversations when Trace next opens, unless that is turned off.
   try { saveResume(storageRoot, hub?.preferences().resumeOnStart === false ? [] : manager.running().map((run) => run.sessionId)); } catch { hostHealth?.record('resume-list-failed'); }
   // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).
