@@ -21,7 +21,7 @@ export interface TableHost {
 /** A seat named for a table (table-open, table-seats): a running chat, with what the person set for it. Its session is read from the run (pty-manager checks a request's pair). */
 export interface SeatInput extends SeatSettings { runId: string; sessionId?: string }
 
-export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
 /** Names in a sentence: "A", "A and B", "A, B and C". */
 export const list = (names: readonly string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 /**

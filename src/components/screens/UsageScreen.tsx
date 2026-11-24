@@ -82,7 +82,7 @@ export function UsageScreen() {
           <span className="tnum">{dollars(focus.cost)}</span></div>
         <div className="tr-chart-plot">
           {/* A window with no tokens shows the empty state alone: axis lines behind it would cross its words. */}
-          {!series.some((day) => day.claude + day.codex + day.gemini > 0) ? <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code, Codex or Gemini CLI report their use.</p></div> : <>
+          {!series.some((day) => day.claude + day.codex + day.gemini > 0) ? <div className="ui-empty tr-chart-empty"><ChartColumn aria-hidden="true" /><h3>No tokens in this window</h3><p>Days fill in as Claude Code, Codex or Gemini report their use.</p></div> : <>
           <div className="tr-chart-axis" aria-hidden="true">{[1, 0.5, 0].map((step) => <span key={step} style={{ bottom: `${step * 100}%` }}>{compact(top * step)}</span>)}</div>
           <div className="tr-chart-bars" onMouseLeave={() => setHovered(null)}>
             {series.map((day, index) => { const total = day.claude + day.codex + day.gemini; return <button key={day.key} className={`tr-chart-col ${index === (hovered ?? series.length - 1) ? 'hot' : ''}`} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} aria-label={`${day.date.toLocaleDateString()}: ${total} tokens, Claude ${day.claude}, Codex ${day.codex}${day.gemini ? `, Gemini ${day.gemini}` : ''}`}>

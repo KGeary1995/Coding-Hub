@@ -94,10 +94,10 @@ function HistoryScreen({ canRun }: { canRun: boolean }) {
   if (!items) return <p className="dim">Loading…</p>;
   return <>
     {note && <p className="dim" role="status">{note}</p>}
-    {!items.length && <Empty title="No conversations yet">Claude Code, Codex and Gemini CLI conversations on this computer show here.</Empty>}
+    {!items.length && <Empty title="No conversations yet">Claude Code, Codex and Gemini conversations on this computer show here.</Empty>}
     {items.length > 0 && <ul className="history rows">{items.map((item) => <li key={item.key} className={`history-item engine-${item.engine}`}>
       <EngineMark engine={item.engine} />
-      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{({ claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const)[item.engine]} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
+      <div><strong>{item.title || 'Untitled conversation'}</strong><p className="meta">{({ claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const)[item.engine]} · <span className="mono">{item.folder}</span> · {when(item.modified)}</p></div>
       {canRun && <button type="button" className="small" onClick={() => void resume(item)}>Resume</button>}
     </li>)}</ul>}
     {!canRun && items.length > 0 && <p className="dim">Resuming needs Can start and stop agents (Settings → Phone access on the computer).</p>}

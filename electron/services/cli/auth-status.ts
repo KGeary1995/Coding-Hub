@@ -20,7 +20,7 @@ export function classifyAuthentication(engine: CLIEngine, result: ProbeResult): 
   if (!result.timedOut && engine === 'gemini' && result.exitCode === 0) {
     try {
       const value = JSON.parse(result.stdout) as { command?: { name?: unknown; data?: { groups?: unknown } } };
-      if (value.command?.name === 'usage' && Array.isArray(value.command.data?.groups) && value.command.data.groups.length) return { ...base, state: 'authenticated', message: 'Gemini CLI reports your plan limits, so it is signed in.' };
+      if (value.command?.name === 'usage' && Array.isArray(value.command.data?.groups) && value.command.data.groups.length) return { ...base, state: 'authenticated', message: 'Gemini reports your plan limits, so it is signed in.' };
     } catch { /* Unknown formats stay unknown. */ }
   }
   const text = `${result.stdout}\n${result.stderr}`;

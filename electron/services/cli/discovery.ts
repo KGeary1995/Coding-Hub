@@ -189,7 +189,7 @@ export function nodeScriptCommand(entry: string, env: Record<string, string>, pl
 /** The program each engine is: Gemini CLI installs as `agy`. */
 export const ENGINE_COMMAND: Record<CLIEngine, string> = { claude: 'claude', codex: 'codex', gemini: 'agy' };
 /** Each engine's name in messages. */
-export const ENGINE_NAME: Record<CLIEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI (agy)' };
+export const ENGINE_NAME: Record<CLIEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini (agy)' };
 
 export async function findExecutable(engine: CLIEngine, environment?: Record<string, string>): Promise<Executable> {
   // Smoke tests start Trace with this set: their fixtures have no agy, and the person's own must not run (or be asked

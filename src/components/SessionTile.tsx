@@ -85,7 +85,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini CLI' : 'Codex CLI';
+  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex CLI';
   // The engine's mark, in its avatar: a shape as well as a colour.
   const EngineIcon = ENGINE_ICONS[engine];
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
@@ -196,7 +196,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       {alerts.length > 0 && <details className="budget-notice"><summary>Usage target notice · {alerts.length} {alerts.length === 1 ? 'threshold' : 'thresholds'}</summary>{alerts.map((alert) => <p key={alert}>{alert}</p>)}<p>Reported usage and estimates can lag. These alerts do not enforce provider billing limits.</p></details>}
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && engine !== 'gemini' && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
         <span className={`welcome-engine ui-avatar large ${engine}`} aria-hidden="true"><EngineIcon /></span>
-        <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini CLI' : 'OpenAI Codex'}</h3>
+        <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : 'Codex'}</h3>
         <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
         {/* The folder opens the channel's settings, where its folder is chosen; with no project yet, it opens Projects. */}
         <div className="welcome-actions">
@@ -206,7 +206,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         </div>
       </div>}</div>
       <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
-        tokensTitle={engine === 'gemini' && !measured ? 'Not measured yet. Gemini CLI records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+        tokensTitle={engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}

@@ -13,7 +13,7 @@ import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
 import { isAgentConfig, isChatEngineConfig } from '../../shared/types';
 
-const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
+const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
 export const DEFAULT_ROUNDS = 2;
 /** The person sees one channel for a Round Table, but each seat is a CLI process of its own, so each counts toward the eight. */

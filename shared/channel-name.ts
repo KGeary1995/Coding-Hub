@@ -1,7 +1,10 @@
 import type { ChannelEngine } from './types';
 
 /** The names new channels start with. A channel still called this is named after its folder instead. */
-export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' };
+export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', shell: 'Terminal' };
+
+/** Gemini channels were called "Gemini CLI" until 1.38.0 (now "Gemini", as "Claude Code" and "Codex" carry no CLI): still a default name. */
+export const isDefaultTitle = (engine: ChannelEngine, title: string) => title === DEFAULT_TITLES[engine] || (engine === 'gemini' && title === 'Gemini CLI');
 
 const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
@@ -10,7 +13,7 @@ const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolea
  * (repository) it works in. The engine is shown separately (badge colour and model), so it need not be in the name.
  */
 export function channelName(channel: { engine: ChannelEngine; title: string; cwd: string | null }): string {
-  return channel.title === DEFAULT_TITLES[channel.engine] && channel.cwd ? folderName(channel.cwd) : channel.title;
+  return isDefaultTitle(channel.engine, channel.title) && channel.cwd ? folderName(channel.cwd) : channel.title;
 }
 
 /**

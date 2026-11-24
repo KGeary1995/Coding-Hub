@@ -67,7 +67,7 @@ export class GeminiStatusReader {
       const state = fields.get('state');
       if (state === 'blocked') {
         let message = ''; try { message = cleanMessage(Buffer.from(fields.get('msg') ?? '', 'base64').toString('utf8')); } catch { /* No readable question. */ }
-        return [{ state, message: message || (fields.get('kind') === 'question' ? 'Gemini CLI has a question for you.' : 'Gemini CLI is waiting for your approval.') }];
+        return [{ state, message: message || (fields.get('kind') === 'question' ? 'Gemini has a question for you.' : 'Gemini is waiting for your approval.') }];
       }
       return state === 'working' || state === 'idle' || state === 'done' || state === 'failed' ? [{ state }] : [];
     });

@@ -12,7 +12,7 @@ export class HubError extends Error {
  * protocol (GeminiStream). Never --dangerously-skip-permissions: Trace answers each request itself.
  */
 export function buildGeminiSeatLaunch(engine: EngineInfo): { args: string[]; env: Record<string, string> } {
-  if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'Gemini CLI is unavailable.');
+  if (!engine.available) throw new HubError('ENGINE_UNAVAILABLE', engine.error ?? 'Gemini is unavailable.');
   if (engine.engine !== 'gemini') throw new HubError('ENGINE_MISMATCH', 'Engine configuration does not match the installed CLI.');
   return { args: ['acp'], env: {} };
 }

@@ -6,7 +6,7 @@ import type { NativeConversation, NativeResume, NativeSearch, NativeSnippet } fr
 import { workbench } from '../runtime/workbench';
 import { createSession, arrangeTiles, resumeConfig, RESUMED_TITLE, useWorkspaceStore } from '../state/workspace-store';
 import { MAX_CHANNELS } from '../../shared/schemas';
-const AGENT_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' } as const;
+const AGENT_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const;
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 /** What a search inside conversations found, in words, saying plainly when it stopped early or left files out. */
 export function searchSummary({ query, results, partial, skipped }: NativeSearch): string {

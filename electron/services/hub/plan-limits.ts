@@ -38,7 +38,7 @@ export async function readGeminiLimits(executable: Executable, env: Record<strin
   if (version.exitCode !== 0 || !atLeast(version.stdout, ...GEMINI_USAGE_COMMAND)) return null;
   const result = await probe(executable, GEMINI_USAGE_ARGS, env);
   const windows = result.exitCode === 0 ? parseGeminiUsage(result.stdout) : null;
-  return { engine: 'gemini', account: 'Default', windows: windows ?? [], plan: null, checkedAt, error: windows?.length ? null : result.timedOut ? 'Gemini CLI did not answer /usage in time.' : windows ? 'Gemini CLI reported no usage limits.' : 'Gemini CLI did not report usage limits. Check that it is signed in.', ...(windows?.length ? {} : { failed: true }) };
+  return { engine: 'gemini', account: 'Default', windows: windows ?? [], plan: null, checkedAt, error: windows?.length ? null : result.timedOut ? 'Gemini did not answer /usage in time.' : windows ? 'Gemini reported no usage limits.' : 'Gemini did not report usage limits. Check that it is signed in.', ...(windows?.length ? {} : { failed: true }) };
 }
 
 /** Codex's app server: `account/rateLimits/read` after the initialize handshake; no model request. */
@@ -109,7 +109,7 @@ export class PlanLimitsService {
         for (const profile of profiles) accounts.push(async () => (await guarded('claude', profile.name, 'Claude Code', () => readClaudeLimits(claude, this.profileEnvironment(env, profile.id), profile.name)))!);
       }
       const [codex, gemini] = await Promise.all([findExecutable('codex', env).catch(() => null), findExecutable('gemini', env).catch(() => null)]);
-      const [claudeLimits, codexLimits, geminiLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? guarded('codex', 'Default', 'Codex', () => readCodexLimits(codex, env)) : null, gemini ? guarded('gemini', 'Default', 'Gemini CLI', () => readGeminiLimits(gemini, env)) : null]);
+      const [claudeLimits, codexLimits, geminiLimits] = await Promise.all([inBatches(accounts, this.concurrency), codex ? guarded('codex', 'Default', 'Codex', () => readCodexLimits(codex, env)) : null, gemini ? guarded('gemini', 'Default', 'Gemini', () => readGeminiLimits(gemini, env)) : null]);
       this.latest = [...claudeLimits, ...(codexLimits ? [codexLimits] : []), ...(geminiLimits ? [geminiLimits] : [])];
       return this.latest;
     })().catch((error: unknown) => { this.last = 0; throw error; }).finally(() => { this.reading = null; });

@@ -35,7 +35,7 @@ const MORE_KEYS: Key[][] = [
   [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
 const MORE_KEY = 'trace-remote-more';
-const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
+const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', shell: 'Terminal' } as const;
 
 type Child = Node | string | false | null | undefined;
 /** A DOM element with properties (`className`, `onclick`, …), `data-` and `aria-` attributes, and children. */
@@ -303,7 +303,7 @@ function alertText(text: string) {
 /** + Channel on the phone: the same kinds as the computer's, in its order (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
 function addMenu() {
   const kinds: { label: string; engine: ChannelEngine; chat: boolean }[] = [
-    { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini CLI', engine: 'gemini', chat: false }];
+    { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini', engine: 'gemini', chat: false }];
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
     ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
   const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');

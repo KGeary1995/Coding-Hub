@@ -97,6 +97,6 @@ export async function geminiModels(dependencies: { find?: typeof findExecutable;
   const env = await freshHostEnvironment(); const executable = await (dependencies.find ?? findExecutable)('gemini', env);
   const result = await (dependencies.probe ?? probeCLI)(executable, ['models'], env);
   const models = result.exitCode === 0 ? parseGeminiModels(result.stdout) : [];
-  if (!models.length) throw new HubError(result.timedOut ? 'MODEL_TIMEOUT' : 'MODEL_CATALOG', result.timedOut ? 'Gemini CLI did not list its models in time. Check its connection, then refresh.' : 'Gemini CLI listed no models. Sign in to agy in a terminal, then refresh. You can still enter an exact model ID or use its default.');
+  if (!models.length) throw new HubError(result.timedOut ? 'MODEL_TIMEOUT' : 'MODEL_CATALOG', result.timedOut ? 'Gemini did not list its models in time. Check its connection, then refresh.' : 'Gemini listed no models. Sign in to agy in a terminal, then refresh. You can still enter an exact model ID or use its default.');
   return { models, checkedAt: new Date().toISOString(), source: 'agy-models' };
 }

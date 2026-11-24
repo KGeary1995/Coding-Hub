@@ -174,7 +174,7 @@ export function StatusBar() {
         around it (tr-sb-drop), so the chip is drawn inside it and leaves with it. */}
     <span ref={todayBox} className={`tr-sb-cell tr-sb-today tr-sb-drop ${budgetLevel} ${todayGone ? 'gone' : ''}`}>
       <button type="button" className="tr-sb-cell tr-sb-today-button" tabIndex={todayGone ? -1 : undefined} aria-hidden={todayGone || undefined} onClick={() => useWorkspaceStore.getState().setView('usage')}
-        title={`${budgetNote}New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's, Codex's and Gemini CLI's own records, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}${today.logs.gemini ? `, Gemini ${today.logs.gemini.toLocaleString()}` : ''}` : ', in Trace channels'}. Click for Usage.`}>
+        title={`${budgetNote}New tokens today on this computer (input outside the cache, plus output)${today.logs ? `, from Claude Code's, Codex's and Gemini's own records, in Trace or not: Claude ${today.logs.claude.toLocaleString()}, Codex ${today.logs.codex.toLocaleString()}${today.logs.gemini ? `, Gemini ${today.logs.gemini.toLocaleString()}` : ''}` : ', in Trace channels'}. Click for Usage.`}>
         <span className="tr-sb-inner"><Coins size={12} aria-hidden="true" />Today <b>{compact(today.tokens)} tok</b></span>{today.cost === null ? null : <span className="tr-sb-cost">{dollars(today.cost)}</span>}
       </button>
     </span>

@@ -145,8 +145,8 @@ describe('Gemini CLI status (OSC 7501)', () => {
   });
   it('says what it waits for when the question is missing or unreadable, and cleans what it shows', () => {
     const reader = new GeminiStatusReader();
-    expect(reader.push(status('state=blocked:kind=question'))).toEqual([{ state: 'blocked', message: 'Gemini CLI has a question for you.' }]);
-    expect(reader.push(status('state=blocked:kind=permission:msg='))).toEqual([{ state: 'blocked', message: 'Gemini CLI is waiting for your approval.' }]);
+    expect(reader.push(status('state=blocked:kind=question'))).toEqual([{ state: 'blocked', message: 'Gemini has a question for you.' }]);
+    expect(reader.push(status('state=blocked:kind=permission:msg='))).toEqual([{ state: 'blocked', message: 'Gemini is waiting for your approval.' }]);
     expect(reader.push(status(ask('Run\x1b[31m rm\nnow')))).toEqual([{ state: 'blocked', message: 'Run [31m rm now' }]);
   });
   it('keeps a long question split across chunks (a long command to approve)', () => {

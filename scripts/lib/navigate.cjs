@@ -1,14 +1,24 @@
 // Opens a view by its name through the Trace top bar: a primary tab, or an item in the Insight or Agent setup menus.
-async function openView(page, name) {
+/** Settings → Show advanced tools (simple mode, 1.38.0): the smokes test the views and settings it hides. */
+async function showAdvanced(page) {
+  await openView(page, 'Settings', false);
+  const box = page.getByLabel('Show advanced tools', { exact: true });
+  if (!await box.isChecked()) { await box.check(); await page.waitForFunction(() => document.querySelector('[aria-label="Show advanced tools"]')?.checked === true); }
+  await page.locator('#settings-hooks-title').waitFor();
+}
+async function openView(page, name, advanced = true) {
   const tab = page.locator('.tr-tabs').getByRole('button', { name, exact: true });
   if (await tab.count()) { await tab.click(); return; }
   if (name === 'Help & AI guide') { await page.getByRole('button', { name: 'Open help', exact: true }).click(); return; }
+  // Settings shows its advanced parts only with the switch on: a smoke opening it means to test them.
   for (const menu of ['Insight views', 'Agent setup']) {
     await page.getByRole('button', { name: menu, exact: true }).click();
     const item = page.getByRole('menuitem', { name, exact: true });
-    if (await item.count()) { await item.click(); return; }
+    if (await item.count()) { await item.click(); if (name === 'Settings' && advanced) await showAdvanced(page); return; }
     await page.keyboard.press('Escape');
   }
+  // A view simple mode leaves out of the menus: shown once advanced tools are on.
+  if (advanced) { await showAdvanced(page); return openView(page, name, false); }
   throw new Error(`No navigation entry named ${name}`);
 }
 
@@ -56,4 +66,4 @@ async function setCodexModel(tile, model) {
   if (await field.locator(`option[value="${model}"]`).count()) { await field.selectOption(model); return; }
   await field.selectOption('other'); await tile.getByLabel('codex model ID', { exact: true }).fill(model);
 }
-module.exports = { setCodexModel, openView, addChannel, startTable, tileControl };
+module.exports = { setCodexModel, openView, showAdvanced, addChannel, startTable, tileControl };

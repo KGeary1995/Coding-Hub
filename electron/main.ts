@@ -301,7 +301,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (config.resumeId) {
       const saved = new Map((storage?.load()?.sessions ?? []).map((session) => [session.id, session.config]));
       if (manager.running().some((other) => other.runId !== run.runId && other.engine === 'gemini' && (saved.get(other.sessionId) as { resumeId?: string } | undefined)?.resumeId === config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.');
-      if (!nativeSessions.source('gemini', config.resumeId)) throw new HubError('NATIVE_SESSION', 'Gemini CLI no longer has this conversation. Clear the resume, or pick another from Session history.');
+      if (!nativeSessions.source('gemini', config.resumeId)) throw new HubError('NATIVE_SESSION', 'Gemini no longer has this conversation. Clear the resume, or pick another from Session history.');
     }
     return;
   }
@@ -895,7 +895,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
+      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
