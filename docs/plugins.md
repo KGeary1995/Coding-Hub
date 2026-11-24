@@ -164,7 +164,7 @@ plugin's author adds the topic. Trace keeps no list of its own.
 |---|---|
 | 1.35.0 | Manifest and its checks; Link a folder; actions; the wider event hooks; the plugin API and `trace` helper (channels, tasks, notify); the Plugins page (Installed). |
 | 1.36.0 | Plugin tiles (+ Channel lists each tile; saved in the workspace; on the phone as terminals). Built as a Terminal channel whose config names `plugin: { id, tile }`; `Plugins.tile()` resolves the command. |
-| after | Install and update from GitHub with the preview; Uninstall; the daily update check; Browse. |
+| 1.37.0 | Install and update from GitHub with the preview; Uninstall; the daily update check; Browse. `electron/services/plugins/github.ts` (git with no shell or terminal prompt; input checked first), `Plugins.fetchPreview/install/checkUpdates`. Versions are kept in `plugins/<id>/<commit>/`, with the one before kept for programs still running it (herdr's install lease). Its `.git` is removed when Windows allows it. |
 
 Each release gets unit tests (the manifest checks, permissions, the install steps against a local Git repository) and
 a smoke test with a sample plugin in `scripts/fixtures/plugins/` that uses every part it delivers. Then comes the
