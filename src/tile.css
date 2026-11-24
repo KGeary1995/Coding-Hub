@@ -122,6 +122,13 @@
 /* A prepared request waiting to be sent is information; a missing login is a warning. */
 .session-error.notice { --tone: var(--tr-accent); }
 .session-error.warning { --tone: var(--tr-warning); }
+/* An automatic check (1.38.0): one line under the channel, its output opened below it when it failed. */
+.auto-check { --tone: var(--tr-accent); flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 var(--tr-tile-inset) 4px; padding: 2px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 12%, transparent); color: var(--tr-fg); font: 400 12px/22px var(--tr-font-ui); }
+.auto-check.passed { --tone: var(--tr-success); } .auto-check.failed { --tone: var(--tr-danger); }
+.auto-check > svg { flex: none; color: var(--tone); } .auto-check > span { flex: 1; min-width: 0; }
+.auto-check .spin { animation: tr-auto-check-spin 1s linear infinite; } @keyframes tr-auto-check-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .auto-check .spin { animation: none; } }
+.auto-check-output { flex-basis: 100%; max-height: 160px; overflow: auto; margin: 0 0 4px; padding: 6px 8px; border-radius: var(--tr-r-small); background: var(--tr-bg); font: 400 11px/16px var(--tr-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* The icon and a button are 24 px tall: one line of words is centred beside them, and more lines start at the top
    (`safe`, or the first lines of a long message would lie above the strip, out of reach of its scrolling). */
 .session-error > svg { flex: none; width: 14px; height: 24px; color: var(--tone); }

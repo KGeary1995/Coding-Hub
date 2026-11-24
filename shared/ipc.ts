@@ -3,6 +3,7 @@ import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
 import type { CoachingRequest, CoachingResponse, LiveTip } from './coaching';
+import type { AutoCheckStatus } from './auto-checks';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
@@ -115,6 +116,7 @@ export interface CodingHubHost {
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
+  onAutoCheckEvent(listener: (status: AutoCheckStatus) => void): () => void;
   /** A desktop notification was clicked: open what it is about. */
   onAlertClick(listener: (target: AlertTarget) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
@@ -189,6 +191,7 @@ export const IPC_CHANNELS = {
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
+  autoCheckEvent: 'coding-hub:auto-check-event',
   alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',

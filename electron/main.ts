@@ -46,6 +46,7 @@ import { BackgroundRunner } from './services/runner/background';
 import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
+import { AutoChecks } from './services/workbench/auto-checks';
 import { Plugins, type PluginContext } from './services/plugins/plugins';
 import { PluginApi } from './services/plugins/plugin-api';
 import type { PluginEventName } from '../shared/plugins';
@@ -190,6 +191,21 @@ const channelTools = new ChannelTools({
   replies: (sessionId, count) => channelReplies(sessionId, count),
   send: (sessionId, text) => sendToChannel(sessionId, text),
 });
+/** Automatic project checks (1.38.0): the project's own checks after an agent's turn changes files; a failure goes back to that agent. */
+const autoChecks = new AutoChecks({
+  enabled: () => { try { return hub?.preferences().autoChecks !== false; } catch { return false; } },
+  canMessage: (sessionId) => { const channel = channelList().find((item) => item.sessionId === sessionId); return Boolean(channel?.running && !channel.waiting); },
+  send: (sessionId, text) => sendToChannel(sessionId, text),
+  publish: (status) => { sendToRenderer(IPC_CHANNELS.autoCheckEvent, status); },
+});
+/** Passes an agent channel's start and turn ends to the automatic checks, by its folder; a seat's turn counts only as its table's. */
+function checkEvent(event: 'started' | 'turn-ended', sessionId: string) {
+  try {
+    const channels = workspaceChannels(); const own = channels.find((session) => session.id === sessionId); if (!own || own.seatedAt || own.engine === 'shell') return;
+    const folder = manager.running().find((run) => run.sessionId === sessionId)?.cwd; if (!folder) return;
+    if (event === 'started') void autoChecks.started(folder); else autoChecks.turnEnded(sessionId, folder);
+  } catch { hostHealth?.record('auto-checks-failed'); }
+}
 /** Event hooks (1.33.1): built once storage is known, below; until then events run none. */
 let eventHooks: EventHooks | null = null;
 /** Trace plugins (1.35.0, docs/plugins.md) and their API: built once storage is known, below. */
@@ -237,9 +253,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   try { channelTools.onSessionEvent(event); } catch { hostHealth?.record('channel-tools-event-failed'); }
   if (event.type === 'started' || event.type === 'exit') try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); }
   if (event.type === 'attention') hookEvent('needs-you', event.sessionId, event.message);
-  else if (event.type === 'answered' && event.finished) hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.');
+  else if (event.type === 'answered' && event.finished) { hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.'); checkEvent('turn-ended', event.sessionId); }
   else if (event.type === 'exit' && event.diagnostic) hookEvent('failed', event.sessionId, event.diagnostic);
-  if (event.type === 'started') hookEvent('started', event.sessionId, 'The channel started.');
+  if (event.type === 'started') { hookEvent('started', event.sessionId, 'The channel started.'); checkEvent('started', event.sessionId); }
   else if (event.type === 'exit') hookEvent('stopped', event.sessionId, event.diagnostic ?? 'The channel stopped.');
   // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
   // file, before the run is ended below. For any other run this is nothing new to telemetry.
@@ -271,6 +287,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (envelope.event.type === 'ready') try { hub?.telemetry?.setGeminiConversation(envelope.runId, envelope.event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   try { channelTools.onChat(envelope); } catch { hostHealth?.record('channel-tools-event-failed'); }
+  if (envelope.event.type === 'done' && !envelope.event.isError) checkEvent('turn-ended', envelope.sessionId);
   if (envelope.event.type === 'done') hookEvent(envelope.event.isError ? 'failed' : 'turn-ended', envelope.sessionId, envelope.event.isError ? envelope.event.error ?? 'The turn ended with an error.' : 'The agent ended its turn.');
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
@@ -1101,7 +1118,7 @@ else app.whenReady().then(() => {
   });
   // On Windows an update leaves the background runner's channels running (it runs outside the install folder), so they do
   // not hold an update back. A Mac's runner still runs from the app an update replaces.
-  busyJobs = () => (background && process.platform === 'win32' ? manager.hasLocalSessions : manager.hasSessions) || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
+  busyJobs = () => (background && process.platform === 'win32' ? manager.hasLocalSessions : manager.hasSessions) || autoChecks.running || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR), macUpdates()),
