@@ -134,6 +134,8 @@
 .chat-icon:hover:not(:disabled) { border-color: var(--tr-line-strong); background: var(--tr-raised); color: var(--tr-fg-strong); }
 .chat-icon.send:not(:disabled) { border-color: var(--tr-accent-solid); background: var(--tr-accent-solid); color: var(--tr-on-accent); }
 .chat-icon.send:hover:not(:disabled) { border-color: var(--tr-accent-solid-hover); background: var(--tr-accent-solid-hover); }
+/* The microphone while it listens (the phone): the danger colour, as a recording light. */
+.chat-icon.listening { border-color: var(--tr-danger); color: var(--tr-danger); }
 .chat-icon.stop, .chat-icon.stop:hover:not(:disabled) { border-color: var(--tr-danger); background: color-mix(in srgb, var(--tr-danger) 14%, transparent); color: var(--tr-danger); }
 .chat-icon:disabled { opacity: .45; }
 @keyframes chat-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }

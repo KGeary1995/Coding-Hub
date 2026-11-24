@@ -22,6 +22,7 @@ import { modelLabel } from '../shared/model-name';
 import { addChannel, changeChannel, channelSettings, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
 import { atPhoneSize, FIT_KEY, takenBack } from './size';
 import { switcherOrder } from './switcher';
+import { dictationSupported, startDictation, withSpoken } from '../src/runtime/dictation';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In three rows, all in view without scrolling and each key at least 44 px wide: the named keys, the arrows, the usual answers. */
@@ -534,7 +535,7 @@ function requestSize(wait = 200) {
   }, wait);
 }
 /** Gives the channel being left back to the desktop's size. */
-function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
+function leaveChannel() { stopDictation?.(); if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
   if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
@@ -573,7 +574,7 @@ function showChannel(sessionId: string) {
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
   const sendingLine = h('p', { id: 'sending', className: 'dim sending', hidden: true, aria: { role: 'status' } }, 'Sending…');
   const text = h('input', { id: 'text', autocomplete: 'off', placeholder: 'Type here, then Send', enterKeyHint: 'send', aria: { label: 'Message' } });
-  const form = h('form', { className: 'compose' }, text, h('button', { className: 'primary', type: 'submit' }, 'Send'));
+  const form = h('form', { className: 'compose' }, text, ...(dictationSupported() ? [micButton(text, sessionId)] : []), h('button', { className: 'primary', type: 'submit' }, 'Send'));
   // The draft stays in the field until it has been delivered, and is cleared only if nothing new was typed meanwhile.
   // Drafts are kept per channel, so going back to the list and returning finds the message still there.
   text.value = drafts.get(sessionId) ?? ''; text.addEventListener('input', () => { if (text.value) drafts.set(sessionId, text.value); else drafts.delete(sessionId); });
@@ -818,6 +819,22 @@ async function type(data: string) {
   // Only this app's own computer unpairing the phone means pairing again; another computer's key being removed does not.
   catch (e) { if (e instanceof Unpaired && e.home) showPair(e.message); else if (problem) problem.textContent = e instanceof Unpaired ? 'That computer no longer accepts this phone. Remove and add it again under Settings → Phone access there.' : (e as Error).message; return false; }
   finally { clearTimeout(slow); const line = document.getElementById('sending'); if (!--sending && line) line.hidden = true; }
+}
+/** Stops the dictation that is listening, if any (leaving the channel stops it). */
+let stopDictation: (() => void) | null = null;
+const MIC = '<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>';
+/** Speak instead of typing: the words fill the message box (after what is there), and Send still sends them. */
+function micButton(field: HTMLInputElement, sessionId: string) {
+  const button = h('button', { type: 'button', className: 'mic icon-only', title: 'Speak a message', aria: { label: 'Speak a message', pressed: 'false' } }); button.innerHTML = iconSvg(MIC);
+  const listening = (on: boolean) => { button.classList.toggle('listening', on); button.setAttribute('aria-pressed', String(on)); field.placeholder = on ? 'Listening… tap the microphone to stop' : 'Type here, then Send'; };
+  button.onclick = () => {
+    if (stopDictation) { stopDictation(); return; }
+    const problem = document.getElementById('send-error'); if (problem) problem.textContent = '';
+    const before = field.value; listening(true);
+    stopDictation = startDictation((spoken) => { if (current !== sessionId) return; field.value = withSpoken(before, spoken); drafts.set(sessionId, field.value); },
+      (error) => { stopDictation = null; listening(false); const line = document.getElementById('send-error'); if (error && line && current === sessionId) line.textContent = error; });
+  };
+  return button;
 }
 /** Keys typed on the phone that the computer has not taken yet. */
 let sending = 0;

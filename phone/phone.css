@@ -227,6 +227,8 @@ body.offline .terminal, body.offline .keys, body.offline .compose { opacity: 0.4
 .keys > div:first-child button { flex-basis: auto; padding: 0 8px; }
 .compose { display: flex; gap: 8px; }
 .compose input { flex: 1; }
+/* The microphone while it listens: the danger colour, as a recording light. */
+.compose .mic { flex: none; } .compose .mic.listening { color: var(--tr-danger); border-color: var(--tr-danger); }
 .sending { margin: 0; font: var(--tr-t-small); }
 /* Text selected by pressing and holding the channel: floats over the channel so its size does not change. */
 .select-bar { position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right)); top: calc(env(safe-area-inset-top) + 64px); z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); }
