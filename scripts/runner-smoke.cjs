@@ -1,19 +1,18 @@
 /**
- * The background runner with real processes (docs/background-runner.md): Electron as Node runs the built runner, which
- * starts a real terminal through node-pty. Trace's connection is dropped while the program keeps writing; a new
- * connection lists it, reads its kept output, and stops it. With nothing left, the runner leaves by itself.
+ * The background runner with real processes (docs/background-runner.md): the runner starts from its kit (its own copy
+ * of Electron as Node, its scripts and node-pty, outside the app folder) and starts a real terminal through node-pty.
+ * Trace's connection is dropped while the program keeps writing; a new connection lists it, reads its kept output, and
+ * stops it. With nothing left, the runner leaves by itself.
  */
-const { spawn } = require('node:child_process');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { encode, FrameReader, Kind, RUNNER_PROTOCOL } = require('../dist-electron/electron/services/runner/protocol.js');
+const { ensureKit, runnerPlace, runnerSecret, startRunner } = require('../dist-electron/electron/services/runner/kit.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-runner-smoke-'));
-const address = process.platform === 'win32' ? `\\\\.\\pipe\\trace-runner-smoke-${crypto.randomBytes(6).toString('hex')}` : path.join(root, 'runner.sock');
-const secret = crypto.randomBytes(32).toString('base64url'); const secretFile = path.join(root, 'secret'); fs.writeFileSync(secretFile, secret, { mode: 0o600 });
+const place = runnerPlace(root); const address = place.address; const secret = runnerSecret(place);
 const electron = require('electron');
 
 function connect() {
@@ -41,10 +40,11 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
 const text = (frame) => frame.payload.toString('utf8');
 
 (async () => {
-  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', CODING_HUB_RUNNER_ADDRESS: address, CODING_HUB_RUNNER_SECRET_FILE: secretFile };
-  const runner = spawn(electron, [path.join(__dirname, '..', 'dist-electron', 'electron', 'services', 'runner', 'runner-main.js')], { env, detached: true, stdio: 'ignore', windowsHide: true });
-  runner.unref();
-  const first = await retry(connect); await first.next(Kind.welcome);
+  const kit = ensureKit(place, path.join(__dirname, '..'), electron); startRunner(kit, place);
+  const first = await retry(connect); const welcome = JSON.parse(text(await first.next(Kind.welcome)));
+  if (path.resolve(welcome.home).toLowerCase() !== path.resolve(kit.folder).toLowerCase()) throw new Error(`The runner runs from ${welcome.home}, not its kit ${kit.folder}.`);
+  const runner = { pid: welcome.pid };
+  console.log(`the runner runs from its kit (${path.relative(root, kit.folder)})`);
   // A program that writes a line every 300 ms, for about 6 seconds, then waits for input.
   const script = "let n=0;const t=setInterval(()=>{process.stdout.write('tick '+(++n)+'\\r\\n');if(n===20)clearInterval(t)},300);process.stdin.on('data',d=>{if(String(d).includes('bye'))process.exit(7)})";
   first.send(Kind.spawn, 0, { id: 'smoke-run', file: process.execPath, args: ['-e', script], cwd: root, env: { PATH: process.env.PATH ?? '', SystemRoot: process.env.SystemRoot ?? '' }, cols: 80, rows: 24 });

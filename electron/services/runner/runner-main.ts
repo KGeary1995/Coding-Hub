@@ -6,9 +6,8 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import type { IPty } from 'node-pty';
+// Only these and node-pty are copied into the runner kit (kit.ts): nothing here may import more of Trace.
 import { nodePty } from '../cli/native-pty';
-import { stopProcess } from '../cli/stop-process';
 import { Runner } from './runner';
 
 const address = process.env.CODING_HUB_RUNNER_ADDRESS; const secretFile = process.env.CODING_HUB_RUNNER_SECRET_FILE;
@@ -21,7 +20,10 @@ const secret = fs.readFileSync(secretFile, 'utf8').trim();
 const server = net.createServer((socket) => runner.connect(socket));
 const runner = new Runner(secret, {
   spawn: (request) => nodePty().spawn(request.file, request.args, { name: 'xterm-256color', cwd: request.cwd, cols: request.cols, rows: request.rows, env: request.env }),
-  stop: (pty, exit) => stopProcess(pty as IPty, exit),
+  // Stop closes the terminal. Trace's own stopProcess has already ended the program's process tree by its id.
+  stop: (pty) => Promise.resolve(pty.kill()),
+  // The kit's own folder: <kit>/app/dist-electron/electron/services/runner is where this file runs.
+  home: path.resolve(__dirname, '..', '..', '..', '..', '..'),
   exit: () => { server.close(); if (process.platform !== 'win32') try { fs.unlinkSync(address); } catch { /* Gone already. */ } process.exit(0); },
 });
 

@@ -20,6 +20,8 @@ export interface RunnerDependencies {
   /** Output queued for Trace beyond this is not sent (it stays in the tail), herdr's 8 MB. */
   sendLimit?: number;
   tailBytes?: number;
+  /** The kit folder the runner runs from, told to Trace so it never deletes it (kit.ts). */
+  home?: string;
 }
 
 interface Terminal { term: number; id: string; pty: RunnerPty; tail: Tail; cols: number; rows: number; exitCode?: number; exited: Promise<void>; skipped: boolean; paused: boolean; meta?: unknown }
@@ -55,7 +57,7 @@ export class Runner {
           greeted = true; clearTimeout(helloTimer); current = hello.version === RUNNER_PROTOCOL;
           // A Trace on another protocol may only drain this runner (an update): it runs its own runner beside this one.
           if (current) { const previous = this.client; this.client = socket; previous?.destroy(); this.busy(); }
-          this.send(socket, encode(Kind.welcome, 0, { version: RUNNER_PROTOCOL, pid: process.pid, draining: this.draining }));
+          this.send(socket, encode(Kind.welcome, 0, { version: RUNNER_PROTOCOL, pid: process.pid, draining: this.draining, ...(this.dependencies.home ? { home: this.dependencies.home } : {}) }));
           continue;
         }
         if (!current) { if (frame.kind === Kind.drain) this.drain(); else this.send(socket, encode(Kind.error, 0, { message: `This runner speaks protocol ${RUNNER_PROTOCOL}.` })); continue; }

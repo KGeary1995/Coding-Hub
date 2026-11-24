@@ -40,7 +40,7 @@ export class RunnerClient {
   get connected() { return Boolean(this.socket && !this.socket.destroyed); }
 
   /** Connects and says hello; resolves with the runner's welcome. Rejects when nothing answers, or on another protocol. */
-  connect(timeoutMs = 3000): Promise<{ version: number; pid: number; draining: boolean }> {
+  connect(timeoutMs = 3000): Promise<{ version: number; pid: number; draining: boolean; home?: string }> {
     return new Promise((resolve, reject) => {
       const socket = net.connect(this.address); const reader = new FrameReader(); let welcomed = false;
       const timer = setTimeout(() => { socket.destroy(); reject(new Error('The background runner did not answer.')); }, timeoutMs);
@@ -51,7 +51,7 @@ export class RunnerClient {
         for (const frame of frames) {
           if (!welcomed) {
             if (frame.kind !== Kind.welcome) { socket.destroy(); return; }
-            welcomed = true; clearTimeout(timer); const welcome = json<{ version: number; pid: number; draining: boolean }>(frame);
+            welcomed = true; clearTimeout(timer); const welcome = json<{ version: number; pid: number; draining: boolean; home?: string }>(frame);
             if (welcome.version !== RUNNER_PROTOCOL || welcome.draining) { socket.destroy(); reject(Object.assign(new Error(`The background runner speaks protocol ${welcome.version}.`), { welcome })); return; }
             this.socket = socket; resolve(welcome); continue;
           }
