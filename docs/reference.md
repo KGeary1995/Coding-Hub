@@ -309,6 +309,16 @@ From 1.36.0, in the installed app, terminal channels (Claude Code, Codex and Gem
 - **Turning it off.** **Settings → Preferences → Keep channels running after Trace quits** (on by default; channels started after saving). Off, channels run inside Trace and stop when it quits, as before 1.36.0. A source run (`npm run dev`) leaves it off unless `CODING_HUB_RUNNER=1`; `CODING_HUB_NO_RUNNER=1` turns it off anywhere.
 - **How it works.** [docs/background-runner.md](background-runner.md). The runner runs from its own copy of the files it needs in `~/.coding-hub/runner/kits/` (about 265 MB on Windows, copied once for each version of the runner), never from Trace's install folder, because Trace's Windows installer stops everything running from there before it updates. It listens only to this user (a named pipe or a socket in Trace's storage folder, and a secret in `runner/secret`), runs only what Trace asks it to, and leaves by itself a minute after its last channel ends with Trace closed.
 
+## Plugins from GitHub
+
+From 1.37.0, **Skills & plugins → Trace plugins** installs plugins from GitHub as well as from a folder ([docs/plugins.md](plugins.md)).
+
+- **Install from GitHub:** enter `owner/repo`, or `owner/repo/folder` for a plugin inside a repository, and optionally a branch, tag or commit, then **Preview**. Trace fetches it with this computer's own Git, so a private repository works when Git is signed in to GitHub here (Git Credential Manager, or `gh auth setup-git`); Trace never sees a token.
+- **The preview** shows the exact commit, what the plugin may ask Trace to do, every command it may run, and its files. Nothing runs before **Install**, and a system dialog asks once more. Then its build steps run (at most 10 minutes each, shown in its runs) and it is turned on.
+- **Updates:** Trace checks once a day where each GitHub plugin's branch or tag is (**Check for updates** asks now) and shows **Update to …** on that plugin. It never updates by itself. The update preview says what changes: commands added or removed, and new permissions. The version before is kept for any of its programs still running, and older versions are removed.
+- **Browse** lists GitHub repositories with the topic `trace-plugin` (GitHub's public search, kept an hour). Nobody reviews this list; **Preview** goes through the same steps.
+- **Remove** stops the plugin and deletes its versions; its `data` folder stays unless removed too.
+
 ## Channel tools
 
 **Settings → Preferences → Let agents see and message other channels** (from 1.33.0, off by default, per computer). When on, each Claude Code and Codex channel started afterwards gets four tools from Trace's `trace-channels` MCP server:

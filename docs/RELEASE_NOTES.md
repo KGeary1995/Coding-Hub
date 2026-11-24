@@ -1,5 +1,13 @@
 ## What's new
 
+1.37.0 installs Trace plugins from GitHub.
+
+- **Install from GitHub** on Skills & plugins → Trace plugins: `owner/repo` (or a folder inside it), with an optional branch, tag or commit. Trace fetches it with this computer's Git, so private repositories work when Git is signed in to GitHub here; Trace never sees a token.
+- **A preview before anything runs:** the exact commit, what it may ask Trace to do, every command it may run, and its files. Install asks once more in a system dialog, then runs its build steps.
+- **Updates you choose:** a daily check (or **Check for updates**) shows **Update to …**; the update preview lists commands added or removed and new permissions. The version before is kept for programs still running it.
+- **Browse** finds repositories with the topic `trace-plugin` on GitHub. Nobody reviews that list.
+- **Tried:** unit tests against real Git repositories (preview, install with a build step, a failed build or a refusal installing nothing, update detection and its preview, the version kept, removal) and the input checks; the productivity smoke test installs a plugin from a repository through the page. **Not tried:** github.com itself and a private repository (the tests use local repositories in GitHub's place).
+
 1.36.0 keeps terminal channels running after Trace quits, crashes or updates, brings them back when it opens, and makes the phone app usable.
 
 - **Closing Trace by mistake no longer stops your agents.** Claude Code, Codex and Gemini CLI terminals, and shells, now run in a small background part of Trace (the runner). Quit, a crash or an update leaves them working; when Trace opens again each one is back in its tile, still running, with what it wrote meanwhile on screen. Settings → Preferences → **Keep channels running after Trace quits** (on by default, the installed app only) turns it off.

@@ -3,12 +3,13 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import type { PluginData, PluginEventName, PluginRun, PluginSummary } from '../../../shared/plugins';
+import type { PluginBrowseItem, PluginData, PluginEventName, PluginPreview, PluginRun, PluginSummary } from '../../../shared/plugins';
 import { load, save } from '../workbench/local-store';
 import { HubError } from '../cli/engine-adapter';
 import { commandsOf, PLUGIN_EVENTS, readManifest, type PluginManifest } from './manifest';
 import { resolveCommand, runLaunch } from './run';
 import { sameToken } from './plugin-api';
+import { browse, fetchRepo, latestCommit, listFiles, parseSource, systemGit, githubUrl, type Git, type RepoUrl } from './github';
 
 /**
  * Trace plugins (docs/plugins.md). This file keeps which plugins are installed and whether each is on, links a folder
@@ -26,6 +27,10 @@ const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('plugin-remove'), id: z.string().max(100), removeData: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('plugin-run'), id: z.string().max(100), actionId: z.string().max(64), sessionId: z.string().max(100).optional(), repository: z.string().max(4096).optional() }).strict(),
   z.object({ action: z.literal('plugin-log'), id: z.string().max(100) }).strict(),
+  z.object({ action: z.literal('plugin-fetch'), repo: z.string().min(1).max(300), ref: z.string().max(100).optional() }).strict(),
+  z.object({ action: z.literal('plugin-install'), fetchId: z.string().regex(/^[0-9a-f]{16}$/) }).strict(),
+  z.object({ action: z.literal('plugin-check') }).strict(),
+  z.object({ action: z.literal('plugin-browse') }).strict(),
 ]);
 /** What a plugin's program is told about where it runs, besides the API address. */
 export interface PluginContext { project?: string | null; channel?: number | null; channelName?: string | null; folder?: string | null; branch?: string | null; message?: string | null; event?: string | null }
@@ -42,6 +47,8 @@ export interface PluginHost {
   failed(name: string, what: string, why: string): void;
 }
 const ACTION_MS = 5 * 60_000; const EVENT_MS = 30_000; const GAP_MS = 10_000; const KEEP_RUNS = 50;
+/** A build step's limit, a fetched preview's life, and how long the browse list is kept. */
+const BUILD_MS = 10 * 60_000; const FETCH_MS = 30 * 60_000; const BROWSE_MS = 60 * 60_000;
 
 export class Plugins {
   private runs = new Map<string, PluginRun[]>();
@@ -49,7 +56,11 @@ export class Plugins {
   private tokens = new Map<string, string>();
   private last = new Map<string, number>();
   private failures = new Map<string, number>();
-  constructor(private root: string, private host: PluginHost) {}
+  /** Fetched repositories waiting for Install in their preview, by id. */
+  private fetched = new Map<string, { dir: string; folder: string; repo: string; ref?: string; commit: string; at: number }>();
+  /** The commit each GitHub plugin's branch or tag is at now, from the last check. */
+  private latest = new Map<string, string>(); private browsed: { at: number; items: PluginBrowseItem[] } | null = null;
+  constructor(private root: string, private host: PluginHost, private github: { git?: Git; url?: RepoUrl; fetcher?: typeof fetch } = {}) {}
   get folder() { return path.join(this.root, 'plugins'); }
   private state() { return load(this.folder, 'installed.json', stateSchema, { plugins: [] }).plugins; }
   private store(plugins: Entry[]) { save(this.folder, 'installed.json', { plugins }); }
@@ -69,14 +80,19 @@ export class Plugins {
       try { manifest = readManifest(item.folder, this.host.version); } catch (error) { problem = error instanceof Error ? error.message : 'Its manifest could not be read.'; }
       return { id: item.id, name: manifest?.name ?? item.id, version: manifest?.version ?? '', description: manifest?.description ?? '', folder: item.folder, source: item.source, enabled: item.enabled, problem,
         permissions: manifest?.permissions ?? [], actions: manifest?.actions.map(({ id, title, context }) => ({ id, title, context })) ?? [], events: manifest?.events.map((event) => event.on) ?? [], tiles: manifest?.tiles.map(({ id, title }) => ({ id, title })) ?? [],
+        update: item.source.kind === 'github' && this.latest.has(item.id) && this.latest.get(item.id) !== item.source.commit ? this.latest.get(item.id)! : null,
         failures: this.failures.get(item.id) ?? 0, lastRun: this.runs.get(item.id)?.[0] ? { ...this.runs.get(item.id)![0], output: '' } : null };
     }) };
   }
 
-  async execute(input: unknown): Promise<PluginData | PluginRun[] | null> {
+  async execute(input: unknown): Promise<PluginData | PluginRun[] | PluginPreview | PluginBrowseItem[] | null> {
     const request = requestSchema.parse(input);
     if (request.action === 'plugin-list') return this.data();
     if (request.action === 'plugin-log') return this.runs.get(request.id) ?? [];
+    if (request.action === 'plugin-browse') { if (!this.browsed || Date.now() - this.browsed.at > BROWSE_MS) this.browsed = { at: Date.now(), items: await browse(this.github.fetcher) }; return this.browsed.items; }
+    if (request.action === 'plugin-check') { await this.checkUpdates(); return this.data(); }
+    if (request.action === 'plugin-fetch') return this.fetchPreview(request.repo, request.ref);
+    if (request.action === 'plugin-install') return this.install(request.fetchId);
     const plugins = this.state();
     if (request.action === 'plugin-link') {
       const folder = path.resolve(request.folder);
@@ -95,8 +111,10 @@ export class Plugins {
       return this.data();
     }
     if (request.action === 'plugin-remove') {
-      this.stop(found.id); this.store(plugins.filter((item) => item.id !== found.id)); this.runs.delete(found.id); this.failures.delete(found.id);
+      this.stop(found.id); this.store(plugins.filter((item) => item.id !== found.id)); this.runs.delete(found.id); this.failures.delete(found.id); this.latest.delete(found.id);
       if (request.removeData) fs.rmSync(path.dirname(this.dataFolder(found.id)), { recursive: true, force: true });
+      // A plugin from GitHub: its versions go too (a linked folder stays where it is).
+      else if (found.source.kind === 'github') this.removeVersions(found.id, []);
       return this.data();
     }
     // plugin-run: an action the person chose in the command menu.
@@ -105,6 +123,76 @@ export class Plugins {
     if (!action) throw new HubError('PLUGIN_ACTION', 'That plugin has no such action now.');
     void this.run(found, manifest.name, `Action: ${action.title}`, action.command, this.host.context(request.sessionId, request.repository), ACTION_MS);
     return null;
+  }
+
+  /** Where a GitHub plugin's versions are kept: `plugins/<id>/<commit>/`, beside its `data/`. */
+  private versions(id: string) { return path.dirname(this.dataFolder(id)); }
+  /** Removes a plugin's versions but those in `keep` (the new one, and the one before, which a program may still run). */
+  private removeVersions(id: string, keep: string[]) {
+    let names: string[]; try { names = fs.readdirSync(this.versions(id)); } catch { return; }
+    const kept = new Set(keep.map((folder) => path.resolve(folder)));
+    for (const name of names) { const folder = path.join(this.versions(id), name); if (name !== 'data' && /^[0-9a-f]{40}$/.test(name) && !kept.has(path.resolve(folder))) try { fs.rmSync(folder, { recursive: true, force: true }); } catch { /* In use: next time. */ } }
+  }
+
+  /** Fetches a repository and says what installing it would add (docs/plugins.md, section 6); nothing runs yet. */
+  private async fetchPreview(repo: string, ref?: string): Promise<PluginPreview> {
+    const source = parseSource(repo, ref); const fetchId = randomBytes(8).toString('hex');
+    for (const [id, item] of this.fetched) if (Date.now() - item.at > FETCH_MS) { this.fetched.delete(id); fs.rm(item.dir, { recursive: true, force: true }, () => {}); }
+    const dir = path.join(this.folder, '.fetch', fetchId);
+    try {
+      const commit = await fetchRepo(source, dir, this.github.git ?? systemGit, this.github.url ?? githubUrl);
+      const folder = source.folder ? path.join(dir, ...source.folder.split('/')) : dir;
+      if (path.relative(dir, folder).startsWith('..') || !fs.existsSync(folder)) throw new HubError('PLUGIN_SOURCE', `${source.repo} has no folder ${source.folder}.`);
+      const manifest = readManifest(folder, this.host.version);
+      const existing = this.state().find((item) => item.id === manifest.id);
+      if (existing?.source.kind === 'folder') throw new HubError('PLUGIN_EXISTS', `${manifest.name} (${manifest.id}) is linked from a folder here. Remove it first to install it from GitHub.`);
+      let before: PluginManifest | null = null; if (existing) try { before = readManifest(existing.folder, this.host.version); } catch { /* Shown as all new. */ }
+      const commands = commandsOf(manifest); const key = (item: { what: string; command: string[] }) => `${item.what}|${item.command.join(' ')}`;
+      const old = new Set(before ? commandsOf(before).map(key) : []); const now = new Set(commands.map(key));
+      this.fetched.set(fetchId, { dir, folder, repo: source.repo, ...(source.ref ? { ref: source.ref } : {}), commit, at: Date.now() });
+      return { fetchId, repo: source.repo, ...(source.ref ? { ref: source.ref } : {}), commit, id: manifest.id, name: manifest.name, version: manifest.version, description: manifest.description ?? '', permissions: manifest.permissions, commands, files: listFiles(folder),
+        update: existing?.source.kind === 'github' ? { from: existing.source.commit, same: existing.source.commit === commit, added: commands.filter((item) => !old.has(key(item))), removed: before ? commandsOf(before).filter((item) => !now.has(key(item))) : [], newPermissions: manifest.permissions.filter((item) => !before?.permissions.includes(item)) } : null };
+    } catch (error) { fs.rmSync(dir, { recursive: true, force: true }); throw error; }
+  }
+
+  /** Installs (or updates to) a fetched preview, after the system dialog shows what it runs: build steps, then into place. */
+  private async install(fetchId: string): Promise<PluginData> {
+    const fetched = this.fetched.get(fetchId); if (!fetched) throw new HubError('PLUGIN_FETCH', 'That preview has expired. Fetch the plugin again.');
+    const manifest = readManifest(fetched.folder, this.host.version); const existing = this.state().find((item) => item.id === manifest.id);
+    if (!await this.host.confirm({ title: `${existing ? 'Update' : 'Install'} ${manifest.name} from ${fetched.repo}`, folder: `${fetched.repo} at ${fetched.commit.slice(0, 12)}`, manifest, commands: commandsOf(manifest) })) throw new HubError('PLUGIN_DECLINED', 'The plugin was not installed.');
+    this.fetched.delete(fetchId);
+    try {
+      const data = this.dataFolder(manifest.id); fs.mkdirSync(data, { recursive: true, mode: 0o700 });
+      const entry: Entry = { id: manifest.id, folder: fetched.folder, source: { kind: 'github', repo: fetched.repo, ...(fetched.ref ? { ref: fetched.ref } : {}), commit: fetched.commit }, enabled: true, installedAt: new Date().toISOString() };
+      // Its build steps, in the fetched folder, each shown in its runs (stopped after 10 minutes).
+      for (const step of manifest.build) {
+        const before = this.runs.get(manifest.id)?.[0];
+        await this.run(entry, manifest.name, `Build: ${step.command.join(' ')}`, step.command, {}, BUILD_MS);
+        const result = this.runs.get(manifest.id)?.[0]; if (!result || result === before || !result.ok) throw new HubError('PLUGIN_BUILD', `${manifest.name}'s build step ${step.command.join(' ')} failed: ${result?.note ?? 'it did not run'}. See its runs.`);
+      }
+      const target = path.join(this.versions(manifest.id), fetched.commit);
+      if (path.resolve(target) !== path.resolve(existing?.folder ?? '')) { fs.rmSync(target, { recursive: true, force: true }); fs.renameSync(fetched.folder, target); }
+      // Git's own copy is not needed to run the plugin. Windows refuses to delete its read-only object files for a
+      // moment after git exits (EPERM), so it is retried, and left if it still cannot be removed.
+      try { fs.rmSync(path.join(target, '.git'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* Takes some space; harmless. */ }
+      const plugins = this.state(); const kept = { ...entry, folder: target, enabled: existing?.enabled ?? true, installedAt: existing?.installedAt ?? entry.installedAt };
+      this.store(existing ? plugins.map((item) => item.id === manifest.id ? kept : item) : [...plugins, kept]);
+      // Programs already running keep the version they started with (herdr's install lease): the one before stays.
+      this.removeVersions(manifest.id, [target, ...(existing ? [existing.folder] : [])]);
+      this.latest.delete(manifest.id); this.failures.delete(manifest.id);
+      return this.data();
+    } catch (error) {
+      // A file that could not be moved or removed says why, rather than Trace's general message.
+      if (error instanceof HubError) throw error;
+      throw new HubError('PLUGIN_INSTALL', `The plugin could not be put in place: ${error instanceof Error ? error.message : String(error)}`);
+    } finally { fs.rm(fetched.dir, { recursive: true, force: true }, () => {}); }
+  }
+
+  /** Asks GitHub where each GitHub plugin's branch or tag is now (never installs anything). */
+  async checkUpdates() {
+    for (const item of this.state()) if (item.source.kind === 'github') try {
+      const commit = await latestCommit(parseSource(item.source.repo, item.source.ref), this.github.git ?? systemGit, this.github.url ?? githubUrl); if (commit) this.latest.set(item.id, commit);
+    } catch { /* Offline, or the repository is gone: shown again at the next check. */ }
   }
 
   /**

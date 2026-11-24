@@ -23,7 +23,11 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
   await fs.writeFile(path.join(project, 'package.json'), JSON.stringify({ scripts: { check: 'node -e "console.log(12345)"' } }));
   execFileSync('git', ['init', '-b', 'main'], { cwd: project, stdio: 'pipe' });
   await fs.mkdir(path.join(project, 'src')); await fs.writeFile(path.join(project, 'src/app.txt'), 'edit');
-  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex') }; delete env.ELECTRON_RUN_AS_NODE;
+  // A repository standing in for github.com/owner/board (CODING_HUB_TEST_PLUGIN_GIT), for Install from GitHub.
+  { const board = path.join(root, 'git', 'owner', 'board'); await fs.mkdir(board, { recursive: true }); const git = (...args) => require('node:child_process').execFileSync('git', args, { cwd: board, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
+    await fs.writeFile(path.join(board, 'trace-plugin.json'), JSON.stringify({ id: 'fixture.board', name: 'GitHub board', version: '2.0.0', minTrace: '1.35.0', description: 'Installed from a repository', actions: [{ id: 'hello', title: 'Hello', command: ['./hello.js'] }] })); await fs.writeFile(path.join(board, 'hello.js'), '');
+    git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-q', '-m', 'board'); }
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_PLUGIN_GIT: path.join(root, 'git') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
@@ -84,6 +88,11 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await board.locator('.xterm-rows').filter({hasText:'TILE READY fixture.sample'}).waitFor();await board.locator('.xterm-helper-textarea').focus();await page.keyboard.type('hi board');await page.keyboard.press('Enter');await board.locator('.xterm-rows').filter({hasText:'TILE GOT hi board'}).waitFor();
     await (await tileControl(board,'Stop')).click();await page.waitForFunction(()=>![...document.querySelectorAll('.session-tile')].some((tile)=>tile.textContent.includes('Sample board')&&tile.getAttribute('data-status')==='running'));
     await (await tileControl(board,'Close channel 3')).click();await board.waitFor({state:'detached'});
+    // Install from GitHub: a preview of everything it would run, then Install (the system dialog is answered above).
+    await openView(page,'Skills & plugins');await page.getByLabel('GitHub repository',{exact:true}).fill('owner/board');await page.getByRole('button',{name:'Preview',exact:true}).click();
+    const preview=page.getByRole('region',{name:'Preview of GitHub board'});await preview.waitFor();assert.match(await preview.textContent(),/Action: Hello: .*hello\.js[\s\S]*nobody has reviewed it|nobody has reviewed it[\s\S]*Action: Hello: .*hello\.js/);
+    await preview.getByRole('button',{name:'Install',exact:true}).click();await page.locator('.trace-plugin').filter({hasText:'GitHub board'}).filter({hasText:'GitHub: owner/board'}).waitFor();await preview.waitFor({state:'detached'});
+    await openView(page,'Workspace');
     const usage=await page.evaluate(()=>window.usages.at(-1));assert.ok(usage.conversationId);
     await (await tileControl(tile, 'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
     const saved=await native(page,'loadWorkspace');assert.equal(saved.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(saved.workspace.sessions[1].title,'Implementation');
