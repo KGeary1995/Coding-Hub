@@ -95,6 +95,8 @@ export interface Session {
   roundTable?: SavedRoundTable;
   budget?: import('./productivity').SessionBudget;
   preparedRequest?: import('./productivity').PreparedSessionRequest;
+  /** Its step in Start in order (shared/start-order.ts). */
+  startup?: import('./start-order').StartStep;
   id: string;
   title: string;
   config: ChannelConfig;
@@ -184,7 +186,7 @@ export interface LocalExtension {
 export interface SavedWorkspace {
   version: 1;
   rootDirectory: string | null;
-  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt' | 'budget' | 'preparedRequest' | 'roundTable'>[];
+  sessions: Pick<Session, 'id' | 'title' | 'config' | 'binding' | 'createdAt' | 'budget' | 'preparedRequest' | 'roundTable' | 'startup'>[];
   tiles: GridTile[];
   layoutMode: 'columns' | 'rows' | 'grid';
   focusedSessionId: string | null;

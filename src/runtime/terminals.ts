@@ -260,6 +260,14 @@ function acknowledge(sessionId: string, runId: string, bytes: number) {
   if (ack.bytes >= 64 * 1024) flushAcks(); else ackTimer ??= setTimeout(flushAcks, 50);
 }
 
+/** Output watchers by channel (Start in order waits for a text): each gets every piece of output its channel's run writes. */
+const outputWatchers = new Map<string, Set<(data: string) => void>>();
+/** Calls `watch` with each piece of this channel's output until the returned function is called. */
+export function watchOutput(sessionId: string, watch: (data: string) => void) {
+  const set = outputWatchers.get(sessionId) ?? new Set(); set.add(watch); outputWatchers.set(sessionId, set);
+  return () => { set.delete(watch); if (!set.size) outputWatchers.delete(sessionId); };
+}
+
 export function routeTerminalEvent(event: SessionEvent) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
   if (!session || session.runId !== event.runId) { if (event.type === 'data') acknowledge(event.sessionId, event.runId, event.data.length); return; }
@@ -283,6 +291,7 @@ export function routeTerminalEvent(event: SessionEvent) {
     sendSize(event.sessionId, entry, entry.terminal.cols, entry.terminal.rows);
   } else if (event.type === 'data') {
     recordActivity(event.sessionId, event.data.length);
+    outputWatchers.get(event.sessionId)?.forEach((watch) => watch(event.data));
     entry.terminal.write(event.data, () => acknowledge(event.sessionId, event.runId, event.data.length));
   } else if (event.type === 'exit') {
     entry.run = null;

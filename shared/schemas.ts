@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { hiddenSeatIds } from './table-seats';
+import { MAX_COMMAND, MAX_STEP, MAX_WAIT_SECONDS, MAX_WAIT_TEXT } from './start-order';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -75,6 +76,7 @@ const sessionFields = {
   id: identifier, title: z.string().min(1).max(160), binding,
   budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
   preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
+  startup: z.object({ order: z.number().int().min(1).max(MAX_STEP), command: z.string().min(1).max(MAX_COMMAND).optional(), prompt: z.string().min(1).max(4000).optional(), waitFor: z.string().min(1).max(MAX_WAIT_TEXT).optional(), waitSeconds: z.number().int().min(5).max(MAX_WAIT_SECONDS).optional() }).strict().optional(),
   createdAt: z.string().datetime(),
 };
 const seatDuty = z.enum(['plan', 'challenge', 'build', 'review', 'final']);

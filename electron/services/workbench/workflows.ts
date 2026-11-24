@@ -73,7 +73,7 @@ export class Workflows {
    const instructions = this.rules.read([cwd]);
    const checks = request.applyChecks ? selected.checks : [];
    if (checks.length + this.verification.data().profiles.length > 100) throw new HubError('TEMPLATE_CHECKS', 'There is no room for these verification profiles.');
-   const detail = `${selected.name}\nProject: ${cwd}\nAll template tiles will use this project. No CLI launches or checks run automatically.\n${request.applyRules ? 'This replaces the canonical shared rules and applies them to this project. Other registered projects may require reapplication.\n' + selected.rules : 'Existing shared rules are retained and applied to this project.'}\nVerification profiles: ${checks.map((item) => item.name).join(', ') || 'None'}`;
+   const detail = `${selected.name}\nProject: ${cwd}\nAll template tiles will use this project. No CLI launches or checks run automatically${workspace.sessions.some((session) => session.startup) ? '; channels with a Start in order step start only when you press Start in order' : ''}.\n${request.applyRules ? 'This replaces the canonical shared rules and applies them to this project. Other registered projects may require reapplication.\n' + selected.rules : 'Existing shared rules are retained and applied to this project.'}\nVerification profiles: ${checks.map((item) => item.name).join(', ') || 'None'}`;
    // The workspace is built and checked before anything is written, so a template that cannot be applied changes nothing.
    workspace.rootDirectory = cwd; workspace.focusedSessionId = null;
    const ids = new Map<string, string>();

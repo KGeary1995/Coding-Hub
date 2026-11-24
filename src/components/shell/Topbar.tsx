@@ -9,6 +9,7 @@ import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-
 import { BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
+import { StartOrderButton } from './StartOrderButton';
 import { MenuButton, type MenuItem } from './MenuButton';
 import { TraceMark } from './TraceMark';
 import { ENGINE_ICONS } from '../tile/engine-icons';
@@ -99,6 +100,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
       {[{ mode: 'columns' as const, icon: Columns2, label: 'Split vertically: columns' }, { mode: 'rows' as const, icon: Rows2, label: 'Split horizontally: rows' }, { mode: 'grid' as const, icon: Grid2X2, label: 'Arrange in grid' }].map(({ mode, icon: Icon, label }) =>
         <button key={mode} className={layoutMode === mode ? 'active' : ''} aria-label={label} title={label} aria-pressed={layoutMode === mode} onClick={() => arrange(mode)}><Icon size={16} /></button>)}
     </div>}
+    {activeView === 'workspace' && <StartOrderButton />}
     <CommandMenu />
     <button className="tr-icon icon-button" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
     <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal size={16} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />

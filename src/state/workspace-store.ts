@@ -298,7 +298,7 @@ export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorks
   return {
     version: 1, rootDirectory: state.rootDirectory,
     // A table whose hidden seats are all gone is not saved, unless it still holds findings that could not be saved to memory.
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && (hiddenSeatIds(roundTable, id).some((seat) => state.sessions.some((item) => item.id === seat)) || roundTable.findings?.length) ? { roundTable } : {}) })),
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable, startup }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(startup ? { startup } : {}), ...(roundTable && (hiddenSeatIds(roundTable, id).some((seat) => state.sessions.some((item) => item.id === seat)) || roundTable.findings?.length) ? { roundTable } : {}) })),
     // Saved tiles always match the channels, whichever path added or removed a hidden seat.
     tiles: fitTiles(state.sessions, state.tiles, state.layoutMode), layoutMode: state.layoutMode,
     focusedSessionId: state.focusedSessionId && channelsOf(state.sessions).some((session) => session.id === state.focusedSessionId) ? state.focusedSessionId : null,
