@@ -98,3 +98,13 @@ export function startRunner(kit: Kit, place: RunnerPlace) {
   const child = spawn(kit.program, [kit.script], { cwd: kit.folder, detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', CODING_HUB_RUNNER_ADDRESS: place.address, CODING_HUB_RUNNER_SECRET_FILE: place.secretFile } });
   child.on('error', () => {}); child.unref();
 }
+
+/** The ports Trace's hook and channel-tool servers had, so they come back on them (agents still running call there). */
+export interface SavedPorts { attention?: number | null; tools?: number | null }
+export function readPorts(place: RunnerPlace): SavedPorts {
+  try { const saved = JSON.parse(fs.readFileSync(path.join(path.dirname(place.secretFile), 'ports.json'), 'utf8')) as SavedPorts; return { attention: Number(saved.attention) || null, tools: Number(saved.tools) || null }; } catch { return {}; }
+}
+export function writePorts(place: RunnerPlace, ports: SavedPorts) {
+  fs.mkdirSync(path.dirname(place.secretFile), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(path.dirname(place.secretFile), 'ports.json'), JSON.stringify(ports), { mode: 0o600 });
+}

@@ -85,7 +85,7 @@ export interface CodingHubHost {
   /** `removedChannels`: Gemini channels a workspace saved by 1.19 or 1.20 had, dropped on load (Trace runs no Gemini now). */
   /** `rootDirectory`: the saved project folder when nothing but Gemini channels was saved (`workspace` is null then). */
   /** `resume`: the channels running when Trace last quit, to start again (1.32.0). */
-  loadWorkspace(): Promise<HostResult<{ workspace: SavedWorkspace | null; info: StorageInfo; removedChannels?: number; rootDirectory?: string; resume?: string[] }>>;
+  loadWorkspace(): Promise<HostResult<{ workspace: SavedWorkspace | null; info: StorageInfo; removedChannels?: number; rootDirectory?: string; resume?: string[]; /** Channels whose terminals the background runner kept running while Trace was closed: taken up, conversation or not. */ kept?: string[] }>>;
   saveWorkspace(workspace: SavedWorkspace): Promise<HostResult<null>>;
   listHistory(): Promise<HostResult<SessionHistoryRun[]>>;
   readRunLog(request: { runId: string }): Promise<HostResult<RunLog>>;

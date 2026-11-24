@@ -42,6 +42,8 @@ import { AttentionServer, CODEX_ATTENTION_CONFIG, claudeAttentionSettings, ownSt
 import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
+import { BackgroundRunner } from './services/runner/background';
+import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
 import { Plugins, type PluginContext } from './services/plugins/plugins';
@@ -207,6 +209,18 @@ function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed' | 'started' | 's
     plugins?.fire(`channel.${event}` as PluginEventName, lead!.id, { project: storage?.load()?.rootDirectory ?? null, channel: index + 1, channelName: lead!.title, folder, message });
   } catch { hostHealth?.record('event-hook-failed'); }
 }
+/**
+ * The background runner (docs/background-runner.md): terminal channels run in it, so they keep running after Trace quits
+ * or fails, and Trace takes them up again when it opens. On in the installed app unless turned off in Settings;
+ * CODING_HUB_RUNNER=1 turns it on for a source run or a smoke test, CODING_HUB_NO_RUNNER=1 off.
+ */
+let background: BackgroundRunner | null = null;
+function runnerOn() { if (process.env.CODING_HUB_NO_RUNNER) return false; return process.env.CODING_HUB_RUNNER === '1' || (app.isPackaged && hub?.preferences().backgroundRunner !== false); }
+function runner() { if (!runnerOn()) return null; if (!background) { background = new BackgroundRunner(storageRoot, app.getAppPath(), process.execPath); background.meta = (meta) => ({ attention: attention.token(meta.session.runId), tools: channelTools.token(meta.session.runId) }); background.onProblem = (message) => reportStorageError(message); } return background; }
+const savedPorts = () => readPorts(runnerPlace(storageRoot));
+function savePorts() { try { writePorts(runnerPlace(storageRoot), { attention: attention.listening, tools: channelTools.listening }); } catch { hostHealth?.record('runner-ports-unsaved'); } }
+/** The tray's Stop all channels and quit: the runner's channels stop too, instead of running on. */
+let stopChannelsOnQuit = false;
 /** The channel-tools MCP server's settings file for each Claude run, removed when the run ends. */
 const channelToolFiles = new Map<string, string>();
 const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished), (runId, conversationId) => hub?.telemetry?.follow(runId, conversationId), (runId, size) => hub?.telemetry?.setContextWindow(runId, size));
@@ -215,7 +229,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (event.type === 'started') hostHealth?.record('cli-started', event.engine);
   if (event.type === 'exit') hostHealth?.record('cli-exited', null, event.exitCode);
   try {
-    if (event.type === 'data') storage?.append(event.runId, event.data);
+    // A replay is what the background runner kept for a channel taken up again: its log has it, or it ran while Trace was closed.
+    if (event.type === 'data' && !event.replay) storage?.append(event.runId, event.data);
     if (event.type === 'exit') storage?.endRun(event.runId, event.exitCode);
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); const file = channelToolFiles.get(event.runId); if (file) { channelToolFiles.delete(event.runId); fs.rm(file, { force: true }, () => {}); } }
@@ -243,7 +258,12 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (event.type === 'attention') desktopAlert({ title: `${channelLabel(event.sessionId)} needs you`, body: event.message, target: { sessionId: event.sessionId } });
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   } catch { hostHealth?.record('desktop-alert-failed'); }
-}), { onChat: (owner, envelope) => {
+}), {
+  held: { spawn: (file, args, options, meta) => runner()?.spawn(file, args, options, meta) ?? Promise.reject(new Error('The background runner is off.')), take: (sessionId) => runner()?.take(sessionId) ?? Promise.resolve(null) },
+  // A channel taken up after a restart: its agent's hooks and channel tools call with the tokens it was started with.
+  // Its usage is not followed again (Usage would count what the run had already read).
+  onAdopted: (session, meta, owner) => { runOwners.set(session.runId, owner); attention.restore(session.runId, meta.attention); channelTools.restore(session.runId, meta.tools); },
+  onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.
   const text = chatText(envelope.event); if (text) try { storage?.append(envelope.runId, text); } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   // A Gemini CLI seat says which conversation it writes to as soon as it is ready: its tokens are counted from that file.
@@ -593,7 +613,7 @@ function updateTray() {
   const running = manager.running().length;
   const words = running ? `${running} ${running === 1 ? 'channel' : 'channels'} running` : 'No channels running';
   tray.setToolTip(`Trace · ${words}`);
-  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Trace', click: showWindow }, { label: words, enabled: false }, { type: 'separator' }, { label: 'Quit Trace', click: () => app.quit() }]));
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Trace', click: showWindow }, { label: words, enabled: false }, { type: 'separator' }, ...(background && running ? [{ label: 'Stop all channels and quit', click: () => { stopChannelsOnQuit = true; app.quit(); } }] : []), { label: background && running ? 'Quit Trace (channels keep running)' : 'Quit Trace', click: () => app.quit() }]));
 }
 function createWindow() {
   window = new BrowserWindow({
@@ -712,8 +732,10 @@ app.on('second-instance', () => {
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void offerToRemoveOldApp().catch(() => {});
-  void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
-  void channelTools.start().catch(() => hostHealth?.record('channel-tools-unavailable'));
+  // On the ports they had last time, so agents the background runner kept running still reach them.
+  const ports = savedPorts();
+  void attention.start(ports.attention).then(() => savePorts()).catch(() => hostHealth?.record('attention-endpoint-unavailable'));
+  void channelTools.start(ports.tools).then(() => savePorts()).catch(() => hostHealth?.record('channel-tools-unavailable'));
   // The tray icon from the start, so Quit is always within reach, once the preferences can be read.
   setTimeout(() => { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } }, 1500);
   hostHealth = new HostHealth(storageRoot);
@@ -1108,14 +1130,16 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.readFile, (owner, payload) => repositoryFiles.read(owner, payload));
   handle(IPC_CHANNELS.gitStatus, (owner, payload) => repositoryGit.status(owner, payload));
   handle(IPC_CHANNELS.gitDiff, (owner, payload) => repositoryGit.diff(owner, payload));
-  handle(IPC_CHANNELS.loadWorkspace, () => {
+  handle(IPC_CHANNELS.loadWorkspace, async () => {
     const database = localStorage();
     const { workspace, removedChannels, rootDirectory } = database.loadMigrated();
-    // Only on the first load: a reload of the window has no quit before it, so starts nothing.
-    const resume = workspaceLoaded || !workspace ? [] : takeResume(storageRoot);
+    // Only on the first load: a reload of the window has no quit before it, so starts nothing. Channels whose terminals
+    // the background runner kept running are taken up again whatever that setting says: they never stopped.
+    const kept = workspaceLoaded || !workspace ? [] : await runner()?.kept().catch(() => []) ?? [];
+    const resume = workspaceLoaded || !workspace ? [] : takeResume(storageRoot).filter((id) => !kept.includes(id));
     workspaceLoaded = true;
     // Only Gemini channels were saved: no workspace is left, but its project folder is kept.
-    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}), ...(resume.length ? { resume } : {}) };
+    return { workspace, info: database.info, ...(removedChannels ? { removedChannels } : {}), ...(!workspace && rootDirectory ? { rootDirectory } : {}), ...(resume.length ? { resume } : {}), ...(kept.length ? { kept } : {}) };
   });
   handle(IPC_CHANNELS.saveWorkspace, (_owner, payload) => {
     if (!workspaceLoaded) throw new HubError('WORKSPACE_NOT_LOADED', 'Load the saved workspace before saving changes.');
@@ -1230,7 +1254,9 @@ app.on('before-quit', (event) => {
   try { saveResume(storageRoot, hub?.preferences().resumeOnStart === false ? [] : manager.running().map((run) => run.sessionId)); } catch { hostHealth?.record('resume-list-failed'); }
   // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).
   const savingUsage = dayUsage.save();
-  void flushWorkspace().then(() => Promise.all([manager.dispose(), accounts.close()])).catch(() => hostHealth?.record('shutdown-stop-failed'))
+  // Channels in the background runner keep running (Trace takes them up when it opens), unless the tray's Stop all
+  // channels and quit was chosen.
+  void flushWorkspace().then(() => Promise.all([manager.dispose(stopChannelsOnQuit || !background), accounts.close()])).then(() => background?.close()).catch(() => hostHealth?.record('shutdown-stop-failed'))
     .then(async () => {
       // Quitting would leave these running with nothing to control them; let the person decide.
       const left = [...manager.processIds(), ...accounts.processIds()];
