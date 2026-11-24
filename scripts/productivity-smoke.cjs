@@ -124,7 +124,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // The sample plugin hears the channel start (channel.started), told which channel.
     await pluginSays(/^started CH2 channel\.started$/m);
     await app.close();app=null;page=await launch();
-    await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));await page.getByText('A channel running when Trace closed was started again on its conversations.',{exact:false}).waitFor();
+    // Trace starts the channel again as it opens, which can be before this page listens for output (launch() subscribes once
+    // the tiles show): its run's saved output is read instead, so the check does not depend on that race.
+    for (let attempt=0;;attempt++) { const running=(await native(page,'listHistory')).filter((run)=>run.status==='running'); let resumed=false; for (const run of running) if ((await native(page,'readRunLog',{runId:run.runId})).text.includes('RESUMING:')) resumed=true; if (resumed) break; assert.ok(attempt<100,'The channel running when Trace closed did not start again on its conversation'); await page.waitForTimeout(200); }
+    await page.getByText('A channel running when Trace closed was started again on its conversations.',{exact:false}).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(),1,'only the channel that was running starts again');
     await (await tileControl(page.locator('.session-tile').nth(1),'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
     await page.evaluate(()=>{window.events.length=0;});
