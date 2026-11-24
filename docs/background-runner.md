@@ -58,6 +58,7 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
 - **Trace opens:** it connects to the runner, or starts one if none answers.
   - Windows: the runner is launched with `DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB`, so it outlives Trace and its job. This needs a check (below) that Electron does not put Trace in a kill-on-close job; herdr falls back to starting through WMI when it does.
   - Mac and Linux: the runner is spawned detached, in its own session.
+  - **Where it runs from (found in the step 1 spike, 2026-11-24):** never from the install folder. Trace's Windows installer (electron-builder's NSIS `allowOnlyOneInstallerInstance.nsh`) stops every process whose path starts with the install folder, with `taskkill /IM Trace.exe` as its fallback, and an update cannot replace a file a running process holds. So Trace copies a runner kit into its storage folder (`~/.coding-hub/runner/<protocol version>/`): Electron's executable renamed `Trace Runner.exe`, with `ffmpeg.dll`, `icudtl.dat`, `snapshot_blob.bin` and `v8_context_snapshot.bin`, plus the runner script and node-pty. The spike ran node-pty from exactly that kit with `ELECTRON_RUN_AS_NODE=1`. It takes about 265 MB on disk, copied once per protocol version, and adds nothing to the download (bundling Node instead would add about 93 MB). A kit no runner uses is deleted on the next start. The Mac equivalent is still to be checked.
 - **Trace reattaches:** LIST, then TAIL for each terminal. The tail is replayed into each tile's xterm and into the mirrors, as herdr-core's `adopt` does. The saved workspace matches each terminal to its channel by the spawn id Trace gave it (its runId).
 - **Trace quits:** the runner keeps going. Quit Trace and stop channels (the tray menu) stops them first, as now. A plain quit leaves them running; this choice goes to the owner (question 1).
 - **Trace crashes:** the runner notices the connection drop and keeps running. Trace reattaches when it is opened again.
@@ -78,7 +79,8 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
 
 ## 6. Risks, and how each is checked
 
-- **Electron's job.** If the packaged app runs in a kill-on-close job, detaching fails. Checked first, with a spike before anything else is built.
+- **Electron's job.** If the packaged app runs in a kill-on-close job, detaching fails. Checked first, with a spike before anything else is built. Development build: a detached child survived `taskkill /F` of Electron's main process (2026-11-24). Never stop Trace with a process-tree kill or by image name, because either one also takes down the runner.
+- **The installer.** Stops anything running from the install folder; hence the runner kit above.
 - **Two Traces against one runner** (a second install, or tests). The newest HELLO takes over. Tests use their own pipe name (from the storage folder).
 - **Protocol drift.** A version in HELLO, and DRAIN for changes, so a mismatch never stops channels.
 - **Security.** The pipe or socket is open only to the user, plus the secret. The runner never runs anything Trace did not SPAWN.
