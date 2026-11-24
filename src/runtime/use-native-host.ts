@@ -37,6 +37,14 @@ function chatTurnDone(sessionId: string, failed: boolean) {
  * An agent's turn ended (Claude Code's Stop hook, or a chat turn; for a Round Table, the driver's reply). Unless the person
  * is looking at that channel (Trace in front, on the channels, with that tile focused), it shows Done until they look.
  */
+/**
+ * Coming back to Trace with focus in a channel's tile is looking at it: no focus event reaches the tile then, so a
+ * turn that ended while Trace was in the background stayed Done (and in Needs you) until the tile was clicked again.
+ */
+export function seenOnReturn() {
+  const state = useWorkspaceStore.getState(); if (state.activeView !== 'workspace') return;
+  const id = document.activeElement?.closest('.session-tile')?.getAttribute('data-session'); if (id) state.markSeen(id);
+}
 function turnDone(sessionId: string) {
   guideTurnEnded();
   const state = useWorkspaceStore.getState(); if (!channelsOf(state.sessions).some((session) => session.id === sessionId)) return;
@@ -127,6 +135,7 @@ export function useNativeHost() {
     // Another computer's chat channels: their events, into this window's chat store, kept apart by computer.
     const unsubscribeLinkedChat = host.onLinkedChatEvent((event) => { const keyOf = linkedChatKey(event.id); if (event.type === 'chat') receiveChat(event.envelope, keyOf); else receiveReplay(event.replay, keyOf); });
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
+    window.addEventListener('focus', seenOnReturn);
     const unsubscribeChecks = host.onAutoCheckEvent(receiveAutoCheck); const unsubscribeUndo = host.onUndoEvent(receiveUndo);
     // App preview (1.39.0): addresses channels printed, and the open preview's state; read once for a reloaded window.
     const unsubscribePreview = host.onPreviewEvent(receivePreview); void loadPreviews();
@@ -176,7 +185,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeUndo(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); unsubscribeScheduled(); unsubscribePreview(); };
+    return () => { cancelled = true; window.removeEventListener('focus', seenOnReturn); onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeUndo(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); unsubscribeScheduled(); unsubscribePreview(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }

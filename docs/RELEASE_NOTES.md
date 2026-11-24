@@ -14,6 +14,7 @@
   - **Tasks:** it takes tasks, in a terminal (Trace reads TASK COMPLETE from its screen) and in a chat.
   - **Round Tables:** it can lead a Round Table and be the seat that edits. A table led by Gemini shows in a Gemini chat channel, and its edits follow the table's permission level. At Ask, Gemini's own settings decide whether it asks before an edit.
   - **Everything else from 1.38 and 1.39** works with Gemini too: the automatic checks, Start in order, Undo last turn and safe commands.
+- **Fixed: Done and Needs you stayed after you had looked.** A channel whose turn ended while Trace was in the background was cleared only by clicking into it again. Typing in it, or coming back to Trace with that channel selected, now clears it too.
 - **Tried:**
   - Unit tests for every change.
   - With the real Gemini (agy 1.5.15 and 1.5.16): its permission rules, the plugin's memory tools and launch notes, where its conversations are stored, its agent-protocol modes and approvals.
