@@ -1,5 +1,10 @@
 ## What's new
 
+1.39.1 puts chats in **New channel**.
+
+- **Claude Code chat, Codex chat and Gemini chat** are now in **New channel**, on the computer and the phone, beside the terminal versions. A chat shows the conversation in Trace's own view, with approvals as cards. Before, a chat came only from a Round Table, a task or a scheduled job. A Gemini chat follows its permission level as a Gemini seat does; at Ask, Gemini's own settings decide whether it asks before edits.
+- **Tried:** unit tests, and the desktop and phone smoke tests with the new menus. **Not tried:** a plain Gemini chat with the real Gemini inside Trace.
+
 1.39.0 adds a safety net and more automation, and makes Gemini a full peer of Claude Code and Codex.
 
 - **Undo last turn.** Before each turn, Trace keeps a hidden copy of the project's files for every agent channel in a Git project: Claude Code, Codex and Gemini. **Undo last turn** on the channel puts every file back as it was before that turn, and **Redo** takes it back. Files your .gitignore leaves out are never touched, and Trace never changes your commits, branches or staged files.

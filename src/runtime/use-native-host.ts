@@ -346,8 +346,8 @@ export async function remoteSettings(change: RemoteChannelChange): Promise<strin
 export function remoteAdd(engine: ChannelEngine, chat = false, like?: string): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
   const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
-  // A chat channel (Claude chat or Codex chat) when the phone or other computer asked for one.
-  if (chat && (engine === 'claude' || engine === 'codex')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
+  // A chat channel (Claude, Codex or Gemini chat) when the phone or other computer asked for one.
+  if (chat && (engine === 'claude' || engine === 'codex' || engine === 'gemini')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine);
   // In the folder another channel works in (a Round Table's seat), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
   if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);
