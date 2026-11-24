@@ -1,16 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { atPhoneSize, fitsOnOpen, takenBack } from './size';
+import { atPhoneSize, takenBack } from './size';
 
 describe('a terminal channel opened on the phone', () => {
-  it('is taken at the phone\'s size, unless "Desktop size" was chosen on this phone', () => {
-    // A phone that never chose, and one whose "Fit to phone" cleared the choice.
-    expect(fitsOnOpen(null)).toBe(true);
-    expect(fitsOnOpen('desktop')).toBe(false);
-  });
   it('shows its text at the chosen size while the phone\'s request is on its way, not only once the computer has answered', () => {
     expect(atPhoneSize(false, true)).toBe(true);
     expect(atPhoneSize(true, false)).toBe(true);
-    // Given back ("Desktop size", or the person typed at the computer): the desktop's layout, its text shrunk to fit.
+    // Given back (the person used the computer, or the phone was put away): the computer's size, panned sideways.
     expect(atPhoneSize(false, false)).toBe(false);
   });
   it('is taken back only from a size the phone had been given, not when a restarted run starts at the desktop\'s size', () => {

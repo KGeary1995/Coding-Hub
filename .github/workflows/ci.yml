@@ -31,14 +31,16 @@ jobs:
       - run: npm run build
       - name: Desktop smoke tests (fixture CLIs, virtual display)
         run: |
-          for test in desktop design profiles workbench enterprise productivity models-stability remote table-seats screen; do
+          for test in desktop design profiles workbench enterprise productivity models-stability remote table-seats screen runner-desktop; do
             echo "::group::$test"
             xvfb-run -a node "scripts/$test-smoke.cjs"
             echo "::endgroup::"
           done
-      # Both run Electron as Node, so they need no display: the memory MCP server over stdio, and real PTYs.
-      - name: Memory server and real PTY checks
+      # They run Electron as Node, so they need no display: the memory MCP server over stdio, real PTYs, and the background
+      # runner holding a real terminal while nothing is connected.
+      - name: Memory server, real PTY and runner checks
         run: |
           node scripts/memory-smoke.cjs
           node scripts/channel-tools-smoke.cjs
           node scripts/run-pty-smoke.cjs
+          node scripts/runner-smoke.cjs

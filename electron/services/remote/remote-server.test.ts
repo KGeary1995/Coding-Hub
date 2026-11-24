@@ -1031,6 +1031,26 @@ describe('a stream’s opening replay', () => {
   });
 });
 
+describe('a phone that falls behind', () => {
+  it('gets no backlog of a channel’s output, then the screen as it is once it catches up', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+    const server = new RemoteServer(root, { sessions: () => [], running: () => [], write: () => {} } as unknown as RemoteHost, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
+    const written: string[] = []; let drain: (() => void) | null = null;
+    const response = { writableLength: 0, destroyed: false, write(text: string) { written.push(text); this.writableLength += text.length; return false; }, destroy() { this.destroyed = true; }, end() {}, once(event: string, listener: () => void) { if (event === 'drain') drain = listener; } };
+    const stream = { device: 'phone', kind: 'phone', response, sessionId: 's1' };
+    const inner = server as unknown as { streams: Set<unknown>; write(stream: unknown, text: string): void; replay: Map<string, { runId: string; snapshot(callback: (screen: { cols: number; rows: number; data: string }) => void): void }> };
+    inner.streams.add(stream); inner.replay.set('s1', { runId: 'r1', snapshot: (callback: (screen: { cols: number; rows: number; data: string }) => void) => callback({ cols: 40, rows: 20, data: 'NOW' }), dispose: () => {} } as never);
+    const output = (data: string) => inner.write(stream, `event: output\ndata: ${JSON.stringify({ sessionId: 's1', runId: 'r1', data })}\n\n`);
+    output('x'.repeat(300 * 1024)); output('late 1'); output('late 2');
+    expect(written.some((text) => text.includes('late'))).toBe(false); expect(response.destroyed).toBe(false);
+    // Other events still go: the channel list, a resize.
+    inner.write(stream, 'event: channels\ndata: []\n\n'); expect(written.at(-1)).toContain('channels');
+    response.writableLength = 0; drain!();
+    expect(written.at(-1)).toMatch(/^event: replay\n/); expect(written.at(-1)).toContain('NOW');
+    output('after'); expect(written.at(-1)).toContain('after');
+  });
+});
+
 describe('the phone app from another of the person’s computers', () => {
   it('may open this computer’s screen directly (its own computer off), and its page allows that connection', async () => {
     const { server } = await remote(); await server.setEnabled(true);

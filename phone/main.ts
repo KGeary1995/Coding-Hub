@@ -20,17 +20,20 @@ import type { ChannelEngine } from '../shared/types';
 import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type RemoteChannel, type RemoteChannelChange, type RemoteMe, type RemoteTask } from '../shared/remote';
 import { modelLabel } from '../shared/model-name';
 import { addChannel, changeChannel, channelSettings, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
-import { atPhoneSize, FIT_KEY, fitsOnOpen, takenBack } from './size';
+import { atPhoneSize, FIT_KEY, takenBack } from './size';
+import { switcherOrder } from './switcher';
 
 /** Keys a CLI prompt usually needs, which a phone keyboard does not offer. */
 /** In three rows, all in view without scrolling and each key at least 44 px wide: the named keys, the arrows, the usual answers. */
-const KEYS: { label: string; name?: string; data: string }[][] = [
-  // Shift+Tab switches Claude Code's mode (plan, auto-accept); a phone keyboard has neither it nor a reliable Backspace here.
-  [{ label: 'Enter', data: '\r' }, { label: 'Esc', data: '\x1b' }, { label: 'Tab', data: '\t' }, { label: '⇧Tab', name: 'Shift Tab', data: '\x1b[Z' },
-    { label: 'Ctrl C', data: '\x03' }, { label: '⌫', name: 'Backspace', data: '\x7f' }],
-  [{ label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }],
+type Key = { label: string; name?: string; data: string };
+/** The keys always shown: one row, so the terminal keeps the screen (herdr gives a phone's screen to the panes). */
+const MAIN_KEYS: Key[] = [{ label: 'Enter', data: '\r' }, { label: 'Esc', data: '\x1b' }, { label: 'Ctrl C', data: '\x03' }, { label: '↑', name: 'Up', data: '\x1b[A' }, { label: '↓', name: 'Down', data: '\x1b[B' }];
+/** Under More. Shift+Tab switches Claude Code's mode (plan, auto-accept); a phone keyboard has neither it nor a reliable Backspace here. */
+const MORE_KEYS: Key[][] = [
+  [{ label: 'Tab', data: '\t' }, { label: '⇧Tab', name: 'Shift Tab', data: '\x1b[Z' }, { label: '⌫', name: 'Backspace', data: '\x7f' }, { label: '←', name: 'Left', data: '\x1b[D' }, { label: '→', name: 'Right', data: '\x1b[C' }],
   [{ label: '1', data: '1' }, { label: '2', data: '2' }, { label: '3', data: '3' }, { label: 'y', data: 'y' }, { label: 'n', data: 'n' }],
 ];
+const MORE_KEY = 'trace-remote-more';
 const ENGINE = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
 
 type Child = Node | string | false | null | undefined;
@@ -172,6 +175,8 @@ function listen(sessionId: string | null) {
   stop?.();
   stop = follow(sessionId, onEvent, (value: boolean, target: Target, problem?: string) => {
     connected = value; if (value) via = target.id ? target.name : null;
+    // While no computer answers, the last screen stays, dimmed, and typing waits (herdr's cached panes).
+    document.body.classList.toggle('offline', !value);
     for (const link of document.querySelectorAll('.link')) { link.className = `link ${value ? 'on' : ''}`; link.textContent = linkText(); }
     // While nothing is connected, the list says which computer this app is asking for and why it does not answer.
     const text = !value && problem ? problem : via ? `${homeName() ?? 'This app’s computer'} can’t be reached, so this phone is connected straight to ${via}. It switches back by itself.` : '';
@@ -482,17 +487,16 @@ function disposeTerminal() { terminal?.dispose(); terminal = null; fit = null; }
  * when the phone leaves the channel or disconnects, or the person types at the desktop. A− / A+ change the text size
  * (remembered on the phone), which changes how much fits.
  *
- * Opening a terminal channel takes it at the phone's size at once, even while the computer is in use, as "Fit to
- * phone" does (phone/size.ts): every request carries `force`. The phone holds that size only while it is in use: it
- * is given back when the phone is locked or the app is in the background, or when the computer is used after the phone
- * has gone untouched for ten seconds, and once the desktop has taken it back the
- * phone asks again only when the person uses the phone (opens the channel, touches it, types or changes the text
- * size), not when it merely reconnects, wakes or its screen changes. "Desktop size" is remembered on the phone: the
- * next channel opens at the desktop's size, and the phone asks for nothing until "Fit to phone".
+ * One rule, herdr's (1.36.0): the screen the person last used leads. Opening, touching or typing in a channel on the
+ * phone draws it at the phone's size (every request carries `force`); clicking or typing in its tile on the computer
+ * takes it back. Nothing else moves it: a phone that wakes, reconnects or redraws asks for nothing until it is
+ * touched, and is locked or put away gives the channel back. While the computer leads, the phone shows its wider
+ * screen at the chosen text size, panned sideways, never shrunk to unreadable text ("Desktop size" before 1.36.0).
  */
+// The "Desktop size" choice of earlier versions is gone.
+localStorage.removeItem(FIT_KEY);
 const SIZE_KEY = 'trace-remote-font';
 let textSize = Math.max(9, Math.min(20, Number(localStorage.getItem(SIZE_KEY)) || 13));
-let chosenSize = localStorage.getItem(FIT_KEY);
 let sizeTimer: ReturnType<typeof setTimeout> | null = null; let sentSize = '';
 /** Whether the phone wants the channel at its size, and the size it last asked for. */
 let holding = false; let asked: { cols: number; rows: number } | null = null; let askedBefore: { cols: number; rows: number } | null = null;
@@ -501,9 +505,8 @@ let holding = false; let asked: { cols: number; rows: number } | null = null; le
  * with its text shrunk to fit the screen's width. `shownAtPhone`: what the button shows, and so what pressing it does.
  */
 let granted = false; let askAgain = false; let shownAtPhone = false;
-/** The person is using the phone: the channel is drawn at the phone's size again, unless they chose "Desktop size". */
+/** The person is using the phone: the channel is drawn at the phone's size again. */
 function useChannel() {
-  if (!fitsOnOpen(chosenSize)) return;
   // Already at the phone's size: tell the computer the phone is still in use (at most every few seconds). From 1.35.2 a
   // computer gives the size back only when its own tile is used, but one before that also took it from a quiet phone.
   if (holding && sentSize) { if (granted && Date.now() - touched > 4000) { touched = Date.now(); askAgain = true; requestSize(0); } return; }
@@ -534,32 +537,20 @@ function requestSize(wait = 200) {
 function leaveChannel() { if (current) void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; asked = null; askedBefore = null; granted = false; }
 function resizeText(step: number) {
   textSize = Math.max(9, Math.min(20, textSize + step)); localStorage.setItem(SIZE_KEY, String(textSize));
-  if (terminal) { terminal.options.fontSize = textSize; if (fitsOnOpen(chosenSize)) holding = true; fitText(); requestSize(); }
+  if (terminal) { terminal.options.fontSize = textSize; holding = true; fitText(); requestSize(); }
 }
-/** At the phone's size, the chosen text size; at the desktop's size, small enough that its width fits the screen. */
+/** Always the chosen text size. While the computer leads, a line says so and that a touch brings the channel here. */
 function fitText() {
   if (!terminal || !fit) return;
   shownAtPhone = atPhoneSize(granted, holding);
-  document.getElementById('fit-phone')?.replaceChildren(shownAtPhone ? 'Desktop size' : 'Fit to phone');
-  // Back at the chosen text size, ask again: the size asked for while the text was shrunk can be a row or column short.
-  if (shownAtPhone) { if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); } return; }
-  const dims = fit.proposeDimensions(); if (!dims || !Number.isFinite(dims.cols) || dims.cols <= 0) return;
-  const fits = (terminal.options.fontSize ?? textSize) * dims.cols / terminal.cols;
-  // Below 6 px the text cannot be read; the screen then pans sideways instead.
-  const size = Math.max(6, Math.min(textSize, Math.floor(fits * 2) / 2));
-  if (terminal.options.fontSize !== size) terminal.options.fontSize = size;
-}
-/** "Fit to phone" takes the channel at the phone's size now; "Desktop size" gives it back. The choice is kept on the phone for the next channel. */
-function toggleFit() {
-  if (!current) return;
-  if (shownAtPhone) { chosenSize = 'desktop'; localStorage.setItem(FIT_KEY, chosenSize); void releaseChannel(current).catch(() => {}); granted = false; holding = false; sentSize = ''; fitText(); return; }
-  chosenSize = null; localStorage.removeItem(FIT_KEY); holding = true; askAgain = true; sentSize = ''; fitText(); requestSize();
+  const line = document.getElementById('computer-size'); if (line) line.hidden = shownAtPhone;
+  if (terminal.options.fontSize !== textSize) { terminal.options.fontSize = textSize; requestSize(); }
 }
 
 function showChannel(sessionId: string) {
   enterInner(); leaveScreen();
   if (current !== sessionId) leaveChannel();
-  current = sessionId; run = null; holding = fitsOnOpen(chosenSize); granted = false; disposeTerminal();
+  current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
@@ -594,15 +585,20 @@ function showChannel(sessionId: string) {
     if (field && current === sessionId && field.value === value) field.value = '';
     if (drafts.get(sessionId) === value) drafts.delete(sessionId);
   };
-  const keys = h('div', { className: 'keys', aria: { role: 'group', label: 'Keys' } }, ...KEYS.map((row) => h('div', {}, ...row.map((key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label)))));
+  const keyButton = (key: Key) => h('button', { type: 'button', onclick: () => void type(key.data), ...(key.name ? { aria: { label: key.name } } : {}) }, key.label);
+  const more = h('button', { type: 'button', className: 'more', aria: { label: 'More keys and tools', expanded: String(localStorage.getItem(MORE_KEY) === 'open') } }, 'More');
+  const keys = h('div', { className: 'keys', aria: { role: 'group', label: 'Keys' } }, h('div', {}, ...MAIN_KEYS.map(keyButton), more));
+  const extra = h('div', { className: 'keys extra', hidden: localStorage.getItem(MORE_KEY) !== 'open', aria: { role: 'group', label: 'More keys' } }, ...MORE_KEYS.map((row) => h('div', {}, ...row.map(keyButton))));
+  // More stays as left on this phone: open for someone who uses the extra keys, closed for the most screen.
+  more.onclick = () => { const open = extra.hidden; extra.hidden = !open; tools.hidden = !open; more.setAttribute('aria-expanded', String(open)); localStorage.setItem(MORE_KEY, open ? 'open' : 'closed'); fit && requestAnimationFrame(() => requestSize()); };
   // The channel's tools sit with the keys, under the thumb, leaving the header room for the channel's name.
-  const tools = h('div', { className: 'tools', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
+  const tools = h('div', { className: 'tools', hidden: localStorage.getItem(MORE_KEY) !== 'open', aria: { role: 'toolbar', label: 'Channel' } }, h('button', { type: 'button', onclick: () => showCopy(), aria: { label: 'Copy text from the channel' } }, 'Copy'),
     channel && (channel.engine === 'claude' || channel.engine === 'codex') ? h('button', { type: 'button', onclick: () => void showConversation(sessionId), title: 'The whole conversation, including what was said before restarts' }, 'Conversation') : null,
-    h('button', { id: 'fit-phone', type: 'button', onclick: toggleFit, title: 'Fit to phone draws the channel at this screen\'s size until you type in it on the computer. Desktop size shows the computer\'s size, and this phone opens the next channel that way too.' }, 'Fit to phone'),
     h('button', { type: 'button', onclick: () => resizeText(-1), aria: { label: 'Smaller text' } }, 'A−'), h('button', { type: 'button', onclick: () => resizeText(1), aria: { label: 'Larger text' } }, 'A+'));
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
-  app.replaceChildren(header(showList, title, ...(channel ? [controlsBox(channel)] : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, output, selected, problem, sendingLine, tools, keys, form));
+  const computerSize = h('p', { id: 'computer-size', className: 'dim computer-size', hidden: true, aria: { role: 'status' } }, 'Shown at the computer’s size, where it was last used. Touch the screen to bring it to this phone.');
+  app.replaceChildren(header(showList, title, switcherButton(), ...(channel ? [controlsBox(channel)] : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, computerSize, output, selected, problem, sendingLine, extra, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false, allowProposedApi: true,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   measureLikeTheCLIs(terminal); fit = new FitAddon(); terminal.loadAddon(fit);
@@ -783,6 +779,7 @@ function renderCoach(channel: RemoteChannel) {
 
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
+  updateSwitcher();
   const title = document.getElementById('channel-title');
   // Two lines, so the name keeps its room beside the channel's buttons: CH2 and the name, then the state and the account.
   title?.replaceChildren(h('span', { className: 'title-line' }, h('span', { className: 'chip', dataset: { engine: channel.engine } }, `CH${channel.channel}`), h('span', { className: 'title-name' }, channel.title)), h('span', { className: 'title-line' }, badge(channel, `state-${state(channel)}`), account(channel)));
@@ -859,6 +856,9 @@ function onEvent(event: StreamEvent) {
     // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
     terminal.write(event.data.data); sentSize = ''; requestSize(0); return;
   }
+  // Output of a run the channel list has not announced yet (a restart): the computer sends events in order, so it is the
+  // newer run, and its first lines (dropped before) start the fresh screen.
+  if (run && event.data.runId !== run) { run = event.data.runId; granted = false; inOrder((screen) => screen.reset()); requestSize(); }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 
@@ -867,8 +867,9 @@ window.addEventListener('resize', () => requestSize()); window.visualViewport?.a
 // A locked phone, or one showing another app, gives the channel back; coming back to it takes it again, if it held it.
 document.addEventListener('visibilitychange', () => {
   if (!current) return;
-  if (document.visibilityState === 'visible') { sentSize = ''; requestSize(); }
-  else { void releaseChannel(current).catch(() => {}); sentSize = ''; }
+  // Coming back asks for nothing until the phone is touched (herdr: only use moves the size).
+  if (document.visibilityState === 'visible') { sentSize = ''; fitText(); }
+  else { void releaseChannel(current).catch(() => {}); sentSize = ''; holding = false; granted = false; }
 });
 /** Back at the front, or back online: a stream that died while the phone slept is replaced (after a moment for what was held up to arrive). */
 const wake = () => { if (document.visibilityState === 'visible') setTimeout(() => revive(), 2000); };
@@ -878,6 +879,30 @@ if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.register('/sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (event) => { const id = (event.data as { open?: string }).open; if (id && token.get()) openChannel(id); });
 }
+/**
+ * The switcher in a channel's header (herdr's mobile switch): how many other channels need you, and a list with those
+ * first, then the running ones, then the rest; one tap opens a channel without going back to the list.
+ */
+function switcherButton() {
+  return h('button', { id: 'switcher', type: 'button', className: 'switcher', onclick: () => showSwitcher(), aria: { label: 'Switch channel' } }, '☰');
+}
+function updateSwitcher() {
+  const button = document.getElementById('switcher'); if (!button) return;
+  const waiting = channels.filter((item) => item.sessionId !== current && Boolean(item.attention)).length;
+  button.replaceChildren('☰', ...(waiting ? [h('span', { className: 'count waiting', aria: { label: `${waiting} need you` } }, String(waiting))] : []));
+  button.setAttribute('aria-label', waiting ? `Switch channel, ${waiting} need you` : 'Switch channel');
+}
+function showSwitcher() {
+  document.getElementById('switch-sheet')?.remove();
+  const close = () => sheet.remove();
+  const rows = switcherOrder(channels).map((item) => h('button', { type: 'button', className: `switch-row${item.sessionId === current ? ' current' : ''}`, onclick: () => { close(); if (item.sessionId !== current) showChannel(item.sessionId); } },
+    h('span', { className: 'chip', dataset: { engine: item.engine } }, `CH${item.channel}`), h('span', { className: 'switch-name' }, item.title), badge(item)));
+  const sheet = h('div', { id: 'switch-sheet', className: 'switch-sheet', aria: { role: 'dialog', label: 'Switch channel' } },
+    h('div', { className: 'switch-panel' }, h('div', { className: 'switch-head' }, h('strong', {}, 'Channels'), h('button', { type: 'button', onclick: close }, 'Close')), ...rows));
+  sheet.addEventListener('click', (event) => { if (event.target === sheet) close(); });
+  document.body.append(sheet);
+}
+
 /** Opens the channel an alert was for: now if the phone knows it, otherwise once the next channel list includes it. */
 function openChannel(id: string) {
   if (channels.some((item) => item.sessionId === id)) { opening = null; showChannel(id); return; }

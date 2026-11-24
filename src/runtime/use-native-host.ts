@@ -136,7 +136,7 @@ export function useNativeHost() {
       if (!result.ok) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: result.error.message }); return; }
       useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info, result.value.removedChannels, result.value.rootDirectory);
       loaded = true;
-      if (result.value.resume) void resumeChannels(result.value.resume);
+      if (result.value.resume || result.value.kept) void resumeChannels(result.value.resume ?? [], result.value.kept ?? []);
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
       // What the saved workspace is made of: when none of these changed (a status line, a view), nothing is serialized.
@@ -170,9 +170,16 @@ export function useNativeHost() {
  * Starts again the channels that were running when Trace quit (1.32.0): an agent on the conversation it saved (one with
  * none would start a new one, so it is left stopped), a shell afresh. Round Table seats too, so the table opens again
  * (restoreTables). One at a time, after the tiles have drawn, so each starts at its own size.
+ * `kept`: channels whose terminals the background runner kept running while Trace was closed (docs/background-runner.md).
+ * Starting one takes its terminal up again, so it needs no saved conversation, and it is said apart.
  */
-export async function resumeChannels(ids: string[]) {
+export async function resumeChannels(ids: string[], kept: string[] = []) {
   await new Promise((resolve) => setTimeout(resolve, 300));
+  const running = (id: string) => useWorkspaceStore.getState().sessions.find((item) => item.id === id)?.status === 'running';
+  const back = useWorkspaceStore.getState().sessions.filter((session) => kept.includes(session.id) && session.status === 'idle');
+  for (const session of back) await startSession(session.id);
+  const taken = back.filter((session) => running(session.id)).length;
+  if (taken) { const note = `${taken === 1 ? 'A channel' : `${taken} channels`} kept running while Trace was closed.`; useWorkspaceStore.setState((state) => ({ loadNotice: state.loadNotice ? `${state.loadNotice} ${note}` : note })); }
   const chosen = useWorkspaceStore.getState().sessions.filter((session) => ids.includes(session.id) && session.status === 'idle' && (!isAgentConfig(session.config) || Boolean(session.config.resumeId)));
   for (const session of chosen) await startSession(session.id);
   const started = chosen.filter((session) => useWorkspaceStore.getState().sessions.find((item) => item.id === session.id)?.status === 'running').length;

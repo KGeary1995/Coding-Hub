@@ -1,5 +1,5 @@
 import http from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { listenLoopback, savedToken } from './loopback';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent } from '../../../shared/ipc';
@@ -41,13 +41,12 @@ export class ChannelTools {
   private asking = new Map<string, string>();
   constructor(private host: ChannelToolsHost) {}
 
-  start() {
-    return new Promise<void>((resolve, reject) => {
-      const server = http.createServer((request, response) => void this.handle(request, response));
-      server.on('error', (error) => { if (this.server !== server) reject(error); });
-      server.listen(0, '127.0.0.1', () => { this.server = server; this.port = (server.address() as AddressInfo).port; resolve(); });
-    });
+  /** Listens on loopback, on `port` (the one it had last time) when free, so agents still running from before reach it. */
+  async start(port?: number | null) {
+    const server = http.createServer((request, response) => void this.handle(request, response));
+    this.port = await listenLoopback(server, port); this.server = server; server.on('error', () => {});
   }
+  get listening() { return this.port; }
   /** The address for one run, or null while the tools are off or not listening. */
   register(runId: string) {
     if (this.port === null || !this.host.enabled()) return null;
@@ -55,6 +54,10 @@ export class ChannelTools {
     return `http://127.0.0.1:${this.port}/channels/${runId}/${token.toString('hex')}`;
   }
   unregister(runId: string) { this.runs.delete(runId); }
+  /** A run's token, kept with its terminal in the background runner. */
+  token(runId: string) { return this.runs.get(runId)?.toString('hex') ?? null; }
+  /** A run the background runner kept while Trace was closed: its agent still calls with the token it was started with. */
+  restore(runId: string, hex: unknown) { const token = savedToken(hex); if (token) this.runs.set(runId, token); }
   close() { this.runs.clear(); for (const set of this.waiters.values()) for (const done of set) done('stopped'); this.waiters.clear(); this.server?.close(); this.server = null; this.port = null; }
 
   /** A channel's turn ended, it asks for an approval, or it stopped: anyone waiting on it hears so. */

@@ -1,16 +1,8 @@
-/** Where this phone remembers "Desktop size" (`'desktop'`), next to its text size; "Fit to phone" clears it. */
+/** Where phones before 1.36.0 remembered "Desktop size"; cleared when the app starts (the choice is gone). */
 export const FIT_KEY = 'trace-remote-fit';
 
 /**
- * Whether a terminal channel opened on this phone is taken at the phone's size. Opening it is the act of the person
- * holding the phone, so it is, at once and even while the computer is in use, as "Fit to phone" does; unless they
- * chose "Desktop size" on this phone, which the next channel keeps until they press "Fit to phone".
- */
-export const fitsOnOpen = (chosen: string | null) => chosen !== 'desktop';
-
-/**
- * Whether the phone shows the channel at its own size, with the text at the chosen size and "Desktop size" on the
- * button: once the computer has drawn it there, and while the phone's own request is on its way, so an opened channel
+ * Whether the phone shows the channel at its own size, with no line saying the computer leads: once the computer has drawn it there, and while the phone's own request is on its way, so an opened channel
  * is never first drawn at the desktop's width with its text shrunk to a few pixels.
  */
 export const atPhoneSize = (granted: boolean, holding: boolean) => granted || holding;

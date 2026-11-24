@@ -2,6 +2,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+// The tile: a program in the channel's terminal, which says it is ready and echoes each line typed into it.
+if (process.argv[2] === 'tile') { process.stdout.write(`TILE READY ${process.env.TRACE_PLUGIN_ID}
+`); process.stdin.on('data', (data) => process.stdout.write(`TILE GOT ${String(data).trim()}
+`)); return; }
 const out = path.join(process.env.TRACE_PLUGIN_DATA, 'out.txt');
 const write = (line) => fs.appendFileSync(out, line + '\n');
 const call = async (op, body = {}) => { const response = await fetch(`${process.env.TRACE_API_URL}/${op}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() }; };

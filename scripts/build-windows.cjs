@@ -20,6 +20,8 @@ try {
     else throw new Error('Supported arguments: --output <folder>, --version <stable-version>.');
   }
   releaseVersion(version);
+  // An installed Trace always has the background runner's job-object helper: this fails without C++ build tools.
+  if (process.platform === 'win32') { const helper = spawnSync(process.execPath, [path.join(__dirname, 'build-jobs-helper.cjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, TRACE_REQUIRE_JOBS_HELPER: '1' } }); if (helper.status !== 0 || !fs.existsSync(path.join(root, 'dist-electron', 'native', 'trace-jobs.exe'))) throw new Error('The job-object helper trace-jobs.exe could not be built.'); }
   const stage = createStage(output);
   console.log(`Build staging directory: ${stage}`);
   const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');

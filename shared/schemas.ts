@@ -52,7 +52,8 @@ const chatEngineOptions = [
   z.object({ engine: z.literal('codex'), chat: z.boolean().optional(), resumeId: z.uuid().optional(), permissions, memoryKey, model, reasoningEffort: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).nullable() }).strict(),
 ] as const;
 export const engineConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, geminiConfigSchema]);
-const shellConfigSchema = z.object({ engine: z.literal('shell') }).strict();
+// A plugin tile names its plugin and tile by the manifest's own id rules (electron/services/plugins/manifest.ts).
+const shellConfigSchema = z.object({ engine: z.literal('shell'), plugin: z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/), tile: z.string().regex(/^[A-Za-z0-9:_-]{1,64}$/) }).strict().optional() }).strict();
 /** Every channel type: the agents, and a plain terminal, which takes no settings. */
 export const channelConfigSchema = z.discriminatedUnion('engine', [...engineConfigSchema.options, shellConfigSchema]);
 /**

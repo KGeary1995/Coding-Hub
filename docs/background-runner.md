@@ -1,6 +1,6 @@
 # Background runner: plan for review
 
-Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Nothing here is built yet.
+Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Steps 1 to 3 are built (1.36.0): terminal channels run in the runner and are taken up again when Trace opens. Steps 4 to 6 are still to do.
 
 **Goal:** channels keep running when Trace quits, crashes or updates, and Trace finds them again when it opens. 1.34.0
 covers closing the window (Trace stays in the tray); this covers the rest.
@@ -92,11 +92,25 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
 ## 7. Order of work
 
 1. **Spike:** start a detached runner from the packaged app on Windows and Mac; check it survives quitting and killing Trace.
-2. **Runner and protocol,** with unit tests (frames, tail ring, DRAIN).
-3. `PtyManager` on the runner for terminal channels; reattach on open; the kill-and-reopen smoke.
-4. Chat channels on the runner (pipe runs).
-5. Windows job objects and Ctrl+C (the native helper).
-6. Updates with DRAIN; the tray's **Quit and stop**; Settings.
+2. **Runner and protocol,** with unit tests (frames, tail ring, DRAIN). Built: `electron/services/runner/` (`protocol.ts`, `tail.ts`, `runner.ts`, the process `runner-main.ts`), `runner.test.ts`, and `npm run test:runner` with real processes. Beyond the table: `spawned` answers a spawn with the terminal number, `forget` drops an ended terminal from the list, and `error` names a failed spawn by its id. A Trace on another protocol may only `drain`. The runner leaves by itself after 60 s with nothing running and no Trace connected.
+3. `PtyManager` on the runner for terminal channels; reattach on open; the kill-and-reopen smoke. Found while planning it (2026-11-24):
+   - **Same interface.** PtyManager talks to node-pty through one `spawn` returning an `IPty`. A runner-backed `IPty` keeps PtyManager as it is.
+   - **Pause and resume.** Its flow control pauses a CLI the window cannot keep up with (`pty.pause()`), so the protocol gains `pause` and `resume`. The runner resumes every terminal when Trace disconnects, so it never leaves a program paused with nobody to resume it.
+   - **The channel's identity.** A spawn carries the channel's details (`meta`: its session, configuration and hook token), which the runner keeps without reading and gives back in `list`. Trace adopts a terminal when the reopened tile starts: the surviving terminals join 1.32.0's resume list, and `start` finds the one with that channel's id instead of launching.
+   - **Hooks after a restart.** An adopted agent's hooks still post to the attention server address it was started with, but that server listens on a random port with tokens kept in memory (`attention.ts`). So it listens on the port it had last time when that port is free, and adopted runs get their tokens back from `meta`. The same goes for the channel tools server. If the port was taken, the screen check (1.35.3) still catches approvals, and the notice says hooks are off for those channels.
+4. Chat channels on the runner (pipe runs). **Not built; needs its own design (2026-11-24).** A chat channel is more than its process: Trace holds its live protocol state in the main process (Claude's message stream, a Codex chat's app-server thread and handshake, Gemini seats' session, pending approvals, and a Round Table's orchestration). A Trace that opens again cannot rebuild that state from 1 MB of output. What a chat loses on quit today is only a turn in progress: 1.32.0 already starts chats again on their conversations. The options are to move each chat protocol's state into the runner, or to make the protocols resumable mid-turn. Either is much larger than steps 1 to 3.
+5. Windows job objects and Ctrl+C (the native helper). **Built (1.36.0):**
+   - `native/trace-jobs.c` is built by `scripts/build-jobs-helper.cjs` (part of `build:host` on Windows, with Visual Studio's C++ build tools) into `dist-electron/native/trace-jobs.exe`, which the kit copies.
+   - The runner puts each program in a job when it starts. Stopping the channel ends the job after Trace's own process-tree stop, so a child that left the tree ends too.
+   - Jobs are deliberately not set to kill on close, so a fault in the helper never stops every channel.
+   - A source run without the build tools works without it. `build-windows.cjs` refuses to package without it.
+   - Ctrl+C needed nothing: written as 0x03, it reached a program started by the detached runner (it exited with STATUS_CONTROL_C_EXIT, checked 2026-11-24), so no inherited "ignore Ctrl+C" reaches agents.
+6. Updates with DRAIN; the tray's **Quit and stop**; Settings. **Partly built (1.36.0):**
+   - On Windows, channels in the runner no longer hold an update back (`PtyManager.hasLocalSessions`). The update quits Trace, which lets go of them, and the new Trace takes them up.
+   - A Mac update still waits, because its runner runs from the app bundle the update replaces.
+   - The tray has **Stop all channels and quit**, and Settings has the switch.
+   - Not built yet: DRAIN of a runner on an older protocol. There is only protocol 1 so far, and each protocol has its own address, so a later protocol must drain protocol 1's runner at its address.
+   - Not tried: a real update of an installed Trace while channels run.
 
 Each step is its own release.
 

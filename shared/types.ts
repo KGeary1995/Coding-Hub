@@ -70,7 +70,9 @@ export const isChatRun = (config: ChannelConfig): boolean => config.engine !== '
 export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
 /** A plain terminal: the login shell (zsh, bash) or PowerShell in the channel's folder. No agent, model or usage. */
-export interface ShellChannelConfig { engine: 'shell' }
+/** `plugin`: a plugin tile (docs/plugins.md), which runs that plugin's tile program instead of a shell. The window names
+ * only the plugin and the tile; the main process finds the command in the installed manifest. */
+export interface ShellChannelConfig { engine: 'shell'; plugin?: { id: string; tile: string } }
 export type ChannelEngine = CLIEngine | 'shell';
 export type ChannelConfig = CLIEngineConfig | ShellChannelConfig;
 /** An agent CLI (Claude Code, Codex or Gemini CLI): model, permissions, resume, usage and notices. */
