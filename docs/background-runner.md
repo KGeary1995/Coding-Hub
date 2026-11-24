@@ -93,7 +93,11 @@ linked tiles keep getting the latest screen from Trace's mirrors, as now.
 
 1. **Spike:** start a detached runner from the packaged app on Windows and Mac; check it survives quitting and killing Trace.
 2. **Runner and protocol,** with unit tests (frames, tail ring, DRAIN). Built: `electron/services/runner/` (`protocol.ts`, `tail.ts`, `runner.ts`, the process `runner-main.ts`), `runner.test.ts`, and `npm run test:runner` with real processes. Beyond the table: `spawned` answers a spawn with the terminal number, `forget` drops an ended terminal from the list, and `error` names a failed spawn by its id. A Trace on another protocol may only `drain`. The runner leaves by itself after 60 s with nothing running and no Trace connected.
-3. `PtyManager` on the runner for terminal channels; reattach on open; the kill-and-reopen smoke.
+3. `PtyManager` on the runner for terminal channels; reattach on open; the kill-and-reopen smoke. Found while planning it (2026-11-24):
+   - **Same interface.** PtyManager talks to node-pty through one `spawn` returning an `IPty`. A runner-backed `IPty` keeps PtyManager as it is.
+   - **Pause and resume.** Its flow control pauses a CLI the window cannot keep up with (`pty.pause()`), so the protocol gains `pause` and `resume`. The runner resumes every terminal when Trace disconnects, so it never leaves a program paused with nobody to resume it.
+   - **The channel's identity.** A spawn carries the channel's details (`meta`: its session, configuration and hook token), which the runner keeps without reading and gives back in `list`. Trace adopts a terminal when the reopened tile starts: the surviving terminals join 1.32.0's resume list, and `start` finds the one with that channel's id instead of launching.
+   - **Hooks after a restart.** An adopted agent's hooks still post to the attention server address it was started with, but that server listens on a random port with tokens kept in memory (`attention.ts`). So it listens on the port it had last time when that port is free, and adopted runs get their tokens back from `meta`. The same goes for the channel tools server. If the port was taken, the screen check (1.35.3) still catches approvals, and the notice says hooks are off for those channels.
 4. Chat channels on the runner (pipe runs).
 5. Windows job objects and Ctrl+C (the native helper).
 6. Updates with DRAIN; the tray's **Quit and stop**; Settings.
