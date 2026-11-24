@@ -856,6 +856,9 @@ function onEvent(event: StreamEvent) {
     // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
     terminal.write(event.data.data); sentSize = ''; requestSize(0); return;
   }
+  // Output of a run the channel list has not announced yet (a restart): the computer sends events in order, so it is the
+  // newer run, and its first lines (dropped before) start the fresh screen.
+  if (run && event.data.runId !== run) { run = event.data.runId; granted = false; inOrder((screen) => screen.reset()); requestSize(); }
   if (event.data.runId === run) terminal.write(event.data.data);
 }
 

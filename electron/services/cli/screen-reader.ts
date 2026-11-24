@@ -11,7 +11,9 @@ export class ScreenReader {
   private terminal: Terminal; private watch = new ScreenWatch(); private timer: ReturnType<typeof setInterval>;
   private wrote = 0; private toldAt = 0;
   constructor(private engine: string, cols: number, rows: number, private title: () => string, private report: (change: 'blocked' | 'resolved', message?: string) => void) {
-    this.terminal = new Terminal({ cols, rows, scrollback: 0, allowProposedApi: true }); measureLikeTheCLIs(this.terminal);
+    // scrollback 1, not 0: with none, xterm 6.0.0 can throw in its write timer after a resize (lineFeed, 'isWrapped'),
+    // an uncaught error that froze Trace behind Electron's error box (seen in the phone smoke test, 2026-11-24).
+    this.terminal = new Terminal({ cols, rows, scrollback: 1, allowProposedApi: true }); measureLikeTheCLIs(this.terminal);
     this.timer = setInterval(() => this.check(), 700); this.timer.unref?.();
   }
   write(data: string) { this.terminal.write(data); this.wrote = Date.now(); }
