@@ -30,6 +30,15 @@ describe('Round Table seats', () => {
     expect(checkSeats('hierarchy', [{ ...claude, duties: ['plan'] }, { ...gemini, duties: ['build'] }], 0)).toMatch(/builder leads/);
     expect(defaultSeatName(gemini, 'discussion')).toBe('Gemini'); expect(seatNames([claude, gemini, gemini], 'discussion')).toEqual(['Claude Code', 'Gemini', 'Gemini 2']);
   });
+  it('seats a custom agent that speaks ACP (phase 2), by its own name, and saves it in a preset by its id', () => {
+    const custom = { engine: 'custom' as const, agentName: 'Fixture ACP' };
+    expect(seatNames([{ engine: 'claude' }, custom, custom, { engine: 'custom' }], 'discussion')).toEqual(['Claude Code', 'Fixture ACP', 'Fixture ACP 2', 'Agent']);
+    expect(checkSeats('hierarchy', [{ ...custom, duties: ['build'] }, { engine: 'claude', duties: ['plan'] }], 0)).toBeNull();
+    const preset = { id: 'mine', name: 'Mine', kind: 'discussion', rounds: 1, seats: [{ engine: 'claude', model: '' }, { engine: 'custom', agent: 'fixture-acp', model: 'fx-large' }] };
+    expect(tablePresetSchema.safeParse(preset).success).toBe(true);
+    expect(tablePresetSchema.safeParse({ ...preset, seats: [preset.seats[0], { engine: 'custom', model: '' }] }).success).toBe(false);
+    expect(tablePresetSchema.safeParse({ ...preset, seats: [{ ...preset.seats[0], agent: 'fixture-acp' }, preset.seats[1]] }).success).toBe(false);
+  });
   it('takes any number of discussion seats from two to eight', () => {
     const seats = (count: number): SeatSettings[] => Array.from({ length: count }, () => ({}));
     expect(checkSeats('discussion', seats(1))).toMatch(/at least two/);

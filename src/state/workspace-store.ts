@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AgentConfig, ChannelEngine, CLIEngine, CLIEngineConfig, GridTile, Session, WorkspaceBinding, SavedWorkspace, StorageInfo, SessionHistoryRun } from '../../shared/types';
 import type { EngineInfo, SessionEvent } from '../../shared/ipc';
 import { MAX_CHANNELS, type LegacySavedWorkspace } from '../../shared/schemas';
-import { isAgentConfig, isBuiltInAgent } from '../../shared/types';
+import { isAgentConfig } from '../../shared/types';
 import { DEFAULT_TITLES } from '../../shared/channel-name';
 import { arrangeChannels, migrateWorkspace, widenShortRow } from '../../shared/workspace-migration';
 import { hiddenSeatIds, savedSeats, type SavedSeat } from '../../shared/table-seats';
@@ -164,8 +164,8 @@ interface WorkspaceState {
   /** A plugin tile: a Terminal channel that runs a plugin's tile program (docs/plugins.md). */
   addPluginTile: (plugin: { id: string; tile: string }, title: string) => void;
   /** A Claude channel shown as a conversation (chat) rather than a terminal. */
-  /** `gemini`: a Gemini chat, made only to lead a Round Table (+ Channel offers Gemini as a terminal). */
-  addChatSession: (engine: 'claude' | 'codex' | 'gemini') => void;
+  /** `gemini`: a Gemini chat (from 1.39.1 in + Channel too); `custom`: a custom agent's ACP chat (phase 2), naming its agent. */
+  addChatSession: (engine: 'claude' | 'codex' | 'gemini' | 'custom', agent?: { id: string; name: string }) => void;
   removeSession: (id: string) => void;
   updateConfig: (id: string, config: AgentConfig) => void;
   resetCodexConfig: (id: string) => void;
@@ -250,7 +250,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return true;
   },
   // Only the session just added becomes a chat: with eight already, none is added, and the last one is left as it was.
-  addChatSession: (engine) => { const before = new Set(get().sessions.map((session) => session.id)); get().addSession(engine); set((state) => { const added = state.sessions.find((session) => !before.has(session.id)); return added && added.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === added.id && isBuiltInAgent(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : state; }); },
+  addChatSession: (engine, agent) => { const before = new Set(get().sessions.map((session) => session.id)); get().addSession(engine, undefined, agent); set((state) => { const added = state.sessions.find((session) => !before.has(session.id)); return added && added.config.engine === engine ? { sessions: state.sessions.map((session) => session.id === added.id && isAgentConfig(session.config) ? { ...session, config: { ...session.config, chat: true } } : session) } : state; }); },
   addSession: (engine, sourceSessionId, agent) => set((state) => {
     if (state.sessions.length >= MAX_CHANNELS) return state;
     const source = state.sessions.find((session) => session.id === sourceSessionId);

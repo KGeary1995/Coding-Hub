@@ -32,7 +32,9 @@ export class CustomStatusReader {
   }
 
   /** What the person typed in the channel: Enter starts a turn (and answers a question the agent asked). */
-  input(data: string) { if (/[\r\n]/.test(data)) { this.armed = true; this.answered = Date.now(); this.output = false; this.wait(); } }
+  input(data: string) { if (/[\r\n]/.test(data)) this.begin(); }
+  /** A turn starts: Enter in the channel, or a run started with its first request as arguments (`firstRequest`). */
+  begin() { this.armed = true; this.answered = Date.now(); this.output = false; this.wait(); }
 
   push(data: string) {
     if (this.disposed) return;

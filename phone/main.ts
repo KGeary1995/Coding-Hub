@@ -274,7 +274,7 @@ async function showSettings(channel: RemoteChannel) {
     const agent = now.engine !== 'shell';
     const note = h('small', { className: 'dim' }, now.permissions ? PERMISSION_NOTE[now.permissions] : '');
     const permissions = h('select', { aria: { label: 'Permissions' }, onchange: () => { note.textContent = PERMISSION_NOTE[permissions.value as keyof typeof PERMISSION_NOTE]; } }, ...PERMISSIONS.map(([value, label]) => h('option', { value, selected: value === now.permissions }, label)));
-    const cli = ENGINE[now.engine]; const listed = now.models.some((item) => item.id === now.model);
+    const cli = now.agent?.name ?? ENGINE[now.engine]; const listed = now.models.some((item) => item.id === now.model);
     const model = h('select', { aria: { label: 'Model' }, disabled: now.running, onchange: () => fillEfforts() },
       h('option', { value: '', selected: !now.model }, `${cli}’s default`), ...now.models.map((item) => h('option', { value: item.id, selected: item.id === now.model }, item.name)),
       now.model && !listed ? h('option', { value: now.model, selected: true }, `${modelLabel(now.model)} · saved`) : null);
@@ -284,12 +284,15 @@ async function showSettings(channel: RemoteChannel) {
       const levels = now.models.find((item) => item.id === model.value)?.efforts ?? ['none', 'low', 'medium', 'high', 'xhigh']; const chosen = effort.options.length ? effort.value : now.effort ?? '';
       effort.replaceChildren(h('option', { value: '' }, `${cli}’s default`), ...levels.map((level) => h('option', { value: level }, level)), ...(chosen && !levels.includes(chosen) ? [h('option', { value: chosen }, `${chosen} · saved`)] : [])); effort.value = chosen;
     };
+    // A custom agent (docs/custom-agents.md) has the levels and a model only when its definition maps them.
+    const levels = !now.agent || now.agent.permissions; const takesModel = !now.agent || now.agent.models;
     if (agent) {
-      fields.push(h('label', { className: 'field' }, 'Permissions', permissions, note));
+      fields.push(levels ? h('label', { className: 'field' }, 'Permissions', permissions, note) : h('p', { className: 'dim' }, 'This agent has no permission levels in Trace. It asks, or not, as its own settings say.'));
       // No list (the CLI did not answer in time, or is signed out): the model stays as it is, and the computer can change it.
-      fields.push(now.models.length ? h('label', { className: 'field' }, 'Model', model) : h('p', { className: 'dim' }, `${cli} did not list its models, so the model stays ${now.model ? modelLabel(now.model) : 'its default'}. Try again in a moment, or change it on the computer.`));
+      if (!takesModel) fields.push(h('p', { className: 'dim' }, `${cli} takes no model setting in Trace.`));
+      else fields.push(now.models.length ? h('label', { className: 'field' }, 'Model', model) : h('p', { className: 'dim' }, now.agent ? `${cli}’s definition lists no models, so the model stays ${now.model || 'its default'}. Choose another on the computer.` : `${cli} did not list its models, so the model stays ${now.model ? modelLabel(now.model) : 'its default'}. Try again in a moment, or change it on the computer.`));
       if (now.engine === 'codex') { fillEfforts(); fields.push(h('label', { className: 'field' }, 'Reasoning effort', effort)); }
-      if (now.running) fields.push(h('p', { className: 'dim' }, `The model${now.engine === 'codex' ? ' and reasoning effort change' : ' changes'} only while the channel is stopped.${now.chat ? ' Permissions change at once.' : ' Permissions apply when it next starts.'}`));
+      if (now.running && (levels || takesModel)) fields.push(h('p', { className: 'dim' }, `The model${now.engine === 'codex' ? ' and reasoning effort change' : ' changes'} only while the channel is stopped.${now.chat ? ' Permissions change at once.' : ' Permissions apply when it next starts.'}`));
     }
     const problem = h('p', { className: 'error', aria: { role: 'alert' } }); const save = h('button', { className: 'primary', type: 'submit' }, 'Save');
     body.replaceChildren(...fields, problem, save);
@@ -298,8 +301,8 @@ async function showSettings(channel: RemoteChannel) {
       // Only what was changed is sent, so a setting changed on the computer meanwhile is not put back.
       const change: RemoteChannelChange = { sessionId: now.sessionId };
       if (name.value.trim() && name.value.trim() !== now.title) change.title = name.value.trim();
-      if (agent && permissions.value !== now.permissions) change.permissions = permissions.value as RemoteChannelChange['permissions'];
-      if (agent && now.models.length && !now.running && model.value !== (now.model ?? '')) change.model = model.value;
+      if (agent && levels && permissions.value !== now.permissions) change.permissions = permissions.value as RemoteChannelChange['permissions'];
+      if (agent && takesModel && now.models.length && !now.running && model.value !== (now.model ?? '')) change.model = model.value;
       if (now.engine === 'codex' && !now.running && (effort.value || null) !== (now.effort ?? null)) change.effort = effort.value || null;
       if (Object.keys(change).length === 1) { close(); return; }
       save.disabled = true; status.textContent = 'Saving…';
@@ -343,7 +346,9 @@ function addMenu() {
   const kinds: { label: string; engine: ChannelEngine; chat: boolean; agent?: string }[] = [
     { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini', engine: 'gemini', chat: false },
     { label: 'Claude Code chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true }, { label: 'Gemini chat', engine: 'gemini', chat: true },
-    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id }))];
+    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id })),
+    // Each that speaks ACP as a chat too (custom agents, phase 2).
+    ...(me?.agents ?? []).filter((agent) => agent.chat).map((agent) => ({ label: `${agent.name} chat`, engine: 'custom' as const, chat: true, agent: agent.id }))];
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
     ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat, undefined, kind.agent); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
   const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');
@@ -597,14 +602,15 @@ function showChannel(sessionId: string) {
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
   // A chat channel: the conversation itself, as on the computer (phone/chat.tsx), with its approvals and Round Table.
-  // A Gemini chat too (one that leads a Round Table, from 1.39); only Claude Code and Codex chats open a table from here.
-  if (channel?.chat && channel.engine !== 'shell' && channel.engine !== 'custom') {
+  // A Gemini chat too (one that leads a Round Table, from 1.39), and a custom agent's ACP chat (phase 2); only Claude Code
+  // and Codex chats open a table from here.
+  if (channel?.chat && channel.engine !== 'shell') {
     holding = false; shownChat = `${channel.sessionId}:${channel.runId}:${channel.running}`;
     const container = h('main', { className: 'chat-host' });
     // Where Start, Stop and Restart say why they failed: a chat has no send-error line of its own here.
     app.replaceChildren(header(showList, h('span', { className: 'title', id: 'channel-title' }), controlsBox(channel)), h('p', { id: 'control-error', className: 'error control-error', hidden: true, aria: { role: 'alert' } }), container);
-    unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat,
-      ...(me?.canRun && channel.engine !== 'gemini' && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
+    unmountChat = mountChat(container, { sessionId, runId: channel.runId, engine: channel.engine, running: channel.running, send: chat, ...(channel.agent ? { agentName: channel.agent.name } : {}),
+      ...(me?.canRun && channel.engine !== 'gemini' && channel.engine !== 'custom' && (!channel.computer || channel.computer.id === me.computer) ? { openTable: () => openTableHere(channel) } : {}),
       follow: (id) => follow(id, (event) => { if (event.type === 'chat') receiveChat(event.data); else if (event.type === 'chat-replay') receiveReplay(event.data); }, () => {}, () => {}) });
     renderChannel(); listen(sessionId);
     return;

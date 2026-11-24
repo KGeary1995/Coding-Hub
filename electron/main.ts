@@ -85,7 +85,8 @@ import { GEMINI_PLUGIN, GEMINI_TOOL_RULES, geminiConfigRoot, geminiPluginOff, in
 import { setBackupRoot } from './services/hub/file-backups';
 import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../shared/types';
 import { CustomAgents } from './services/agents/agents';
-import { buildCustomLaunch, takesTools, type McpServer } from './services/agents/launch';
+import { buildAcpLaunch, buildCustomLaunch, takesTools, type McpServer } from './services/agents/launch';
+import { AGENT_ID } from '../shared/agent-definition';
 import { isBuiltInRun } from '../shared/ipc';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
@@ -347,7 +348,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
 }, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
   beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.engine === 'gemini' || config.engine === 'custom' ? undefined : config.memoryKey) : Promise.resolve(),
-  customLaunch: (run, config, base) => customLaunch(run, config, base), customStatus: (agentId) => customAgents?.status(agentId) ?? null, prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
+  customLaunch: (run, config, base, prompt) => customLaunch(run, config, base, prompt), customStatus: (agentId) => customAgents?.status(agentId) ?? null, prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
   // Gemini CLI resumes agy's own conversation. Its usage is read from that conversation's file once the run has started
   // (telemetry.startGemini). Shared memory and the channel tools come from Trace's agy plugin (gemini-plugin.ts), told
@@ -425,21 +426,25 @@ let customAgents: CustomAgents | null = null;
  * how the program takes MCP servers, shared memory (with its notes as instructions) and the channel tools. A claude-json
  * file goes where the channel tools' files go, and is removed with them when the run ends or does not start.
  */
-async function customLaunch(run: AgentRunningSession, config: CustomChannelConfig, base: Record<string, string>) {
+async function customLaunch(run: AgentRunningSession, config: CustomChannelConfig, base: Record<string, string>, prompt?: string) {
   if (!customAgents) throw new HubError('CUSTOM_AGENTS', 'Custom agents are unavailable: Trace’s storage could not be opened.');
   const { definition, executable } = await customAgents.launchable(config.agentId, base);
   return timed('launch-prepare', () => {
     hub?.rules.verifyLaunch(run.cwd);
     const servers: Record<string, McpServer> = {}; let instructions: string | null = null;
-    if (takesTools(definition)) {
+    // An ACP chat takes MCP servers in its protocol (every ACP agent must take stdio servers), whatever its terminal takes.
+    if (takesTools(definition) || config.chat) {
       const memory = autoMemory?.customMemory(run.cwd) ?? null; if (memory) { servers['coding-hub-memory'] = memory.server; instructions = memory.context; }
       const toolsUrl = channelTools.register(run.runId);
       if (toolsUrl) servers['trace-channels'] = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
     }
+    const common = { file: executable.file, name: definition.name, status: definition.status };
+    // A chat (phase 2): the program as an ACP server; its level is Trace's to keep (modes and answers), so the channel's own.
+    if (config.chat) { const launch = buildAcpLaunch({ definition, config, servers, instructions }); return { ...common, level: permissionLevel(config), args: [...executable.prefixArgs, ...launch.args], env: { ...base, ...executable.extraEnv, ...launch.env }, chat: launch.agent }; }
     const folder = path.join(storageRoot, 'channel-tools'); const mcpFile = path.join(folder, `${run.runId}.mcp.json`);
-    const launch = buildCustomLaunch({ definition, config, servers, instructions, mcpFile });
+    const launch = buildCustomLaunch({ definition, config, servers, instructions, mcpFile, ...(prompt ? { prompt } : {}) });
     if (launch.mcpConfig) { fs.mkdirSync(folder, { recursive: true, mode: 0o700 }); fs.writeFileSync(mcpFile, launch.mcpConfig, { mode: 0o600 }); channelToolFiles.set(run.runId, mcpFile); }
-    return { file: executable.file, args: [...executable.prefixArgs, ...launch.args], env: { ...base, ...executable.extraEnv, ...launch.env }, status: definition.status };
+    return { ...common, args: [...executable.prefixArgs, ...launch.args], env: { ...base, ...executable.extraEnv, ...launch.env }, prompted: launch.prompted };
   });
 }
 
@@ -527,7 +532,8 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-unlink'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-input'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), data: z.string().min(1).max(4096) }).strict(),
   z.object({ action: z.literal('linked-control'), id: z.uuid(), sessionId: z.string().min(1).max(100), control: z.enum(['start', 'stop', 'restart', 'close']) }).strict(),
-  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), chat: z.boolean().optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'gemini')), 'Only Claude Code and Codex channels can be chats.'),
+  z.object({ action: z.literal('linked-add'), id: z.uuid(), engine: z.enum(['claude', 'codex', 'gemini', 'custom', 'shell']), chat: z.boolean().optional(), agent: z.string().regex(AGENT_ID).optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'gemini' || value.engine === 'custom')), 'Only Claude Code and Codex channels can be chats.').refine((value) => (value.engine === 'custom') === Boolean(value.agent), 'A custom agent channel names its agent.'),
+  z.object({ action: z.literal('linked-agents'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
@@ -612,7 +618,8 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-unlink') return linked.unlink(request.id);
   if (request.action === 'linked-input') { await linked.input(request.id, request.sessionId, request.runId, request.data, AbortSignal.timeout(INPUT_TIMEOUT)); return null; }
   if (request.action === 'linked-control') { await linked.control(request.id, request.sessionId, request.control); return null; }
-  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && (request.engine === 'claude' || request.engine === 'codex')); return null; }
+  if (request.action === 'linked-add') { await linked.add(request.id, request.engine, request.chat === true && (request.engine === 'claude' || request.engine === 'codex'), request.agent); return null; }
+  if (request.action === 'linked-agents') return linked.agents(request.id);
   if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
   if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
   if (request.action === 'linked-update') return linked.update(request.id);
@@ -655,17 +662,19 @@ async function channelSettings(sessionId: string): Promise<RemoteChannelSettings
   const within = <T>(work: Promise<T>): Promise<T | null> => Promise.race([work.catch(() => null), new Promise<null>((resolve) => { setTimeout(() => resolve(null), 8000).unref(); })]);
   let models: RemoteChannelSettings['models'] = [];
   if (config.engine === 'claude') models = (hub?.catalog.current().claudeModels ?? [...CLAUDE_MODELS]).map((id) => ({ id, name: modelLabel(id) }));
-  // A custom agent: the models its definition lists (its program's own list is not run for a phone).
+  // A custom agent: the models its definition lists, and those its program listed when the computer last asked (it is
+  // not run for a phone).
   else if (config.engine === 'custom') models = (customAgents?.choices(config.agentId) ?? []).map((id) => ({ id, name: id }));
   else if (config.engine === 'codex') {
     const cwd = running?.cwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : saved.rootDirectory);
     const catalog = await within(Promise.resolve().then(() => modelCatalog.execute({ action: 'codex-models', directory: cwd ?? null })));
     models = (catalog?.models ?? []).filter((item) => !item.hidden || item.model === config.model).map((item) => ({ id: item.model, name: item.displayName || modelLabel(item.model), ...(item.reasoningEfforts.length ? { efforts: item.reasoningEfforts } : {}) }));
   } else models = ((await within(geminiModels()))?.models ?? []).map((item) => ({ id: item.model, name: item.displayName }));
-  return { ...base, permissions: permissionLevel(config), model: config.model, ...(config.engine === 'codex' ? { effort: config.reasoningEffort } : {}), models };
+  const agent = config.engine === 'custom' ? { name: customAgents?.look(config.agentId)?.name ?? config.agentId, ...customAgents?.settings(config.agentId) ?? { models: false, permissions: false } } : null;
+  return { ...base, permissions: permissionLevel(config), model: config.model, ...(config.engine === 'codex' ? { effort: config.reasoningEffort } : {}), models, ...(agent ? { agent } : {}) };
 }
 /** A linked computer (or a phone allowed to) adds a channel here: the window adds it to this computer's workspace, as + Channel does. */
-function addChannel(engine: ChannelEngine, chat = false, like?: string, agent?: string): Promise<void> { return askWindow({ add: engine, ...(chat && (engine === 'claude' || engine === 'codex') ? { chat: true as const } : {}), ...(like ? { like } : {}), ...(engine === 'custom' && agent ? { agent } : {}) }); }
+function addChannel(engine: ChannelEngine, chat = false, like?: string, agent?: string): Promise<void> { return askWindow({ add: engine, ...(chat && engine !== 'shell' ? { chat: true as const } : {}), ...(like ? { like } : {}), ...(engine === 'custom' && agent ? { agent } : {}) }); }
 /**
  * A phone resumes a conversation from Session history here: the window adds the channel, as Resume there does. The key
  * must be one the history lists, and the conversation's own folder is used (a phone cannot choose another).
@@ -1019,7 +1028,8 @@ else app.whenReady().then(() => {
 
 It runs without a shell. Save it only if you trust this program.` })).response === 0,
     confirmRun: async (run) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run', 'Cancel'], defaultId: 1, cancelId: 1, title: run.title, message: run.message, detail: run.detail })).response === 0,
-  });
+  // "From a list" fetches from local repositories in smoke tests, as plugins do; never set in use.
+  }, process.env.CODING_HUB_TEST_PLUGIN_GIT ? { github: { url: (owner, name) => path.join(process.env.CODING_HUB_TEST_PLUGIN_GIT!, owner, name) } } : {});
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   const readyForBackup = async () => { if (manager.hasSessions || scheduledJobs.running || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all channels and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
@@ -1110,6 +1120,8 @@ It runs without a shell. Save it only if you trust this program.` })).response =
   // Other computers: each advertises its remote's tailnet address through the Drive sync folder, and links with a code.
   if (hub) {
     const devices = hub.devices; phone.identity = devices.machine;
+    // Custom agent definitions sync too; one from another computer stays Off here until confirmed (docs/custom-agents.md).
+    devices.agents = customAgents;
     // This computer's Drive folder was moved to the one its other computers use: said here and as a notification.
     devices.onJoined = (moved) => { hostHealth?.record('sync-folder-joined'); desktopAlert({ title: 'Trace now syncs with your other computers', body: `This computer’s Drive folder was changed to ${moved.to}, which ${moved.computers.join(', ')} ${moved.computers.length === 1 ? 'uses' : 'use'}. Settings → Sync between computers can move it back.`, target: { view: 'settings' } }, true); };
     // Auto-link needs no code, so the person is always told, even with Trace in front; clicking opens that computer's tab.

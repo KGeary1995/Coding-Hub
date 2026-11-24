@@ -149,6 +149,7 @@
 .seat-claude { --tone: var(--tr-ch-claude); }
 .seat-codex { --tone: var(--tr-ch-codex); }
 .seat-gemini { --tone: var(--tr-ch-gemini); }
+.seat-custom { --tone: var(--tr-ch-custom); }
 .seat-planner { --tone: var(--tr-ch-planner); }
 /* With its lists open (challenges, findings) the bar scrolls in itself past 60% of the chat, so the thread keeps its room in a small tile. */
 .table-bar { max-height: 60%; overflow-y: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 12px; border-bottom: 1px solid var(--tr-line); background: var(--tr-surface); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
@@ -184,6 +185,7 @@
 .seat-text-claude { color: var(--tr-ch-claude); }
 .seat-text-codex { color: var(--tr-ch-codex); }
 .seat-text-gemini { color: var(--tr-ch-gemini); }
+.seat-text-custom { color: var(--tr-ch-custom); }
 .table-rounds { display: inline-flex; align-items: center; gap: 8px; color: var(--tr-fg-muted); font: 500 12px/16px var(--tr-font-ui); }
 .table-rounds select { height: 24px; min-height: 24px; padding: 0 8px; border: 1px solid var(--tr-line-control); border-radius: var(--tr-r-small); background-color: var(--tr-well); color: var(--tr-fg); font: 500 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
 .table-status { margin-left: auto; color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); }
@@ -195,12 +197,13 @@
 .table-claude { --tone: var(--tr-ch-claude); }
 .table-codex { --tone: var(--tr-ch-codex); }
 .table-gemini { --tone: var(--tr-ch-gemini); }
+.table-custom { --tone: var(--tr-ch-custom); }
 .table-planner { --tone: var(--tr-ch-planner); }
 .seat-hex { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
 .chat-author .seat-hex { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 14%, transparent); color: color-mix(in srgb, var(--tone) 80%, var(--tr-fg-strong)); }
 .chat-author .seat-hex svg { width: 12px; height: 12px; }
-.chat-message.assistant:is(.table-claude, .table-codex, .table-gemini, .table-planner) { padding-left: 32px; }
-.chat-message.assistant:is(.table-claude, .table-codex, .table-gemini, .table-planner) > .chat-author { margin-left: -32px; }
+.chat-message.assistant:is(.table-claude, .table-codex, .table-gemini, .table-custom, .table-planner) { padding-left: 32px; }
+.chat-message.assistant:is(.table-claude, .table-codex, .table-gemini, .table-custom, .table-planner) > .chat-author { margin-left: -32px; }
 /* A chat on another computer (its tab here, or the phone): the same thread; an enlarged image covers the view. */
 .remote-chat { flex: 1; min-height: 0; }
 /* Clear of an iPhone's notch and home bar (env() is 0 elsewhere), so Close can be reached (1.31.4). */
@@ -251,6 +254,7 @@
 .chain-seats .seat-claude + strong { --tone: var(--tr-ch-claude); }
 .chain-seats .seat-codex + strong { --tone: var(--tr-ch-codex); }
 .chain-seats .seat-gemini + strong { --tone: var(--tr-ch-gemini); }
+.chain-seats .seat-custom + strong { --tone: var(--tr-ch-custom); }
 .chain-seats .seat-planner + strong { --tone: var(--tr-ch-planner); }
 .chain-seats .working { color: var(--tr-fg-strong); }
 /* Codex's challenges to the plan, with the planner's answers. */

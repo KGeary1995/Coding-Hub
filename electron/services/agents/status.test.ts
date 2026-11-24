@@ -40,6 +40,11 @@ describe('custom agent status', () => {
     // A progress bar (OSC 9;4) is not a notification.
     made.input('more\r'); made.push('\x1b]9;4;1;50\x07'); expect(changes).toHaveLength(3);
   });
+  it('a run started with its first request as arguments has a turn under way without an Enter', async () => {
+    const { changes, made } = reader({ turnEnd: ['^> $'] });
+    made.begin(); await sleep(300); made.push('Working on it…\r\nDone.\r\n> '); await sleep(120);
+    expect(changes).toEqual([{ kind: 'turn-ended' }]);
+  });
   it('without any signal named it reports nothing', async () => {
     const { changes, made } = reader(undefined);
     await turn(made, 'answer\r\n> '); await sleep(100); expect(changes).toEqual([]);

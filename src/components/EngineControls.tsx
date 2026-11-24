@@ -65,7 +65,7 @@ function MemoryProjectControl({ config, directory, onChange }: { config: ChatEng
 
 /** A custom agent's channel has its own settings (docs/custom-agents.md); the built-in CLIs have theirs below. */
 export function EngineControls({ id, config, directory = null, onChange }: { id: string; config: AgentConfig; directory?: string | null; onChange: (config: AgentConfig) => void }) {
-  return config.engine === 'custom' ? <CustomAgentControls config={config} onChange={onChange} /> : <BuiltInControls id={id} config={config} directory={directory} onChange={onChange} />;
+  return config.engine === 'custom' ? <CustomAgentControls config={config} directory={directory} onChange={onChange} /> : <BuiltInControls id={id} config={config} directory={directory} onChange={onChange} />;
 }
 function BuiltInControls({ id, config, directory, onChange }: { id: string; config: CLIEngineConfig; directory: string | null; onChange: (config: CLIEngineConfig) => void }) {
   const { profiles, error } = useAccountStore();

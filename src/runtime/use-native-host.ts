@@ -3,6 +3,7 @@ import type { ChannelControl, RemoteChannelChange, RemoteResumeRequest } from '.
 import { permissionLevel } from '../../shared/schemas';
 import type { ChannelEngine, Session } from '../../shared/types';
 import { HIERARCHY_MODELS, RETIRED_REVIEWER_MODELS } from '../../shared/chat';
+import { promptFits } from '../../shared/agent-definition';
 import { refreshLinked, routeLinkedEvent } from './linked-terminals';
 import { linkedChatKey, receiveChat, receiveReplay } from '../components/chat/RemoteChat';
 import { archiveFindings, forgetTable, rememberTable, restoreTables } from './round-table';
@@ -63,6 +64,7 @@ import { receiveUndo } from '../state/undo-store';
 import { scheduledRun } from './scheduled-run';
 import { loadPreviews, receivePreview } from '../state/preview-store';
 import { lookOf, useAgentStore } from '../state/agent-store';
+import { validResumeId } from '../../shared/agent-definition';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -108,6 +110,8 @@ export function useNativeHost() {
     const unsubscribeChat = host.onChatEvent((envelope) => {
       // The agent refused a permission change: the control shows the level still in effect.
       if (envelope.event.type === 'permissions') { void permissionsRefused(envelope.sessionId, envelope.runId, envelope.event.level); return; }
+      // A custom agent's chat names its ACP session once ready: kept as its conversation, so a restart loads it (Trace reads no usage files of its).
+      if (envelope.event.type === 'ready') keepAcpSession(envelope.sessionId, envelope.runId, envelope.event.conversationId);
       applyChatEvent(envelope); if (envelope.event.type === 'done') chatTurnDone(envelope.sessionId, envelope.event.isError); if (envelope.event.type === 'table' && envelope.event.table) { rememberTable(envelope.sessionId, envelope.event.table); chainTasks(envelope.sessionId, envelope.event.table); }
       // Tasks from Tasks the host removed from a hierarchy table without starting them (dropped, or the table closed): back to To do.
       if (envelope.event.type === 'table' && envelope.event.discarded?.length) void returnTasks(envelope.sessionId, envelope.event.discarded, envelope.event.table?.chain?.task);
@@ -214,11 +218,15 @@ export async function resumeChannels(ids: string[], kept: string[] = []) {
   useWorkspaceStore.setState((state) => ({ loadNotice: state.loadNotice ? `${state.loadNotice} ${line}` : line }));
 }
 
-export async function startSession(id: string) {
+/**
+ * Starts a channel. `firstRequest`: a custom agent's first request, which its host gives the program as arguments when
+ * the definition says how (docs/custom-agents.md). Whether it did: otherwise the caller types it once the agent is ready.
+ */
+export async function startSession(id: string, options: { firstRequest?: string } = {}): Promise<boolean> {
   const state = useWorkspaceStore.getState();
-  if (!state.persistenceReady) return;
+  if (!state.persistenceReady) return false;
   const session = state.sessions.find((item) => item.id === id);
-  if (!session || session.status === 'running' || session.status === 'starting') return;
+  if (!session || session.status === 'running' || session.status === 'starting') return false;
   // A hierarchy table's reviewer saved before it had a model of its own would start on whatever Codex's settings
   // default to, and one saved on a retired reviewer model (gpt-6-astra) on that: both get the table's (Models on the bar
   // can change it while the channel is stopped).
@@ -227,17 +235,19 @@ export async function startSession(id: string) {
   if (session.config.engine === 'codex' && hierarchyLead?.kind === 'hierarchy' && (RETIRED_REVIEWER_MODELS.includes(session.config.model) || (!session.config.model && !hierarchyLead.seats))) {
     state.updateConfig(id, { ...session.config, model: HIERARCHY_MODELS.reviewer });
     const updated = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
-    if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id);
+    if (updated?.config.engine === 'codex' && updated.config.model) return startSession(id, options);
   }
-  if (!window.codingHub) { state.setSessionError(id, 'Live channels require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return; }
+  if (!window.codingHub) { state.setSessionError(id, 'Live channels require the Electron desktop app. Run npm.cmd run dev on Windows, or npm run dev on macOS/Linux.', true); return false; }
   // A Round Table's lead starts in its table's folder (its hidden seats keep theirs), so the table can be seated again.
   const cwd = tableDirectory(state.sessions, session) ?? (session.binding.mode === 'independent' ? session.binding.cwd : state.rootDirectory);
-  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository folder first.', true); return; }
-  state.markStarting(id);
+  if (!cwd) { state.setSessionError(id, 'Choose a workspace root or an independent repository folder first.', true); return false; }
+  state.markStarting(id); let prompted = false;
+  const firstRequest = session.config.engine === 'custom' && options.firstRequest && promptFits(options.firstRequest) ? options.firstRequest : undefined;
   try {
-    const result = await window.codingHub.startSession({ sessionId: id, cwd, config: session.config, ...terminalDimensions(id) });
+    const result = await window.codingHub.startSession({ sessionId: id, cwd, config: session.config, ...terminalDimensions(id), ...(firstRequest ? { firstRequest } : {}) });
     if (!result.ok) useWorkspaceStore.getState().setSessionError(id, result.error.message, true);
     else {
+      prompted = result.value.prompted === true;
       // The started event usually precedes the invoke reply; never overwrite a later exit.
       if (useWorkspaceStore.getState().sessions.find((item) => item.id === id)?.status === 'starting') {
         useWorkspaceStore.getState().applyEvent({ type: 'started', ...result.value });
@@ -250,6 +260,7 @@ export async function startSession(id: string) {
   const lead = useWorkspaceStore.getState().sessions.find((item) => item.id === id);
   const seats = hiddenSeats(useWorkspaceStore.getState().sessions, id);
   await Promise.all(seats.map((seat) => lead?.status === 'running' && seat.status !== 'running' && seat.status !== 'starting' ? startSession(seat.id) : undefined));
+  return prompted;
 }
 
 /** Waits (up to `ms`) until none of these sessions is running, or only until they are past starting. */
@@ -345,11 +356,19 @@ export async function remoteSettings(change: RemoteChannelChange): Promise<strin
 }
 /** A linked computer's + Channel: adds the channel here, as this window's own + Channel does. */
 /** `agent`: a custom agent's id, for a 'custom' channel; it is named as the Agents page lists it. */
+/** A custom agent's chat (phase 2) keeps the ACP session it runs as its `resumeId`, when the id is one a config may hold. */
+function keepAcpSession(sessionId: string, runId: string, conversationId: string) {
+  const fits = (session: Session) => session.id === sessionId && session.runId === runId && session.config.engine === 'custom' && session.config.chat === true && session.config.resumeId !== conversationId;
+  if (!validResumeId(conversationId) || !useWorkspaceStore.getState().sessions.some(fits)) return;
+  useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => fits(session) && session.config.engine === 'custom' ? { ...session, config: { ...session.config, resumeId: conversationId } } : session) }));
+}
 export function remoteAdd(engine: ChannelEngine, chat = false, like?: string, agent?: string): string | undefined {
   const before = useWorkspaceStore.getState().sessions.length;
   const full = channelsFullNote(useWorkspaceStore.getState().sessions); if (full) return full;
-  // A chat channel (Claude, Codex or Gemini chat) when the phone or other computer asked for one.
-  if (chat && (engine === 'claude' || engine === 'codex' || engine === 'gemini')) useWorkspaceStore.getState().addChatSession(engine); else useWorkspaceStore.getState().addSession(engine, undefined, engine === 'custom' && agent ? { id: agent, name: lookOf(useAgentStore.getState().agents, agent).name } : undefined);
+  // A chat channel (Claude, Codex or Gemini chat, or a custom agent's ACP chat) when the phone or other computer asked for one.
+  const named = engine === 'custom' && agent ? { id: agent, name: lookOf(useAgentStore.getState().agents, agent).name } : undefined;
+  if (chat && engine === 'custom' && !useAgentStore.getState().agents.some((item) => item.id === agent && item.look.chat)) return `${named?.name ?? 'This agent'} has no chat: its definition has no acp arguments.`;
+  if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine, named); else useWorkspaceStore.getState().addSession(engine, undefined, named);
   // In the folder another channel works in (a Round Table's seat), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
   if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);

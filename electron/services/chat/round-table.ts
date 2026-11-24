@@ -1,15 +1,16 @@
 import type { ChatEnvelope, ChatEvent, ChatImage, RoundTableState } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
-import type { PermissionLevel } from '../../../shared/types';
+import type { PermissionLevel, SeatEngine } from '../../../shared/types';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
 import { checkSeats, seatNames, type SeatSettings, type TableKind } from '../../../shared/table-seats';
 
-type Engine = 'claude' | 'codex' | 'gemini';
+type Engine = SeatEngine;
 /** What the coordinator needs from the run manager: chat runs it can read about and write to on the person's behalf. */
 export interface TableHost {
   /** `permissions`: the level the person set for the run; at Full a read-only seat runs its commands without asking. */
   /** `busy`: the run is still in a turn it was given before (by an earlier table, say): its `done` has not come yet. */
-  run(runId: string): { sessionId: string; engine: Engine; cwd: string; owner: number; permissions?: PermissionLevel; busy?: boolean } | null;
+  /** `agentName`: a custom agent's name (its seat's default name). */
+  run(runId: string): { sessionId: string; engine: Engine; agentName?: string; cwd: string; owner: number; permissions?: PermissionLevel; busy?: boolean } | null;
   send(runId: string, text: string, images: ChatImage[]): void;
   setReadOnly(runId: string, readOnly: boolean): void;
   answer(runId: string, requestId: string, allow: boolean): void;
@@ -21,7 +22,9 @@ export interface TableHost {
 /** A seat named for a table (table-open, table-seats): a running chat, with what the person set for it. Its session is read from the run (pty-manager checks a request's pair). */
 export interface SeatInput extends SeatSettings { runId: string; sessionId?: string }
 
-export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
+export const NAME: Record<Engine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent' };
+/** What an agent is called: a custom agent by its own name. */
+export const agentName = (seat: { engine: Engine; agentName?: string }) => (seat.engine === 'custom' && seat.agentName) || NAME[seat.engine];
 /** Names in a sentence: "A", "A and B", "A, B and C". */
 export const list = (names: readonly string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 /**
@@ -73,7 +76,7 @@ export function allowAtFull(host: TableHost, runId: string, requestId: string): 
 /** An answer saying the agent agrees and has nothing to add. */
 const AGREES = /^\s*\**AGREE\**\s*[.!]?\s*$/i;
 
-interface Seat { runId: string; sessionId: string; engine: Engine; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
+interface Seat { runId: string; sessionId: string; engine: Engine; agentName?: string; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
   /** Seated after the table opened (setSeats): its first brief carries the latest messages, word for word. */
   newcomer?: boolean;
   /** Still in a turn from before this table opened: its `done` ends that old turn and is never taken as an answer. */
@@ -134,7 +137,7 @@ export class RoundTables {
   }
   private seat(input: SeatInput): Seat {
     const run = this.host.run(input.runId); if (!run) throw new HubError('TABLE_RUN', 'That chat is not running.');
-    return { runId: input.runId, sessionId: run.sessionId, engine: run.engine, ...settings(input), busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
+    return { runId: input.runId, sessionId: run.sessionId, engine: run.engine, ...(run.agentName ? { agentName: run.agentName } : {}), ...settings(input), busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
   }
   private busy(table: Table) { return table.seats.some((seat) => seat.busy); }
   /** Each seat's name (its own, or its agent's; numbered when two would share one). */
@@ -146,12 +149,12 @@ export class RoundTables {
     const seat = seats.find((each) => each.sessionId === driver) ?? seats.find((each) => each.engine === driver);
     if (seat) return seat;
     // An engine no seat has (a table of two Claudes asked for Codex): the lead drives, as the table's own channel.
-    if (driver === 'claude' || driver === 'codex' || driver === 'gemini') return seats[0];
+    if (driver === 'claude' || driver === 'codex' || driver === 'gemini' || driver === 'custom') return seats[0];
     throw new HubError('TABLE_DRIVER', 'The seat that edits files must sit at this Round Table. Choose one of its seats.');
   }
   private state(table: Table): RoundTableState {
     const partner = table.seats[1];
-    return { seats: table.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, ...settings(seat) })), driverSeat: table.driver.sessionId,
+    return { seats: table.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, ...(seat.agentName ? { agentName: seat.agentName } : {}), ...settings(seat) })), driverSeat: table.driver.sessionId,
       partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, driver: table.driver.engine, rounds: table.rounds, round: table.round, phase: table.phase, agreed: table.agreed, findings: table.findings.map((finding) => ({ ...finding })), ...(table.queued ? { waiting: table.queued.text, ...this.keptImages(table.queued.images), ...(table.kept ? { waitingKept: true } : {}) } : {}) };
   }
   /** A waiting message's images go with the saved table up to KEEP_IMAGES of base64; beyond that they are counted as dropped. */
@@ -172,7 +175,7 @@ export class RoundTables {
     const names = this.names(table); const name = names.get(seat)!; const two = table.seats.length === 2;
     const otherNames = table.seats.filter((other) => other !== seat).map((other) => names.get(other)!); const others = list(otherNames);
     // A seat whose name is not simply its agent's (two Claudes, a name the person gave) is told what the others call it.
-    const self = !two || name !== NAME[seat.engine] ? ` The others call you ${name}.` : '';
+    const self = !two || name !== agentName(seat) ? ` The others call you ${name}.` : '';
     const role = seat === table.driver
       ? `You are the driver: you make the file changes, once the discussion is over. While Trace says to discuss, say how you would do it and change nothing (Trace keeps you read-only until then). When Trace tells you the discussion is over, carry out what the person asked without asking again whether to proceed; ask only about choices that are theirs to make, or before anything that publishes, deletes or cannot be undone.`
       : two ? `You are the reviewer: read files, give your own view of what the person asked and check the driver's plan and work, but do not edit files (Trace keeps you read-only).`
@@ -484,7 +487,7 @@ export class RoundTables {
   private remember(runId: string, event: ChatEvent) {
     const line = event.type === 'user' ? `The person: ${event.text}` : event.type === 'assistant' ? event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n') : '';
     if (!line.trim()) return;
-    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? NAME[run.engine] : 'Agent'}: `;
+    const run = this.host.run(runId); const who = event.type === 'user' ? '' : `${run ? agentName(run) : 'Agent'}: `;
     const lines = this.recent.get(runId) ?? []; lines.push(`${who}${line.slice(0, 2000)}`); if (lines.length > RECENT * 2) lines.splice(0, lines.length - RECENT * 2);
     this.recent.set(runId, lines);
   }

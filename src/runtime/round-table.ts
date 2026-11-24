@@ -4,6 +4,7 @@ import type { SeatEngine, Session } from '../../shared/types';
 import { BUILT_IN_PRESETS, checkSeats, MAX_SEATS, savedSeats, type SavedSeat, type SeatReference, type SeatSettings, type TablePreset, type TablePresetSeat } from '../../shared/table-seats';
 import { createSession, fitTiles, hiddenSeats, seatsOf, useWorkspaceStore } from '../state/workspace-store';
 import { tableOpenFailed } from '../state/hierarchy-state';
+import { lookOf, useAgentStore } from '../state/agent-store';
 export { hierarchyDetached, tableDetached } from '../state/hierarchy-state';
 import { checkPreset, leadIndex } from '../state/table-presets';
 import { useChatStore } from '../state/chat-store';
@@ -13,7 +14,11 @@ import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
 import { isAgentConfig, isChatRun, seatEngineOf } from '../../shared/types';
 
-const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const;
+const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent' } as const;
+/** A preset seat's agent by name: a custom agent's own (phase 2). */
+const agentLabel = (seat: TablePresetSeat) => seat.engine === 'custom' && seat.agent ? lookOf(useAgentStore.getState().agents, seat.agent).name : NAME[seat.engine];
+/** The custom agent a preset seat names, as a new channel takes it. */
+const agentOf = (seat: TablePresetSeat) => seat.engine === 'custom' && seat.agent ? { id: seat.agent, name: agentLabel(seat) } : undefined;
 /** Rounds a new table discusses after each message: both answer, then each replies to the other twice at most. */
 export const DEFAULT_ROUNDS = 2;
 /** The person sees one channel for a Round Table, but each seat is a CLI process of its own, so each counts toward the eight. */
@@ -35,7 +40,9 @@ const seatRecord = (session: string, seat: SeatSettings, hierarchy: boolean): Sa
 const seatReference = (seat: SavedSeat, session: Session): SeatReference => ({ sessionId: seat.session, runId: session.runId!, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: seat.duties } : {}) });
 /** A hidden seat's chat: this agent and model, in the lead's folder, with the lead's permissions and memory project (one table, one setting). */
 function seatSession(lead: Session, seat: TablePresetSeat, cwd: string): Session {
-  const added = createSession(seat.engine, { mode: 'independent', cwd }); const from = lead.config;
+  const added = createSession(seat.engine, { mode: 'independent', cwd }, agentOf(seat)); const from = lead.config;
+  // A custom agent's seat (phase 2): its ACP chat, with the lead's permissions; Trace's memory tools go to it in its protocol.
+  if (added.config.engine === 'custom') { added.config = { ...added.config, chat: true, model: seat.model ?? '', ...('permissions' in from && from.permissions ? { permissions: from.permissions } : {}) }; return added; }
   // A Gemini seat: its agent protocol server (plan mode while read-only), with its own model; its memory tools come from Trace's agy plugin, and what a reviewer may do is the table's to decline.
   // It takes the lead's permissions like every seat: at Full access the table answers its commands for it. Up to 1.29.0
   // it was seated without them, so it asked before every command whatever the table was set to.
@@ -85,7 +92,7 @@ export async function openTable(leadId: string, preset: TablePreset): Promise<st
   try {
     await Promise.all(added.map((seat) => startSession(seat.id)));
     const now = useWorkspaceStore.getState().sessions; const seat = (id: string) => now.find((session) => session.id === id);
-    for (const [index, item] of added.entries()) { const started = seat(item.id); if (!up(started)) { const why = started?.error ?? `${others[index].name?.trim() || NAME[others[index].engine]} could not be started.`; await retire(leadId); return why; } }
+    for (const [index, item] of added.entries()) { const started = seat(item.id); if (!up(started)) { const why = started?.error ?? `${others[index].name?.trim() || agentLabel(others[index])} could not be started.`; await retire(leadId); return why; } }
     const l = seat(leadId); if (!up(l)) { await retire(leadId); return 'This chat stopped before the Round Table opened.'; }
     const references = records.map((record) => seatReference(record, seat(record.session)!));
     const partner = references[1]; const plan = references.find((reference) => reference.sessionId === planner);
@@ -251,13 +258,13 @@ export async function startTable(preset: TablePreset): Promise<string | null> {
   if (before.size + preset.seats.length > MAX_CHANNELS) return tableFull(preset.seats.length);
   // A Gemini lead is a Gemini chat channel (from 1.39), as Claude Code's and Codex's are theirs.
   const seat = preset.seats[Math.max(0, leadIndex(preset))];
-  useWorkspaceStore.getState().addChatSession(seat.engine);
+  useWorkspaceStore.getState().addChatSession(seat.engine, agentOf(seat));
   const lead = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!lead || lead.config.engine !== seat.engine) return 'The Round Table could not be added.';
   if (seat.model) useWorkspaceStore.getState().updateConfig(lead.id, { ...lead.config, model: seat.model });
   await startSession(lead.id);
   const started = useWorkspaceStore.getState().sessions.find((session) => session.id === lead.id);
-  if (started?.status !== 'running') return started?.error ?? `${NAME[seat.engine]} could not be started.`;
+  if (started?.status !== 'running') return started?.error ?? `${agentLabel(seat)} could not be started.`;
   return openTable(lead.id, preset);
 }
 /** + Channel → Round Table: Claude Code with Codex (the built-in discussion table). Claude drives first; the person can swap. */
@@ -291,7 +298,7 @@ export function tableSeats(leadId: string): EditableSeat[] {
   const seats = seatsOf(sessions, leadId).flatMap(({ seat, session }) => session && isAgentConfig(session.config) ? [{ seat, session, model: session.config.model }] : []);
   // A table saved before seats were named has no driverSeat: the seat of the driver's agent.
   const driverId = table.kind === 'hierarchy' ? undefined : table.driverSeat ?? seats.find(({ session }) => session.config.engine === table.driver)?.seat.session;
-  return seats.map(({ seat, session, model }) => ({ engine: engineOf(session), model, ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
+  return seats.map(({ seat, session, model }) => ({ engine: engineOf(session), model, ...(session.config.engine === 'custom' ? { agent: session.config.agentId } : {}), ...(seat.name ? { name: seat.name } : {}), ...(seat.instructions ? { instructions: seat.instructions } : {}), ...(seat.duties ? { duties: [...seat.duties] } : {}), session: session.id, lead: session.id === leadId, driver: session.id === driverId, status: session.status }));
 }
 
 /** A plan for the seats of a table that is already open or saved: `session` names a seat that stays (with what the person now set), none a seat to add; seats not listed go. */
@@ -315,7 +322,7 @@ export async function changeSeats(leadId: string, plan: SeatPlan): Promise<strin
   const order = [at, ...plan.seats.map((_, index) => index).filter((index) => index !== at)]; const seats = order.map((index) => plan.seats[index]);
   const named = seats.flatMap((seat) => seat.session ? [seat.session] : []);
   if (new Set(named).size !== named.length || named.some((id) => !known.get(id))) return 'A seat in this change is not at the Round Table.';
-  for (const seat of seats) { const session = seat.session ? known.get(seat.session) : null; if (session && session.config.engine !== seat.engine) return 'A seat keeps its agent. Take it away and add another to change it.'; }
+  for (const seat of seats) { const session = seat.session ? known.get(seat.session) : null; if (session && (session.config.engine !== seat.engine || (session.config.engine === 'custom' && session.config.agentId !== seat.agent))) return 'A seat keeps its agent. Take it away and add another to change it.'; }
   const why = checkSeats(kind, seats, 0, !hierarchy && plan.driver !== undefined ? order.indexOf(plan.driver) : undefined); if (why) return why;
   if (!hierarchy && plan.driver !== undefined && !plan.seats[plan.driver]) return 'The seat that edits is not at the table.';
   if (plan.rounds !== undefined && (!Number.isInteger(plan.rounds) || plan.rounds < (hierarchy ? 1 : 0) || plan.rounds > 5)) return hierarchy ? 'A hierarchy Round Table reviews between 1 and 5 rounds.' : 'A Round Table discusses between 0 and 5 rounds.';

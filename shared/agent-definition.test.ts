@@ -21,6 +21,15 @@ describe('agent definitions', () => {
     expect(agentDefinitionSchema.safeParse({ schema: 1, id: 'my-agent', name: 'Mine', program: { command: 'C:\\Tools\\mine.exe' } }).success).toBe(true);
     expect(agentDefinitionSchema.safeParse({ schema: 1, id: 'node-agent', name: 'Node', program: { command: '/opt/agent/cli.js' } }).success).toBe(true);
   });
+  it('takes acp (phase 2): its arguments with no placeholder, and mode ids that are not flags; a definition without it stays valid', () => {
+    expect(refused((definition) => { definition.acp = { args: ['acp'], modes: { ask: 'plan', edits: 'accept-edits', full: 'auto' } }; })).toBeNull();
+    expect(refused((definition) => { definition.acp = { args: [] }; })).toBeNull();
+    expect(refused((definition) => { definition.acp = { args: ['--acp', '{model}'] }; })).toMatch(/can’t be used here/);
+    expect(refused((definition) => { definition.acp = { args: ['acp'], modes: { ask: '--yolo' } }; })).toMatch(/mode id/);
+    expect(refused((definition) => { definition.acp = { args: ['acp'], modes: { ask: 'plan', write: 'x' } }; })).not.toBeNull();
+    expect(refused((definition) => { definition.acp = { args: ['acp'], extra: 1 }; })).not.toBeNull();
+    expect(refused((definition) => { definition.acp = { args: ['line\nbreak'] }; })).not.toBeNull();
+  });
   it('refuses a shell, a batch file, or a command line in the program', () => {
     for (const command of ['cmd', 'cmd.exe', 'powershell', 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '/bin/bash', 'sh', 'pwsh', 'env', 'agy.cmd', 'C:\\x\\run.bat', 'tool.ps1', 'aider --yes', 'aider && calc', 'aider;rm', '-x', 'a\nb'])
       expect(refused((definition) => { definition.program.command = command; }), command).not.toBeNull();
@@ -69,11 +78,12 @@ describe('agent definitions', () => {
 });
 
 describe('custom agent channels', () => {
-  it('a custom channel names its agent, a model and a level, and is an agent but not a built-in one or a chat', () => {
+  it('a custom channel names its agent, a model and a level, and is an agent but not a built-in one; a chat only when it says so (phase 2)', () => {
     const config = { engine: 'custom', agentId: 'aider', model: 'sonnet', permissions: 'edits', resumeId: 'chat-1' } as const;
     expect(channelConfigSchema.safeParse(config).success).toBe(true);
     expect(startSessionSchema.safeParse({ sessionId: 'c1', cwd: '/p', config, cols: 80, rows: 24 }).success).toBe(true);
     expect(isAgentConfig(config)).toBe(true); expect(isBuiltInAgent(config)).toBe(false); expect(isChatRun(config)).toBe(false);
-    for (const bad of [{ ...config, agentId: 'claude!' }, { ...config, model: '--yolo' }, { ...config, resumeId: '-x' }, { ...config, chat: true }, { ...config, program: 'calc' }]) expect(channelConfigSchema.safeParse(bad).success).toBe(false);
+    expect(channelConfigSchema.safeParse({ ...config, chat: true }).success).toBe(true); expect(isChatRun({ ...config, chat: true })).toBe(true);
+    for (const bad of [{ ...config, agentId: 'claude!' }, { ...config, model: '--yolo' }, { ...config, resumeId: '-x' }, { ...config, chat: 'yes' }, { ...config, program: 'calc' }]) expect(channelConfigSchema.safeParse(bad).success).toBe(false);
   });
 });

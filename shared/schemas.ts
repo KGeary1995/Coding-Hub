@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { hiddenSeatIds } from './table-seats';
 import { MAX_COMMAND, MAX_STEP, MAX_WAIT_SECONDS, MAX_WAIT_TEXT } from './start-order';
-import { AGENT_ID, AGENT_MODEL, AGENT_RESUME_ID } from './agent-definition';
+import { AGENT_ID, AGENT_MODEL, AGENT_RESUME_ID, MAX_AGENT_PROMPT } from './agent-definition';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -55,7 +55,7 @@ const chatEngineOptions = [
 ] as const;
 export const engineConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, geminiConfigSchema]);
 /** A custom agent's channel (docs/custom-agents.md): it names its definition, never a program. */
-const customConfigSchema = z.object({ engine: z.literal('custom'), agentId: z.string().regex(AGENT_ID), model: z.string().max(120).refine((value) => value === '' || AGENT_MODEL.test(value), 'Use a model name, or leave blank for the programâ€™s default.'), permissions, resumeId: z.string().regex(AGENT_RESUME_ID).optional() }).strict();
+const customConfigSchema = z.object({ engine: z.literal('custom'), agentId: z.string().regex(AGENT_ID), model: z.string().max(120).refine((value) => value === '' || AGENT_MODEL.test(value), 'Use a model name, or leave blank for the programâ€™s default.'), permissions, resumeId: z.string().regex(AGENT_RESUME_ID).optional(), chat: z.boolean().optional() }).strict();
 // A plugin tile names its plugin and tile by the manifest's own id rules (electron/services/plugins/manifest.ts).
 const shellConfigSchema = z.object({ engine: z.literal('shell'), plugin: z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/), tile: z.string().regex(/^[A-Za-z0-9:_-]{1,64}$/) }).strict().optional() }).strict();
 /** Every channel type: the agents, and a plain terminal, which takes no settings. */
@@ -68,7 +68,7 @@ const legacyGeminiConfigSchema = z.object({ ...geminiFields, chat: z.boolean().o
 const legacyChannelConfigSchema = z.discriminatedUnion('engine', [...chatEngineOptions, legacyGeminiConfigSchema, customConfigSchema, shellConfigSchema]);
 export const dimensions = { cols: z.number().int().min(2).max(500), rows: z.number().int().min(1).max(300) };
 export const runReferenceSchema = z.object({ sessionId: identifier, runId: z.string().uuid() }).strict();
-export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.'), config: channelConfigSchema, ...dimensions }).strict();
+export const startSessionSchema = z.object({ sessionId: identifier, cwd: z.string().min(1).max(4096).refine((value) => !value.includes('\0'), 'Invalid folder path.'), config: channelConfigSchema, ...dimensions, firstRequest: z.string().min(1).max(MAX_AGENT_PROMPT).refine((value) => !value.includes('\0')).optional() }).strict();
 export const writeSessionSchema = runReferenceSchema.extend({ data: z.string().max(64 * 1024) }).strict();
 export const resizeSessionSchema = runReferenceSchema.extend(dimensions).strict();
 export const ackSessionSchema = runReferenceSchema.extend({ bytes: z.number().int().min(0).max(64 * 1024 * 1024) }).strict();
@@ -88,8 +88,8 @@ const seatSettings = { name: z.string().min(1).max(40).optional(), instructions:
 const savedSeat = z.object({ session: identifier, ...seatSettings }).strict();
 const seatReference = runReferenceSchema.extend(seatSettings).strict();
 /** A table preset (shared/table-seats.ts TablePreset), kept in the preferences. Whether its seats make a table (checkSeats) is checked where it is used. */
-export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex', 'gemini']), model, ...seatSettings }).strict()).min(2).max(MAX_CHANNELS) }).strict();
-const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex', 'gemini']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
+export const tablePresetSchema = z.object({ id: identifier, name: z.string().min(1).max(60), kind: z.enum(['discussion', 'hierarchy']), rounds: z.number().int().min(0).max(5), driver: z.number().int().min(0).max(MAX_CHANNELS - 1).optional(), seats: z.array(z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'custom']), model, agent: z.string().regex(AGENT_ID).optional(), ...seatSettings }).strict().refine((seat) => (seat.engine === 'custom') === Boolean(seat.agent), 'A custom agent’s seat names its agent.')).min(2).max(MAX_CHANNELS) }).strict();
+const tableFields = { seats: z.array(savedSeat).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional(), partner: identifier, driver: z.enum(['claude', 'codex', 'gemini', 'custom']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: identifier.optional() };
 const tileSchema = z.object({
   sessionId: identifier, x: z.number().int().min(0).max(11), y: z.number().int().min(0).max(1000),
   w: z.number().int().min(3).max(12), h: z.number().int().min(10).max(1000),
@@ -148,14 +148,14 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('answer'), requestId: z.string().min(1).max(200), allow: z.boolean(), allowEdits: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('interrupt') }).strict(),
   runReferenceSchema.extend({ action: z.literal('permissions'), level: permissionLevelSchema }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex', 'gemini']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional(), seats: z.array(seatReference).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-open'), partner: runReferenceSchema, driver: z.enum(['claude', 'codex', 'gemini', 'custom']), rounds: z.number().int().min(0).max(5), ...tableRecord, kind: z.literal('hierarchy').optional(), planner: runReferenceSchema.optional(), chain: savedChainSchema.optional(), rejoin: z.literal(true).optional(), seats: z.array(seatReference).min(2).max(MAX_CHANNELS).optional(), driverSeat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-seats'), seats: z.array(seatReference).min(2).max(MAX_CHANNELS), driverSeat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-plan'), approve: z.boolean(), note: z.string().max(20_000) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-continue'), skipChallenge: z.boolean().optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-next-drop'), index: z.number().int().min(0).max(9), head: z.string().min(1).max(200) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
-  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex', 'gemini']), seat: identifier.optional() }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex', 'gemini', 'custom']), seat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-stop') }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-close') }).strict(),

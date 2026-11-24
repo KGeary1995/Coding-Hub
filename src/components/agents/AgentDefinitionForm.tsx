@@ -15,7 +15,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) { 
  * The definition form (docs/custom-agents.md, "Write or paste one"), with a JSON tab for the whole definition. Nothing
  * runs from here without the host's native confirmation: Test start and Save each ask, naming the exact command.
  */
-export function AgentDefinitionForm({ initial, editing, problems: given = [], onSaved, onCancel }: { initial?: Draft; editing?: string; problems?: string[]; onSaved: (list: AgentList) => void; onCancel: () => void }) {
+export function AgentDefinitionForm({ initial, editing, problems: given = [], note, onSaved, onCancel }: { initial?: Draft; editing?: string; problems?: string[]; /** Where a shared definition came from. */ note?: string; onSaved: (list: AgentList) => void; onCancel: () => void }) {
   const [draft, setDraft] = useState<Draft>(initial ?? BLANK); const [tab, setTab] = useState<'form' | 'json'>('form');
   const [text, setText] = useState(''); const [textProblem, setTextProblem] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [tested, setTested] = useState<AgentTestResult | null>(null);
@@ -33,9 +33,11 @@ export function AgentDefinitionForm({ initial, editing, problems: given = [], on
   const save = () => { const value = current(); setTouched(true); if (!value || checkDraft(value).problems.length) return; void run(async () => onSaved(await workbench<AgentList>({ action: 'agent-save', definition: value, ...(editing ? { replaces: editing } : {}) }))); };
   const level = field(draft, ['permissions']) !== undefined; const instructions = field(draft, ['instructions']) as { args?: string[]; env?: string } | undefined;
   const mcp = (field(draft, ['mcp', 'format']) as string | undefined) ?? 'none';
+  const acp = field(draft, ['acp']) as { args?: string[]; modes?: Partial<Record<'ask' | 'edits' | 'full', string>> } | undefined;
   return <article className="ui-card agent-form" aria-label={editing ? 'Edit agent' : 'New agent'}>
     <div className="ui-card-head"><ListChecks aria-hidden="true" /><h2>{editing ? `Edit ${String(draft.name || editing)}` : 'New agent'}</h2>
       <div className="ui-card-actions"><span className="tr-seg" role="group" aria-label="Definition view"><button type="button" aria-pressed={tab === 'form'} className={tab === 'form' ? 'active' : ''} onClick={() => tab === 'json' ? fromJson() : undefined}>Form</button><button type="button" aria-pressed={tab === 'json'} className={tab === 'json' ? 'active' : ''} onClick={() => tab === 'form' ? toJson() : undefined}><Braces size={12} aria-hidden="true" />JSON</button></span></div></div>
+    {note && <p className="ui-hint" role="status">{note}</p>}
     {tab === 'json' ? <label className="ui-field">Definition (JSON)<textarea aria-label="Agent definition JSON" className="agent-json" rows={18} spellCheck={false} value={text} onChange={(event) => { setText(event.target.value); setTextProblem(''); }} />{textProblem && <small className="error-message" role="alert">{textProblem}</small>}<small className="ui-hint">The format is in docs/custom-agents.md. Switch back to Form to check it.</small></label> : <>
       <Section title="The agent">
         <label className="ui-field">Name<input aria-label="Agent name" maxLength={40} value={String(draft.name ?? '')} onChange={(event) => setName(event.target.value)} placeholder="Aider" /></label>
@@ -69,6 +71,12 @@ export function AgentDefinitionForm({ initial, editing, problems: given = [], on
           <option value="none">None</option><option value="args">Arguments with {'{text}'}</option><option value="env">An environment variable</option></select><small className="ui-hint">Carries the project’s recent notes, as Claude Code gets them.</small></label>
         {instructions && 'args' in instructions && <Lines label="Instructions arguments" draft={draft} path={['instructions', 'args']} onChange={change} />}
         {instructions && 'env' in instructions && <label className="ui-field">Variable name<input aria-label="Instructions variable" spellCheck={false} value={instructions.env ?? ''} onChange={(event) => change(setField(draft, ['instructions'], { env: event.target.value.trim() }))} /></label>}
+      </Section>
+      <Section title="Chat and Round Tables">
+        <label className="update-checkbox"><input type="checkbox" aria-label="It speaks the Agent Client Protocol" checked={acp !== undefined} onChange={(event) => change(setField(draft, ['acp'], event.target.checked ? { args: ['acp'] } : undefined))} />It has an Agent Client Protocol (ACP) server, so it can be a chat and sit at a Round Table</label>
+        {acp && <Lines label="Start it as an ACP server with (one argument per line)" hint="Such as acp, or --experimental-acp. Empty when the program is the server itself." draft={draft} path={['acp', 'args']} onChange={change} rows={1} />}
+        {acp && PERMISSION_LEVELS.map((item) => <label key={item} className="ui-field">{`${PERMISSION_LABEL[item]}: its mode`}<input aria-label={`${PERMISSION_LABEL[item]} mode`} spellCheck={false} placeholder={item === 'ask' ? 'plan' : item === 'edits' ? 'accept-edits' : 'auto'} value={acp.modes?.[item] ?? ''} onChange={(event) => { const value = event.target.value.trim(); const modes = { ...acp.modes }; if (value) modes[item] = value; else delete modes[item]; change(setField(draft, ['acp', 'modes'], modes)); }} /></label>)}
+        {acp && <small className="ui-hint">Optional: the session mode ids it lists for each level. Ask’s is also a reviewer’s at a Round Table, so give it a read-only one when it has one. A level with none stays in the mode it starts in.</small>}
       </Section>
       <Section title="More">
         <Lines label="Continue a conversation: arguments" hint="With {id} for the conversation, such as --resume then {id}." draft={draft} path={['resume', 'args']} onChange={change} />

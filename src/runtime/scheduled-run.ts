@@ -7,6 +7,7 @@ import { closeChannel, startSession } from './use-native-host';
 import { sendWhenReady } from './start-order';
 import { sendToChannel } from './send-to-channel';
 import { workbench } from './workbench';
+import { useAgentStore } from '../state/agent-store';
 
 const sessionOf = (id: string) => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
 
@@ -15,7 +16,8 @@ const sessionOf = (id: string) => useWorkspaceStore.getState().sessions.find((it
  * the host says it is done with, adds a channel with the run's id for the agent in the job's folder, and starts it.
  * Claude Code and Codex get a chat channel, which takes the task at once (as Start in worktree does); Gemini and a custom
  * agent a terminal.
- * Returns why it could not, for the run's line and its task. The task is sent afterwards, once the agent is ready.
+ * A custom agent whose definition takes its first request as arguments (`firstRequest`) is started with the task.
+ * Returns why it could not, for the run's line and its task. Otherwise the task is sent afterwards, once the agent is ready.
  */
 export async function scheduledRun(request: ScheduledRunRequest): Promise<string | undefined> {
   if (!useWorkspaceStore.getState().persistenceReady) return 'Trace was still opening its workspace.';
@@ -30,10 +32,14 @@ export async function scheduledRun(request: ScheduledRunRequest): Promise<string
   // In the layout the desktop already uses: the person may be elsewhere.
   const sessions = [...state.sessions, session];
   useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, state.layoutMode) });
-  await startSession(session.id);
+  // The task is marked sent (task-send) before the start, so its prompt can go in with it.
+  const takesPrompt = request.engine === 'custom' && Boolean(useAgentStore.getState().agents.find((agent) => agent.id === request.agent)?.definition?.firstRequest);
+  const sent = takesPrompt ? await workbench<TaskSent>({ action: 'task-send', id: request.taskId }).catch(() => null) : null;
+  const prompted = await startSession(session.id, sent ? { firstRequest: sent.prompt } : {});
   const started = sessionOf(session.id);
-  if (started?.status !== 'running') return started?.error ?? 'The channel could not start.';
-  void deliver(request.taskId, session.id).catch(() => {});
+  if (started?.status !== 'running') { if (sent) await setTaskStatus(request.taskId, 'queued').catch(() => {}); return started?.error ?? 'The channel could not start.'; }
+  if (prompted) void loadTasks().catch(() => {});
+  else void deliver(request.taskId, session.id, sent?.prompt).catch(() => {});
   return undefined;
 }
 
@@ -44,17 +50,18 @@ async function noteTask(id: string, note: string) {
 }
 
 /**
- * Sends the run's task once the agent is ready (sendWhenReady). Claude Code and Codex: as Send on the Tasks board does.
+ * Sends the run's task once the agent is ready (sendWhenReady); `prompt` when task-send already gave it. Claude Code and Codex: as Send on the Tasks board does.
  * Gemini: Tasks refuses it there, since Trace cannot read Gemini's replies, so its marked prompt is typed here; the task
  * then waits in Working for the person to move it on. Not sent: the task stays in To do and says why.
  */
-export async function deliver(taskId: string, sessionId: string) {
+export async function deliver(taskId: string, sessionId: string, prompt?: string) {
   await loadTasks();
   const task = (): Task | undefined => useTaskStore.getState().tasks.find((item) => item.id === taskId);
   const send = async (session: Session) => {
     if (isChatEngineConfig(session.config)) return sendTask(taskId).then(() => true, () => false);
-    const { prompt } = await workbench<TaskSent>({ action: 'task-send', id: taskId });
-    if (await sendToChannel(session, prompt)) { await loadTasks(); return true; }
+    // Already marked sent when it was to go in at the start (a long one, or one the host did not take as arguments).
+    const typed = prompt ?? (await workbench<TaskSent>({ action: 'task-send', id: taskId })).prompt;
+    if (await sendToChannel(session, typed)) { await loadTasks(); return true; }
     await setTaskStatus(taskId, 'queued'); return false;
   };
   if (await sendWhenReady(sessionId, task()?.details ?? '', (session) => send(session).catch(() => false))) return;

@@ -4,6 +4,8 @@ import { MAX_CHANNELS } from '../../shared/schemas';
 import { arrangeTiles, createSession, useWorkspaceStore } from '../state/workspace-store';
 import { useTaskStore } from '../state/task-store';
 import { scheduledRun } from './scheduled-run';
+import { useAgentStore } from '../state/agent-store';
+import { agentLook } from '../../shared/agent-look';
 
 const typed: { id: string; data: string }[] = [];
 // A terminal's screen needs a DOM: what is typed into one is recorded instead, and its output stays quiet.
@@ -41,6 +43,16 @@ describe('a scheduled run in the window', () => {
     await vi.advanceTimersByTimeAsync(2000); expect(typed).toEqual([]); await vi.advanceTimersByTimeAsync(1500);
     expect(requests.map((item) => item.action)).toContain('task-send');
     expect(typed).toEqual([{ id: CHANNEL, data: 'Task t-0000aaaa: Review the code for bugs. Review the code for bugs.\r' }]); expect(task.status).toBe('active');
+  });
+  it('starts a custom agent with its task as arguments when its definition takes them, and types nothing', async () => {
+    vi.useFakeTimers(); const { codingHub, requests } = host();
+    useAgentStore.setState({ agents: [{ id: 'aider', look: agentLook({ id: 'aider', name: 'Aider' }), definition: { schema: 1, id: 'aider', name: 'Aider', program: { command: 'aider' }, firstRequest: { args: ['--message', '{prompt}'] } }, active: true, program: 'aider', problem: null }], loaded: true });
+    codingHub.startSession.mockImplementation(async (start: { sessionId: string; cwd: string; firstRequest?: string }) => ({ ok: true, value: { sessionId: start.sessionId, runId: '00000009-1111-4111-8111-111111111111', pid: 10, cwd: start.cwd, engine: 'custom', ...(start.firstRequest ? { prompted: true } : {}) } }) as never);
+    expect(await scheduledRun({ ...request('gemini'), engine: 'custom', agent: 'aider' })).toBeUndefined();
+    expect(codingHub.startSession.mock.calls[0][0]).toMatchObject({ firstRequest: 'Task t-0000aaaa: Review the code for bugs. Review the code for bugs.' });
+    expect(requests.filter((item) => item.action === 'task-send')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5000); expect(typed).toEqual([]);
+    useAgentStore.setState({ agents: [] });
   });
   it('with every channel taken, says so and adds nothing', async () => {
     host(); const sessions = Array.from({ length: MAX_CHANNELS }, () => createSession('shell')); useWorkspaceStore.setState({ sessions, tiles: arrangeTiles(sessions, 'grid') });

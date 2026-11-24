@@ -16,6 +16,7 @@ export interface AgentDefinition {
   mcp?: { format: 'claude-json' | 'codex-toml' | 'none'; args?: string[] };
   instructions?: { args: string[] } | { env: string };
   env?: Record<string, string>;
+  acp?: { args: string[]; modes?: { ask?: string; edits?: string; full?: string } };
 }
 
 /** A custom agent as the Agents page lists it (docs/custom-agents.md). Types only, so the phone can import them. */
@@ -27,12 +28,18 @@ export interface AgentEntry {
   active: boolean;
   /** Where its program was found on this computer, or null (`problem` says why). */
   program: string | null; problem: string | null;
+  /** Off because it came from another computer through sync and was not confirmed here yet: that computer's name, and whether it replaced a definition this computer had. */
+  synced?: { from: string; changed: boolean } | null;
 }
 export interface AgentList { agents: AgentEntry[] }
 /** What Test start showed: the command it ran and what came back. */
 export interface AgentTestResult { command: string; output: string; exitCode: number | null; timedOut: boolean }
 /** A definition Claude Code drafted from the program's help, and what the schema says about it (empty when valid). */
 export interface AgentDraft { definition: Record<string, unknown>; problems: string[] }
+/** A definition fetched from a GitHub repository's trace-agent.json ("From a list"): opened in the form, never saved or run as it is. */
+export interface AgentFetched extends AgentDraft { source: { repo: string; commit: string } }
+/** A conversation the program's `resume.listArgs` printed: its ID, and the rest of its line to tell it apart. */
+export interface AgentConversation { id: string; label: string }
 export type AgentRequest =
   | { action: 'agent-list' }
   /** `replaces`: the id of the definition being edited, when the id changed. */
@@ -41,4 +48,9 @@ export type AgentRequest =
   | { action: 'agent-activate'; id: string }
   | { action: 'agent-test'; definition: unknown }
   | { action: 'agent-draft'; command: string }
-  | { action: 'agent-models'; id: string };
+  | { action: 'agent-models'; id: string }
+  /** Repositories on GitHub with the topic trace-agent (an unreviewed list, as for plugins). */
+  | { action: 'agent-browse' }
+  | { action: 'agent-fetch'; repo: string }
+  /** `directory`: the channel's folder, where the program lists that folder's conversations. */
+  | { action: 'agent-conversations'; id: string; directory?: string };

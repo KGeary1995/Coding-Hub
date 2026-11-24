@@ -4,6 +4,7 @@ import { ArrowDown, ImagePlus, MessagesSquare, Mic, Send, Square, Users, X } fro
 import { startDictation, withSpoken } from '../../runtime/dictation';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
+import type { SeatEngine } from '../../../shared/types';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
 import { AGENT, ChainBar, EMPTY, readImage, type SeatThread, TableBar, ThreadItems, useHint, useMergedThread, useSeatAnswers, workingText } from './ChatParts';
 import { followSeats, joinNames, seatRun, seatViews, tableSeatIds } from './seat-view';
@@ -33,8 +34,8 @@ export function receiveReplay(replay: ChatReplay, keyOf: (sessionId: string) => 
 export const linkedChatKey = (computerId: string) => (sessionId: string) => `${computerId}:${sessionId}`;
 
 export interface RemoteChatProps {
-  /** `gemini`: a Gemini chat that leads a Round Table (from 1.39). */
-  sessionId: string; runId: string | null; engine: 'claude' | 'codex' | 'gemini'; running: boolean;
+  /** `gemini`: a Gemini chat that leads a Round Table (from 1.39); `custom`: a custom agent's ACP chat (phase 2), named by `agentName`. */
+  sessionId: string; runId: string | null; engine: SeatEngine; running: boolean; agentName?: string;
   send: (request: ChatRequest) => Promise<void>;
   /** Follows another channel's chat events (every other seat of a Round Table) until the returned function is called; none when they all arrive anyway. */
   follow?: (sessionId: string) => () => void;
@@ -47,7 +48,8 @@ export interface RemoteChatProps {
 }
 
 const same = (id: string) => id;
-export function RemoteChat({ sessionId, runId, engine, running, send, follow, keyOf = same, className = '', openTable, dictation = false }: RemoteChatProps) {
+export function RemoteChat({ sessionId, runId, engine, running, agentName, send, follow, keyOf = same, className = '', openTable, dictation = false }: RemoteChatProps) {
+  const agent = (engine === 'custom' && agentName) || AGENT[engine];
   const [opening, setOpening] = useState(false);
   const chat = useChatStore((state) => state.threads[keyOf(sessionId)] ?? EMPTY);
   const table = chat.table ?? null;
@@ -69,7 +71,7 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
     stopListening.current = startDictation((spoken) => setText(withSpoken(before, spoken)), (failure) => { stopListening.current = null; setListening(false); if (failure) setError(failure); });
   };
   const views = useMemo(() => table ? seatViews(table, engine, { builderWorking: 'The builder', plannerWorking: 'The planner', plannerColour: 'claude' }, sessionId) : [], [table, engine, sessionId]);
-  const sources: SeatThread[] = table ? views.map((seat) => ({ seat, thread: seat.lead ? chat : threads[hiddenIds.indexOf(seat.id)] ?? EMPTY })) : [{ seat: { id: sessionId, engine, lead: true, name: AGENT[engine], working: AGENT[engine], duties: [], driver: false, colour: engine }, thread: chat }];
+  const sources: SeatThread[] = table ? views.map((seat) => ({ seat, thread: seat.lead ? chat : threads[hiddenIds.indexOf(seat.id)] ?? EMPTY })) : [{ seat: { id: sessionId, engine, lead: true, name: agent, working: agent, duties: [], driver: false, colour: engine }, thread: chat }];
   const entries = useMergedThread(sources);
   useLayoutEffect(() => { const element = scroller.current; if (element && pinned.current) element.scrollTop = element.scrollHeight; }, [chat, entries]);
   const live = running && runId !== null;
@@ -95,7 +97,6 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   useLayoutEffect(() => { const area = input.current; if (area) { area.style.height = 'auto'; area.style.height = Math.min(area.scrollHeight, 220) + 'px'; } }, [text]);
   const stop = () => { if (!runId) return; void act(table ? { action: 'table-stop', sessionId, runId } : { action: 'interrupt', sessionId, runId }); };
   const attach = async (files: Blob[]) => { try { const read = await Promise.all(files.filter((item) => item.type.startsWith('image/')).map(readImage)); setImages((current) => [...current, ...read].slice(0, 10)); } catch (e) { setError((e as Error).message); } };
-  const agent = AGENT[engine];
   const workers = table ? views.filter((view) => view.lead ? chat.busy : threads[hiddenIds.indexOf(view.id)]?.busy).map((view) => view.working) : [agent];
   const everyone = views.length > 2 ? `all ${views.length} agents` : joinNames(views.map((view) => view.name));
   /** The message box's hint, then shorter forms for a narrow tile or the phone (useHint). */

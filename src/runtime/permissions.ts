@@ -1,13 +1,15 @@
-import type { ChannelConfig, CLIEngineConfig, PermissionLevel } from '../../shared/types';
+import type { AgentConfig, ChannelConfig, PermissionLevel, SeatEngine } from '../../shared/types';
 import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store';
 import type { Session } from '../../shared/types';
-import { isBuiltInAgent, isChatRun } from '../../shared/types';
+import { isAgentConfig, isChatRun } from '../../shared/types';
 
 export const PERMISSION_LEVELS: PermissionLevel[] = ['ask', 'edits', 'full'];
 export const PERMISSION_LABEL: Record<PermissionLevel, string> = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' };
 /** What each level means for each agent, in the person's words (tooltips and the settings note). */
 /** `chat`: a chat channel's (a Gemini chat differs from its terminal: see GEMINI_MODE in gemini-stream.ts). */
-export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: PermissionLevel, chat = false) {
+/** `name`: a custom agent's (its chat, phase 2: Trace answers what it asks, and asks for the mode its definition names). */
+export function permissionHelp(engine: SeatEngine, level: PermissionLevel, chat = false, name = 'The agent') {
+  if (engine === 'custom') return (level === 'ask' ? `${name} only reads: Trace says no to any file change it asks for, and asks you before its commands.` : level === 'edits' ? `Trace lets ${name} change files without asking you; it asks you before its commands.` : `${name} never asks: Trace allows whatever it would ask about. Use it only for work you trust.`) + ' What it does without asking at all is its own mode’s to say. A running chat changes from its next message.';
   // Ask is read-only for Gemini (plan mode, the owner's decision of 2026-11-24), in a chat and in a terminal.
   if (engine === 'gemini' && chat) return (level === 'ask' ? 'Gemini only reads: it answers and plans, but does not change your files.' : level === 'edits' ? 'Gemini edits files in the project without asking; it asks before commands.' : 'Gemini never asks: Trace allows whatever it would ask about. Use it only for work you trust.') + ' A running Gemini chat changes from its next message.';
   if (engine === 'gemini') return level === 'ask' ? 'Gemini only reads: it answers and plans, but does not change your files.' : level === 'edits' ? 'Gemini edits files in the project without asking; it asks before commands.' : 'Gemini never asks: any command, any file (its own blocked-command list still applies). Use it only for work you trust.';
@@ -19,9 +21,9 @@ export function permissionHelp(engine: 'claude' | 'codex' | 'gemini', level: Per
 }
 
 /** The config with this level, always written out: no setting means the default (Allow edits), not Ask. */
-export function withPermissions<T extends CLIEngineConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
-/** A channel whose level a table's control sets: Claude Code, Codex or a Gemini CLI seat. */
-const tableChat = (config: ChannelConfig): config is CLIEngineConfig => isBuiltInAgent(config);
+export function withPermissions<T extends AgentConfig>(config: T, level: PermissionLevel): T { return { ...config, permissions: level }; }
+/** A channel whose level a table's control sets: Claude Code, Codex, a Gemini CLI seat or a custom agent's chat. */
+const tableChat = (config: ChannelConfig): config is AgentConfig => isAgentConfig(config);
 
 /**
  * Every channel at the Round Table a channel leads or sits at: the lead and all its hidden seats. One table, one permission level; a channel at no table is alone.

@@ -65,11 +65,17 @@ export function listFiles(folder: string, limit = 300) {
 }
 
 export interface BrowseItem { repo: string; description: string; stars: number; pushedAt: string; url: string }
-/** Repositories with the topic `trace-plugin`, from GitHub's public search (unsigned: ten a minute), kept for an hour. */
-export async function browse(fetcher: typeof fetch = fetch): Promise<BrowseItem[]> {
-  const response = await fetcher('https://api.github.com/search/repositories?q=topic:trace-plugin&sort=stars&order=desc&per_page=50', { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Trace' } });
+/** Repositories with a topic (`trace-plugin`, or `trace-agent` for custom agents), from GitHub's public search (unsigned: ten a minute). */
+export async function browse(fetcher: typeof fetch = fetch, topic: 'trace-plugin' | 'trace-agent' = 'trace-plugin'): Promise<BrowseItem[]> {
+  const response = await fetcher(`https://api.github.com/search/repositories?q=topic:${topic}&sort=stars&order=desc&per_page=50`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Trace' } });
   if (response.status === 403 || response.status === 429) throw new HubError('PLUGIN_BROWSE', 'GitHub asks to wait before searching again. Try again in a minute.');
   if (!response.ok) throw new HubError('PLUGIN_BROWSE', `GitHub's search did not answer (${response.status}).`);
   const body = await response.json() as { items?: { full_name?: unknown; description?: unknown; stargazers_count?: unknown; pushed_at?: unknown; html_url?: unknown }[] };
   return (body.items ?? []).flatMap((item) => typeof item.full_name === 'string' && REPO.test(item.full_name) ? [{ repo: item.full_name, description: typeof item.description === 'string' ? item.description.slice(0, 300) : '', stars: Number(item.stargazers_count) || 0, pushedAt: typeof item.pushed_at === 'string' ? item.pushed_at : '', url: typeof item.html_url === 'string' && item.html_url.startsWith('https://github.com/') ? item.html_url : `https://github.com/${item.full_name}` }] : []);
+}
+
+/** A topic's list, kept for an hour, so opening the list again does not use up the unsigned search limit. */
+export function topicList(topic: 'trace-plugin' | 'trace-agent', fetcher?: typeof fetch, keepMs = 60 * 60_000) {
+  let kept: { at: number; items: BrowseItem[] } | null = null;
+  return async () => { if (!kept || Date.now() - kept.at > keepMs) kept = { at: Date.now(), items: await browse(fetcher, topic) }; return kept.items; };
 }

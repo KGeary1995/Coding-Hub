@@ -13,6 +13,7 @@ import { modelProblem } from './seat-model';
 export type SetupMode = { type: 'new'; table?: TableKind } | { type: 'chat'; leadId: string } | { type: 'edit'; leadId: string };
 export interface DraftSeat {
   key: string; engine: SeatEngine; /** As typed; blank is the CLI's default. */ model: string; name: string; instructions: string; duties: SeatDuty[];
+  /** A custom agent's id, for a seat of engine custom (phase 2). */ agent?: string;
   /** The channel's session, for a seat that exists already. */
   session?: string; lead: boolean;
   /** Its agent cannot change: a seat that exists, or the channel a table is started on. */ keepsAgent: boolean;
@@ -26,11 +27,12 @@ const builtIn = (kind: TableKind) => BUILT_IN_PRESETS.find((preset) => preset.ki
 export const DEFAULT_TABLE_NAME = 'Round Table';
 
 /** A copy of the preset to edit; `lead` fixes the lead seat to a running chat (its agent and model). */
-export function draftFromPreset(preset: TablePreset, lead?: { engine: SeatEngine; model: string }): Draft {
+export function draftFromPreset(preset: TablePreset, lead?: { engine: SeatEngine; model: string; agent?: string }): Draft {
   const at = Math.max(0, leadIndex(preset));
   const seats = preset.seats.map((seat, index): DraftSeat => {
-    const isLead = index === at; const draft = { key: newKey(), engine: seat.engine, model: seat.model, name: seat.name ?? '', instructions: seat.instructions ?? '', duties: [...(seat.duties ?? [])], lead: isLead, keepsAgent: false, keepsModel: false };
-    return lead && isLead ? { ...draft, engine: lead.engine, model: lead.model, keepsAgent: true, keepsModel: true } : draft;
+    const isLead = index === at; const draft: DraftSeat = { key: newKey(), engine: seat.engine, model: seat.model, ...(seat.agent ? { agent: seat.agent } : {}), name: seat.name ?? '', instructions: seat.instructions ?? '', duties: [...(seat.duties ?? [])], lead: isLead, keepsAgent: false, keepsModel: false };
+    if (!lead || !isLead) return draft;
+    const { agent: _agent, ...rest } = draft; return { ...rest, engine: lead.engine, model: lead.model, ...(lead.agent ? { agent: lead.agent } : {}), keepsAgent: true, keepsModel: true };
   });
   // The tables Trace comes with are copied, never changed: the name is left for the person to give.
   return { presetId: preset.id, name: isBuiltInPreset(preset.id) ? '' : preset.name, kind: preset.kind, rounds: preset.rounds, driver: preset.driver ?? 0, seats };
@@ -38,7 +40,7 @@ export function draftFromPreset(preset: TablePreset, lead?: { engine: SeatEngine
 /** The seats of an open or saved table (tableSeats), to edit. */
 export function draftFromTable(seats: EditableSeat[], kind: TableKind, rounds: number): Draft {
   return { presetId: '', name: '', kind, rounds, driver: Math.max(0, seats.findIndex((seat) => seat.driver)),
-    seats: seats.map((seat): DraftSeat => ({ key: newKey(), engine: seat.engine, model: seat.model, name: seat.name ?? '', instructions: seat.instructions ?? '', duties: [...(seat.duties ?? [])], session: seat.session, lead: seat.lead, keepsAgent: true, keepsModel: false, status: seat.status })) };
+    seats: seats.map((seat): DraftSeat => ({ key: newKey(), engine: seat.engine, model: seat.model, ...(seat.agent ? { agent: seat.agent } : {}), name: seat.name ?? '', instructions: seat.instructions ?? '', duties: [...(seat.duties ?? [])], session: seat.session, lead: seat.lead, keepsAgent: true, keepsModel: false, status: seat.status })) };
 }
 
 const LAST = (kind: TableKind) => `trace.tablePreset.${kind}`;
@@ -48,13 +50,14 @@ export function rememberPreset(kind: TableKind, id: string) { try { localStorage
 /** The preset to start with for a kind: the person's last-used one if it still exists, else the built-in. */
 export const pickPreset = (presets: TablePreset[], kind: TableKind, last: string | null = lastPreset(kind)): TablePreset => presets.find((preset) => preset.kind === kind && preset.id === last) ?? builtIn(kind);
 
-const seatOf = (seat: DraftSeat, kind: TableKind): TablePresetSeat => ({ engine: seat.engine, model: modelValue(seat.model) ?? '', ...(seat.name.trim() ? { name: seat.name.trim() } : {}), ...(seat.instructions.trim() ? { instructions: seat.instructions.trim() } : {}), ...(kind === 'hierarchy' ? { duties: [...seat.duties] } : {}) });
+const seatOf = (seat: DraftSeat, kind: TableKind): TablePresetSeat => ({ engine: seat.engine, model: modelValue(seat.model) ?? '', ...(seat.engine === 'custom' && seat.agent ? { agent: seat.agent } : {}), ...(seat.name.trim() ? { name: seat.name.trim() } : {}), ...(seat.instructions.trim() ? { instructions: seat.instructions.trim() } : {}), ...(kind === 'hierarchy' ? { duties: [...seat.duties] } : {}) });
 export const toPreset = (draft: Draft, id = draft.presetId): TablePreset => ({ id, name: draft.name.trim() || DEFAULT_TABLE_NAME, kind: draft.kind, rounds: draft.rounds, ...(draft.kind === 'discussion' ? { driver: draft.driver } : {}), seats: draft.seats.map((seat) => seatOf(seat, draft.kind)) });
 export const toPlan = (draft: Draft): SeatPlan => ({ seats: draft.seats.map((seat) => ({ ...seatOf(seat, draft.kind), ...(seat.session ? { session: seat.session } : {}) })), ...(draft.kind === 'discussion' ? { driver: draft.driver } : {}), rounds: draft.rounds });
 
 /** Why this draft cannot be started or applied, in words for the person, or null. */
 export function draftProblem(draft: Draft): string | null {
   for (const seat of draft.seats) { const why = modelProblem(seat.model); if (why) return why; }
+  if (draft.seats.some((seat) => seat.engine === 'custom' && !seat.agent)) return 'Choose which of your agents sits in each seat.';
   const why = checkSeats(draft.kind, draft.seats.map((seat) => seatOf(seat, draft.kind)), Math.max(0, draft.seats.findIndex((seat) => seat.lead)), draft.kind === 'discussion' ? draft.driver : undefined);
   if (why) return why;
   if (draft.kind === 'discussion' && !draft.seats[draft.driver]) return 'Choose the agent that edits files.';
@@ -63,8 +66,8 @@ export function draftProblem(draft: Draft): string | null {
 }
 export const roundsRange = (kind: TableKind): [number, number] => kind === 'hierarchy' ? [1, 5] : [0, 5];
 
-/** The default name of each seat as it would be called with no name of its own: the field's placeholder. */
-export const placeholders = (draft: Draft): string[] => seatNames(draft.seats.map((seat) => ({ engine: seat.engine, duties: seat.duties })), draft.kind);
+/** The default name of each seat as it would be called with no name of its own: the field's placeholder. `agentName`: a custom agent's name by id. */
+export const placeholders = (draft: Draft, agentName: (id: string) => string = (id) => id): string[] => seatNames(draft.seats.map((seat) => ({ engine: seat.engine, duties: seat.duties, ...(seat.agent ? { agentName: agentName(seat.agent) } : {}) })), draft.kind);
 
 /** How many more seats fit, and why none does when none does. `room` is seatRoom(): what the eight CLIs and the channels leave. */
 export function roomNote(draft: Draft, room: number, max: number): { left: number; text: string } {
@@ -94,7 +97,7 @@ export function setDuty(draft: Draft, index: number, duty: SeatDuty, on: boolean
 }
 export const setDriver = (draft: Draft, index: number): Draft => ({ ...draft, driver: index });
 /** Another kind of table: the built-in (or last-used) preset of that kind, on the same fixed lead. */
-export const withKind = (draft: Draft, presets: TablePreset[], kind: TableKind, lead?: { engine: SeatEngine; model: string }): Draft => draft.kind === kind ? draft : draftFromPreset(pickPreset(presets, kind), lead);
+export const withKind = (draft: Draft, presets: TablePreset[], kind: TableKind, lead?: { engine: SeatEngine; model: string; agent?: string }): Draft => draft.kind === kind ? draft : draftFromPreset(pickPreset(presets, kind), lead);
 
 export interface SetupDeps {
   startTable: (preset: TablePreset) => Promise<string | null>;

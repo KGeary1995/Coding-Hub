@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { workbench } from '../../runtime/workbench';
 import type { PluginData } from '../../../shared/plugins';
 import { useShallow } from 'zustand/react/shallow';
 import { seatRoom } from '../../runtime/round-table';
 import type { TableKind } from '../../../shared/table-seats';
 import { TableSetup } from '../chat/TableSetup';
-import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-store';
+import { addLinkedChannel, refreshLinkedAgents, useLinkedStore, waitingOn } from '../../state/linked-store';
 import { Bot, BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
@@ -80,15 +80,21 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   // The custom agents turned on here (docs/custom-agents.md), read again the same way (after Agents).
   const agents = useAgentStore((state) => state.agents).filter((agent) => agent.active);
   useEffect(() => { void refreshAgents(); }, [activeView]);
+  // On another computer's tab, its own agents (1.40 there and later), read when the tab opens or it connects again.
+  const otherAgents = useLinkedStore((state) => other ? state.agents[other.id] : undefined) ?? [];
+  useEffect(() => { if (other?.connected) void refreshLinkedAgents(other.id); }, [other?.id, other?.connected]);
   useEffect(() => { void workbench<PluginData>({ action: 'plugin-list' }).then((data) => setTiles(data.plugins.filter((plugin) => plugin.enabled && !plugin.problem).flatMap((plugin) => plugin.tiles.map((tile) => ({ plugin: plugin.id, tile: tile.id, title: tile.title, name: plugin.name }))))).catch(() => setTiles([])); }, [activeView]);
   const addPluginTile = useWorkspaceStore((state) => state.addPluginTile);
   const channelMenu: MenuItem[] = other
-    ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
+    ? [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine))),
+      ...otherAgents.map((agent): MenuItem => ({ label: agent.name, icon: <span className="ui-avatar small custom" style={{ '--tone': agent.color } as CSSProperties} aria-hidden="true">{agent.initials}</span>, onSelect: () => void addLinkedChannel(other.id, 'custom', agent.id) }))]
     : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
       // The same agents as chats (1.39.0): the conversation in Trace's own view instead of the CLI's terminal.
       ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelItem(`${engine}Chat`, () => useWorkspaceStore.getState().addChatSession(engine))),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
       ...agents.map((agent): MenuItem => ({ label: agent.look.name, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => addSession('custom', undefined, { id: agent.id, name: agent.look.name }) })),
+      // Each that speaks ACP as a chat too (custom agents, phase 2), after the terminals as the built-in agents' chats are.
+      ...agents.filter((agent) => agent.look.chat).map((agent): MenuItem => ({ label: `${agent.look.name} chat`, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) })),
       ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : []),
       ...tiles.map((item): MenuItem => ({ label: `${item.title} (${item.name})`, icon: <span className="ui-avatar small shell" aria-hidden="true"><Puzzle /></span>, onSelect: () => addPluginTile({ id: item.plugin, tile: item.tile }, item.title) }))];
   return <header className="tr-topbar">

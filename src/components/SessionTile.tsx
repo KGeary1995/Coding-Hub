@@ -95,7 +95,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
-  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : engine === 'gemini' ? 'Gemini chat' : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex CLI';
+  const engineName = atTable ? 'Round Table' : chat ? (claude ? 'Claude chat' : engine === 'gemini' ? 'Gemini chat' : custom ? `${look.name} chat` : 'Codex chat') : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex CLI';
   const resumeId = !isAgentConfig(session.config) ? undefined : session.config.resumeId;
   const model = !isAgentConfig(session.config) ? '' : session.config.model;
   const channel = index + 1;
@@ -210,7 +210,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       <div className={`terminal-frame ${session.status === 'idle' && !session.runId ? 'terminal-idle' : ''} ${chat ? 'chat-frame' : ''}`}>{chat ? <ChatView session={session} /> : <><TerminalViewport session={session} />{attention}</>}{conversation && !chat && resumeId && <div className="transcript-overlay"><TranscriptView agent={claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} load={() => workbench<ChannelTranscript>({ action: 'channel-transcript', sessionId: session.id })} /></div>}{session.status === 'idle' && !session.runId && !controlsOpen && <div className="session-welcome">
         <EngineAvatar engine={engine} agentId={agentId} size="large" className="welcome-engine" />
         <h3>{chat ? engineName : claude ? 'Claude Code' : shell ? 'Terminal' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex'}</h3>
-        <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
+        <p>{resumeId ? 'Continues your saved conversation.' : shell ? 'Your shell, in this folder. Nothing it prints is recorded.' : chat ? `${claude ? 'Claude Code' : engine === 'gemini' ? 'Gemini' : custom ? look.name : 'Codex'} as a conversation.` : 'Your account, tools and folder.'}{shell ? '' : ' CLI permissions and approvals apply.'}</p>
         {/* The folder opens the channel's settings, where its folder is chosen; with no project yet, it opens Projects. */}
         <div className="welcome-actions">
           {cwd ? <button className="button secondary welcome-directory" aria-label={`${folderName(cwd)} · channel ${channel} settings`} title={`Channel settings · ${cwd}`} onClick={() => setControlsOpen(true)}><Folder size={14} /><span>{folderName(cwd)}</span></button>
