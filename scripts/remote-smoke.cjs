@@ -92,9 +92,6 @@ ${terminalFixture}
     const fitButton = () => phone.locator('#fit-phone').textContent();
     assert.equal(await textSize(), '13px', 'a channel opens with its text at the chosen size');
     assert.equal(await fitButton(), 'Desktop size', 'a channel opens at the phone\'s size');
-    // From here the computer counts as unused, so the phone keeps the size it took; one step below uses it again.
-    const computerIdle = (seconds) => app.evaluate((_electron, value) => { process.env.CODING_HUB_TEST_DESKTOP_IDLE = value; }, String(seconds));
-    await computerIdle(600);
     const width = () => phone.evaluate(async (id) => (await (await fetch('/api/channels', { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } })).json()).find((channel) => channel.sessionId === id).cols, codexId);
     const reported = () => phone.evaluate(() => Number([...document.getElementById('output').textContent.matchAll(/SIZE:(\d+)x/g)].at(-1)?.[1]));
     for (let i = 0; i < 50 && (await reported()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
@@ -126,11 +123,10 @@ ${terminalFixture}
     await (await tileControl(tile, 'Stop')).click();
     await (await tileControl(tile, 'Restart')).click();
     await phone.waitForFunction(() => { const text = document.getElementById('output').textContent; return text.includes('READY') && !text.includes('ECHO:y'); });
-    // The restarted run is drawn at the phone's size again without a touch: its first size, the desktop's, is not the
-    // desktop taking the channel back.
-    for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) <= 60, 'a channel restarted on the computer is drawn at the phone\'s size again');
-    assert.equal(await fitButton(), 'Desktop size'); assert.equal(await textSize(), '13px');
+    // Restarted from the desktop tile, the channel is the desktop's (1.35.2: whoever last used a channel leads), until the
+    // phone uses it: sending a message below takes it again.
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'a channel restarted from the desktop tile is drawn at the desktop\'s size');
     if (process.env.CODING_HUB_REMOTE_SCREENSHOT) await phone.screenshot({ path: process.env.CODING_HUB_REMOTE_SCREENSHOT.replace(/\.png$/, '-channel.png') });
     await phone.locator('#text').fill('after-restart'); await phone.getByRole('button', { name: 'Send', exact: true }).click();
     await phone.locator('#output').filter({ hasText: 'ECHO:after-restart' }).waitFor();
@@ -148,13 +144,12 @@ ${terminalFixture}
     await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) <= 60, 'touching the channel on the phone draws it at the phone\'s size again');
-    // The computer is used while the phone lies untouched: after ten seconds the computer's size comes back, without
-    // typing in that channel, and touching the channel on the phone takes it again.
-    await computerIdle(0);
-    // Ten seconds after the phone's last request (a late size request of its own starts that again), checked every two: up to 40 s here.
-    for (let i = 0; i < 400 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.ok((await width()) > 60, 'using the computer gives it the size back from a phone left untouched');
-    await computerIdle(600); await phone.locator('#output').click();
+    // Focusing that channel's tile on the desktop (without typing) gives it back, and touching it on the phone takes it
+    // again (1.35.2). Before, the computer merely being used for ten seconds gave it back, whatever channel it was used on.
+    await page.evaluate(() => document.activeElement?.blur()); await tile.locator('.xterm-helper-textarea').focus();
+    for (let i = 0; i < 50 && (await width()) <= 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.ok((await width()) > 60, 'focusing the channel\'s tile on the desktop gives it the size back');
+    await phone.locator('#output').click();
     for (let i = 0; i < 50 && (await width()) > 60; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok((await width()) <= 60, 'touching the channel again draws it at the phone\'s size');
     // A locked phone (or one showing another app) gives it back; coming back takes it again.

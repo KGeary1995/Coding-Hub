@@ -852,8 +852,6 @@ else app.whenReady().then(() => {
     askCoach: (id) => liveCoach.ask(id),
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
-    idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
-    inFront: () => process.env.CODING_HUB_TEST_IN_FRONT ? process.env.CODING_HUB_TEST_IN_FRONT === '1' : Boolean(window && !window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.isFocused()),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
     transcript: channelTranscript,
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback, or, on Windows, Trace's screen service (when
@@ -1188,6 +1186,7 @@ else app.whenReady().then(() => {
     return null;
   });
   handle(IPC_CHANNELS.ackSession, (owner, payload) => { manager.ack(owner, payload); return null; });
+  handle(IPC_CHANNELS.focusChannel, (_owner, payload) => { remote?.desktopFocus(z.object({ sessionId: z.string().min(1).max(100) }).strict().parse(payload).sessionId); return null; });
   handle(IPC_CHANNELS.chat, (owner, payload) => { manager.chat(owner, payload); return null; });
   handle(IPC_CHANNELS.resizeSession, (owner, payload) => {
     const parsed = resizeSessionSchema.safeParse(payload);

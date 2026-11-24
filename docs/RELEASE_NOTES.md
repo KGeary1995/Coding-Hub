@@ -1,5 +1,14 @@
 ## What's new
 
+1.35.2 replaces the rules for whose size a channel has with herdr's single rule:
+
+- **A channel is drawn at the size of whoever last used it.** Using it means typing in it, clicking into its tile, or, on the phone, opening, touching or typing in it. Showing it does not count, and neither does the computer being idle or Trace being in front. This replaces the idle timers, the "in front" check from 1.34.0 and the phone's quiet time, which together made channels shrink and bounce back while you only read them.
+- **On the desktop:** typing in a channel's tile or clicking into it takes the channel back from a phone or another computer.
+- **On the phone:** nothing changes in use. Opening a channel, touching it, typing, or **Fit to phone** takes it; leaving it, locking the phone, or **Desktop size** gives it back. A computer merely being used, anywhere, no longer takes it from the phone.
+- **On another computer's tab:** its tile's size is used once you type into that tile, not while it is only shown. Before, it was used whenever nobody had touched this computer for two minutes.
+- **Tried:** the unit tests (a viewer that only watched takes the size once it types; the desktop takes it back on focus; a linked computer's tile takes it once typed into and steps back when its phone leaves), and the remote smoke test, rewritten for the rule: a restart from the desktop tile is the desktop's, sending from the phone takes it, typing or clicking into the tile takes it back, touching the phone takes it again. The desktop, workbench, screen, phone screen and design smoke tests pass.
+- **Not tried:** a real phone and your Mac's tab together.
+
 1.35.1 is the first fix taken from herdr's source code:
 
 - **Your other computer comes back after sleep.** When this computer wakes, each linked computer connects again at once. Before, its tab could show stale channels for up to a minute, or stay disconnected until the next retry.

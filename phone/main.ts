@@ -504,8 +504,8 @@ let granted = false; let askAgain = false; let shownAtPhone = false;
 /** The person is using the phone: the channel is drawn at the phone's size again, unless they chose "Desktop size". */
 function useChannel() {
   if (!fitsOnOpen(chosenSize)) return;
-  // Already at the phone's size: tell the computer the phone is still in use (at most every few seconds), since a
-  // computer in use takes the channel back from a phone that has gone quiet (PHONE_QUIET_MS there).
+  // Already at the phone's size: tell the computer the phone is still in use (at most every few seconds). From 1.35.2 a
+  // computer gives the size back only when its own tile is used, but one before that also took it from a quiet phone.
   if (holding && sentSize) { if (granted && Date.now() - touched > 4000) { touched = Date.now(); askAgain = true; requestSize(0); } return; }
   holding = true; sentSize = ''; requestSize();
 }

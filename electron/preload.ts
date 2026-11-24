@@ -62,6 +62,7 @@ const host: CodingHubHost = {
   writeSession: (request) => ipcRenderer.invoke('coding-hub:write-session', request),
   resizeSession: (request) => ipcRenderer.invoke('coding-hub:resize-session', request),
   ackSession: (request) => ipcRenderer.invoke('coding-hub:ack-session', request),
+  focusChannel: (request) => ipcRenderer.invoke('coding-hub:focus-channel', request),
   stopSession: (request) => ipcRenderer.invoke('coding-hub:stop-session', request),
   onSessionEvent: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, payload: SessionEvent) => listener(payload);
