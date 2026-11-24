@@ -1,5 +1,13 @@
 ## What's new
 
+1.34.0 keeps your channels running when you close Trace's window:
+
+- **Closing the window no longer stops your agents.** Trace hides to its icon in the system tray (the menu bar on a Mac), and channels, the phone, linked computers and alerts keep going. Click the icon, open Trace again, or click an alert to bring the window back. The icon's menu shows how many channels are running and has **Quit Trace**, which stops them as before (with Start channels again when Trace opens, they come back on their conversations next time). The first time, a notice says where Trace went. **Settings → Preferences → Keep running when the window is closed** turns it off.
+- **Channels no longer shrink for a moment when another computer has this one's tab open.** Each tile on the other computer asks for its channel at the tile's size, and this computer applied it once its mouse and keyboard had been still for two minutes, so reading a long reply was enough; the next mouse move put the size back a second or two later. It now also waits until Trace's window is not in front, and a size applied while it was in the background goes back as soon as Trace is in front again. A phone's own "Fit to phone" works as before.
+- **Next:** a background runner that keeps channels running even when Trace quits, crashes or updates, and plugins.
+- **Tried:** the unit tests (another computer's size waits while Trace is in front, is drawn once it is not, and goes back when it is again), and the desktop smoke test: closing the window hides it while both channels keep running, and typing works when it is shown again. The remote, screen, design, workbench, productivity and enterprise smoke tests pass.
+- **Not tried:** the tray icon and its menu by hand on Windows and a Mac (the smoke tests cannot click it).
+
 1.33.2 closes the items left open by the herdr work:
 
 - **Codex terminals say Done too.** Trace now asks Codex for its end-of-turn notice as well as its approval requests, and tells them apart by the approval requests' fixed wording ("Approval requested: …", "Approval requested by …", "Codex wants to edit …"). Only a reply that itself began with one of those would be taken for an approval. A Codex turn's end also reaches event hooks and the channel tools' wait.

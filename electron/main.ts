@@ -21,7 +21,7 @@ import { CLAUDE_MODELS, modelLabel } from '../shared/model-name';
 import type { NativeResume } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
-import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, Menu, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
+import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, Menu, Tray, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { ProjectChecks } from './services/repository/project-checks';
 import { WorktreeService } from './services/repository/worktrees';
@@ -187,6 +187,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); const file = channelToolFiles.get(event.runId); if (file) { channelToolFiles.delete(event.runId); fs.rm(file, { force: true }, () => {}); } }
   try { channelTools.onSessionEvent(event); } catch { hostHealth?.record('channel-tools-event-failed'); }
+  if (event.type === 'started' || event.type === 'exit') try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); }
   if (event.type === 'attention') hookEvent('needs-you', event.sessionId, event.message);
   else if (event.type === 'answered' && event.finished) hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.');
   else if (event.type === 'exit' && event.diagnostic) hookEvent('failed', event.sessionId, event.diagnostic);
@@ -537,6 +538,28 @@ function handle<T>(channel: string, operation: (owner: number, payload: unknown)
   });
 }
 
+/**
+ * Close to the tray (1.34.0): closing the window hides Trace, and its channels, the phone and alerts keep running until
+ * Quit in the tray (Windows) or menu bar (Mac) menu, or the app menu's Quit on a Mac. Before, closing the window stopped
+ * every channel. Settings → Preferences → "Keep running when the window is closed" turns it off.
+ */
+let tray: Tray | null = null; let toldAboutTray = false;
+const closeToTray = () => { try { return hub?.preferences().closeToTray !== false; } catch { return true; } };
+function showWindow() { if (quitting) return; if (!window || window.isDestroyed()) { createWindow(); return; } if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+/** The tray's icon: the app's, at tray size (a source checkout has no built phone app, so its own assets folder). */
+function trayImage() {
+  for (const file of [path.join(__dirname, '../../dist/phone/icon-192.png'), path.join(__dirname, '../../assets/icon.png')]) { const image = nativeImage.createFromPath(file); if (!image.isEmpty()) return image.resize({ width: 16, height: 16, quality: 'best' }); }
+  return nativeImage.createEmpty();
+}
+/** The tray icon and its menu, which says how many channels run (kept current as they start and stop). */
+function updateTray() {
+  if (!closeToTray()) { tray?.destroy(); tray = null; return; }
+  if (!tray) { try { tray = new Tray(trayImage()); } catch { hostHealth?.record('tray-unavailable'); return; } tray.on('click', showWindow); tray.on('double-click', showWindow); }
+  const running = manager.running().length;
+  const words = running ? `${running} ${running === 1 ? 'channel' : 'channels'} running` : 'No channels running';
+  tray.setToolTip(`Trace · ${words}`);
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Trace', click: showWindow }, { label: words, enabled: false }, { type: 'separator' }, { label: 'Quit Trace', click: () => app.quit() }]));
+}
 function createWindow() {
   window = new BrowserWindow({
     width: 1520,
@@ -599,6 +622,14 @@ function createWindow() {
   current.on('close', (event) => {
     if (closing || quitting) return;
     event.preventDefault();
+    // Hidden, not closed: its channels keep running. The first time, a notice says where Trace went.
+    if (closeToTray()) {
+      updateTray(); if (!tray) { hostHealth?.record('tray-unavailable'); } else {
+        current.hide();
+        if (!toldAboutTray && Notification.isSupported()) { toldAboutTray = true; const notice = new Notification({ title: 'Trace is still running', body: `Your channels keep going. Open Trace from its icon in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}, or quit it there.` }); notice.on('click', showWindow); notice.show(); }
+        return;
+      }
+    }
     if (delivery?.running || workflows?.running || worktrees?.active) { void dialog.showMessageBox(current, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before closing the app.' }); return; }
     closing = true;
     void flushWorkspace().then(() => Promise.all([manager.stopOwner(owner), accounts.stopOwner(owner)])).catch(() => hostHealth?.record('shutdown-stop-failed')).then(async () => {
@@ -641,13 +672,15 @@ let relaunching = false;
 // While it is quitting (saving memory summaries can take seconds after the window is gone), it opens again afterwards.
 app.on('second-instance', () => {
   if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; }
-  if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus();
+  if (!window || window.isDestroyed()) return; showWindow();
 });
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.whenReady().then(() => {
   void offerToRemoveOldApp().catch(() => {});
   void attention.start().catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   void channelTools.start().catch(() => hostHealth?.record('channel-tools-unavailable'));
+  // The tray icon from the start, so Quit is always within reach, once the preferences can be read.
+  setTimeout(() => { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } }, 1500);
   hostHealth = new HostHealth(storageRoot);
   // About once a second: a main process blocked 250 ms or more is recorded with the job that ran (see timed()).
   mainStalls.start((ms, job) => hostHealth?.stall('main', 'main-stall', ms, job));
@@ -765,6 +798,7 @@ else app.whenReady().then(() => {
     // Keyboard and mouse use of this computer, so a phone does not shrink channels while the person is here.
     // CODING_HUB_TEST_DESKTOP_IDLE (test-only): smoke tests say how long the computer has been idle; CI machines never are.
     idleSeconds: () => process.env.CODING_HUB_TEST_DESKTOP_IDLE ? Number(process.env.CODING_HUB_TEST_DESKTOP_IDLE) : powerMonitor.getSystemIdleTime(),
+    inFront: () => process.env.CODING_HUB_TEST_IN_FRONT ? process.env.CODING_HUB_TEST_IN_FRONT === '1' : Boolean(window && !window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.isFocused()),
     // A Mac asks the system: Electron's idle state says active when Trace started while the Mac was already locked.
     transcript: channelTranscript,
     // A phone's Screen reaches this Mac's own Screen Sharing on loopback, or, on Windows, Trace's screen service (when
@@ -1116,7 +1150,7 @@ else app.whenReady().then(() => {
     } catch { hostHealth?.record('usage-alerts-failed'); }
   })); }, 60000);
   // On a Mac, opening Trace from the Dock or Finder while it quits raises this, not second-instance: it opens afterwards.
-  app.on('activate', () => { if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('activate', () => { if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); else showWindow(); });
 }).catch(() => {
   // Without this, a failure while starting left Trace running with no window, and opening it again showed nothing.
   hostHealth?.record('host-start-failed');
@@ -1154,7 +1188,7 @@ app.on('before-quit', (event) => {
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
     // Then those summaries reach Drive, or another computer starts without them.
     await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed')); await savingUsage;
-    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
+    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); tray?.destroy(); tray = null; modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
     finally { if (reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate) app.relaunch(); app.quit(); }
   });
 });

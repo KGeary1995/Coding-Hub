@@ -55,6 +55,8 @@ export interface RemoteHost {
   resize?(reference: RunReference, cols: number, rows: number): void;
   /** Seconds since the person last used this computer's keyboard or mouse; without it the computer counts as away. */
   idleSeconds?(): number;
+  /** Whether Trace's window is in front here (shown and focused): the person may be reading it without touching anything. */
+  inFront?(): boolean;
   /** Whether this computer's screen is locked (null when the system cannot say), for a linked computer showing it. */
   screenLocked?(): boolean | null | Promise<boolean | null>;
   /** A channel's conversation from its CLI's transcript, across restarts. */
@@ -600,7 +602,13 @@ export class RemoteServer {
     let last = 0; for (const [id, time] of this.usedFrom) if (id !== device) last = Math.max(last, time);
     return Math.min(own, (Date.now() - last) / 1000);
   }
-  private desktopAway(device?: string) { const idle = this.idle(device); return idle === undefined || idle >= DESKTOP_IDLE_SECONDS; }
+  /**
+   * Whether a size asked for without `force` (a linked computer's tile, a phone in the background) may be applied: the
+   * computer unused for DESKTOP_IDLE_SECONDS, and Trace's window not in front. Before 1.34.0 only the mouse and keyboard
+   * counted, so reading a long reply for two minutes redrew the channels at another computer's tile size until the
+   * mouse moved.
+   */
+  private desktopAway(device?: string) { const idle = this.idle(device); return idle === undefined || (idle >= DESKTOP_IDLE_SECONDS && !this.host.inFront?.()); }
   /** While phones want or hold a size, follows whether the person is at this computer. */
   private watchDesktop() {
     if (this.desktopTimer || !this.host.idleSeconds) return;
@@ -609,14 +617,16 @@ export class RemoteServer {
   /** Gives automatic phone sizes back the moment the computer is used, and applies waiting ones once it is idle. */
   checkDesktop() {
     if (this.idle() === undefined) return;
+    // Trace brought to the front gives an automatic size back too, as using the computer does.
+    const front = this.host.inFront?.() === true;
     for (const [sessionId, hold] of [...this.phoneSizes]) {
-      if (this.idle(hold.device)! >= 3) continue;
+      if (this.idle(hold.device)! >= 3 && !(front && !hold.forced)) continue;
       // An automatic size goes back at once and is applied again when the computer is idle; one the phone insisted on
       // goes back when the phone has gone quiet, and the phone asks again when it is next used.
       if (!hold.forced) { this.wants.set(sessionId, { device: hold.device, runId: hold.runId, cols: hold.cols, rows: hold.rows, at: hold.at }); this.release(sessionId, hold.device, true); }
       else if (Date.now() - hold.at > PHONE_QUIET_MS) this.release(sessionId, hold.device);
     }
-    for (const [sessionId, want] of [...this.wants]) if (this.idle(want.device)! >= DESKTOP_IDLE_SECONDS) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
+    for (const [sessionId, want] of [...this.wants]) if (this.desktopAway(want.device)) { this.wants.delete(sessionId); this.apply(want.device, sessionId, want.runId, want.cols, want.rows, false); }
     if (!this.wants.size && !this.phoneSizes.size && this.desktopTimer) { clearInterval(this.desktopTimer); this.desktopTimer = null; }
   }
   /** Puts back the desktop's size, if this device is the one holding the channel at its size. */
