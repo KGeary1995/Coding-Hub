@@ -1,5 +1,12 @@
 ## What's new
 
+1.33.1 is the last idea from herdr for now, a careful version of its plugins:
+
+- **Event hooks:** Settings → **Event hooks** runs a program of your own when a channel needs you, ends its turn, or fails, such as a script that sends a message to your phone. It is told which channel and why in environment variables (TRACE_CHANNEL, TRACE_CHANNEL_NAME, TRACE_MESSAGE, TRACE_FOLDER, TRACE_EVENT). Trace asks you to confirm the exact command in a system dialog before saving it. It runs without a shell and is stopped after 30 seconds; one hook runs at most once every 10 seconds for a channel. **Test** runs it once.
+- **Your verification profiles are actions in the command menu:** *Run verification: name* opens Verification profiles and runs it there, after its usual confirmation.
+- **Not done:** add-ons that draw their own panes or tiles, and installing add-ons from GitHub, as herdr's plugins do. Those need more design before Trace runs other people's code.
+- **Tried:** the unit tests (a hook is saved only once confirmed and only with a program's full path; it runs with what happened in its environment, once per channel in ten seconds; Test and Delete), and the productivity smoke test: a hook added in Settings runs when the Codex channel asks for an approval, told CH2 and the request, and a profile runs from the command menu. The design, desktop and workbench smoke tests pass.
+
 1.33.0 is the fourth idea from herdr, whose agents can start, prompt and wait for each other:
 
 - **Agents can see and message other channels, if you turn it on.** Settings → Preferences → **Let agents see and message other channels**, off by default. Claude Code and Codex channels started afterwards get four tools: list this computer's channels, read another channel's last replies, send another channel a message, and wait for its turn to end (or an approval, or a stop). So one agent can hand work to another and pick up the result.

@@ -13,6 +13,7 @@ import { jumpToChannel } from './shell/StatusBar';
 import { useLinkedStore } from '../state/linked-store';
 import { channelKeyHint } from './channel-key';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
+import type { VerificationData } from '../../shared/workbench';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
 type Group = 'actions' | 'channels' | 'files' | 'memory';
@@ -33,6 +34,9 @@ function Highlight({ label, text }: { label: string; text: string }) {
 /** Ctrl ⇧ P: actions, live channels, project files and memory in one list (docs/design/trace, sheet 06). */
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
+  /** The verification profiles, read as the menu opens: each is an action that runs it (1.33.1). */
+  const [checks, setChecks] = useState<VerificationData['profiles']>([]);
+  useEffect(() => { if (open) void workbench<VerificationData>({ action: 'verification-list' }).then((data) => setChecks(data.profiles)).catch(() => setChecks([])); }, [open]);
   const [input, setInput] = useState('');
   const [chosenScope, setChosenScope] = useState<CommandScope>('all');
   const [selected, setSelected] = useState(0);
@@ -107,6 +111,8 @@ export function CommandMenu() {
       { id: 'templates', label: 'Apply a project template', run: go('projects') },
       { id: 'support', label: 'Export a diagnostic report', run: go('settings') },
       { id: 'grid', label: 'Arrange channels in grid', run: () => { setView('workspace'); arrange('grid'); } },
+      // Each verification profile, run where its result shows (its confirmation still names the exact commands).
+      ...checks.map((check) => ({ id: `check-${check.id}`, label: `Run verification: ${check.name}`, run: () => { useWorkspaceStore.setState({ runVerificationId: check.id }); setView('verification'); } })),
       { id: 'detect', label: 'Refresh local CLI detection', run: () => void refreshEngines() },
       // Each linked computer's tab (1.31.5), as its tab in the top bar opens it.
       ...computers.filter((computer) => computer.linked).map((computer) => ({ id: `computer-${computer.id}`, label: `Open ${computer.name}${computer.connected ? '' : ' (not connected)'}`, run: () => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' }) })),
@@ -127,7 +133,7 @@ export function CommandMenu() {
     }
     // Actions and channels match on their label; search hits already matched their content.
     return all.filter((item) => (scope === 'all' || scope === item.group) && (item.group === 'files' || item.group === 'memory' || !text || matchRange(item.label, text)));
-  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange]);
+  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange, checks]);
   useEffect(() => { setSelected(0); }, [scope, text]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   const run = (item: Item | undefined) => { if (!item) return; setOpen(false); item.run(); };

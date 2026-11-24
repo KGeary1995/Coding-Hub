@@ -43,6 +43,7 @@ import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
 import { ChannelTools } from './services/cli/channel-tools';
+import { EventHooks } from './services/workbench/event-hooks';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, permissionLevel, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
@@ -158,6 +159,19 @@ const channelTools = new ChannelTools({
     if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
   },
 });
+/** Event hooks (1.33.1): built once storage is known, below; until then events run none. */
+let eventHooks: EventHooks | null = null;
+/** Runs the person's event hooks for a channel's event, named as the window names it. Seats count as their table's channel. */
+function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed', sessionId: string, message: string) {
+  if (!eventHooks) return;
+  try {
+    const channels = workspaceChannels(); const own = channels.find((session) => session.id === sessionId); const lead = own?.seatedAt ? channels.find((session) => session.id === own.seatedAt) : own;
+    const shown = channels.filter((session) => !session.seatedAt); const index = lead ? shown.indexOf(lead) : -1; if (index < 0) return;
+    // A seat's turn ending says nothing about the table's work: only its lead's (or an approval or failure) is passed on.
+    if (event === 'turn-ended' && own?.seatedAt) return;
+    eventHooks.fire(event, lead!.id, { channel: index + 1, name: lead!.title, message, folder: manager.running().find((run) => run.sessionId === lead!.id)?.cwd ?? null });
+  } catch { hostHealth?.record('event-hook-failed'); }
+}
 /** The channel-tools MCP server's settings file for each Claude run, removed when the run ends. */
 const channelToolFiles = new Map<string, string>();
 const attention = new AttentionServer((runId, message) => manager.notifyAttention(runId, message), (runId, finished) => manager.notifyResolved(runId, finished), (runId, conversationId) => hub?.telemetry?.follow(runId, conversationId), (runId, size) => hub?.telemetry?.setContextWindow(runId, size));
@@ -171,6 +185,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   } catch { reportStorageError('Session output could not be saved. Live terminal output remains available.'); }
   if (event.type === 'exit') { attention.unregister(event.runId); runOwners.delete(event.runId); const file = channelToolFiles.get(event.runId); if (file) { channelToolFiles.delete(event.runId); fs.rm(file, { force: true }, () => {}); } }
   try { channelTools.onSessionEvent(event); } catch { hostHealth?.record('channel-tools-event-failed'); }
+  if (event.type === 'attention') hookEvent('needs-you', event.sessionId, event.message);
+  else if (event.type === 'answered' && event.finished) hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.');
+  else if (event.type === 'exit' && event.diagnostic) hookEvent('failed', event.sessionId, event.diagnostic);
   // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
   // file, before the run is ended below. For any other run this is nothing new to telemetry.
   if (event.type === 'conversation') try { hub?.telemetry?.setGeminiConversation(event.runId, event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
@@ -195,6 +212,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (envelope.event.type === 'ready') try { hub?.telemetry?.setGeminiConversation(envelope.runId, envelope.event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   try { channelTools.onChat(envelope); } catch { hostHealth?.record('channel-tools-event-failed'); }
+  if (envelope.event.type === 'done') hookEvent(envelope.event.isError ? 'failed' : 'turn-ended', envelope.sessionId, envelope.event.isError ? envelope.event.error ?? 'The turn ended with an error.' : 'The agent ended its turn.');
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
@@ -700,6 +718,7 @@ else app.whenReady().then(() => {
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
+  eventHooks = new EventHooks(storageRoot, async (item) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Save event hook', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run a program on an event', message: `When a channel ${item.event === 'needs-you' ? 'needs you' : item.event === 'turn-ended' ? 'ends its turn' : 'fails'}, Trace will run:`, detail: [item.program, ...item.args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ') + '\n\nIt runs as you, without a shell, with the channel\'s number, name, folder and message in TRACE_* environment variables. Save it only if you trust this program.' })).response === 0);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all channels and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
   backups = new Backups(storageBase, storageRoot, profileRoot, app.getVersion(), { ready: readyForBackup,
@@ -936,10 +955,11 @@ else app.whenReady().then(() => {
     }
     if (action === 'diagnose') return diagnostics.execute(payload);
     if (action.startsWith('native-')) return nativeSessions.execute(payload);
-    if (backups?.busy && ['verification-run', 'verification-save', 'verification-delete', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
+    if (backups?.busy && ['verification-run', 'verification-save', 'verification-delete', 'hook-save', 'hook-delete', 'task-save', 'experiment-save', 'trial-add', 'experiment-delete', 'trial-delete'].includes(action)) throw new HubError('BACKUP_BUSY', 'Finish the backup operation before changing local workspace data.');
     // Jobs that run or rewrite local data wait out a Mac script update, as channel starts do (it restarts Trace once it is done).
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
+    if (action.startsWith('hook-')) return eventHooks!.execute(payload);
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);
     if (action.startsWith('backup-')) return backups!.execute(payload);

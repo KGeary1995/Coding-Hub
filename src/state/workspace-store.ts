@@ -142,6 +142,8 @@ interface WorkspaceState {
   reviewSessionId: string | null;
   /** An absolute file path Files should select next (from the command menu); cleared once Files reads it. */
   openFilePath: string | null;
+  /** A verification profile to run once Verification profiles opens (from the command menu, 1.33.1); cleared there. */
+  runVerificationId: string | null;
   /** A memory note Shared memory should show next (from the command menu); cleared once Shared memory reads it. */
   openMemoryNote: { project: string; id: string } | null;
   engines: EngineInfo[];
@@ -216,7 +218,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   focusedSessionId: null,
   activeView: 'workspace',
   helpTopicId: 'overview',
-  historyMode: 'runs', recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, openMemoryNote: null,
+  historyMode: 'runs', recoverySessionId: null, computerId: null, reviewSessionId: null, openFilePath: null, runVerificationId: null, openMemoryNote: null,
   engines: [],
   discovering: false,
   discoveryError: null,
