@@ -11,7 +11,7 @@ import { refreshEngines } from '../runtime/use-native-host';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { MAC } from './platform';
 import { ENGINE_ICONS } from './tile/engine-icons';
-import { HowThisWorks } from './HubPanels';
+import { HowThisWorks } from './HowThisWorks';
 
 const names: Record<AccountProvider, string> = { claude: 'Claude Code', codex: 'OpenAI Codex', github: 'GitHub' };
 /** Each tool's mark, in its engine's colour, as on a channel tile; GitHub is no engine, so it stays neutral. */

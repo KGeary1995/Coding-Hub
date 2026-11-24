@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AttentionServer, GeminiStatusReader, OscNotifications, OscSequences, atLeast, claudeAttentionSettings, cleanMessage, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
+import { AttentionServer, codexApproval, GeminiStatusReader, OscNotifications, OscSequences, atLeast, claudeAttentionSettings, cleanMessage, ownStatusLine, supportsHttpHooks, supportsSessionHook, systemCurl, withLoopbackNoProxy } from './attention';
 
 describe('OSC 9 notifications', () => {
+  it('tells Codex\'s approval requests from the end of its turn', () => {
+    for (const asking of ['Approval requested: npm test', 'Approval requested by github', 'Codex wants to edit src/app.ts', 'Codex wants to edit 3 files']) expect(codexApproval(asking)).toBe(true);
+    for (const ended of ['Agent turn complete', 'The tests pass now and the build is green.', 'Approval of the plan: done', 'Requested approval was given']) expect(codexApproval(ended)).toBe(false);
+  });
   it('reads notifications ended by BEL or ST and ignores progress reports', () => {
     const osc = new OscNotifications();
     expect(osc.push('output \x1b]9;Approval requested: npm test\x07 more \x1b]9;4;1;50\x07 \x1b]9;Second\x1b\\')).toEqual(['Approval requested: npm test', 'Second']);

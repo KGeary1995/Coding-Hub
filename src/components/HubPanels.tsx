@@ -46,7 +46,6 @@ function ProjectSelect({ directory, onChange }: { directory: string | null; onCh
 /** The page heading (ui-page-head): the same icon as the page's entry in the Agent setup menu, the title, one line, actions. */
 function Heading({ title, description, icon: Icon, actions }: { title: string; description: string; icon: typeof Cable; actions?: ReactNode }) { return <header className="ui-page-head"><span className="ui-page-icon"><Icon aria-hidden="true" /></span><div><h1>{title}</h1><p>{description}</p></div>{actions && <div className="ui-page-actions">{actions}</div>}</header>; }
 /** Explanation that would otherwise be a paragraph in a card: closed until asked for (docs/design/midnight, section 7). */
-export function HowThisWorks({ children }: { children: ReactNode }) { return <details className="ui-how"><summary>How this works</summary><div>{children}</div></details>; }
 /** An engine's mark, the one its channel tile shows. */
 function EngineGlyph({ engine }: { engine: keyof typeof ENGINE_NAMES }) { const Glyph = ENGINE_ICONS[engine]; return <Glyph />; }
 

@@ -15,7 +15,7 @@ import { buildGeminiSeatLaunch, buildLaunch, HubError, launchedLevel } from './e
 import { discoverEngine, freshHostEnvironment } from './discovery';
 import { AUTH_TIMED_OUT } from './auth-status';
 import { geminiConversations } from './gemini-conversations';
-import { cleanMessage, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
+import { cleanMessage, codexApproval, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
 import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
@@ -305,7 +305,7 @@ export class PtyManager {
         run.pendingData += data;
         if (run.pendingData.length >= 32 * 1024) this.flush(run);
         else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
-        if (run.osc) for (const message of run.osc.push(data)) this.notifyAttention(run.session.runId, message);
+        if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
         if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
       });
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
@@ -361,6 +361,8 @@ export class PtyManager {
    * and what it causes goes to the owning window as if sent there. Whether the device may open a Round Table is the
    * remote server's check.
    */
+  /** Whether a run leads an open Round Table of either kind, so a message to it goes to the table (`table-send`). */
+  leadsTable(runId: string) { return this.tables.leads(runId) || this.chains.has(runId); }
   chatRemote(payload: unknown) {
     this.chatRequest(payload, true, (reference) => {
       const run = this.runs.get(reference.sessionId);

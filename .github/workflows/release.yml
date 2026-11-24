@@ -23,8 +23,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.16.0'
           cache: npm
@@ -49,7 +49,7 @@ jobs:
           WINDOWS_PUBLISHER_NAME: ${{ secrets.WINDOWS_CERTIFICATE != '' && vars.WINDOWS_PUBLISHER_NAME || '' }}
       # The price list and model names this version was built with, for installed copies to refresh from between releases.
       - run: node scripts/make-catalog.cjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-windows
           if-no-files-found: error
@@ -64,8 +64,8 @@ jobs:
     # Notarizing two disk images waits on Apple, so this one gets longer.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.16.0'
           cache: npm
@@ -96,7 +96,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       - name: Start a CLI in the packaged app (Apple silicon)
         run: node scripts/packaged-smoke.cjs "release/mac/mac-arm64/Trace.app/Contents/MacOS/Trace"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-mac
           if-no-files-found: error
@@ -124,9 +124,9 @@ jobs:
           passed=$(gh run list --workflow windows-release.yml --commit "$GITHUB_SHA" --status success --limit 1 --json databaseId --jq 'length')
           if [ "$passed" != 1 ]; then echo "::error::No successful Windows release candidate run on $GITHUB_SHA. Start it (gh workflow run windows-release.yml --ref main), wait for it to pass on this commit, then rerun this job."; exit 1; fi
           echo "The Windows release candidate passed on $GITHUB_SHA."
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Not "assets": that folder in the checkout holds the app icons and entitlements, which would be published too.
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: release-assets
           merge-multiple: true

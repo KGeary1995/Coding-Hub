@@ -147,7 +147,8 @@ const repositoryGit = new RepositoryGit(repositoryFiles);
 // SessionStart says which conversation a run is in: telemetry follows it there, then tells the window (see onConversation).
 /**
  * Channel tools (1.33.0): agents may list, read, message and wait for other channels, only while the person has turned
- * that on. A Round Table counts as its lead's channel; a message to a chat goes in as a chat message, to a terminal as a line.
+ * that on. A Round Table counts as its lead's channel, and a message to it goes to the table; to a chat it goes in as a chat
+ * message, to a terminal as a line.
  */
 const channelTools = new ChannelTools({
   enabled: () => { try { return hub?.preferences().channelTools === true; } catch { return false; } },
@@ -156,7 +157,8 @@ const channelTools = new ChannelTools({
   replies: (sessionId, count) => (channelTranscript(sessionId)?.messages ?? []).flatMap((message) => message.role === 'assistant' ? [message.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n').trim()] : []).filter(Boolean).slice(-count).map((text) => text.slice(-8000)),
   send: async (sessionId, text) => {
     const run = manager.running().find((item) => item.sessionId === sessionId); if (!run) throw new HubError('CHANNEL_TOOLS_STOPPED', 'That channel is not running.');
-    if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
+    // A Round Table's lead passes it to the table, as a message typed there does (1.33.2; before, the lead alone got it).
+    if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: manager.leadsTable(run.runId) ? 'table-send' : 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
   },
 });
 /** Event hooks (1.33.1): built once storage is known, below; until then events run none. */
@@ -243,7 +245,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
   // Last: Claude's --mcp-config takes a list of values.
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
-  // Then the channel tools, when turned on, join that list (or start it). Codex keeps asking before each call.
+  // Then the channel tools, when turned on, join that list (or start it). Codex takes the three that only look (list,
+  // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
+  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it.
   const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
     const server = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
@@ -253,7 +257,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
         const file = path.join(folder, `${run.runId}.mcp.json`); fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'trace-channels': server } }), { mode: 0o600 }); channelToolFiles.set(run.runId, file);
         if (launch.args.at(-2) === '--mcp-config') launch.args.push(file); else launch.args.push('--mcp-config', file);
       } catch { channelTools.unregister(run.runId); }
-    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`);
+    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
     else channelTools.unregister(run.runId);
   }
 }), abandonLaunch: (run) => { attention.unregister(run.runId); channelTools.unregister(run.runId); const file = channelToolFiles.get(run.runId); if (file) { channelToolFiles.delete(run.runId); fs.rm(file, { force: true }, () => {}); } hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {

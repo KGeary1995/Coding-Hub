@@ -30,6 +30,11 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
 }
 
 describe('Round Table', () => {
+  it('says which run leads an open table (a message to its channel goes to the table), and not once it is closed', () => {
+    const { tables } = setup(); expect(tables.leads(CLAUDE)).toBe(false);
+    tables.open(1, CLAUDE, CODEX, 'claude', 0); expect(tables.leads(CLAUDE)).toBe(true); expect(tables.leads(CODEX)).toBe(false);
+    tables.close(CLAUDE); expect(tables.leads(CLAUDE)).toBe(false);
+  });
   it('keeps what a seat said by itself, between turns, out of its next answer, and does not move on its end', () => {
     const { tables, sent, say, done, last, runs } = setup();
     tables.open(1, CLAUDE, CODEX, 'claude', 0);
