@@ -719,7 +719,7 @@ else app.whenReady().then(() => {
   hostHealth = new HostHealth(storageRoot);
   // About once a second: a main process blocked 250 ms or more is recorded with the job that ran (see timed()).
   mainStalls.start((ms, job) => hostHealth?.stall('main', 'main-stall', ms, job));
-  powerMonitor.on('suspend', () => mainStalls.skip()); powerMonitor.on('resume', () => mainStalls.skip());
+  powerMonitor.on('suspend', () => mainStalls.skip()); powerMonitor.on('resume', () => { mainStalls.skip(); linked?.resumed(); });
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
   try { const dumps = path.join(storageRoot, 'crash-dumps'); fs.mkdirSync(dumps, { recursive: true, mode: 0o700 }); app.setPath('crashDumps', dumps); crashReporter.start({ uploadToServer: false, ignoreSystemCrashHandler: false }); void pruneCrashDumps(dumps).catch(() => {}); }
   catch { hostHealth.record('crash-dump-setup-unavailable'); }

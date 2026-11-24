@@ -1,5 +1,13 @@
 ## What's new
 
+1.35.1 is the first fix taken from herdr's source code:
+
+- **Your other computer comes back after sleep.** When this computer wakes, each linked computer connects again at once. Before, its tab could show stale channels for up to a minute, or stay disconnected until the next retry.
+- **A dead link is noticed in 30 seconds, not 60.** Trace now pings linked computers and phones every 10 seconds instead of 25. 30 seconds still works with a computer on an older Trace.
+- **A link that keeps dropping backs off.** Retries wait 2 seconds, doubling to 30, and start again from 2 seconds only after a connection has held for a minute. Before, any connection that worked for a moment put the wait back to 2 seconds, so a flapping link was retried every 2 seconds.
+- **Tried:** the unit tests, including a new one where a linked computer, woken, drops its stream and has a new one within 1.5 seconds; the remote and screen smoke tests. The screen smoke test failed once on a pasted-keys check and passed twice after, with no change; it is not caused by this.
+- **Not tried:** a real sleep and wake with your Mac linked.
+
 1.35.0 starts Trace plugins (design: docs/plugins.md):
 
 - **Trace plugins**, in Agent setup → Skills & plugins. A plugin is a folder with a trace-plugin.json manifest and its programs, in any language. **Link a folder** adds one after a system dialog shows every command it may run and what it may ask Trace to do. It runs as you and nobody reviews it, so add only ones you trust.
