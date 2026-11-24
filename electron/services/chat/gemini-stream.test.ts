@@ -147,15 +147,15 @@ describe('a Gemini chat that may edit (lead or driver)', () => {
     return { stream, written, events, sent, push, reply, update, switched, open, ask };
   }
 
-  it('runs in the mode of its level (Ask: default, Allow edits: accept-edits, Full access: auto), and is ready only once agy reports it', () => {
-    expect(GEMINI_MODE).toEqual({ ask: 'default', edits: 'accept-edits', full: 'auto' });
+  it('runs in the mode of its level (Ask: plan, Allow edits: accept-edits, Full access: auto), and is ready only once agy reports it', () => {
+    expect(GEMINI_MODE).toEqual({ ask: 'plan', edits: 'accept-edits', full: 'auto' });
     for (const level of ['ask', 'edits', 'full'] as const) {
       const { stream, events, sent, reply, update } = peer({ permissions: level });
       stream.start(); reply('initialize'); reply('session/new', OPENED);
-      // At Ask a new session is in default already, as agy reports: not asked for again (agy 1.5.16 reports no change then).
-      expect(sent('session/set_mode').map((item) => item.params)).toEqual(level === 'ask' ? [] : [{ sessionId: 's1', modeId: GEMINI_MODE[level] }]);
+      // A new session is in default, as agy reports: every level asks for its own mode.
+      expect(sent('session/set_mode').map((item) => item.params)).toEqual([{ sessionId: 's1', modeId: GEMINI_MODE[level] }]);
       stream.send('Hello', []);
-      if (level !== 'ask') { reply('session/set_mode'); expect(sent('session/prompt')).toHaveLength(0); expect(events.some((event) => event.type === 'ready')).toBe(false); update({ sessionUpdate: 'current_mode_update', currentModeId: GEMINI_MODE[level] }); }
+      { reply('session/set_mode'); expect(sent('session/prompt')).toHaveLength(0); expect(events.some((event) => event.type === 'ready')).toBe(false); update({ sessionUpdate: 'current_mode_update', currentModeId: GEMINI_MODE[level] }); }
       expect(events).toContainEqual({ type: 'ready', conversationId: 's1', model: 'gemini-4-neon-high' });
       expect(sent('session/prompt')).toHaveLength(1);
     }
@@ -187,6 +187,14 @@ describe('a Gemini chat that may edit (lead or driver)', () => {
     // Read-only at Full access: the table decides (it declines edits and allows the rest), so the request is passed on.
     full.reply('session/prompt', { stopReason: 'end_turn' }); full.stream.setReadOnly(true); full.switched(); full.stream.send('Review.', []);
     full.ask(9); expect(full.events.at(-1)).toMatchObject({ type: 'permission', toolName: 'Shell' });
+  });
+  it('at Ask is read-only: plan mode, a file change it asks for is declined and said, a command is still asked about', () => {
+    const { stream, events, written, open, push } = peer({ permissions: 'ask' }); expect(open()).toBe('plan'); stream.send('Fix it.', []);
+    push({ id: 11, method: 'session/request_permission', params: { ...REQUEST, toolCall: { toolCallId: 't2', name: 'write_file', kind: 'edit', title: 'a.txt', locations: [{ path: '/project/a.txt' }] } } });
+    expect(written.at(-1)).toEqual({ jsonrpc: '2.0', id: 11, result: { outcome: { outcome: 'selected', optionId: 'deny' } } });
+    expect(events.some((event) => event.type === 'permission')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'notice', text: expect.stringContaining('/project/a.txt') });
+    push({ id: 12, method: 'session/request_permission', params: REQUEST }); expect(events.at(-1)).toMatchObject({ type: 'permission', toolName: 'Shell' });
   });
   it('says nothing about its writes while it may edit; a read-only seat’s writes are said', () => {
     const { stream, events, open, update, reply, switched } = peer(); open(); stream.send('Write it.', []);

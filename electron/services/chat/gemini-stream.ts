@@ -12,13 +12,14 @@ export const CONFIRM_MS = 20_000;
 /** The most messages of a loaded conversation the thread shows again. */
 const REPLAYED = 40;
 /**
- * agy's session mode for each permission level while the run may edit (from 1.39). agy 1.5.16 offers default, accept-edits,
+ * agy's session mode for each permission level (from 1.39; Ask is plan, read-only, from 1.40.1 by the owner's decision of
+ * 2026-11-24, because Default could edit without asking). agy 1.5.16 offers default, accept-edits,
  * auto and plan in `session/new` and `session/load` (seen 2026-11-24). Default asks before commands and, by agy's own
  * permission settings, may write files without asking (it did, seen with 1.5.16): Trace cannot set those settings over
  * ACP. Accept edits writes without asking and asks before commands. Auto also runs commands it takes for safe; at Full
  * access Trace answers whatever it still asks (allow), as Claude's and Codex's full access never ask.
  */
-export const GEMINI_MODE: Record<PermissionLevel, string> = { ask: 'default', edits: 'accept-edits', full: 'auto' };
+export const GEMINI_MODE: Record<PermissionLevel, string> = { ask: 'plan', edits: 'accept-edits', full: 'auto' };
 /**
  * A model as the session reports it: agy 1.5.6 takes `session/set_model` with `gemini-4-argon-high`, then reports
  * model `gemini-4-argon` and thinking level `high` in its config options (scripts/fixtures/agy-acp-1.5.6.jsonl).
@@ -65,6 +66,8 @@ export class GeminiStream implements ChatStream {
 
   /** The mode the run should be in now. */
   private mode() { return this.readOnly ? 'plan' : GEMINI_MODE[this.level]; }
+  /** Does not change the project: read-only at a table, or at Ask. */
+  private readsOnly() { return this.readOnly || this.level === 'ask'; }
   /** A Round Table's reviewer reads but does not edit: plan mode (and its edits are declined there). */
   setReadOnly(readOnly: boolean) { if (readOnly === this.readOnly) return; this.readOnly = readOnly; this.applyMode(); }
   /** From the next turn: agy is not switched in the middle of one. */
@@ -222,7 +225,7 @@ export class GeminiStream implements ChatStream {
       const input = record(update.rawInput); const paths = this.paths(update);
       this.emit({ type: 'assistant', messageId: `gemini-tool-${id}`, blocks: [{ type: 'tool', id, name: text(update.name) || tool.kind || 'tool', input: { ...input, ...(paths.length ? { paths } : {}), title: tool.title } }] });
       // A write a read-only run makes without asking (plan mode writes its own notes so) is shown, so nothing it writes goes unseen.
-      if (WRITES.has(tool.kind) && this.readOnly) this.emit({ type: 'notice', text: `Gemini writes ${paths.length ? paths.join(', ') : tool.title} (Trace checks the project's files after this step).` });
+      if (WRITES.has(tool.kind) && this.readsOnly()) this.emit({ type: 'notice', text: `Gemini writes ${paths.length ? paths.join(', ') : tool.title} (Trace checks the project's files after this step).` });
       return;
     }
     if (kind === 'tool_call_update') {
@@ -248,6 +251,8 @@ export class GeminiStream implements ChatStream {
     if (this.level === 'full' && !this.readOnly) { this.answer(requestId, true, false, false); return; }
     const paths = this.paths(call); const title = text(call.title) || text(call.name);
     const toolName = WRITES.has(kind) ? 'File changes' : kind === 'execute' ? 'Shell' : title || 'Tool';
+    // A chat at Ask is read-only: a file change is declined, and said. (A table's read-only seat is the table's to decline.)
+    if (WRITES.has(kind) && this.level === 'ask' && !this.readOnly) { this.answer(requestId, false, false, false); this.emit({ type: 'notice', text: `Gemini asked to change ${paths.length ? paths.join(', ') : 'files'}. At Ask it only reads, so Trace said no. Choose Allow edits to let it edit.` }); return; }
     this.emit({ type: 'permission', requestId, toolName, description: paths.length ? paths.join(', ') : title, input: record(call.rawInput), canAllowEdits: false });
   }
 }
