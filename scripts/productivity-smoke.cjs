@@ -64,6 +64,20 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await openView(page,'Workspace');await tile.locator('.xterm-helper-textarea').focus();await page.keyboard.type('need-approval');await page.keyboard.press('Enter');
     for(let i=0;i<150&&!(await fs.stat(hookOut).catch(()=>null));i++)await new Promise((resolve)=>setTimeout(resolve,100));
     assert.match(await fs.readFile(hookOut,'utf8'),/^needs-you\|2\|Approval requested: npm test$/);
+    // A Trace plugin (1.35.0): linked from a folder once confirmed, its actions run from the command menu and call Trace's
+    // plugin API, within the permissions it declared; turned off, its actions are gone.
+    const sample=path.resolve(__dirname,'fixtures/plugins/sample');
+    const pluginOutput=async()=>{for(const file of await fs.readdir(path.join(root,'storage'),{recursive:true}))if(String(file).endsWith(path.join('fixture.sample','data','out.txt')))return fs.readFile(path.join(root,'storage',String(file)),'utf8');return '';};
+    const pluginSays=async(pattern)=>{for(let i=0;i<150&&!pattern.test(await pluginOutput());i++)await new Promise((resolve)=>setTimeout(resolve,100));assert.match(await pluginOutput(),pattern);};
+    const runPluginAction=async(title)=>{await page.keyboard.press('Control+Shift+P');await page.getByLabel('Search commands',{exact:true}).fill('Sample plugin');await page.getByRole('option').filter({hasText:`Sample plugin: ${title}`}).first().click();};
+    await app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},sample);
+    await openView(page,'Skills & plugins');await page.getByRole('button',{name:'Link a folder',exact:true}).click();await page.locator('.trace-plugin').filter({hasText:'Sample plugin'}).waitFor();
+    await runPluginAction('List channels');await pluginSays(/^list CH1:\w+,CH2:running/m);
+    await runPluginAction('List channels with the trace helper');await pluginSays(/^helper \d+$/m);
+    await runPluginAction('Try to message CH1');await pluginSays(/^send 409 Sample plugin did not ask for channels\.send/m);
+    await page.getByLabel('Sample plugin on',{exact:true}).uncheck();await page.keyboard.press('Control+Shift+P');await page.getByLabel('Search commands',{exact:true}).fill('Sample plugin');
+    await page.waitForTimeout(500);assert.equal(await page.getByRole('option').filter({hasText:'Sample plugin:'}).count(),0,'a plugin turned off has no actions');await page.keyboard.press('Escape');
+    await page.getByLabel('Sample plugin on',{exact:true}).check();await openView(page,'Workspace');
     const usage=await page.evaluate(()=>window.usages.at(-1));assert.ok(usage.conversationId);
     await (await tileControl(tile, 'Stop')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===0);
     const saved=await native(page,'loadWorkspace');assert.equal(saved.workspace.sessions[1].config.resumeId,usage.conversationId);assert.equal(saved.workspace.sessions[1].title,'Implementation');
@@ -75,6 +89,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await openView(page, 'AI coaching');await page.getByRole('button',{name:'Review coaching report',exact:true}).click();await page.getByLabel('Approve sharing coaching report through my CLI',{exact:true}).check();await page.getByRole('button',{name:'Prepare Claude coaching',exact:true}).click();await page.locator('.session-tile').nth(3).waitFor();
     // A channel running when Trace closes starts again by itself, on its conversation (1.32.0); the stopped ones stay stopped.
     await (await tileControl(tile,'Restart')).click();await page.waitForFunction(()=>document.querySelectorAll('.session-tile[data-status="running"]').length===1);
+    // The sample plugin hears the channel start (channel.started), told which channel.
+    await pluginSays(/^started CH2 channel\.started$/m);
     await app.close();app=null;page=await launch();
     await page.waitForFunction(()=>window.events.some((event)=>event.data?.includes('RESUMING:')));await page.getByText('A channel running when Trace closed was started again on its conversations.',{exact:false}).waitFor();
     assert.equal(await page.locator('.session-tile[data-status="running"]').count(),1,'only the channel that was running starts again');

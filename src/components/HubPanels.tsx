@@ -21,6 +21,7 @@ import { PhoneAccessCard } from './PhoneAccess';
 import { ENGINE_ICONS } from './tile/engine-icons';
 import { rebaseDraft } from '../state/rebase-draft';
 import { EventHooksCard } from './EventHooksCard';
+import { TracePlugins } from './TracePlugins';
 
 /**
  * The budget fields kept to their ranges: when a field is left and on save, not on each keystroke, which turned the
@@ -67,6 +68,7 @@ export function ConfigurationPanel({ skills = false }: { skills?: boolean }) {
     : skills ? <div className="ui-empty"><Sparkles aria-hidden="true" /><h3>No local extensions found</h3><p>Select a project or install skills through your CLI. Discovery never runs hook commands.</p></div>
     : <div className="ui-empty"><Cable aria-hidden="true" /><h3>No servers configured</h3><p>Add a stdio or HTTP server, or select a project to inspect its configuration.</p>{!adding && addButton}</div>;
   return <section className="feature-panel hub-panel config-panel"><Heading title={skills ? 'Skills & plugins' : 'MCP servers'} description={skills ? 'The instructions, skills, plugins and hooks your local agents can use.' : 'The servers Claude Code and Codex use; restart channels after a change.'} icon={skills ? Sparkles : Cable} actions={<>{refreshButton}{!skills && (count > 0 || adding) && addButton}</>} />
+    {skills && <TracePlugins />}
     <div className="hub-toolbar"><ProjectSelect directory={directory} onChange={setDirectory} /></div>
     <p className="ui-hint config-note">Changes preserve unknown fields and create private backups. TOML formatting and comments may normalize. Enabled means configured; the CLI verifies connection and permissions when it starts.</p>
     <Feedback error={op.error} notice={op.notice} />{inventory.warnings.map((w) => <div className="hub-warning" key={w}>{w}</div>)}

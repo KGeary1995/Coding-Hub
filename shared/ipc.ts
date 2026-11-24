@@ -140,7 +140,7 @@ export function clipboardPreviewType(type: string, bytes: number): 'image/png' |
   return (name === 'image/png' || name === 'image/jpeg') && bytes > 0 && bytes <= CLIPBOARD_PREVIEW_LIMIT ? name : null;
 }
 /** What a desktop notification opens: a channel here, another computer's tab, or Usage. */
-export type AlertTarget = { sessionId: string } | { computerId: string } | { view: 'usage' | 'settings' };
+export type AlertTarget = { sessionId: string } | { computerId: string } | { view: 'usage' | 'settings' | 'skills' };
 /** What the window reports about itself (windowHealthSchema): `ms` is how long a task or stall took, `detail` a short label. */
 export interface WindowHealthReport { kind: 'long-task' | 'stall' | 'context-lost' | 'context-restored'; ms?: number; detail?: string }
 export const IPC_CHANNELS = {

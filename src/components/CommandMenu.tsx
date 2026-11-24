@@ -14,6 +14,7 @@ import { useLinkedStore } from '../state/linked-store';
 import { channelKeyHint } from './channel-key';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
 import type { VerificationData } from '../../shared/workbench';
+import type { PluginData } from '../../shared/plugins';
 import { MAX_CHANNELS } from '../../shared/schemas';
 
 type Group = 'actions' | 'channels' | 'files' | 'memory';
@@ -37,6 +38,11 @@ export function CommandMenu() {
   /** The verification profiles, read as the menu opens: each is an action that runs it (1.33.1). */
   const [checks, setChecks] = useState<VerificationData['profiles']>([]);
   useEffect(() => { if (open) void workbench<VerificationData>({ action: 'verification-list' }).then((data) => setChecks(data.profiles)).catch(() => setChecks([])); }, [open]);
+  /** Trace plugins that are on, read as the menu opens: their actions are listed here (1.35.0). */
+  const [plugins, setPlugins] = useState<PluginData['plugins']>([]);
+  useEffect(() => { if (open) void workbench<PluginData>({ action: 'plugin-list' }).then((data) => setPlugins(data.plugins.filter((plugin) => plugin.enabled && !plugin.problem))).catch(() => setPlugins([])); }, [open]);
+  /** The channel whose terminal had the keyboard when the menu opened: a plugin's channel actions are about it. */
+  const opener = useRef<string | null>(null);
   const [input, setInput] = useState('');
   const [chosenScope, setChosenScope] = useState<CommandScope>('all');
   const [selected, setSelected] = useState(0);
@@ -55,7 +61,7 @@ export function CommandMenu() {
     const handler = (event: KeyboardEvent) => {
       // Ctrl+Shift+P typed into another computer's screen is that computer's.
       if (event.target instanceof Element && event.target.closest('.linked-screen')) return;
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); setOpen((current) => !current); }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); opener.current = event.target instanceof Element ? event.target.closest('.session-tile')?.getAttribute('data-session') ?? null : null; setOpen((current) => !current); }
       if (event.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', handler);
@@ -113,6 +119,9 @@ export function CommandMenu() {
       { id: 'grid', label: 'Arrange channels in grid', run: () => { setView('workspace'); arrange('grid'); } },
       // Each verification profile, run where its result shows (its confirmation still names the exact commands).
       ...checks.map((check) => ({ id: `check-${check.id}`, label: `Run verification: ${check.name}`, run: () => { useWorkspaceStore.setState({ runVerificationId: check.id }); setView('verification'); } })),
+      // Each Trace plugin's actions: for the workspace always, for a channel when the menu was opened in one, for the repository on Changes.
+      ...plugins.flatMap((plugin) => plugin.actions.filter((action) => action.context === 'workspace' || (action.context === 'channel' && opener.current) || (action.context === 'repository' && useWorkspaceStore.getState().activeView === 'diff' && rootDirectory))
+        .map((action) => ({ id: `plugin-${plugin.id}-${action.id}`, label: `${plugin.name}: ${action.title}`, run: () => void workbench({ action: 'plugin-run', id: plugin.id, actionId: action.id, ...(action.context === 'channel' && opener.current ? { sessionId: opener.current } : {}), ...(action.context === 'repository' && rootDirectory ? { repository: rootDirectory } : {}) }).catch(() => {}) }))),
       { id: 'detect', label: 'Refresh local CLI detection', run: () => void refreshEngines() },
       // Each linked computer's tab (1.31.5), as its tab in the top bar opens it.
       ...computers.filter((computer) => computer.linked).map((computer) => ({ id: `computer-${computer.id}`, label: `Open ${computer.name}${computer.connected ? '' : ' (not connected)'}`, run: () => useWorkspaceStore.setState({ computerId: computer.id, activeView: 'computer' }) })),
@@ -133,7 +142,7 @@ export function CommandMenu() {
     }
     // Actions and channels match on their label; search hits already matched their content.
     return all.filter((item) => (scope === 'all' || scope === item.group) && (item.group === 'files' || item.group === 'memory' || !text || matchRange(item.label, text)));
-  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange, checks]);
+  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange, checks, plugins]);
   useEffect(() => { setSelected(0); }, [scope, text]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   const run = (item: Item | undefined) => { if (!item) return; setOpen(false); item.run(); };

@@ -1,5 +1,13 @@
 ## What's new
 
+1.35.0 starts Trace plugins (design: docs/plugins.md):
+
+- **Trace plugins**, in Agent setup → Skills & plugins. A plugin is a folder with a trace-plugin.json manifest and its programs, in any language. **Link a folder** adds one after a system dialog shows every command it may run and what it may ask Trace to do. It runs as you and nobody reviews it, so add only ones you trust.
+- **What a plugin can do:** add actions to the command menu (for the workspace, the channel you are in, or the repository on Changes); run commands when a channel needs you, ends its turn, fails, starts or stops, a task is ready for review, a worktree is made, or Trace starts; and call Trace back, through the `trace` helper or its local address, to list, read, message, wait for, start, stop and add channels, read and add tasks, and show notices. Each call needs the permission its manifest declares.
+- **Turning a plugin off** stops its programs and its access to Trace at once. Each plugin shows its last runs and the end of their output; a failed run raises an alert.
+- **Not yet:** plugin tiles (1.35.1), and installing from GitHub, updates and the list to browse (1.35.2).
+- **Tried:** the unit tests (manifests read whole or refused with why; programs found only in the plugin's folder or on PATH, never through a batch file; linking only after the confirmation; actions and events run with what happened; a plugin turned off stops running; the API allows only declared permissions, and only its own secret address). The productivity smoke test links a sample plugin through Skills & plugins, runs its actions from the command menu (one lists channels through the API, one through the `trace` helper, one is refused a permission it did not declare), turns it off and on, and hears its channel.started event. The desktop, design, workbench, enterprise, table seats, remote and channel-tools smoke tests pass.
+
 1.34.0 keeps your channels running when you close Trace's window:
 
 - **Closing the window no longer stops your agents.** Trace hides to its icon in the system tray (the menu bar on a Mac), and channels, the phone, linked computers and alerts keep going. Click the icon, open Trace again, or click an alert to bring the window back. The icon's menu shows how many channels are running and has **Quit Trace**, which stops them as before (with Start channels again when Trace opens, they come back on their conversations next time). The first time, a notice says where Trace went. **Settings → Preferences → Keep running when the window is closed** turns it off.

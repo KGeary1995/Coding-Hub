@@ -65,6 +65,16 @@ export class ChannelTools {
     else if (event.type === 'exit') { this.settle(event.sessionId, 'stopped'); this.unregister(event.runId); }
   }
   onChat(envelope: ChatEnvelope) { if (envelope.event.type === 'done') this.settle(envelope.sessionId, 'turn-ended'); }
+  /** The next turn end, approval request or stop of a running channel, or 'timeout' (also used by the plugin API). */
+  waitFor(sessionId: string, timeoutSeconds: number) {
+    return new Promise<WaitOutcome>((resolve) => {
+      const set = this.waiters.get(sessionId) ?? new Set(); this.waiters.set(sessionId, set);
+      const done = (value: WaitOutcome) => { clearTimeout(timer); set.delete(done); resolve(value); };
+      const timer = setTimeout(() => done('timeout'), timeoutSeconds * 1000); set.add(done);
+    });
+  }
+  /** What a channel waits for the person to answer, if anything. */
+  waitingOf(sessionId: string) { return this.asking.get(sessionId) ?? null; }
   private settle(sessionId: string, outcome: WaitOutcome) { const set = this.waiters.get(sessionId); if (!set) return; this.waiters.delete(sessionId); for (const done of set) done(outcome); }
 
   private async handle(request: http.IncomingMessage, response: http.ServerResponse) {
@@ -102,11 +112,6 @@ export class ChannelTools {
     if (channel.sessionId === self) throw new HubError('CHANNEL_TOOLS_SELF', 'That is your own channel.');
     if (!channel.running) return { channel: channel.channel, outcome: 'stopped' };
     if (channel.waiting) return { channel: channel.channel, outcome: 'waiting', waiting: channel.waiting };
-    const outcome = await new Promise<WaitOutcome>((resolve) => {
-      const set = this.waiters.get(channel.sessionId) ?? new Set(); this.waiters.set(channel.sessionId, set);
-      const done = (value: WaitOutcome) => { clearTimeout(timer); set.delete(done); resolve(value); };
-      const timer = setTimeout(() => done('timeout'), request.timeoutSeconds * 1000); set.add(done);
-    });
-    return { channel: channel.channel, outcome };
+    return { channel: channel.channel, outcome: await this.waitFor(channel.sessionId, request.timeoutSeconds) };
   }
 }
