@@ -47,6 +47,7 @@ import { askForHandoff } from './auto-handoff';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 import { isAgentConfig, isChatRun } from '../../shared/types';
+import { autoStartInOrder } from './start-order';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -136,7 +137,8 @@ export function useNativeHost() {
       if (!result.ok) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: result.error.message }); return; }
       useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info, result.value.removedChannels, result.value.rootDirectory);
       loaded = true;
-      if (result.value.resume || result.value.kept) void resumeChannels(result.value.resume ?? [], result.value.kept ?? []);
+      // Channels that were running come back first; Start in order then runs only if none did (src/runtime/start-order.ts).
+      void (result.value.resume || result.value.kept ? resumeChannels(result.value.resume ?? [], result.value.kept ?? []) : Promise.resolve()).then(() => autoStartInOrder());
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
       // What the saved workspace is made of: when none of these changed (a status line, a view), nothing is serialized.
