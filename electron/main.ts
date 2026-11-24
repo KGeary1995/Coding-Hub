@@ -18,7 +18,7 @@ import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
 import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type RemoteResumeRequest } from '../shared/remote';
 import { CLAUDE_MODELS, modelLabel } from '../shared/model-name';
-import type { NativeResume } from '../shared/workbench';
+import type { NativeResume, Task } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, Menu, Tray, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
@@ -321,7 +321,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
   // Then the channel tools, when turned on, join that list (or start it). Codex takes the three that only look (list,
   // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
-  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it.
+  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it. The task tools ride the same
+  // server when their own setting is on (either one adds it); list_tasks only looks, adding or updating a task asks.
   const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
     const server = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
@@ -331,7 +332,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
         const file = path.join(folder, `${run.runId}.mcp.json`); fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'trace-channels': server } }), { mode: 0o600 }); channelToolFiles.set(run.runId, file);
         if (launch.args.at(-2) === '--mcp-config') launch.args.push(file); else launch.args.push('--mcp-config', file);
       } catch { channelTools.unregister(run.runId); }
-    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
+    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
     else channelTools.unregister(run.runId);
   }
 }), abandonLaunch: (run) => { attention.unregister(run.runId); channelTools.unregister(run.runId); const file = channelToolFiles.get(run.runId); if (file) { channelToolFiles.delete(run.runId); fs.rm(file, { force: true }, () => {}); } hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
@@ -830,13 +831,22 @@ else app.whenReady().then(() => {
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
+  /** The board changed outside the window (an agent's task tools, a plugin): it reads it again at once, not at its next 30 s look. */
+  const tasksChanged = () => { sendToRenderer(IPC_CHANNELS.tasksChanged, null); };
+  channelTools.tasks = {
+    enabled: () => { try { return hub?.preferences().taskTools !== false; } catch { return false; } },
+    folderOf: (runId) => manager.running().find((run) => run.runId === runId)?.cwd ?? null,
+    list: () => tasks.list(), changed: tasksChanged, notes: (id, notes) => tasks.setNotes(id, notes),
+    add: async (fields) => await tasks.execute({ action: 'task-save', ...fields, sessionId: null, scope: ['**'], status: 'queued', verificationId: null }) as Task,
+    status: async (id, status) => await tasks.execute({ action: 'task-status', id, status }) as Task,
+  };
   // Plugins: the API they call back on, and the service that runs them (docs/plugins.md).
   pluginApi = new PluginApi({
     plugin: (id, token) => plugins?.pluginOfToken(id, token) ?? null,
     channels: () => channelList(), replies: (sessionId, count) => channelReplies(sessionId, count), waiting: (sessionId) => channelTools.waitingOf(sessionId), wait: (sessionId, timeout) => channelTools.waitFor(sessionId, timeout),
     send: (sessionId, text) => sendToChannel(sessionId, text), control: (sessionId, control) => controlChannel(sessionId, control), add: (engine, chat) => addChannel(engine, chat),
     tasks: () => { const shown = channelList(); return (tasks.list()).map((task) => ({ id: task.id, title: task.title, status: task.status, channel: shown.find((item) => item.sessionId === task.sessionId)?.channel ?? null })); },
-    addTask: async (title, details, sessionId) => { const directory = storage?.load()?.rootDirectory; if (!directory) throw new HubError('PLUGIN_API_PROJECT', 'Open a project in Trace first: a task belongs to one.'); const saved = await tasks.execute({ action: 'task-save', title, ...(details ? { details } : {}), directory, sessionId, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as { id: string }; return { id: saved.id }; },
+    addTask: async (title, details, sessionId) => { const directory = storage?.load()?.rootDirectory; if (!directory) throw new HubError('PLUGIN_API_PROJECT', 'Open a project in Trace first: a task belongs to one.'); const saved = await tasks.execute({ action: 'task-save', title, ...(details ? { details } : {}), directory, sessionId, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as { id: string }; tasksChanged(); return { id: saved.id }; },
     notify: (title, body) => desktopAlert({ title, body, target: { view: 'skills' } }, true),
   });
   void pluginApi.start().catch(() => hostHealth?.record('plugin-api-unavailable'));

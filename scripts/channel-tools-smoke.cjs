@@ -31,7 +31,18 @@ const { ChannelTools } = require('../dist-electron/electron/services/cli/channel
     const waiting = tool('wait_for_channel', { channel: 2, timeoutSeconds: 10 });
     setTimeout(() => tools.onSessionEvent({ type: 'answered', sessionId: 'builder', runId: 'r', at: '', finished: true }), 300);
     assert.equal((await waiting).value.outcome, 'turn-ended');
+    // The task tools: listed and answered only while their own setting is on, in the asking channel's project.
+    let tasksOn = false; const board = [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Parser', directory: '/p', sessionId: null, scope: ['**'], status: 'queued', notes: '', verificationId: null, createdAt: '2026-11-24T00:00:00.000Z' }];
+    tools.tasks = { enabled: () => tasksOn, folderOf: () => '/p', list: () => board, changed: () => {}, notes: (id, notes) => Object.assign(board[0], { notes }), status: async (id, status) => Object.assign(board[0], { status }), add: async () => { throw new Error('not used'); } };
+    const names = async () => (await call('tools/list')).result.tools.map((item) => item.name);
+    assert.deepEqual(await names(), ['list_channels', 'read_channel', 'send_to_channel', 'wait_for_channel']);
+    tasksOn = true; assert.deepEqual(await names(), ['list_channels', 'read_channel', 'send_to_channel', 'wait_for_channel', 'list_tasks', 'add_task', 'update_task']);
+    assert.deepEqual((await tool('list_tasks', {})).value.tasks.map((item) => item.title), ['Parser']);
+    assert.equal((await tool('update_task', { id: board[0].id, status: 'review', note: 'Ready.' })).value.task.notes, 'CH1: Ready.');
+    const done = await tool('update_task', { id: board[0].id, status: 'done' }); assert.equal(done.error, true); assert.match(done.value, /Only the person moves a task to Done/);
     on = false; const off = await tool('list_channels', {}); assert.equal(off.error, true); assert.match(off.value, /Channel tools are off/);
-    console.log('PASS: channel-tools MCP server: list, read, send (marked as from the asking channel), wait for a turn to end, refusing the own channel, and stopping once turned off');
+    assert.deepEqual(await names(), ['list_tasks', 'add_task', 'update_task']);
+    tasksOn = false; assert.deepEqual(await names(), []); const tasksOff = await tool('list_tasks', {}); assert.equal(tasksOff.error, true); assert.match(tasksOff.value, /Task tools are off/);
+    console.log('PASS: channel-tools MCP server: list, read, send (marked as from the asking channel), wait for a turn to end, refusing the own channel, the task tools (listed per setting, never Done), and each group stopping once turned off');
   } finally { child.kill(); tools.close(); }
 })().catch((error) => { console.error(error); process.exit(1); });

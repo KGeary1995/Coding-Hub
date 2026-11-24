@@ -117,6 +117,8 @@ export interface CodingHubHost {
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
   onAutoCheckEvent(listener: (status: AutoCheckStatus) => void): () => void;
+  /** The Tasks board changed outside the window (an agent's task tools, a plugin): read it again. */
+  onTasksChanged(listener: () => void): () => void;
   /** A desktop notification was clicked: open what it is about. */
   onAlertClick(listener: (target: AlertTarget) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
@@ -192,6 +194,7 @@ export const IPC_CHANNELS = {
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
   autoCheckEvent: 'coding-hub:auto-check-event',
+  tasksChanged: 'coding-hub:tasks-changed',
   alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',
