@@ -27,6 +27,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
   { const board = path.join(root, 'git', 'owner', 'board'); await fs.mkdir(board, { recursive: true }); const git = (...args) => require('node:child_process').execFileSync('git', args, { cwd: board, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
     await fs.writeFile(path.join(board, 'trace-plugin.json'), JSON.stringify({ id: 'fixture.board', name: 'GitHub board', version: '2.0.0', minTrace: '1.35.0', description: 'Installed from a repository', actions: [{ id: 'hello', title: 'Hello', command: ['./hello.js'] }] })); await fs.writeFile(path.join(board, 'hello.js'), '');
     git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-q', '-m', 'board'); }
+  // And github.com/owner/agent, a shared custom agent definition for Agents → From a list.
+  { const shared = path.join(root, 'git', 'owner', 'agent'); await fs.mkdir(shared, { recursive: true }); const git = (...args) => require('node:child_process').execFileSync('git', args, { cwd: shared, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
+    await fs.writeFile(path.join(shared, 'trace-agent.json'), JSON.stringify({ schema: 1, id: 'shared-agent', name: 'Shared agent', program: { command: 'shared-agent' }, status: { quietSeconds: 4 } }));
+    git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-q', '-m', 'agent'); }
   const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: path.join(root, 'storage'), CLAUDE_CONFIG_DIR: path.join(root, 'claude'), CODEX_HOME: path.join(root, 'codex'), CODING_HUB_TEST_PLUGIN_GIT: path.join(root, 'git') }; delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
@@ -92,8 +96,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // listed on the Agents page, added from + Channel, given shared memory through its --mcp-config file, and read for Needs
     // you (a waiting pattern) and Done (its ready prompt) from its screen.
     const agentProgram=path.resolve(__dirname,'fixtures/custom-agent.cjs');
-    await wb(page,{action:'agent-save',definition:{schema:1,id:'fixture-agent',name:'Fixture agent',color:'#5ec4a8',program:{command:agentProgram,args:['--plain']},version:{args:['--version']},status:{waiting:['\\(Y\\)es/\\(N\\)o'],turnEnd:['^> $']},mcp:{format:'claude-json',args:['--mcp-config','{file}']}}});
+    await wb(page,{action:'agent-save',definition:{schema:1,id:'fixture-agent',name:'Fixture agent',color:'#5ec4a8',program:{command:agentProgram,args:['--plain']},version:{args:['--version']},status:{waiting:['\\(Y\\)es/\\(N\\)o'],turnEnd:['^> $']},mcp:{format:'claude-json',args:['--mcp-config','{file}']},resume:{args:['--resume','{id}'],listArgs:['--list']}}});
     assert.match((await wb(page,{action:'agent-test',definition:(await wb(page,{action:'agent-list'})).agents[0].definition})).output,/fixture-agent 1\.0/);
+    // From a list: a shared definition is fetched and checked for the form, and nothing is saved until Save confirms it.
+    { const fetched=await wb(page,{action:'agent-fetch',repo:'owner/agent'}); assert.deepEqual([fetched.definition.id,fetched.problems,fetched.source.repo],['shared-agent',[],'owner/agent']); assert.deepEqual((await wb(page,{action:'agent-list'})).agents.map((agent)=>agent.id),['fixture-agent']); }
+    // Its conversations to continue, as its resume.listArgs prints them (phase 2): IDs only, a header left out.
+    assert.deepEqual((await wb(page,{action:'agent-conversations',id:'fixture-agent'})).map((item)=>item.id),['conv-1','conv-2']);
     await openView(page,'Agents');await page.locator('.agents-panel .ui-row').filter({hasText:'Fixture agent'}).filter({hasText:'On'}).waitFor();await openView(page,'Workspace');
     await addChannel(page,'Fixture agent');const agentTile=page.locator('.session-tile').filter({hasText:'Fixture agent'});await agentTile.getByRole('button',{name:'Start channel',exact:true}).click();
     await page.waitForFunction(()=>[...document.querySelectorAll('.session-tile')].some((tile)=>tile.textContent.includes('Fixture agent')&&(tile.querySelector('.xterm-rows')?.textContent.includes('AGENT READY')||tile.querySelector('.session-error'))));
@@ -105,6 +113,27 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.waitForFunction((id)=>window.events.some((event)=>event.sessionId===id&&event.type==='attention'&&event.message.includes('(Y)es/(N)o')),agentSession);
     await (await tileControl(agentTile,'Stop')).click();await page.waitForFunction((id)=>!document.querySelector(`.session-tile[data-session="${id}"][data-status="running"]`),agentSession);
     await (await tileControl(agentTile,'Close channel 3')).click();await agentTile.waitFor({state:'detached'});
+    // Phase 2: a custom agent that speaks ACP (scripts/fixtures/acp-agent.cjs) as a chat from + Channel, given Trace's MCP
+    // servers in its protocol and run in its definition's mode for Allow edits; then a Round Table of two of its chats.
+    await wb(page,{action:'agent-save',definition:{schema:1,id:'fixture-acp',name:'Fixture ACP',program:{command:path.resolve(__dirname,'fixtures/acp-agent.cjs')},version:{args:['--version']},acp:{args:[],modes:{ask:'read-only',edits:'edits',full:'yolo'}}}});
+    await openView(page,'Agents');await page.locator('.agents-panel .ui-row').filter({hasText:'Fixture ACP'}).filter({hasText:'On'}).waitFor();await openView(page,'Workspace');
+    await addChannel(page,'Fixture ACP chat');const acpSession=await page.locator('.session-tile').filter({hasText:'Fixture ACP chat'}).getAttribute('data-session');const acpTile=page.locator(`.session-tile[data-session="${acpSession}"]`);await acpTile.getByRole('button',{name:'Start channel',exact:true}).click();
+    const acpBox=acpTile.getByRole('textbox',{name:'Message to Fixture ACP',exact:true});await page.waitForFunction(()=>[...document.querySelectorAll('.session-tile textarea')].some((box)=>box.getAttribute('aria-label')==='Message to Fixture ACP'&&!box.disabled));
+    await acpBox.fill('hello acp');await acpBox.press('Enter');
+    await acpTile.locator('.chat-message.assistant').filter({hasText:/ACP edits fx-small got: hello acp \(mcp: coding-hub-memory/}).waitFor();
+    await acpTile.getByRole('button',{name:'Round Table: add agents',exact:true}).click();const acpSetup=page.locator('dialog.table-setup');await acpSetup.waitFor();
+    await acpSetup.getByLabel('Seat 2 agent',{exact:true}).selectOption('custom:fixture-acp');assert.equal(await acpSetup.getByLabel('Seat 2 name',{exact:true}).getAttribute('placeholder'),'Fixture ACP 2');
+    await acpSetup.getByRole('button',{name:'Start Round Table',exact:true}).click();await acpSetup.waitFor({state:'detached',timeout:60000});
+    await acpTile.locator('.table-roles').filter({hasText:'Fixture ACP drives · Fixture ACP 2 reviews'}).waitFor({state:'attached',timeout:60000});
+    const tableBox=acpTile.getByRole('textbox',{name:'Message to the Round Table',exact:true});await tableBox.fill('Hello table');await tableBox.press('Enter');
+    // Both answer read-only while they discuss, agree, and the driver then carries it out in its edits mode.
+    await acpTile.locator('.chat-message.assistant').filter({has:page.locator('.chat-author',{hasText:'Fixture ACP 2'})}).filter({hasText:'ACP read-only fx-small got'}).first().waitFor({timeout:60000});
+    await acpTile.locator('.table-status').filter({hasText:'They agree. Your turn'}).waitFor({state:'attached',timeout:60000});
+    assert.ok((await acpTile.locator('.chat-message.assistant').allTextContents()).some((text)=>/ACP edits fx-small got: .*carry out/i.test(text)),'the driver carried it out in its edits mode');
+    await acpTile.getByRole('button',{name:'Close the Round Table',exact:true}).click();
+    await acpTile.locator('.table-bar').waitFor({state:'detached',timeout:30000});
+    await (await tileControl(acpTile,'Stop')).click();await page.waitForFunction((id)=>!document.querySelector(`.session-tile[data-session="${id}"][data-status="running"]`),acpSession);
+    await (await tileControl(acpTile,'Close channel 3')).click();await acpTile.waitFor({state:'detached'});
     // Install from GitHub: a preview of everything it would run, then Install (the system dialog is answered above).
     await openView(page,'Skills & plugins');await page.getByLabel('GitHub repository',{exact:true}).fill('owner/board');await page.getByRole('button',{name:'Preview',exact:true}).click();
     const preview=page.getByRole('region',{name:'Preview of GitHub board'});await preview.waitFor();assert.match(await preview.textContent(),/Action: Hello: .*hello\.js[\s\S]*nobody has reviewed it|nobody has reviewed it[\s\S]*Action: Hello: .*hello\.js/);
@@ -175,6 +204,6 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     // Failed runs in a narrow window too: no sideways scroll.
     await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})));await openView(page,'Session history');await page.getByRole('button',{name:'Failed runs',exact:true}).click();await page.getByRole('button',{name:'Run recovery checks',exact:true}).waitFor();assert.equal(await page.evaluate(()=>document.body.scrollWidth>innerWidth),false);
     const backup=await wb(page,{action:'backup-create',includeLogs:true});const restoredBackup=await wb(page,{action:'backup-restore',id:backup.record.id});await app.close();app=null;page=await launch();assert.equal((await wb(page,{action:'runtime'})).storagePath,restoredBackup.restoredPath);assert.equal((await wb(page,{action:'flow-conversations'}))[0].pinned,true);assert.equal((await wb(page,{action:'flow-templates'}))[0].name,'Paired implementation');
-    assert.deepEqual(errors,[]);console.log('PASS: a custom agent saved, tested, started with shared memory and read for Needs you and Done, named channels and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
+    assert.deepEqual(errors,[]);console.log('PASS: a custom agent saved, tested, a shared one fetched from a list without saving it, started with shared memory and read for Needs you and Done, one that speaks ACP as a chat and at a Round Table of two of its chats, named channels and budgets, retained native conversation identity, pinned labels and prepared requests across restart, recovery diagnostics, scoped unified search with private-file exclusions and explicit output search, reviewed Git stage/commit/local push, fixture PR body-file flow on Unix, reusable templates/rules/checks, diagnostic export, source signing status, 900×640 layout, and workflow backup restore. No real provider inference or GitHub PR created.');
   } finally {await app?.close().catch(()=>{});await removeFolder(root);}
 })().catch((error)=>{console.error(error);process.exitCode=1;});

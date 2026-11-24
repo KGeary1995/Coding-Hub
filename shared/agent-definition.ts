@@ -16,6 +16,8 @@ export const AGENT_RESUME_ID = /^[A-Za-z0-9][\w.:/@+-]{0,199}$/;
 /** As long as a prepared request may be (shared/schemas.ts preparedRequest). */
 export const MAX_AGENT_PROMPT = 4000;
 export const MAX_AGENTS = 20;
+/** An ACP session mode id (`session/set_mode`), as the agent lists it: never a flag, no spaces. */
+export const AGENT_MODE = /^[A-Za-z0-9][\w.:/-]{0,79}$/;
 export const PLACEHOLDERS = ['model', 'prompt', 'id', 'file', 'text'] as const;
 export type Placeholder = typeof PLACEHOLDERS[number];
 const PLACEHOLDER = /\{([a-z]+)\}/g;
@@ -39,7 +41,9 @@ const pattern = z.string().min(1).max(200).refine((value) => { try { new RegExp(
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/, 'Use letters, digits and _ for a variable name.')
   .refine((name) => name.toUpperCase() !== 'PATH' && !name.toUpperCase().startsWith('CODING_HUB_') && name.toUpperCase() !== 'ELECTRON_RUN_AS_NODE', 'Trace sets this variable itself.');
 
-export const programCommand = z.string().min(1).max(1024)
+const modeId = z.string().regex(AGENT_MODE, 'Use a mode id the agent lists, such as plan.');
+
+export const programCommand =z.string().min(1).max(1024)
   .refine((value) => !/[\0\r\n]/.test(value), 'The program can’t hold a line break.')
   .refine((value) => ABSOLUTE.test(value) || /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(value), 'Give the program’s name, such as aider, or its full path. Its arguments go in program.args.')
   .refine((value) => !/\.(cmd|bat|ps1|vbs|lnk)$/i.test(value), 'Trace runs no batch or script files (.cmd, .bat, .ps1). Name the program itself: an .exe, or a Node .js file.')
@@ -65,6 +69,11 @@ export const agentDefinitionSchema = z.object({
   mcp: z.object({ format: z.enum(['claude-json', 'codex-toml', 'none']), args: args(['file']).optional() }).strict().optional(),
   instructions: z.union([z.object({ args: args(['text']) }).strict(), z.object({ env: envName }).strict()]).optional(),
   env: z.record(envName, z.string().max(2000).refine((value) => !value.includes('\0'))).refine((value) => Object.keys(value).length <= 20, 'At most 20 variables.').optional(),
+  /**
+   * Phase 2: the arguments that start the program as an Agent Client Protocol server (JSON-RPC over stdin and stdout),
+   * for its chat channel and Round Table seats, and the session mode each permission level asks for, where it has modes.
+   */
+  acp: z.object({ args: args(), modes: z.object({ ask: modeId.optional(), edits: modeId.optional(), full: modeId.optional() }).strict().optional() }).strict().optional(),
 }).strict().superRefine((definition, context) => {
   // A claude-json file reaches the program only through {file}; codex-toml takes Codex's own --config arguments.
   if (definition.mcp?.format === 'claude-json' && !definition.mcp.args?.some((value) => value.includes('{file}'))) context.addIssue({ code: 'custom', path: ['mcp', 'args'], message: 'claude-json needs args with {file}, such as ["--mcp-config", "{file}"].' });
@@ -98,6 +107,8 @@ export function fillArgs(template: readonly string[], values: Partial<Record<Pla
 /** A model or conversation ID the person or the program gave, checked before it fills a placeholder. */
 export const validModel = (value: string) => AGENT_MODEL.test(value);
 export const validResumeId = (value: string) => AGENT_RESUME_ID.test(value);
+/** A first request that can go to the program as one argument (`firstRequest.args`): text, at most as long as a prepared request. */
+export const promptFits = (value: string) => value.trim().length > 0 && value.length <= MAX_AGENT_PROMPT && !value.includes('\0');
 
 /**
  * The format section of docs/custom-agents.md, given to Claude Code with a program's --help when the person asks Trace
@@ -114,7 +125,8 @@ export const DRAFT_FORMAT = `A Trace agent definition is JSON (schema 1). Unknow
  "status":{"osc":true,"waiting":["\\\\(Y\\\\)es/\\\\(N\\\\)o"],"turnEnd":["^> $"],"quietSeconds":4},
  "mcp":{"format":"claude-json","args":["--mcp-config","{file}"]},
  "instructions":{"args":["--append-system-prompt","{text}"]},
- "env":{"AIDER_CHECK_UPDATE":"false"}}
+ "env":{"AIDER_CHECK_UPDATE":"false"},
+ "acp":{"args":["acp"],"modes":{"ask":"plan","edits":"accept-edits","full":"auto"}}}
 Rules:
 - id: ^[a-z][a-z0-9-]{1,30}$, not claude, codex, gemini, shell or custom. name: 1-40 characters. color: #rrggbb, optional.
 - program.command: the program's name on PATH (or a full path), never a shell, .cmd or .bat. Arguments are arrays of strings.
@@ -126,4 +138,5 @@ Rules:
 - status: how Trace tells the agent waits or finished a turn. osc: true when it sends terminal notifications (OSC 9/777/99). waiting: regexes for its approval questions. turnEnd: regexes for its idle prompt line. quietSeconds: 2-60 seconds of no output that mean the turn ended (4 is a good default), 0 for off.
 - mcp.format: claude-json (a {"mcpServers":{...}} file passed with {file}), codex-toml (Codex-style --config mcp_servers.* arguments), or none.
 - instructions: {"args":[...,"{text}"]} or {"env":"VARIABLE"} for extra system instructions, if the program takes them.
-- env: environment variables the program needs (no secrets).`;
+- env: environment variables the program needs (no secrets).
+- acp: only when the help shows an Agent Client Protocol (ACP) server mode, such as an acp subcommand or an --acp or --experimental-acp flag: {"args":[...]} with the arguments that start it. modes: the session mode ids for ask (read-only, or asks before changes), edits and full, only those the help names; leave modes out otherwise. No placeholders in acp.`;

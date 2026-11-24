@@ -70,12 +70,13 @@ export async function startInOrder() {
       let seen = false; const found = step.waitFor ? outputMatcher(step.waitFor) : null;
       const unwatch = found ? watchOutput(planned.id, (data) => { if (!seen && found(data)) { seen = true; wake?.(); } }) : () => {};
       try {
-        if (!wasRunning) await startSession(planned.id);
+        // A custom agent whose definition takes its first request as arguments is given it at start (docs/custom-agents.md).
+        const prompted = !wasRunning && await startSession(planned.id, step.prompt && before.config.engine === 'custom' ? { firstRequest: step.prompt } : {});
         const session = sessionOf(planned.id);
         if (session?.status !== 'running') return report(`CH${number} did not start${session?.error ? `: ${session.error}` : '.'} The rest were not started.`);
         // An already running channel is not typed into again: its command or request was for its start.
         if (!wasRunning && step.command && !isAgentConfig(session.config)) await writeTerminal(planned.id, step.command + '\r');
-        if (!wasRunning && step.prompt && isAgentConfig(session.config)) void sendWhenReady(planned.id, step.prompt);
+        if (!wasRunning && !prompted && step.prompt && isAgentConfig(session.config)) void sendWhenReady(planned.id, step.prompt);
         if (!found || isChatRun(session.config) || index === steps.length - 1) continue;
         useStartOrder.setState({ progress: { step: index + 1, steps: steps.length, channel: number, waiting: step.waitFor! } });
         const seconds = step.waitSeconds ?? DEFAULT_WAIT_SECONDS; const runId = session.runId;

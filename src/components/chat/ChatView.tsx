@@ -9,6 +9,7 @@ import { chatAnswered, chatDrafts, chatFailed, chatSent, useChatStore } from '..
 import { seatsOf, useWorkspaceStore } from '../../state/workspace-store';
 import { seatLabels } from '../../state/hierarchy-state';
 import { useHubStore } from '../../state/hub-store';
+import { lookOf, useAgentLook, useAgentStore } from '../../state/agent-store';
 import { channelToday } from '../../state/channel-state';
 import { archiveFindings, forgetTable, hierarchyDetached, reopenTable, TABLE_FULL, tableRequest } from '../../runtime/round-table';
 import { PERMISSION_LABEL, PERMISSION_LEVELS, permissionHelp, setPermissions } from '../../runtime/permissions';
@@ -57,7 +58,9 @@ export function ChatView({ session }: { session: Session }) {
   const channels = useWorkspaceStore((state) => state.sessions.length);
   const engine = seatEngineOf(session.config);
   const permissions: PermissionLevel = isAgentConfig(session.config) ? permissionLevel(session.config) : 'ask';
-  const agent = AGENT[engine];
+  // A custom agent by its own name (custom agents, phase 2).
+  const look = useAgentLook(session.config.engine === 'custom' ? session.config.agentId : ''); const agents = useAgentStore((state) => state.agents);
+  const agent = engine === 'custom' ? look.name : AGENT[engine];
   const running = session.status === 'running' && session.runId !== null && chat.runId === session.runId;
   const busy = chat.busy || (table !== null && threads.some((thread) => thread.busy));
   // The message being written is kept by channel (chatDrafts), so maximising the tile or opening another page loses none of it.
@@ -145,7 +148,7 @@ export function ChatView({ session }: { session: Session }) {
   const barSeats: BarSeat[] = views.map((view) => ({ ...view, ...(view.lead ? {} : { state: stateOf(view) }), tokens: barTokens(view) }));
   const seated = Boolean(table?.seats?.length || (!table && record?.seats?.length));
   /** The agent and model of a seat, when its name does not say it. */
-  const detail = (view: SeatView) => { const config = (view.lead ? session : bySeat.get(view.id)?.session)?.config; const model = config && isAgentConfig(config) ? config.model : ''; return model ? (view.engine === 'claude' ? modelName(model) : model) : AGENT[view.engine]; };
+  const detail = (view: SeatView) => { const config = (view.lead ? session : bySeat.get(view.id)?.session)?.config; const model = config && isAgentConfig(config) ? config.model : ''; return model ? (view.engine === 'claude' ? modelName(model) : model) : config?.engine === 'custom' ? lookOf(agents, config.agentId).name : AGENT[view.engine]; };
   /** Who sits at a hierarchy table and what each is doing, so the bar shows every seat at work, not only the builder's tile. */
   const chainSeats: ChainSeat[] | undefined = hierarchy && views.length ? [...views.filter((view) => view.duties.includes('plan')), ...views.filter((view) => view.duties.includes('build')), ...views.filter((view) => !view.duties.includes('plan') && !view.duties.includes('build'))]
     .map((view) => ({ id: view.id, role: view.role ?? '', ...(seated ? { detail: detail(view) } : {}), name: view.name, colour: view.colour, state: stateOf(view), tokens: tokensOf(view) })) : undefined;
@@ -195,12 +198,12 @@ export function ChatView({ session }: { session: Session }) {
     <div className="chat-composer">
       {images.length > 0 && <ul className="chat-attachments" aria-label="Attached images">{images.map((image, index) => <li key={index}><img src={`data:${image.mediaType};base64,${image.data}`} alt={`Attached image ${index + 1}`} /><button aria-label={`Remove image ${index + 1}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}><X size={11} /></button></li>)}</ul>}
       {error && <p className="chat-notice error" role="alert">{error}</p>}
-      {confirmFull && <div className="ui-banner warning chat-confirm" role="alertdialog" aria-label="Turn on Full access?"><TriangleAlert aria-hidden="true" /><div><p><strong>Turn on Full access?</strong> {permissionHelp(engine, 'full', true)}{tableNote}</p>
+      {confirmFull && <div className="ui-banner warning chat-confirm" role="alertdialog" aria-label="Turn on Full access?"><TriangleAlert aria-hidden="true" /><div><p><strong>Turn on Full access?</strong> {permissionHelp(engine, 'full', true, agent)}{tableNote}</p>
         <div className="ui-actions"><button className="button danger solid small" onClick={() => choose('full', true)}>Turn on Full access</button><button className="button secondary small" onClick={() => setConfirmFull(false)}>Cancel</button></div></div></div>}
       <div className="chat-input-row">
         <button className="chat-icon" aria-label="Attach images" title="Attach images (or paste or drop them)" disabled={!running || Boolean(seatedAt)} onClick={() => file.current?.click()}><ImagePlus size={16} /></button>
         {!table && !seatedAt && !showable && <button className="chat-icon" aria-label="Round Table: add agents" title={channels >= MAX_CHANNELS ? TABLE_FULL : 'Round Table: bring other agents into this conversation, in this channel'} disabled={!running || channels >= MAX_CHANNELS} onClick={() => setSetup({ type: 'chat', leadId: session.id })}><Users size={16} /></button>}
-        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions, true)}${tableNote}`} value={permissions} onChange={(event) => choose(event.target.value as PermissionLevel)}>
+        {!seatedAt && isAgentConfig(session.config) && <select className={`chat-permissions ${permissions}`} aria-label="Permissions" title={`${permissionHelp(engine, permissions, true, agent)}${tableNote}`} value={permissions} onChange={(event) => choose(event.target.value as PermissionLevel)}>
           {PERMISSION_LEVELS.map((level) => <option key={level} value={level}>{PERMISSION_LABEL[level]}</option>)}
         </select>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />

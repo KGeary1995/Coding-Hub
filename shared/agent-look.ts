@@ -16,7 +16,8 @@ export function agentInitials(name: string): string {
   return letters.toUpperCase();
 }
 /** What the window and phones know of a custom agent to show it: never its program or arguments. */
-export interface AgentLook { id: string; name: string; color: string; initials: string }
-export const agentLook = (agent: { id: string; name: string; color?: string }): AgentLook => ({ id: agent.id, name: agent.name, color: agentColor(agent), initials: agentInitials(agent.name) });
+/** `chat`: its definition starts it as an ACP server (`acp`), so it can be a chat channel and sit at a Round Table. */
+export interface AgentLook { id: string; name: string; color: string; initials: string; chat?: true }
+export const agentLook = (agent: { id: string; name: string; color?: string; acp?: unknown }): AgentLook => ({ id: agent.id, name: agent.name, color: agentColor(agent), initials: agentInitials(agent.name), ...(agent.acp ? { chat: true as const } : {}) });
 /** The permission levels' names, as Settings shows them (src/runtime/permissions.ts PERMISSION_LABEL). */
 export const PERMISSION_NAMES = { ask: 'Ask', edits: 'Allow edits', full: 'Full access' } as const;

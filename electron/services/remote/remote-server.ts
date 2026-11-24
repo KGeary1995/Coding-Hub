@@ -161,7 +161,7 @@ const computerKeySchema = z.object({ id: z.uuid() }).strict();
 export const eventJSON = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const sizeSchema = z.object({ sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), cols: z.number().int().min(20).max(300), rows: z.number().int().min(6).max(200), force: z.boolean().optional() }).strict();
 const releaseSchema = z.object({ sessionId: z.string().min(1).max(100) }).strict();
-const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'custom', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional(), agent: z.string().regex(AGENT_ID).optional() }).strict().refine((value) => !(value.chat && (value.engine === 'shell' || value.engine === 'custom')), 'Only Claude Code, Codex and Gemini channels can be chats.').refine((value) => (value.engine === 'custom') === Boolean(value.agent), 'A custom agent channel names its agent.');
+const addSchema = z.object({ engine: z.enum(['claude', 'codex', 'gemini', 'custom', 'shell']), chat: z.boolean().optional(), like: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional(), agent: z.string().regex(AGENT_ID).optional() }).strict().refine((value) => !(value.chat && value.engine === 'shell'), 'A terminal can’t be a chat.').refine((value) => (value.engine === 'custom') === Boolean(value.agent), 'A custom agent channel names its agent.');
 /** A chat message may carry 10 images of up to 14 MB of base64 each (chatRequestSchema). */
 const CHAT_BODY = 10 * 14 * 1024 * 1024 + 256 * 1024;
 /** How much of a body past its limit is read and dropped so the sender gets the 413; past that the connection is cut. */
@@ -997,7 +997,10 @@ export class RemoteServer {
       if (!this.me(now).canRun) return this.send(response, 403, { error: RUN_REFUSED });
       if (!this.host.add) return this.send(response, 409, { error: 'This computer cannot add channels right now.' });
       if (parsed.data.like && !this.local(parsed.data.like)) return this.send(response, 400, { error: 'Unknown channel.' });
-      if (parsed.data.agent && !this.host.agents?.().some((agent) => agent.id === parsed.data.agent)) return this.send(response, 400, { error: 'That agent is not turned on on this computer.' });
+      const agent = parsed.data.agent ? this.host.agents?.().find((item) => item.id === parsed.data.agent) : undefined;
+      if (parsed.data.agent && !agent) return this.send(response, 400, { error: 'That agent is not turned on on this computer.' });
+      // A custom agent is a chat only when its definition starts it as an ACP server (custom agents, phase 2).
+      if (agent && parsed.data.chat && !agent.chat) return this.send(response, 400, { error: `${agent.name} has no chat: its definition has no acp arguments.` });
       try { await this.host.add(parsed.data.engine, parsed.data.chat === true, parsed.data.like, parsed.data.agent); }
       catch (error) { return this.send(response, 409, { error: error instanceof HubError ? error.message : 'The channel could not be added.' }); }
       return this.send(response, 200, { ok: true });

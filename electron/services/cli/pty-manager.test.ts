@@ -650,7 +650,7 @@ describe('custom agent runs (docs/custom-agents.md)', () => {
     const processes: FakePty[] = []; const events: SessionEvent[] = []; const started: string[] = [];
     const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
     const discover = vi.fn(async (engine: CLIEngine) => engines(engine));
-    const customLaunch = vi.fn(async () => ({ file: '/bin/agent', args: ['--yes'], env: { PATH: '/bin', AGENT: '1' }, status: { waiting: ['Allow\?'], turnEnd: ['^> $'] } }));
+    const customLaunch = vi.fn(async () => ({ file: '/bin/agent', args: ['--yes'], env: { PATH: '/bin', AGENT: '1' }, status: { waiting: ['Allow\?'], turnEnd: ['^> $'] }, name: 'Aider' }));
     const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover, customLaunch, onStarted: (session) => started.push(session.engine), environment: () => ({ PATH: '/bin' }) }); managers.push(manager);
     const config = { engine: 'custom' as const, agentId: 'aider', model: '' };
     const session = await manager.start(1, { sessionId: 'c1', cwd: process.cwd(), config, cols: 80, rows: 24 });
@@ -663,5 +663,28 @@ describe('custom agent runs (docs/custom-agents.md)', () => {
     expect(events.filter((event) => event.type === 'answered').map((event) => (event as { finished?: true }).finished ?? false)).toEqual([false, true]);
     const bare = new PtyManager(() => {}, { spawn, discover, environment: () => ({ PATH: '/bin' }) }); managers.push(bare);
     await expect(bare.start(1, { sessionId: 'c2', cwd: process.cwd(), config, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'CUSTOM_AGENTS' });
+  });
+  it('runs a custom agent’s chat over ACP (phase 2): its acp launch, the channel’s level, its name for a Round Table, no screen reading', async () => {
+    const processes: FakePty[] = []; const chats: ChatEnvelope[] = []; const terminal = vi.fn();
+    const agent = { name: 'Fake ACP', prefix: 'acp', modes: { ask: 'read-only', full: 'yolo' }, allowEdits: true, mcpServers: [] };
+    const customLaunch = vi.fn(async () => ({ file: '/bin/fake-acp', args: ['acp'], env: { PATH: '/bin' }, status: undefined, name: 'Fake ACP', chat: agent, level: 'full' as const }));
+    const manager = new PtyManager(() => {}, { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn: terminal, discover: async (engine) => engines(engine), customLaunch, environment: () => ({ PATH: '/bin' }), onChat: (_owner, envelope) => chats.push(envelope),
+      spawnChat: (file, args) => { expect([file, args]).toEqual(['/bin/fake-acp', ['acp']]); const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    const session = await manager.start(1, { sessionId: 'acp1', cwd: process.cwd(), config: { engine: 'custom' as const, agentId: 'fake-acp', model: '', chat: true, permissions: 'full' }, cols: 80, rows: 24 });
+    expect(terminal).not.toHaveBeenCalled();
+    const written = () => processes[0].write.mock.calls.map(([line]) => JSON.parse(String(line)) as { id?: number; method?: string; params?: Record<string, unknown> });
+    const answer = (method: string, result: Record<string, unknown>) => { const request = written().filter((line) => line.method === method).at(-1)!; processes[0].data(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\n'); };
+    answer('initialize', { protocolVersion: 1, agentCapabilities: {} });
+    answer('session/new', { sessionId: 'S1', modes: { currentModeId: 'default', availableModes: [] } });
+    // Full access asks for the definition's full mode; the answer confirms it, and the chat is ready.
+    expect(written().at(-1)).toMatchObject({ method: 'session/set_mode', params: { sessionId: 'S1', modeId: 'yolo' } });
+    answer('session/set_mode', {});
+    expect(chats.map((envelope) => envelope.event)).toContainEqual({ type: 'ready', conversationId: 'S1', model: null });
+    const host = (manager as unknown as { tableHost(): { run(runId: string): { engine: string; agentName?: string; permissions?: string } | null } }).tableHost();
+    expect(host.run(session.runId)).toMatchObject({ engine: 'custom', agentName: 'Fake ACP', permissions: 'full' });
+    // A terminal-only definition can't be a chat.
+    const plain = new PtyManager(() => {}, { stopDependencies: { platform: 'linux', signalGroup: () => {} }, discover: async (engine) => engines(engine), customLaunch: async () => ({ file: '/bin/agent', args: [], env: {}, status: undefined, name: 'Aider' }), environment: () => ({ PATH: '/bin' }) }); managers.push(plain);
+    await expect(plain.start(1, { sessionId: 'acp2', cwd: process.cwd(), config: { engine: 'custom' as const, agentId: 'aider', model: '', chat: true }, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'AGENT_NO_CHAT' });
   });
 });

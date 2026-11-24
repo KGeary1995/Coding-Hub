@@ -1,6 +1,8 @@
 // A CLI added to Trace as a custom agent (docs/custom-agents.md), for the productivity smoke: an idle prompt ("> ") after
 // each answer, a (Y)es/(N)o question when asked to "ask", and the MCP servers its --mcp-config file names.
 if (process.argv.includes('--version')) { console.log('fixture-agent 1.0'); process.exit(0); }
+// Its conversations, as `resume.listArgs` asks for them: a header, then one per line.
+if (process.argv.includes('--list')) { console.log('ID      TITLE\nconv-1  Fix the tests\nconv-2  Add a page'); process.exit(0); }
 const fs = require('node:fs');
 const at = process.argv.indexOf('--mcp-config');
 let servers = 'none'; if (at >= 0) try { servers = Object.keys(JSON.parse(fs.readFileSync(process.argv[at + 1], 'utf8')).mcpServers).join(',') || 'none'; } catch { servers = 'unreadable'; }

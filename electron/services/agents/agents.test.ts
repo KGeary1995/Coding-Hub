@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CustomAgents, describeDefinition, findProgram, jsonFrom, shimTarget, type AgentDialogs } from './agents';
+import { conversationsFrom, CustomAgents, describeDefinition, findProgram, jsonFrom, shimTarget, type AgentDialogs } from './agents';
 import { setBackupRoot } from '../hub/file-backups';
 import type { AgentDefinition } from '../../../shared/agent-definition';
-import type { AgentDraft, AgentList, AgentTestResult } from '../../../shared/agents';
+import type { AgentConversation, AgentDraft, AgentList, AgentTestResult } from '../../../shared/agents';
 
 const roots: string[] = [];
 const fixture = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-agents-')); roots.push(dir); return dir; };
@@ -73,7 +73,7 @@ console.log('Here it is:\\n\`\`\`json\\n' + JSON.stringify({ schema: 1, id: 'fak
     const { agents } = store({ save: true, run: true }, { claude: async (env) => findProgram(claude, env) }); const file = program(root, 'fake.js', 'USAGE: fake --model <name>');
     const draft = await agents.execute({ action: 'agent-draft', command: file }) as AgentDraft;
     expect(draft.problems).toEqual([]); expect((draft.definition.program as { command: string }).command).toBe(file);
-    const sent = fs.readFileSync(prompts, 'utf8'); expect(sent).toContain('-p --output-format text --tools  --no-session-persistence'); expect(sent).toContain('USAGE: fake --model <name>'); expect(sent).toContain('Placeholders');
+    const sent = fs.readFileSync(prompts, 'utf8'); expect(sent).toContain('-p --output-format text --tools  --no-session-persistence'); expect(sent).toContain('USAGE: fake --model <name>'); expect(sent).toContain('Placeholders'); expect(sent).toContain('acp: only when the help shows an Agent Client Protocol');
   });
   it('says so when Claude Code is missing, before running anything', async () => {
     const { root, asked, agents } = store({ save: true, run: true }, { claude: async () => { throw new Error('none'); } }); const file = program(root, 'fake.js');
@@ -105,5 +105,37 @@ describe('drafts and confirmations', () => {
   it('names every argument the agent can be given, quoted where it has spaces', () => {
     const text = describeDefinition({ ...definition('aider'), instructions: { env: 'AIDER_SYSTEM' }, mcp: { format: 'claude-json', args: ['--mcp-config', '{file}'] }, program: { command: 'aider', args: ['--message prefix'] } }, 'C:\\bin\\aider.exe');
     expect(text.split('\n')).toEqual(['Program: C:\\bin\\aider.exe', 'Always with: "--message prefix"', 'Ask: (no arguments)', 'Allow edits: --edits', 'Full access: --yes', 'Model: --model {model}', 'Shared memory and channel tools: --mcp-config {file}', 'Instructions: in AIDER_SYSTEM', 'Environment: FAKE_MODE=test']);
+    // An ACP chat's arguments and modes are named too (phase 2).
+    expect(describeDefinition({ ...definition('aider'), acp: { args: ['acp', '--stdio'], modes: { ask: 'plan', full: 'auto' } } }, 'aider')).toContain('Chat (ACP): acp --stdio; modes Ask plan, Allow edits (its own), Full access auto');
+  });
+});
+
+describe('conversations to continue (resume.listArgs)', () => {
+  it('reads one ID per line, or a line starting with one, and leaves out headers, flags and repeats', () => {
+    const printed = '\x1b[1mID       UPDATED   TITLE\x1b[0m\nses_01abc  2 hours ago  Fix the login form\n\n  7f3e9c2a: Add dark mode\n--help\nses_01abc again\n- a bullet\nbad id with $ sign\n';
+    expect(conversationsFrom(printed)).toEqual([{ id: 'ses_01abc', label: '2 hours ago Fix the login form' }, { id: '7f3e9c2a', label: 'Add dark mode' }, { id: 'bad', label: 'id with $ sign' }]);
+    expect(conversationsFrom('')).toEqual([]);
+    expect(conversationsFrom(Array.from({ length: 80 }, (_, i) => `c${i}`).join('\n'))).toHaveLength(50);
+  });
+  it('runs the list only for a confirmed agent, in the channel’s folder, and says so when it fails', async () => {
+    const { root, agents } = store(); const file = path.join(root, 'lister.js');
+    fs.writeFileSync(file, `if (process.argv.includes('--fail')) process.exit(3); console.log('one  ' + process.cwd()); console.log('two');\n`);
+    const withList = { ...definition(file), resume: { args: ['--resume', '{id}'], listArgs: ['sessions'] } };
+    await agents.execute({ action: 'agent-save', definition: withList });
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-agents-cwd-')); roots.push(folder);
+    const listed = await agents.execute({ action: 'agent-conversations', id: 'fake', directory: folder }) as AgentConversation[];
+    expect(listed.map((item) => item.id)).toEqual(['one', 'two']); expect(fs.realpathSync(listed[0].label)).toBe(fs.realpathSync(folder));
+    fs.writeFileSync(path.join(root, 'agents', 'fake.json'), JSON.stringify({ ...withList, resume: { ...withList.resume, listArgs: ['--fail'] } }));
+    await expect(agents.execute({ action: 'agent-conversations', id: 'fake' })).rejects.toMatchObject({ code: 'AGENT_NOT_CONFIRMED' });
+    await agents.execute({ action: 'agent-activate', id: 'fake' });
+    await expect(agents.execute({ action: 'agent-conversations', id: 'fake' })).rejects.toMatchObject({ code: 'AGENT_LIST', message: expect.stringContaining('exited with code 3') });
+  });
+  it('keeps the models the program listed for phones, which never run it', async () => {
+    const { root, agents } = store(); const file = path.join(root, 'models.js');
+    fs.writeFileSync(file, `console.log('big-1  the large one'); console.log('-not-a-model');\n`);
+    await agents.execute({ action: 'agent-save', definition: { ...definition(file), models: { choices: ['small'], listArgs: ['models'], arg: ['--model', '{model}'] } } });
+    expect(agents.choices('fake')).toEqual(['small']);
+    expect(await agents.execute({ action: 'agent-models', id: 'fake' })).toEqual(['small', 'big-1']);
+    expect(agents.choices('fake')).toEqual(['small', 'big-1']); expect(agents.settings('fake')).toEqual({ models: true, permissions: true });
   });
 });

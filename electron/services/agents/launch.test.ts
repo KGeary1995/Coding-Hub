@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCustomLaunch, customLevel, takesTools } from './launch';
+import { buildAcpLaunch, buildCustomLaunch, customLevel, firstRequestFits, takesTools } from './launch';
 import type { AgentDefinition } from '../../../shared/agent-definition';
 import type { CustomChannelConfig } from '../../../shared/types';
 
@@ -26,6 +26,29 @@ describe('custom agent launch', () => {
     expect(launch.args).toEqual(['--no-auto-commits', '--config', 'mcp_servers.coding-hub-memory.command="C:\\\\Trace\\\\Trace.exe"', '--config', 'mcp_servers.coding-hub-memory.args=["C:\\\\Trace\\\\memory-server.js"]', '--config', 'mcp_servers.coding-hub-memory.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_MEMORY_KEY="proj-1"}']);
     expect(launch.env.AGENT_SYSTEM).toBe('remember');
     expect(takesTools(codexLike)).toBe(true); expect(takesTools({ ...aider, mcp: { format: 'none' } })).toBe(false); expect(takesTools({ ...aider, mcp: undefined })).toBe(false);
+  });
+  it('starts a chat (phase 2) with acp.args only, its modes and Trace’s MCP servers in the protocol, and refuses one without acp', () => {
+    const acp = { ...aider, instructions: { env: 'AGENT_SYSTEM' }, acp: { args: ['--acp'], modes: { ask: 'plan', full: 'auto' } } };
+    const launch = buildAcpLaunch({ definition: acp, config: config({ chat: true, model: 'sonnet', permissions: 'full', resumeId: 'chat-7' }), servers: { 'coding-hub-memory': memory }, instructions: 'remember' });
+    expect(launch.args).toEqual(['--acp']); expect(launch.env).toEqual({ AIDER_CHECK_UPDATE: 'false', AGENT_SYSTEM: 'remember' });
+    expect(launch.agent).toEqual({ name: 'Aider', prefix: 'acp', modes: { ask: 'plan', full: 'auto' }, allowEdits: true, mcpServers: [{ name: 'coding-hub-memory', command: memory.command, args: memory.args, env: [{ name: 'ELECTRON_RUN_AS_NODE', value: '1' }, { name: 'CODING_HUB_MEMORY_KEY', value: 'proj-1' }] }] });
+    expect(() => buildAcpLaunch({ definition: aider, config: config({ chat: true }), servers: {}, instructions: null })).toThrow(/no acp arguments/);
+    expect(() => buildAcpLaunch({ definition: acp, config: config({ chat: true, model: '-x' }), servers: {}, instructions: null })).toThrow(/can’t be used/);
+  });
+  it('gives a first request as one argument before the MCP file, only when the definition takes one and it fits', () => {
+    const asks = { ...aider, firstRequest: { args: ['--message', '{prompt}'] } };
+    const prompt = 'Fix the "login" form; then && run the tests\nand say TASK COMPLETE';
+    const launch = buildCustomLaunch({ definition: asks, config: config(), servers: { 'coding-hub-memory': memory }, instructions: null, mcpFile: '/s/run.mcp.json', prompt });
+    expect(launch.prompted).toBe(true); expect(launch.args).toEqual(['--no-auto-commits', '--yes-always', '--message', prompt, '--mcp-config', '/s/run.mcp.json']);
+    // Without firstRequest, too long, or empty: not given, so the window types it once the agent is ready.
+    for (const [definition, text] of [[aider, 'hello'], [asks, 'x'.repeat(4001)], [asks, '   ']] as const) {
+      const plain = buildCustomLaunch({ definition, config: config(), servers: {}, instructions: null, mcpFile: 'f', prompt: text });
+      expect(plain.prompted).toBe(false); expect(plain.args).toEqual(['--no-auto-commits', '--yes-always']);
+    }
+    // A prompt that is an argument of its own and starts with - could be read as a flag; inside another argument it can't.
+    expect(firstRequestFits({ ...aider, firstRequest: { args: ['{prompt}'] } }, '--yes do it')).toBe(false);
+    expect(firstRequestFits({ ...aider, firstRequest: { args: ['--message={prompt}'] } }, '--yes do it')).toBe(true);
+    expect(firstRequestFits({ ...aider, firstRequest: { args: ['{prompt}'] } }, 'x'.repeat(4000))).toBe(true);
   });
   it('refuses a model or conversation the definition can’t take, or one that could read as a flag', () => {
     const bare = { ...aider, models: undefined, resume: undefined };

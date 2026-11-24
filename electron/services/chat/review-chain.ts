@@ -1,9 +1,10 @@
 import { late, type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
-import { allowAtFull, checkTable, checkWaiting, cut, instructionsFor, isEdit, KEEP_IMAGES, leadFirst, list, NAME, settings, type SeatInput, type TableHost } from './round-table';
+import { allowAtFull, checkTable, checkWaiting, cut, instructionsFor, isEdit, KEEP_IMAGES, agentName, leadFirst, list, settings, type SeatInput, type TableHost } from './round-table';
 import { BLOCKED_LINE, SIGNAL_INSTRUCTION, taskSignal } from '../../../shared/task-signal';
 import { defaultSeatName, LEGACY_DUTIES, seatNames, type SeatDuty } from '../../../shared/table-seats';
+import type { SeatEngine } from '../../../shared/types';
 
 /** Review rounds (the reviewers review, the builder fixes) before the final review, unless the table sets its own. */
 export const REVIEW_ROUNDS = 2;
@@ -30,7 +31,7 @@ export const legacySeats = (partnerRunId: string, plannerRunId: string): SeatInp
 const sameDuties = (a: readonly SeatDuty[], b: readonly SeatDuty[]) => a.length === b.length && a.every((duty) => b.includes(duty));
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-interface Seat { runId: string; sessionId: string; engine: 'claude' | 'codex' | 'gemini'; duties: SeatDuty[]; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
+interface Seat { runId: string; sessionId: string; engine: SeatEngine; agentName?: string; duties: SeatDuty[]; name?: string; instructions?: string; busy: boolean; text: string; answer: string | null; briefed: boolean;
   /** Still in a turn from before this table opened (Reopen while it worked): its `done` ends that old turn, never a step. */
   stale?: boolean }
 interface Chain {
@@ -123,7 +124,7 @@ export class ReviewChains {
   private seatOf(input: SeatInput): Seat {
     const run = this.host.run(input.runId); if (!run) throw new HubError('TABLE_RUN', 'That chat is not running.');
     // A seat still working on a turn from before (a table closed while it worked) counts as busy until that turn ends.
-    return { runId: input.runId, sessionId: run.sessionId, engine: run.engine, duties: [...(input.duties ?? [])], ...settings(input), busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
+    return { runId: input.runId, sessionId: run.sessionId, engine: run.engine, ...(run.agentName ? { agentName: run.agentName } : {}), duties: [...(input.duties ?? [])], ...settings(input), busy: run.busy === true, text: '', answer: null, briefed: false, ...(run.busy ? { stale: true } : {}) };
   }
   private busy(chain: Chain) { return chain.seats.some((seat) => seat.busy); }
   /** The seats with a duty, in seat order. checkSeats makes sure there is one planner and at most one final reviewer. */
@@ -147,7 +148,7 @@ export class ReviewChains {
     const partner = this.having(chain, 'review')[0] ?? chain.seats.find((seat) => seat !== chain.builder)!;
     const turnStep = chain.step === 'stopped' ? chain.stoppedAt : chain.step;
     return {
-      kind: 'hierarchy', seats: chain.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, duties: [...seat.duties], ...settings(seat) })),
+      kind: 'hierarchy', seats: chain.seats.map((seat) => ({ sessionId: seat.sessionId, runId: seat.runId, engine: seat.engine, ...(seat.agentName ? { agentName: seat.agentName } : {}), duties: [...seat.duties], ...settings(seat) })),
       partner: { sessionId: partner.sessionId, runId: partner.runId, engine: partner.engine }, planner: { sessionId: planner.sessionId, runId: planner.runId, engine: planner.engine as 'claude' },
       // The builder leads: any agent, Gemini too from 1.39.
       driver: chain.builder.engine, rounds: chain.rounds, round: chain.reviewRound, phase: working ? 'answering' : 'idle', agreed: chain.verdict === 'approved',
@@ -171,7 +172,7 @@ export class ReviewChains {
   }
   /** The steps of this table, from the seats it has; each seat's agent is named where the seat first comes up. */
   private steps(chain: Chain) {
-    const named = new Set<Seat>(); const who = (seat: Seat) => { const called = this.called(chain, seat); if (named.has(seat)) return called; named.add(seat); return `${called} (${NAME[seat.engine]})`; };
+    const named = new Set<Seat>(); const who = (seat: Seat) => { const called = this.called(chain, seat); if (named.has(seat)) return called; named.add(seat); return `${called} (${agentName(seat)})`; };
     const planner = this.planner(chain); const challengers = this.having(chain, 'challenge'); const reviewers = this.having(chain, 'review'); const final = this.finalSeat(chain);
     const parts = [`${who(planner)} plans`];
     if (challengers.length) { const them = list(challengers.map(who)); parts.push(`${them} ${challengers.length === 1 ? 'challenges the plan' : 'challenge the plan one after another'} and ${who(planner)} answers`); }

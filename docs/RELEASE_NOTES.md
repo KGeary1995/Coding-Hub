@@ -1,5 +1,33 @@
 ## What's new
 
+1.41.0 completes agents you add yourself (Agent setup → **Agents**).
+
+- **From a list.** **Add an agent** → **From a list**:
+  - **Show shared agents** lists ready-made agents that people share on GitHub. Nobody reviews that list, so check each one yourself.
+  - You can also paste a GitHub address.
+  - The agent you pick opens in the usual form. Nothing runs until you save it and confirm the program in the system dialog.
+- **Your agents follow you.** Agents sync between your computers with your other settings.
+  - One that arrives from another computer stays **Off** until you check it and turn it on there.
+  - When both computers change the same agent, the newer change wins. The older version is kept in Trace's backups.
+- **Chat and Round Tables.**
+  - An agent that speaks the Agent Client Protocol, the one Gemini uses, gets a **<Name> chat** in **New channel**, on the computer and the phone.
+  - It can take any Round Table seat, including leading and making the changes.
+  - At **Ask** it only reads: a file change it asks for is declined, and the chat says so.
+  - **Draft it for me** fills this in when the program's help mentions it.
+- **Continue a conversation from a list.** In a custom channel's settings, **List its conversations** shows the agent's past conversations to pick from, when its program can list them.
+- **First request with the start.** Start in order and scheduled jobs give an agent its first request as it starts, when its program takes one that way.
+- **Another computer's tab** offers that computer's agents in **New channel**.
+- **Clearer settings.** An agent without permission levels says so instead of showing an empty list, on the computer and the phone. The Usage page says that usage isn't tracked for agents you add, since each program reports it differently.
+- **Fixed:** a test that checks a channel resumes after Trace restarts sometimes failed on its own. It now reads the channel's saved output.
+- **Tried:**
+  - Unit tests and every smoke test, with stand-in agent programs.
+  - The real Gemini (agy 1.5.16), defined as a custom agent and driven through the new chat code: at Ask it changed nothing in the project, and at Allow edits it wrote the file it was asked to.
+- **Not tried yet:**
+  - A real shared agent on GitHub.
+  - Sync between two real computers.
+  - Another ACP agent than Gemini.
+  - The new screens by hand in the running app.
+
 1.40.1 makes Ask mean read-only for Gemini.
 
 - **Gemini at Ask only reads.** In a terminal and in a chat, Gemini at **Ask** now runs in its plan mode: it answers questions and makes plans, but does not change your files. If it still asks to change a file, Trace says no and tells you so in the chat. To let it edit, choose **Allow edits**. A Round Table led by Gemini at Ask discusses but does not edit. Claude Code and Codex are unchanged.

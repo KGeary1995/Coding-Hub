@@ -10,6 +10,9 @@ import { RulesService } from './rules';
 import { load, save } from '../workbench/local-store';
 import { templateSchema } from '../workbench/workflows';
 import { z } from 'zod';
+import { CustomAgents } from '../agents/agents';
+import { setBackupRoot } from './file-backups';
+import type { AgentDefinition } from '../../../shared/agent-definition';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -259,5 +262,52 @@ describe('device sync', () => {
     setRules(a.rules, 'Still syncs.'); const status = a.sync.sync();
     expect(status.error).toMatch(/settings\.json/);
     expect(JSON.parse(fs.readFileSync(path.join(drive, SYNC_FOLDER, 'rules.json'), 'utf8')).value.content).toBe('Still syncs.');
+  });
+});
+
+describe('device sync of custom agents', () => {
+  afterEach(() => setBackupRoot(null));
+  const agent = (name = 'Fake agent'): AgentDefinition => ({ schema: 1, id: 'fake', name, program: { command: process.execPath, args: ['--plain'] }, status: { quietSeconds: 4 } });
+  /** A computer whose custom agents sync, and whose dialogs always say yes. */
+  function withAgents(drive: string, name: string) {
+    const machine = computer(drive, name); setBackupRoot(machine.root);
+    const agents = new CustomAgents(machine.root, { confirmSave: async () => true, confirmRun: async () => true }, { environment: async () => ({ ...process.env as Record<string, string> }) });
+    machine.sync.agents = agents; return { ...machine, agents };
+  }
+  const shared = (drive: string) => path.join(drive, SYNC_FOLDER, 'agents');
+
+  it('carries a definition to the other computer, where it is off until confirmed there, and never carries the confirmations', async () => {
+    const drive = temporary(); const desk = withAgents(drive, 'desk'); const laptop = withAgents(drive, 'laptop');
+    await desk.agents.save(agent()); desk.sync.sync(); laptop.sync.sync();
+    expect(fs.readdirSync(shared(drive))).toEqual(['fake.json']); expect(fs.readdirSync(path.join(drive, SYNC_FOLDER)).some((name) => name.includes('confirmed'))).toBe(false);
+    const arrived = (await laptop.agents.list()).agents[0];
+    expect(arrived).toMatchObject({ id: 'fake', active: false, synced: { from: 'desk', changed: false }, definition: agent() });
+    await expect(laptop.agents.launchable('fake', process.env as Record<string, string>)).rejects.toMatchObject({ code: 'AGENT_NOT_CONFIRMED' });
+    await laptop.agents.activate('fake'); laptop.sync.sync(); desk.sync.sync();
+    expect((await laptop.agents.list()).agents[0]).toMatchObject({ active: true, synced: null }); expect((await desk.agents.list()).agents[0].active).toBe(true);
+    // Changed on the laptop: the desk takes it, and it is off there until confirmed again.
+    await laptop.agents.save(agent('Renamed'), 'fake'); laptop.sync.sync(); desk.sync.sync();
+    expect((await desk.agents.list()).agents[0]).toMatchObject({ active: false, synced: { from: 'laptop', changed: true }, definition: { name: 'Renamed' } });
+    // Removed on the desk: removed on the laptop too.
+    desk.agents.remove('fake'); desk.sync.sync(); laptop.sync.sync();
+    expect((await laptop.agents.list()).agents).toEqual([]); expect(desk.sync.status().error).toBeNull();
+  });
+
+  it('never takes a missing shared file as a removal, and lets the newer change win when both computers changed one', async () => {
+    const drive = temporary(); const desk = withAgents(drive, 'desk'); const laptop = withAgents(drive, 'laptop');
+    await desk.agents.save(agent()); desk.sync.sync(); laptop.sync.sync();
+    fs.rmSync(path.join(shared(drive), 'fake.json')); laptop.sync.sync();
+    expect((await laptop.agents.list()).agents).toHaveLength(1); expect(fs.existsSync(path.join(shared(drive), 'fake.json'))).toBe(true);
+    desk.sync.sync(); expect((await desk.agents.list()).agents[0].active).toBe(true);
+    // Both change it before syncing: the laptop's older change gives way to the desk's newer one.
+    await laptop.agents.activate('fake'); await laptop.agents.save(agent('Laptop'), 'fake'); const past = new Date(Date.now() - 60_000); fs.utimesSync(path.join(laptop.root, 'agents', 'fake.json'), past, past);
+    await desk.agents.save(agent('Desk'), 'fake'); desk.sync.sync(); laptop.sync.sync();
+    expect((await laptop.agents.list()).agents[0]).toMatchObject({ active: false, definition: { name: 'Desk' } });
+  });
+
+  it('leaves a shared file it cannot read alone, and says so', async () => {
+    const drive = temporary(); const desk = withAgents(drive, 'desk');
+    desk.sync.sync(); fs.writeFileSync(path.join(shared(drive), 'odd.json'), '{"version":1}');
+    expect(desk.sync.sync().error).toContain('shared agent definition could not be read'); expect((await desk.agents.list()).agents).toEqual([]);
   });
 });

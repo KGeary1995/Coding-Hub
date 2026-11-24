@@ -9,7 +9,7 @@ import { HubError } from '../cli/engine-adapter';
 import { commandsOf, PLUGIN_EVENTS, readManifest, type PluginManifest } from './manifest';
 import { resolveCommand, runLaunch } from './run';
 import { sameToken } from './plugin-api';
-import { browse, fetchRepo, latestCommit, listFiles, parseSource, systemGit, githubUrl, type Git, type RepoUrl } from './github';
+import { fetchRepo, latestCommit, listFiles, parseSource, systemGit, githubUrl, topicList, type Git, type RepoUrl } from './github';
 
 /**
  * Trace plugins (docs/plugins.md). This file keeps which plugins are installed and whether each is on, links a folder
@@ -47,8 +47,8 @@ export interface PluginHost {
   failed(name: string, what: string, why: string): void;
 }
 const ACTION_MS = 5 * 60_000; const EVENT_MS = 30_000; const GAP_MS = 10_000; const KEEP_RUNS = 50;
-/** A build step's limit, a fetched preview's life, and how long the browse list is kept. */
-const BUILD_MS = 10 * 60_000; const FETCH_MS = 30 * 60_000; const BROWSE_MS = 60 * 60_000;
+/** A build step's limit, and a fetched preview's life. */
+const BUILD_MS = 10 * 60_000; const FETCH_MS = 30 * 60_000;
 
 export class Plugins {
   private runs = new Map<string, PluginRun[]>();
@@ -59,7 +59,7 @@ export class Plugins {
   /** Fetched repositories waiting for Install in their preview, by id. */
   private fetched = new Map<string, { dir: string; folder: string; repo: string; ref?: string; commit: string; at: number }>();
   /** The commit each GitHub plugin's branch or tag is at now, from the last check. */
-  private latest = new Map<string, string>(); private browsed: { at: number; items: PluginBrowseItem[] } | null = null;
+  private latest = new Map<string, string>(); private browsed?: () => Promise<PluginBrowseItem[]>;
   constructor(private root: string, private host: PluginHost, private github: { git?: Git; url?: RepoUrl; fetcher?: typeof fetch } = {}) {}
   get folder() { return path.join(this.root, 'plugins'); }
   private state() { return load(this.folder, 'installed.json', stateSchema, { plugins: [] }).plugins; }
@@ -89,7 +89,7 @@ export class Plugins {
     const request = requestSchema.parse(input);
     if (request.action === 'plugin-list') return this.data();
     if (request.action === 'plugin-log') return this.runs.get(request.id) ?? [];
-    if (request.action === 'plugin-browse') { if (!this.browsed || Date.now() - this.browsed.at > BROWSE_MS) this.browsed = { at: Date.now(), items: await browse(this.github.fetcher) }; return this.browsed.items; }
+    if (request.action === 'plugin-browse') return (this.browsed ??= topicList('trace-plugin', this.github.fetcher))();
     if (request.action === 'plugin-check') { await this.checkUpdates(); return this.data(); }
     if (request.action === 'plugin-fetch') return this.fetchPreview(request.repo, request.ref);
     if (request.action === 'plugin-install') return this.install(request.fetchId);

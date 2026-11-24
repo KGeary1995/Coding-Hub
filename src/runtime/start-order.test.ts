@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../shared/types';
 
-const fake = vi.hoisted(() => ({ watchers: new Map<string, (data: string) => void>(), typed: [] as [string, string][], started: [] as string[], fail: new Set<string>() }));
+const fake = vi.hoisted(() => ({ watchers: new Map<string, (data: string) => void>(), typed: [] as [string, string][], started: [] as string[], fail: new Set<string>(), asked: [] as (string | undefined)[], prompted: false }));
 vi.mock('./terminals', () => ({ watchOutput: (id: string, watch: (data: string) => void) => { fake.watchers.set(id, watch); return () => fake.watchers.delete(id); }, writeTerminal: async (id: string, data: string) => { fake.typed.push([id, data]); return true; } }));
 vi.mock('./use-native-host', async () => {
   const { useWorkspaceStore } = await import('../state/workspace-store');
-  return { startSession: async (id: string) => {
-    fake.started.push(id);
+  return { startSession: async (id: string, options: { firstRequest?: string } = {}) => {
+    fake.started.push(id); fake.asked.push(options.firstRequest);
     useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id !== id ? item : fake.fail.has(id) ? { ...item, status: 'error' as const, error: 'No such program.' } : { ...item, status: 'running' as const, runId: `run-${id}` }) }));
+    return fake.prompted && Boolean(options.firstRequest);
   } };
 });
 const { createSession, useWorkspaceStore } = await import('../state/workspace-store');
@@ -16,7 +17,7 @@ const { cancelStartOrder, startInOrder, useStartOrder } = await import('./start-
 function workspace(...sessions: Session[]) { useWorkspaceStore.setState({ sessions, tiles: sessions.map((session, i) => ({ sessionId: session.id, x: (i % 2) * 6, y: Math.floor(i / 2) * 10, w: 6, h: 10, minW: 3, minH: 10 })) }); }
 const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 5)); };
 
-beforeEach(() => { fake.watchers.clear(); fake.typed = []; fake.started = []; fake.fail.clear(); useStartOrder.setState({ progress: null, notice: null }); });
+beforeEach(() => { fake.watchers.clear(); fake.typed = []; fake.started = []; fake.fail.clear(); fake.asked = []; fake.prompted = false; useStartOrder.setState({ progress: null, notice: null }); });
 
 describe('Start in order', () => {
   it('starts by step, types the shell command, waits for the text, and sends the agent its request', async () => {
@@ -73,6 +74,18 @@ describe('the first request', () => {
       const busy = { ...createSession('codex'), status: 'running' as const, runId: 'r2', attention: { message: 'Approve?', at: '' } }; workspace(busy);
       const offered = sendWhenReady(busy.id, 'Hello'); await vi.advanceTimersByTimeAsync(READY_LIMIT_MS + 1000); await offered;
       expect(fake.typed).toEqual([]); expect(useWorkspaceStore.getState().sessions[0].preparedRequest).toEqual({ prompt: 'Hello', label: 'Send first request' });
+    } finally { vi.useRealTimers(); }
+  });
+  it('goes to a custom agent at its start when its definition takes it as arguments, and is not typed again', async () => {
+    vi.useFakeTimers();
+    try {
+      const { READY_QUIET_MS } = await import('./start-order');
+      const custom = { ...createSession('custom', undefined, { id: 'aider', name: 'Aider' }), startup: { order: 1, prompt: 'Fix the build.' } };
+      const claude = { ...createSession('claude'), startup: { order: 2, prompt: 'Review it.' } };
+      workspace(custom, claude); fake.prompted = true;
+      await startInOrder(); await vi.advanceTimersByTimeAsync(READY_QUIET_MS + 1000);
+      // Only the custom agent is asked to take it at start; Claude Code's is typed as before.
+      expect(fake.asked).toEqual(['Fix the build.', undefined]); expect(fake.typed).toEqual([[claude.id, 'Review it.' + String.fromCharCode(13)]]);
     } finally { vi.useRealTimers(); }
   });
 });

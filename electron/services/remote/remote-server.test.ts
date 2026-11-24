@@ -775,6 +775,7 @@ describe('phone permissions and chat channels', () => {
       write: () => {},
       control: async (sessionId, control) => { controls.push({ sessionId, control }); },
       add: async (engine, chat) => { adds.push({ engine, chat }); },
+      agents: () => [{ id: 'fake-acp', name: 'Fake ACP', color: '#7c9cff', initials: 'FA', chat: true }, { id: 'aider', name: 'Aider', color: '#7c9cff', initials: 'AI' }],
       chat: (request) => { if (request.runId !== RUN) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.'); chats.push(request); },
     };
     const server = new RemoteServer(root, host, 0, '', async () => 'sent'); cleanup.push(() => server.stop()); await server.setEnabled(true);
@@ -823,8 +824,12 @@ describe('phone permissions and chat channels', () => {
     // Gemini, as a terminal or (from 1.39.0) as a chat.
     expect((await post(server, token, '/api/channel-add', { engine: 'gemini' })).status).toBe(200);
     expect((await post(server, token, '/api/channel-add', { engine: 'gemini', chat: true })).status).toBe(200);
+    // A custom agent as a chat (phase 2): the window checks that its definition has acp; one with no agent is refused.
+    expect((await post(server, token, '/api/channel-add', { engine: 'custom', agent: 'fake-acp', chat: true })).status).toBe(200);
+    expect((await post(server, token, '/api/channel-add', { engine: 'custom', chat: true })).status).toBe(400);
+    expect((await post(server, token, '/api/channel-add', { engine: 'custom', agent: 'aider', chat: true })).status).toBe(400);
     expect((await post(server, token, '/api/control', { sessionId: 'elsewhere', control: 'stop' })).status).toBe(400);
-    expect(controls).toEqual([{ sessionId: 's1', control: 'restart' }]); expect(adds).toEqual([{ engine: 'codex', chat: true }, { engine: 'shell', chat: false }, { engine: 'gemini', chat: false }, { engine: 'gemini', chat: true }]);
+    expect(controls).toEqual([{ sessionId: 's1', control: 'restart' }]); expect(adds).toEqual([{ engine: 'codex', chat: true }, { engine: 'shell', chat: false }, { engine: 'gemini', chat: false }, { engine: 'gemini', chat: true }, { engine: 'custom', chat: true }]);
     server.setCanRun(id, false);
     expect((await post(server, token, '/api/control', { sessionId: 's1', control: 'stop' })).status).toBe(403); expect(controls).toHaveLength(1);
     // A linked computer always may, and its permission cannot be changed here.

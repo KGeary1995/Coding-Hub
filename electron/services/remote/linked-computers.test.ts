@@ -15,7 +15,7 @@ const until = async (check: () => boolean, what: string) => { for (let i = 0; i 
 const temporary = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'linked-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true })); return root; };
 
 /** A computer's remote with one running Claude channel, standing in for Trace on the other computer. */
-async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }, screen?: { locked: boolean | null }) {
+async function computer(id: string, name: string, sessionId: string, idle?: { seconds: number }, screen?: { locked: boolean | null }, agents?: RemoteHost['agents']) {
   const running: RunningSession[] = [{ sessionId, runId: 'run-' + sessionId, pid: 1, cwd: '/p', engine: 'claude' }];
   const writes: { reference: RunReference; data: string }[] = []; const controls: { sessionId: string; control: ChannelControl }[] = []; const adds: string[] = [];
   const size = { cols: 100, rows: 30 }; const sizes: string[] = []; const images: { reference: RunReference; image: Buffer }[] = [];
@@ -25,10 +25,11 @@ async function computer(id: string, name: string, sessionId: string, idle?: { se
     resize: (_reference, cols, rows) => { Object.assign(size, { cols, rows }); sizes.push(`${cols}x${rows}`); },
     write: (reference, data) => { writes.push({ reference, data }); },
     control: async (target, control) => { controls.push({ sessionId: target, control }); },
-    add: async (engine) => { adds.push(engine); },
+    add: async (engine, _chat, _like, agent) => { adds.push(agent ? `${engine}:${agent}` : engine); },
     pasteImage: async (reference, image) => { images.push({ reference, image }); },
     ...(idle ? { idleSeconds: () => idle.seconds } : {}),
     ...(screen ? { screenLocked: () => screen.locked } : {}),
+    ...(agents ? { agents } : {}),
   };
   const server = new RemoteServer(temporary(), host, 0, '', async () => 'sent'); cleanup.push(() => server.stop());
   server.identity = { id, name }; await server.setEnabled(true);
@@ -42,6 +43,22 @@ async function phoneToken(server: RemoteServer) {
 const PC = '11111111-1111-4111-8111-111111111111'; const MAC = '22222222-2222-4222-8222-222222222222';
 
 describe('linked computers', () => {
+  it('offers the custom agents turned on there, and adds a channel for one (docs/custom-agents.md)', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1', undefined, undefined, () => [{ id: 'aider', name: 'Aider', color: '#7c9cff', initials: 'AI' }]);
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop());
+    await mac.link(PC, pc.server.pair('computer').pairing!.code);
+    expect(await mac.agents(PC)).toEqual([{ id: 'aider', name: 'Aider', color: '#7c9cff', initials: 'AI' }]);
+    await mac.add(PC, 'custom', false, 'aider'); expect(pc.adds).toEqual(['custom:aider']);
+    // One not turned on there is refused by that computer.
+    await expect(mac.add(PC, 'custom', false, 'goose')).rejects.toMatchObject({ message: expect.stringContaining('not turned on') });
+  });
+  it('offers no custom agents from a computer that has none to offer', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop());
+    await mac.link(PC, pc.server.pair('computer').pairing!.code); expect(await mac.agents(PC)).toEqual([]);
+  });
   it('connects again at once when this computer wakes from sleep (1.35.1)', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
     const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }, { id: MAC, name: 'MacBook', url: null }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });

@@ -48,7 +48,7 @@ export function DeviceSyncCard() {
   const outside = outsideSyncFolder(linked, status);
   return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">
     {head(!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable', status.enabled && status.connected ? 'saved success' : status.enabled ? 'warning' : 'neutral')}
-    <p>Settings, shared rules, project templates and usage history follow you through the Drive folder above. Running channels, recorded output and the project list stay on each computer.</p>
+    <p>Settings, shared rules, project templates, custom agents and usage history follow you through the Drive folder above. Running channels, recorded output and the project list stay on each computer.</p>
     {status.enabled && <>
       <dl className="settings-facts">
         <dt>This computer</dt><dd>{status.machine.name}</dd>

@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { DEFAULT_PREFERENCES, type DeviceSyncStatus, type HubPreferences, type SyncedComputer, type SyncedDocument, type UsageRecord } from '../../../shared/hub';
 import type { ProjectTemplate } from '../../../shared/productivity';
+import { AGENT_ID, agentDefinitionSchema, type AgentDefinition } from '../../../shared/agent-definition';
 import { HubError } from '../cli/engine-adapter';
 import { load, save } from '../workbench/local-store';
 import { templateSchema } from '../workbench/workflows';
@@ -16,7 +17,9 @@ import type { RulesService } from './rules';
  * Carries settings, shared rules, project templates and usage between computers through the same Drive folder that
  * syncs memory notes. Settings and rules are merged three ways against what was last synced: a change on one side is
  * taken, and a change on both sides is held as a conflict for the person to settle. Templates never change after they
- * are saved, so they merge as a set (deletions included). Each computer writes only its own usage file.
+ * are saved, so they merge as a set (deletions included). Each computer writes only its own usage file. Custom agent
+ * definitions merge one by one (`agents`); one that arrives is Off until confirmed on this computer, and which agents are
+ * confirmed (agents-confirmed.json) never syncs.
  */
 export const SYNC_FOLDER = 'AI-Coding-Hub-Sync';
 const LINEAGE = 50;
@@ -45,6 +48,8 @@ const documentSchema = <T extends z.ZodType>(value: T) => z.object({ version: z.
  */
 const versionedSchema = <T extends z.ZodType>(value: T) => documentSchema(value).extend({ history: hashes.default([]) });
 const addressDocument = documentSchema(z.object({ url: z.string().max(500).nullable() }).strict());
+/** A custom agent's definition, or null where a computer removed it (so a missing file is never read as a removal). */
+const agentDocument = documentSchema(agentDefinitionSchema.nullable());
 const settingsDocument = versionedSchema(settingsSchema); const rulesDocument = versionedSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
 type Machine = z.infer<typeof machineSchema>;
 type SyncedValue = { settings: z.infer<typeof settingsSchema>; rules: z.infer<typeof rulesSchema> };
@@ -55,13 +60,24 @@ const stateSchema = z.object({
   /** The sync folder the template baseline belongs to; a different folder starts a new baseline instead of implying deletions. */
   folder: z.string().max(4096).nullable().default(null),
   templates: z.array(z.uuid()).max(500), usage: z.string().nullable(), lastSync: z.iso.datetime().nullable(),
+  /** Each custom agent's definition as last synced (its hash), and the sync folder that belongs to. */
+  agents: z.object({ folder: z.string().max(4096).nullable(), base: z.record(z.string().regex(AGENT_ID), z.string().regex(/^[a-f0-9]{64}$/)) }).strict().default({ folder: null, base: {} }),
   pending: z.object({ settings: settingsDocument.optional(), rules: rulesDocument.optional() }).strict(),
   rulesFrom: z.object({ name: z.string().max(100), at: z.iso.datetime() }).strict().nullable(),
   /** The Drive folder Trace moved this computer to by itself, and the one it left: it moves to a folder once, so moving back stays. */
   moved: z.object({ from: z.string().max(4096), to: z.string().max(4096), computers: z.array(z.string().max(100)).max(50), at: z.iso.datetime() }).strict().optional(),
 }).strict();
 type State = z.infer<typeof stateSchema>;
-const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, folder: null, templates: [], usage: null, lastSync: null, pending: {}, rulesFrom: null };
+const EMPTY: State = { base: { settings: null, rules: null }, lineage: { settings: [], rules: [] }, folder: null, templates: [], usage: null, lastSync: null, agents: { folder: null, base: {} }, pending: {}, rulesFrom: null };
+/** The custom agents' store (electron/services/agents/agents.ts), as sync sees it. */
+export interface SyncedAgents {
+  /** Every definition file here by id; null for one that is there but not valid (left alone). */
+  definitions(): Map<string, AgentDefinition | null>;
+  modifiedAt(id: string): number;
+  /** Writes another computer's definition here, unconfirmed (Off); false when it could not be added. */
+  receive(definition: AgentDefinition, from: string): boolean;
+  remove(id: string): void;
+}
 /** Claude account profiles belong to the computer that made a template; an imported template uses this computer's default account. */
 function portable(template: ProjectTemplate): ProjectTemplate {
   const copy = structuredClone(template); for (const session of copy.workspace.sessions) delete (session.config as { accountProfileId?: string }).accountProfileId; return copy;
@@ -97,6 +113,8 @@ export class DeviceSync {
   private addresses = new Map<string, { id: string; name: string; url: string | null }>();
   /** This computer's phone remote address on the tailnet, when it has one; other computers link to it there. */
   advertise: () => string | null = () => null;
+  /** Custom agents, once their store is open (main.ts); without it they are not synced. */
+  agents: SyncedAgents | null = null;
   constructor(private root: string, private preferences: () => HubPreferences, private savePreferences: (preferences: HubPreferences) => void, private rules: RulesService, private localUsage: () => UsageRecord[]) {
     const name = (os.hostname() || 'This computer').slice(0, 100);
     // A damaged identity file must not stop the rest of the hub: keep the file, report it, and leave sync off. A
@@ -117,7 +135,7 @@ export class DeviceSync {
     const folder = path.join(drive, SYNC_FOLDER);
     // Every tick is a call on the Drive volume: the sub-folders are made once, and afterwards only looked at (lstat sees a
     // link or junction as no folder). One that went, or became a link, sends the tick through the full check below.
-    const subs = ['', 'templates', 'usage', 'computers'];
+    const subs = ['', 'templates', 'usage', 'computers', 'agents'];
     if (this.prepared === folder && subs.every((sub) => { try { return fs.lstatSync(path.join(folder, sub)).isDirectory(); } catch { return false; } })) return folder;
     for (const sub of subs) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
     this.prepared = folder; return folder;
@@ -182,6 +200,43 @@ export class DeviceSync {
     if (next.length !== local.length || next.some((item, index) => item.id !== local[index].id)) save(this.root, 'project-templates.json', next);
     state.templates = next.map((item) => item.id);
     if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared template file${unreadable === 1 ? '' : 's'} could not be read; copies on this computer were kept.`);
+  }
+  /**
+   * Custom agents, one file each (`agents/<id>.json`), merged against the hash last synced: a change on one side is
+   * taken; when both sides changed, a change wins over a removal and otherwise the newer one wins (the replaced definition
+   * stays in this computer's configuration backups). A definition taken from another computer is written unconfirmed, so
+   * it is Off here until the person turns it on. A file that is missing or can't be read is never taken as a removal.
+   */
+  private syncAgents(folder: string, state: State) {
+    const store = this.agents; if (!store) return;
+    const directory = path.join(folder, 'agents'); const remote = new Map<string, z.infer<typeof agentDocument>>(); const present = new Set<string>(); let unreadable = 0;
+    for (const name of fs.readdirSync(directory)) {
+      const id = /^(.+)\.json$/.exec(name)?.[1]; if (!id || !AGENT_ID.test(id)) continue; present.add(id);
+      try { const document = readJson(path.join(directory, name), agentDocument); if (document && (document.value === null || document.value.id === id)) { remote.set(id, document); this.seen(document.machine, document.updatedAt); } else unreadable++; } catch { unreadable++; }
+    }
+    if (state.agents.folder !== folder) state.agents = { folder, base: {} };
+    const base = state.agents.base; const local = store.definitions();
+    const publish = (id: string, value: AgentDefinition | null) => writeJson(path.join(directory, id + '.json'), { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value });
+    for (const id of new Set([...local.keys(), ...present, ...Object.keys(base)])) {
+      const mine = local.get(id); const theirs = remote.get(id);
+      // Not valid here, or unreadable there (half-synced, or from a newer Trace): left as it is on both sides.
+      if (mine === null || (present.has(id) && !theirs)) continue;
+      const settle = (hash: string | null) => { if (hash) base[id] = hash; else delete base[id]; };
+      const ours = mine ? digest(mine) : null;
+      // No shared file (a new agent, or a folder that lost it): this computer's definition is shared again.
+      if (!theirs) { if (mine) publish(id, mine); settle(ours); continue; }
+      const shared = theirs.value ? digest(theirs.value) : null; const last = base[id] ?? null;
+      if (ours === shared) { settle(ours); continue; }
+      const take = () => {
+        if (theirs.value) { if (!store.receive(theirs.value, theirs.machine.name)) return; } else store.remove(id);
+        settle(shared);
+      };
+      const give = () => { publish(id, mine ?? null); settle(ours); };
+      if (shared === last) give(); else if (ours === last) take();
+      else if (!mine) take(); else if (!theirs.value) give();
+      else if (Date.parse(theirs.updatedAt) > store.modifiedAt(id)) take(); else give();
+    }
+    if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared agent definition${unreadable === 1 ? '' : 's'} could not be read; this computer's copies were kept.`);
   }
   private usage(folder: string, state: State, now: boolean) {
     const own = path.join(folder, 'usage', this.machine.id + '.json');
@@ -282,7 +337,7 @@ export class DeviceSync {
     try {
       const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
-      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder), () => this.lookElsewhere(folder, now, state)]) {
+      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.syncAgents(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder), () => this.lookElsewhere(folder, now, state)]) {
         try { step(); } catch (error) { this.prepared = null; this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);

@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { IPty, IPtyForkOptions } from 'node-pty';
-import type { AgentConfig, ChannelConfig, CLIEngineConfig, CustomChannelConfig, PermissionLevel } from '../../../shared/types';
+import type { AgentConfig, ChannelConfig, CLIEngineConfig, CustomChannelConfig, PermissionLevel, SeatEngine } from '../../../shared/types';
 import type { AgentDefinition } from '../../../shared/agent-definition';
 import { CustomStatusReader, type CustomStatusChange } from '../agents/status';
 import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../../../shared/types';
@@ -23,6 +23,7 @@ import { nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { GeminiStream } from '../chat/gemini-stream';
+import { AcpStream, type AcpAgent } from '../chat/acp-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
 import { legacySeats, ReviewChains } from '../chat/review-chain';
 import { spawnChatProcess, type ChatProcess } from '../chat/chat-process';
@@ -117,6 +118,8 @@ interface ManagedRun {
   gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number; known: Set<string> };
   /** A custom agent's run: Needs you and Done from the signals its definition names (agents/status.ts). */
   custom?: CustomStatusReader;
+  /** A custom agent's name: its Round Table seat's default name. */
+  agentName?: string;
   session: RunningSession;
   pty: IPty;
   nativeKey?: string;
@@ -159,7 +162,9 @@ export class PtyManager {
        * A custom agent's launch (docs/custom-agents.md), built by the host from its confirmed definition: the program,
        * arguments and environment, and the status signals to read. Throws a HubError the person can act on.
        */
-      customLaunch?: (session: AgentRunningSession, config: CustomChannelConfig, env: Record<string, string>) => Promise<{ file: string; args: string[]; env: Record<string, string>; status: AgentDefinition['status'] }>;
+      customLaunch?: (session: AgentRunningSession, config: CustomChannelConfig, env: Record<string, string>, prompt?: string) => Promise<{ file: string; args: string[]; env: Record<string, string>; status: AgentDefinition['status']; name: string; prompted?: boolean;
+        /** A chat run (phase 2): how AcpStream drives the agent, and the level it starts at. */
+        chat?: AcpAgent; level?: PermissionLevel }>;
       /** A custom agent's status signals, for a run taken up from the background runner. */
       customStatus?: (agentId: string) => AgentDefinition['status'] | null;
       /** Windows' sudo setting, for Terminal channels (tests replace it). */
@@ -297,8 +302,9 @@ export class PtyManager {
         if (!(await stat(cwd)).isDirectory()) throw new Error('Not a directory');
       } catch { throw new HubError('INVALID_DIRECTORY', 'The working folder does not exist or is not accessible.'); }
       const baseEnvironment = await this.environment();
-      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask'; let customStatus: AgentDefinition['status'] | null = null;
-      // A chat run: Claude Code or Codex in structured mode, or a Round Table's Gemini seat (agy's agent protocol server).
+      let file: string; let args: string[]; let env: Record<string, string>; let session: RunningSession; let level: PermissionLevel = 'ask'; let customStatus: AgentDefinition['status'] | null = null; let prompted = false;
+      let agentName: string | undefined; let acp: AcpAgent | undefined;
+      // A chat run: Claude Code or Codex in structured mode, or an agent protocol (ACP) server: Gemini's, or a custom agent's.
       const chat = isChatRun(request.config);
       if (request.config.engine === 'custom') {
         // A custom agent: the host builds its launch from the confirmed definition; no discovery, flags or telemetry of a built-in CLI.
@@ -306,9 +312,11 @@ export class PtyManager {
         const ready = this.beforeLaunch(cwd, request.config);
         const agent: AgentRunningSession = { sessionId: request.sessionId, runId: randomUUID(), engine: 'custom', pid: 0, cwd };
         await ready; prepared = agent;
-        const launch = await this.dependencies.customLaunch(agent, request.config, baseEnvironment);
+        const launch = await this.dependencies.customLaunch(agent, request.config, baseEnvironment, request.firstRequest);
         if (reservation.cancelled || this.closing) throw new HubError('START_CANCELLED', 'Starting the channel was cancelled.');
-        session = agent; customStatus = launch.status; file = launch.file; args = launch.args;
+        session = agent; customStatus = launch.status; file = launch.file; args = launch.args; agentName = launch.name; acp = launch.chat; prompted = !chat && launch.prompted === true;
+        if (chat && !acp) throw new HubError('AGENT_NO_CHAT', `${launch.name} can’t run as a chat: its definition has no acp arguments.`);
+        if (chat) level = launch.level ?? 'ask';
         env = { ...launch.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
       } else if (request.config.engine === 'shell') {
         // A plain terminal: no agent discovery, flags, rules, usage or memory, and its output is not recorded.
@@ -352,9 +360,11 @@ export class PtyManager {
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
       if (held) run.held = true;
-      if (request.config.engine === 'custom') run.custom = this.customReader(run, customStatus, request.cols, request.rows);
+      if (request.config.engine === 'custom') { run.agentName = agentName; if (!chat) run.custom = this.customReader(run, customStatus, request.cols, request.rows); }
+      // The first request went in as arguments: the agent's first turn is under way without an Enter, and is not typed again.
+      if (prompted) { run.custom?.begin(); session.prompted = true; }
       this.runs.set(request.sessionId, run); prepared = null;
-      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } } : {}, level);
+      if (chat) this.attachChat(run, pty as ChatProcess, request.config.engine === 'codex' ? { codex: { cwd, model: request.config.model, reasoningEffort: request.config.reasoningEffort, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), permissions: level } } : request.config.engine === 'gemini' ? { gemini: { cwd, model: request.config.model, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}) } } : request.config.engine === 'custom' && acp ? { acp: { cwd, model: request.config.model, ...(request.config.resumeId ? { resumeId: request.config.resumeId } : {}), agent: acp } } : {}, level);
       else this.watchTerminal(run);
       pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
       if (isAgentConfig(request.config)) this.dependencies.onStarted?.(session as AgentRunningSession, request.config, owner);
@@ -419,7 +429,7 @@ export class PtyManager {
    * A chat run: Claude's messages become chat events for the owning window. An approval request also marks the channel
    * as waiting (status bar, notices, phone alerts), and its answer clears that, as for a terminal prompt.
    */
-  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string; model: string; resumeId?: string } }, permissions: PermissionLevel) {
+  private attachChat(run: ManagedRun, child: ChatProcess, protocol: { codex?: CodexThreadOptions; gemini?: { cwd: string; model: string; resumeId?: string }; acp?: { cwd: string; model: string; resumeId?: string; agent: AcpAgent } }, permissions: PermissionLevel) {
     const { sessionId, runId } = run.session;
     const write = (line: string) => { try { child.write(line); } catch { /* Exited. */ } };
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
@@ -437,7 +447,7 @@ export class PtyManager {
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') { try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } try { this.chains.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } }
     };
-    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { ...protocol.gemini, permissions }) : new ClaudeStream(write, emit, permissions);
+    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { ...protocol.gemini, permissions }) : protocol.acp ? new AcpStream(write, emit, { cwd: protocol.acp.cwd, model: protocol.acp.model, ...(protocol.acp.resumeId ? { resumeId: protocol.acp.resumeId } : {}), permissions }, protocol.acp.agent) : new ClaudeStream(write, emit, permissions);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
@@ -537,7 +547,7 @@ export class PtyManager {
   /** Hierarchy Round Tables (plan, build, review, fix, final review), on the same chat runs. */
   private readonly chains = new ReviewChains(this.tableHost());
   private tableHost(): TableHost { return {
-    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as 'claude' | 'codex' | 'gemini', cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
+    run: (runId) => { const run = this.chatRun(runId); return run ? { sessionId: run.session.sessionId, engine: run.session.engine as SeatEngine, ...(run.agentName ? { agentName: run.agentName } : {}), cwd: run.session.cwd, owner: run.owner, permissions: run.chat!.permissions(), busy: run.turnOpen === true } : null; },
     send: (runId, text, images) => { const run = this.chatRun(runId); if (!run?.chat) return; run.turnOpen = true; run.chat.send(text, images); },
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },

@@ -44,9 +44,13 @@ export interface StartSessionRequest {
   config: ChannelConfig;
   cols: number;
   rows: number;
+  /** A custom agent's first request, given as its `firstRequest.args` when its definition has them (docs/custom-agents.md). */
+  firstRequest?: string;
 }
 export interface RunReference { sessionId: string; runId: string }
-export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: ChannelEngine }
+export interface RunningSession extends RunReference { accountProfileId?: string; pid: number; cwd: string; engine: ChannelEngine;
+  /** The start request's `firstRequest` went to the program as arguments, so it is not typed after. */
+  prompted?: true }
 /** A run of an agent (Claude Code, Codex, Gemini CLI or a custom agent), which history follows; Terminal channels never reach them. */
 export type AgentRunningSession = RunningSession & { engine: CLIEngine | 'custom' };
 /** A run of a built-in CLI, whose usage and memory files Trace reads. */

@@ -67,12 +67,12 @@ export interface GeminiCLIEngineConfig {
 export type CLIEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig | GeminiCLIEngineConfig;
 /** The engines with chat channels, shared memory, tasks and Round Table seats. */
 export type ChatEngine = 'claude' | 'codex';
-/** The agents that can sit at a Round Table, in any seat: the chat engines, and Gemini CLI. */
-export type SeatEngine = ChatEngine | 'gemini';
+/** The agents that can sit at a Round Table, in any seat: the chat engines, Gemini CLI, and custom agents that speak ACP (phase 2). */
+export type SeatEngine = ChatEngine | 'gemini' | 'custom';
 /** The seat engine of a channel's config (a terminal reads as Claude, as the table code always took it). */
-export const seatEngineOf = (config: ChannelConfig): SeatEngine => config.engine === 'codex' ? 'codex' : config.engine === 'gemini' ? 'gemini' : 'claude';
-/** A run driven through its structured protocol and drawn (or seated) by Trace, not a terminal: a chat channel, or a Gemini seat. */
-export const isChatRun = (config: ChannelConfig): boolean => isBuiltInAgent(config) && config.chat === true;
+export const seatEngineOf = (config: ChannelConfig): SeatEngine => config.engine === 'codex' ? 'codex' : config.engine === 'gemini' ? 'gemini' : config.engine === 'custom' ? 'custom' : 'claude';
+/** A run driven through its structured protocol and drawn (or seated) by Trace, not a terminal: a chat channel, or a Gemini or custom agent's ACP chat. */
+export const isChatRun = (config: ChannelConfig): boolean => isAgentConfig(config) && config.chat === true;
 export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
 
 /**
@@ -80,7 +80,9 @@ export type ChatEngineConfig = ClaudeCLIEngineConfig | CodexCLIEngineConfig;
  * (~/.coding-hub/agents/<agentId>.json). The window names only the agent; the host reads its definition and builds the
  * launch. `model` is '' for the program's own default; `resumeId` is the conversation its resume arguments take.
  */
-export interface CustomChannelConfig { engine: 'custom'; agentId: string; model: string; permissions?: PermissionLevel; resumeId?: string }
+export interface CustomChannelConfig { engine: 'custom'; agentId: string; model: string; permissions?: PermissionLevel; resumeId?: string;
+  /** Phase 2: a chat run, the program started as an Agent Client Protocol server (`acp` in its definition; AcpStream), as a chat channel or a Round Table seat. `resumeId` is then its ACP session. */
+  chat?: boolean }
 /** Every agent a channel can run: the built-in CLIs and custom agents. */
 export type AgentConfig = CLIEngineConfig | CustomChannelConfig;
 

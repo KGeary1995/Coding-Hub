@@ -3,14 +3,18 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AGENT_ID, agentDefinitionSchema, definitionProblems, DRAFT_FORMAT, MAX_AGENTS, programCommand, validModel, type AgentDefinition } from '../../../shared/agent-definition';
+import { AGENT_ID, agentDefinitionSchema, definitionProblems, DRAFT_FORMAT, MAX_AGENTS, programCommand, validModel, validResumeId, type AgentDefinition } from '../../../shared/agent-definition';
 import { agentLook, PERMISSION_NAMES, type AgentLook } from '../../../shared/agent-look';
-import type { AgentDraft, AgentEntry, AgentList, AgentRequest, AgentTestResult } from '../../../shared/agents';
+import type { AgentConversation, AgentDraft, AgentEntry, AgentFetched, AgentList, AgentRequest, AgentTestResult } from '../../../shared/agents';
+import type { PluginBrowseItem } from '../../../shared/plugins';
 import { HubError } from '../cli/engine-adapter';
 import { advertisesFlag, findExecutable, freshHostEnvironment, nodeScriptCommand, probeDirectory, PROBE_ENVIRONMENT, type Executable } from '../cli/discovery';
 import { readConfig, updateConfig } from '../hub/config';
 import { keepBackup } from '../hub/file-backups';
 import { load, save } from '../workbench/local-store';
+import { topicList, type Git, type RepoUrl } from '../plugins/github';
+import type { SyncedAgents } from '../hub/device-sync';
+import { fetchDefinition } from './from-github';
 
 /**
  * Custom agents' store (docs/custom-agents.md): `agents/<id>.json` in Trace's storage, one definition per file, written
@@ -26,9 +30,15 @@ const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('agent-test'), definition: z.unknown() }).strict(),
   z.object({ action: z.literal('agent-draft'), command: programCommand }).strict(),
   z.object({ action: z.literal('agent-models'), id: z.string().regex(AGENT_ID) }).strict(),
+  z.object({ action: z.literal('agent-browse') }).strict(),
+  z.object({ action: z.literal('agent-fetch'), repo: z.string().min(1).max(300) }).strict(),
+  z.object({ action: z.literal('agent-conversations'), id: z.string().regex(AGENT_ID), directory: z.string().min(1).max(4096).refine((value) => !value.includes('\0')).optional() }).strict(),
 ]);
 const confirmedSchema = z.object({ confirmed: z.record(z.string().regex(AGENT_ID), z.string().regex(/^[a-f0-9]{64}$/)) }).strict();
 const CONFIRMED = 'agents-confirmed.json';
+/** Definitions another computer's sync wrote here: from which computer, and the hash it wrote (still Off until confirmed). */
+const receivedSchema = z.object({ received: z.record(z.string().regex(AGENT_ID), z.object({ from: z.string().max(100), hash: z.string().regex(/^[a-f0-9]{64}$/), changed: z.boolean() }).strict()) }).strict();
+const RECEIVED = 'agents-received.json';
 /** What a probe (version, help, model list) may take: 10 seconds and 64 KB of output. */
 export const PROBE_MS = 10_000; export const PROBE_BYTES = 64 * 1024;
 /** Claude Code drafting a definition: at most two minutes. */
@@ -99,6 +109,24 @@ export function runCaptured(executable: Executable, args: string[], options: { e
   });
 }
 
+/** Colour, cursor and title sequences a program prints even into a pipe. */
+const ESCAPES = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
+/**
+ * The conversations a program's `resume.listArgs` printed (docs/custom-agents.md), read defensively: one per line, its
+ * first word the ID (a trailing `:` or `,` dropped), the rest of the line its label. Only IDs that can fill {id}; a
+ * header word in capitals (ID, SESSION) is not one. At most 50, in the order printed.
+ */
+export function conversationsFrom(output: string): AgentConversation[] {
+  const found = new Map<string, string>();
+  for (const line of output.replace(ESCAPES, '').split(/\r?\n/)) {
+    const [first = '', ...rest] = line.trim().split(/\s+/); const id = first.replace(/[:,;]+$/, '');
+    if (!validResumeId(id) || /^[A-Z_]+$/.test(id) || found.has(id)) continue;
+    found.set(id, rest.join(' ').replace(/^[-|:\s]+/, '').slice(0, 120));
+    if (found.size >= 50) break;
+  }
+  return [...found].map(([id, label]) => ({ id, label }));
+}
+
 /** An argument as the confirmation shows it: quoted when it has spaces, so the person sees where each one ends. */
 const shown = (value: string) => value === '' ? '""' : /[\s"]/.test(value) ? JSON.stringify(value) : value;
 export const commandLine = (parts: string[]) => parts.map(shown).join(' ');
@@ -111,6 +139,8 @@ export function describeDefinition(definition: AgentDefinition, program: string)
   if (definition.resume) lines.push(`Resume: ${commandLine(definition.resume.args)}`);
   if (definition.mcp && definition.mcp.format !== 'none') lines.push(`Shared memory and channel tools: ${definition.mcp.format === 'claude-json' ? commandLine(definition.mcp.args ?? []) : 'Codex-style --config mcp_servers.* arguments'}`);
   if (definition.instructions) lines.push(`Instructions: ${'args' in definition.instructions ? commandLine(definition.instructions.args) : `in ${definition.instructions.env}`}`);
+  // A chat or Round Table seat starts the program with these instead (docs/custom-agents.md, phase 2).
+  if (definition.acp) lines.push(`Chat (ACP): ${definition.acp.args.length ? commandLine(definition.acp.args) : '(no arguments)'}${definition.acp.modes ? `; modes ${(['ask', 'edits', 'full'] as const).map((level) => `${PERMISSION_NAMES[level]} ${definition.acp!.modes![level] ?? '(its own)'}`).join(', ')}` : ''}`);
   for (const [name, value] of Object.entries(definition.env ?? {})) lines.push(`Environment: ${name}=${value}`);
   if (definition.version) lines.push(`Test start: ${commandLine(definition.version.args)}`);
   if (definition.models?.listArgs) lines.push(`Model list: ${commandLine(definition.models.listArgs)}`);
@@ -133,12 +163,17 @@ export interface AgentDialogs {
   confirmRun(run: { title: string; message: string; detail: string }): Promise<boolean>;
 }
 
-export class CustomAgents {
+export class CustomAgents implements SyncedAgents {
   readonly folder: string;
-  constructor(private root: string, private dialogs: AgentDialogs, private options: { environment?: () => Promise<Record<string, string>>; claude?: (env: Record<string, string>) => Promise<Executable> } = {}) { this.folder = path.join(root, 'agents'); }
+  private browsed?: () => Promise<PluginBrowseItem[]>;
+  /** What each agent's own model list printed when the window last asked, for phones (which never run it). */
+  private listed = new Map<string, string[]>();
+  constructor(private root: string, private dialogs: AgentDialogs, private options: { environment?: () => Promise<Record<string, string>>; claude?: (env: Record<string, string>) => Promise<Executable>; github?: { git?: Git; url?: RepoUrl; fetcher?: typeof fetch } } = {}) { this.folder = path.join(root, 'agents'); }
   private environment() { return (this.options.environment ?? freshHostEnvironment)(); }
   private confirmed() { return load(this.root, CONFIRMED, confirmedSchema, { confirmed: {} }).confirmed; }
   private setConfirmed(id: string, hash: string | null) { const confirmed = { ...this.confirmed() }; if (hash) confirmed[id] = hash; else delete confirmed[id]; save(this.root, CONFIRMED, { confirmed }); }
+  private received() { return load(this.root, RECEIVED, receivedSchema, { received: {} }).received; }
+  private setReceived(id: string, value: { from: string; hash: string; changed: boolean } | null) { const received = { ...this.received() }; if (value) received[id] = value; else if (id in received) delete received[id]; else return; save(this.root, RECEIVED, { received }); }
   private file(id: string) { if (!AGENT_ID.test(id)) throw new HubError('AGENT_ID', 'That is not an agent id.'); return path.join(this.folder, `${id}.json`); }
 
   /** The definition saved under `id`, checked; null when there is no file. */
@@ -153,12 +188,13 @@ export class CustomAgents {
   private ids(): string[] { try { return fs.readdirSync(this.folder).flatMap((name) => { const id = name.endsWith('.json') ? name.slice(0, -5) : ''; return AGENT_ID.test(id) ? [id] : []; }).sort(); } catch { return []; } }
 
   async list(): Promise<AgentList> {
-    const confirmed = this.confirmed(); const env = await this.environment();
+    const confirmed = this.confirmed(); const env = await this.environment(); let received: ReturnType<CustomAgents['received']> = {}; try { received = this.received(); } catch { /* Only the note is lost. */ }
     const agents = await Promise.all(this.ids().map(async (id): Promise<AgentEntry> => {
       const read = this.read(id)!; const definition = read.definition;
       let program: string | null = null; let problem = read.problem;
       if (definition) try { program = (await findProgram(definition.program.command, env)).displayPath; } catch (error) { problem = error instanceof HubError ? error.message : 'Its program was not found.'; }
-      return { id, look: agentLook(definition ?? { id, name: id }), definition, active: Boolean(definition && confirmed[id] === definitionHash(definition)), program, problem };
+      const active = Boolean(definition && confirmed[id] === definitionHash(definition)); const from = received[id];
+      return { id, look: agentLook(definition ?? { id, name: id }), definition, active, program, problem, synced: !active && definition && from?.hash === definitionHash(definition) ? { from: from.from, changed: from.changed } : null };
     }));
     return { agents };
   }
@@ -170,8 +206,10 @@ export class CustomAgents {
   }
   /** How one agent looks, turned on or not (a channel keeps its agent's name and colour); null when it is gone. */
   look(id: string): AgentLook | null { try { const definition = this.read(id)?.definition; return definition ? agentLook(definition) : null; } catch { return null; } }
-  /** The models a saved agent's definition lists (`models.choices`). */
-  choices(id: string): string[] { try { return this.read(id)?.definition?.models?.choices ?? []; } catch { return []; } }
+  /** The models a saved agent's definition lists (`models.choices`), and those its program listed when last asked. */
+  choices(id: string): string[] { try { return [...new Set([...this.read(id)?.definition?.models?.choices ?? [], ...this.listed.get(id) ?? []])]; } catch { return []; } }
+  /** What a phone's channel settings may offer for this agent: whether it takes a model and maps permission levels. */
+  settings(id: string): { models: boolean; permissions: boolean } { try { const definition = this.read(id)?.definition; return { models: Boolean(definition?.models), permissions: Boolean(definition?.permissions) }; } catch { return { models: false, permissions: false }; } }
   /** A saved agent's status signals, whether or not it is on (a run the background runner kept is read with them). */
   status(id: string): AgentDefinition['status'] | null { try { return this.read(id)?.definition?.status ?? null; } catch { return null; } }
   /** What a channel start needs: the confirmed definition and its program on this computer. */
@@ -206,7 +244,25 @@ export class CustomAgents {
   remove(id: string) {
     const file = this.file(id);
     try { const text = fs.readFileSync(file, 'utf8'); keepBackup(file, text); fs.rmSync(file, { force: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new HubError('AGENT_REMOVE', 'The agent could not be removed. Check that Trace can write its storage folder.'); }
-    this.setConfirmed(id, null);
+    this.setConfirmed(id, null); this.setReceived(id, null);
+  }
+
+  /** For device sync: every definition file here by id, checked; null for one that is there but not valid (sync leaves it alone). */
+  definitions(): Map<string, AgentDefinition | null> { return new Map(this.ids().map((id) => [id, this.read(id)?.definition ?? null])); }
+  /** When a definition's file last changed here: the newer side wins when two computers both changed one. */
+  modifiedAt(id: string) { try { return fs.statSync(this.file(id)).mtimeMs; } catch { return 0; } }
+  /**
+   * A definition from another computer's sync: written like a saved one (backup, atomic replace) but not confirmed, so it
+   * stays Off here until the person checks it and turns it on. False when this computer already has the most agents.
+   */
+  receive(input: AgentDefinition, from: string): boolean {
+    const definition = this.checked(input); const file = this.file(definition.id); const changed = fs.existsSync(file);
+    if (!changed && this.ids().length >= MAX_AGENTS) return false;
+    fs.mkdirSync(this.folder, { recursive: true, mode: 0o700 });
+    const inspected = readConfig(file);
+    updateConfig(file, inspected.hash, (data) => { for (const key of Object.keys(data)) delete data[key]; Object.assign(data, definition); });
+    this.setReceived(definition.id, { from: from.slice(0, 100), hash: definitionHash(definition), changed });
+    return true;
   }
 
   /** Confirms a definition that changed or was copied in, after the same dialog as saving. */
@@ -231,7 +287,22 @@ export class CustomAgents {
     const env = await this.environment(); const { definition, executable } = await this.launchable(id, env);
     const listed = definition.models?.listArgs ? await runCaptured(executable, definition.models.listArgs, { env: { ...env, ...definition.env }, timeout: PROBE_MS, limit: PROBE_BYTES }) : null;
     const names = (listed?.exitCode === 0 ? listed.output.split(/\r?\n/).map((line) => line.trim().split(/\s+/)[0] ?? '') : []).filter(validModel);
+    if (names.length) this.listed.set(id, names.slice(0, 100));
     return [...new Set([...(definition.models?.choices ?? []), ...names])].slice(0, 100);
+  }
+
+  /**
+   * The conversations a confirmed agent can continue (`resume.listArgs`), run without a shell in the channel's folder
+   * (10 s, 64 KB). Empty when the definition gives no list or the program printed none it can use: the ID is typed instead.
+   */
+  async conversations(id: string, directory?: string): Promise<AgentConversation[]> {
+    const env = await this.environment(); const { definition, executable } = await this.launchable(id, env);
+    if (!definition.resume?.listArgs) return [];
+    let cwd: string | undefined; try { if (directory && path.isAbsolute(directory) && fs.statSync(directory).isDirectory()) cwd = directory; } catch { /* Its probe folder instead. */ }
+    const listed = await runCaptured(executable, definition.resume.listArgs, { env: { ...env, ...definition.env }, timeout: PROBE_MS, limit: PROBE_BYTES, ...(cwd ? { cwd } : {}) });
+    if (listed.timedOut) throw new HubError('AGENT_LIST', `${definition.name} did not list its conversations within 10 seconds. Type the conversation’s ID instead.`);
+    if (listed.exitCode !== 0) throw new HubError('AGENT_LIST', `${definition.name} could not list its conversations${listed.exitCode === null ? '' : ` (it exited with code ${listed.exitCode})`}. Type the conversation’s ID instead.`);
+    return conversationsFrom(listed.output);
   }
 
   /**
@@ -260,14 +331,17 @@ export class CustomAgents {
     return { definition: draft, problems: parsed.success ? [] : definitionProblems(parsed.error) };
   }
 
-  async execute(input: unknown): Promise<AgentList | AgentTestResult | AgentDraft | string[] | null> {
+  async execute(input: unknown): Promise<AgentList | AgentTestResult | AgentDraft | AgentFetched | AgentConversation[] | PluginBrowseItem[] | string[] | null> {
     const request = requestSchema.parse(input) as AgentRequest;
     if (request.action === 'agent-list') return this.list();
+    if (request.action === 'agent-browse') return (this.browsed ??= topicList('trace-agent', this.options.github?.fetcher))();
+    if (request.action === 'agent-fetch') return fetchDefinition(request.repo, this.options.github?.git, this.options.github?.url);
     if (request.action === 'agent-save') return this.save(request.definition, request.replaces);
     if (request.action === 'agent-remove') { this.remove(request.id); return this.list(); }
     if (request.action === 'agent-activate') return this.activate(request.id);
     if (request.action === 'agent-test') return this.test(request.definition);
     if (request.action === 'agent-models') return this.models(request.id);
+    if (request.action === 'agent-conversations') return this.conversations(request.id, request.directory);
     return this.draft(request.command);
   }
 }

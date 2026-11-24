@@ -1,9 +1,9 @@
 import { Fragment, memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { ArrowLeftRight, Asterisk, ChevronDown, ChevronRight, MessagesSquare, Settings2, Sparkle, Square, TerminalSquare, User, X } from 'lucide-react';
+import { ArrowLeftRight, Asterisk, Bot, ChevronDown, ChevronRight, MessagesSquare, Settings2, Sparkle, Square, TerminalSquare, User, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
 import { isTracePrompt, late, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
-import type { Session } from '../../../shared/types';
+import type { SeatEngine, Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
 import type { SeatDuty } from '../../../shared/table-seats';
 import { joinNames, seatViews, type SeatColour, type SeatView } from './seat-view';
@@ -87,7 +87,7 @@ export function ToolCard({ block, result }: { block: Extract<ChatBlock, { type: 
 }
 
 /** `engine`: the seat's agent. A seat's name says it only by default (a seat may be named Reviewer, or Codex 2). */
-export function Permission({ item, agent, engine, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; engine?: 'claude' | 'codex' | 'gemini'; answer: (allow: boolean, allowEdits?: boolean) => void }) {
+export function Permission({ item, agent, engine, answer }: { item: Extract<ChatItem, { kind: 'permission' }>; agent: string; engine?: SeatEngine; answer: (allow: boolean, allowEdits?: boolean) => void }) {
   const summary = toolSummary(item.toolName, item.input);
   // An edit is approved seeing what it changes, not only the file's name (the streams pass the tool's input).
   const changes = toolChanges(item.input && typeof item.input === 'object' ? item.input : {});
@@ -106,10 +106,11 @@ export function Permission({ item, agent, engine, answer }: { item: Extract<Chat
   </div>;
 }
 
-export const AGENT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' } as const;
+/** `custom`: a custom agent's own name is used where its session is known (agentLabel). */
+export const AGENT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', custom: 'Agent' } as const;
 const PHASE = (many: boolean): Record<RoundTableState['phase'], string> => ({ joining: many ? 'Catching the others up' : 'Catching the other agent up', answering: many ? 'All answering' : 'Both answering', discussing: 'Discussing', acting: 'Making the changes', idle: 'Your turn' });
 
-export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; engine?: 'claude' | 'codex' | 'gemini'; author?: 'claude' | 'codex' | 'gemini' | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
+export interface ItemProps { item: ChatItem; results: Record<string, ToolResult>; agent: string; engine?: SeatEngine; author?: SeatEngine | 'planner'; answer: (requestId: string) => (allow: boolean, allowEdits?: boolean) => void; view: (url: string) => void; role?: string }
 /**
  * Whether a message would draw the same: the store keeps a settled item's object while another streams, and the tool
  * results that matter are its own tool calls'. So a streamed piece, a keystroke in the message box or another channel's
@@ -196,7 +197,7 @@ export function useHint(field: RefObject<HTMLTextAreaElement>, hints: string[]) 
 }
 
 /** A seat's avatar glyph: the person, or the engine's mark as on its tile (a planner is a Claude model). */
-const SEAT_ICON = { you: User, claude: Asterisk, planner: Asterisk, codex: TerminalSquare, gemini: Sparkle } as const;
+const SEAT_ICON = { you: User, claude: Asterisk, planner: Asterisk, codex: TerminalSquare, gemini: Sparkle, custom: Bot } as const;
 function SeatAvatar({ seat }: { seat: keyof typeof SEAT_ICON }) { const Icon = SEAT_ICON[seat]; return <i className={`seat-hex seat-${seat}`} aria-hidden="true"><Icon /></i>; }
 
 /** One message, approval or notice in a thread; `author` labels it in a Round Table. */
@@ -228,7 +229,7 @@ export function seatState(partner: Pick<Session, 'status' | 'error'> & { attenti
 }
 
 /** The controls of a Round Table: who sits there and who drives, how many rounds, where it is, Seats, stop and close. */
-export type TableAction = { action: 'table-waiting'; send: boolean } | { action: 'table-driver'; driver: 'claude' | 'codex' | 'gemini'; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
+export type TableAction = { action: 'table-waiting'; send: boolean } | { action: 'table-driver'; driver: SeatEngine; seat?: string } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' };
 const short = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : value >= 1e3 ? `${Math.round(value / 1e3)}k` : String(value);
 /** A seat as the bar shows it: `state` (seatState) for a seat that has no tile, and its new tokens today, when the caller has them (the desktop does). */
 /** `tokens`: null when the seat's usage is not measured (a Gemini CLI seat before its first request is read), shown as "—". */
@@ -239,7 +240,7 @@ const counts = (seat: BarSeat) => seat.tokens === null || seat.tokens === undefi
  * phone, a linked computer). `onShow` (the desktop, where hidden seats have no tile) switches the thread to a seat's own
  * conversation, `showing` is that seat's id; `onSeats` opens the seat editor (not on a phone or linked computer).
  */
-export function TableBar({ leadEngine, table, busy, onRequest, seats: given, showing = null, onShow, onSeats }: { leadEngine: 'claude' | 'codex' | 'gemini'; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; seats?: BarSeat[]; showing?: string | null; onShow?: (seat: string | null) => void; onSeats?: () => void }) {
+export function TableBar({ leadEngine, table, busy, onRequest, seats: given, showing = null, onShow, onSeats }: { leadEngine: SeatEngine; table: RoundTableState; busy: boolean; onRequest: (request: TableAction) => void; seats?: BarSeat[]; showing?: string | null; onShow?: (seat: string | null) => void; onSeats?: () => void }) {
   const seats: BarSeat[] = given ?? seatViews(table, leadEngine); const many = seats.length > 2;
   const driver = seats.find((seat) => seat.driver) ?? seats[0]; const others = seats.filter((seat) => seat !== driver); const hidden = seats.filter((seat) => !seat.lead);
   const run = onRequest; const images = waitingImageCount(table); const counted = seats.filter((seat) => seat.tokens !== undefined);

@@ -58,7 +58,9 @@ export type RemoteControlRequest = { requestId: string; sessionId: string; contr
  */
 export interface RemoteChannelSettings { sessionId: string; title: string; engine: RemoteEngine; chat: boolean; running: boolean;
   permissions?: import('./types').PermissionLevel; model?: string; effort?: string | null;
-  models: { id: string; name: string; efforts?: string[] }[] }
+  models: { id: string; name: string; efforts?: string[] }[];
+  /** A custom agent's channel: its name, and whether its definition takes a model and maps the permission levels. */
+  agent?: { name: string; models: boolean; permissions: boolean } }
 /** What a phone changes (POST /api/channel-settings); a field left out stays as it is. `model` '' and `effort` null are the CLI's own default. */
 export interface RemoteChannelChange { sessionId: string; title?: string; permissions?: import('./types').PermissionLevel; model?: string; effort?: string | null }
 export interface TailscaleState {
@@ -168,7 +170,9 @@ export type LinkedComputerRequest =
   | { action: 'linked-watch'; id: string }
   | { action: 'linked-unwatch'; id: string }
   /** Adds a channel on that computer, in its own workspace. */
-  | { action: 'linked-add'; id: string; engine: ChannelEngine }
+  | { action: 'linked-add'; id: string; engine: ChannelEngine; /** With engine 'custom': which of that computer's agents. */ agent?: string }
+  /** The custom agents turned on there (AgentLook[]), for + Channel on its tab. */
+  | { action: 'linked-agents'; id: string }
   /** An image pasted here (PNG or JPEG, base64) for a channel there; that computer attaches it as if pasted there. */
   | { action: 'linked-paste-image'; id: string; sessionId: string; runId: string; image: string }
   | { action: 'linked-update'; id: string }

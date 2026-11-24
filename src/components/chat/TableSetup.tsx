@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { DUTY_LABEL, isBuiltInPreset, MAX_PRESET_NAME, MAX_SEAT_INSTRUCTIONS, MAX_SEAT_NAME, MAX_SEATS, SEAT_DUTIES, type TableKind } from '../../../shared/table-seats';
 import { MAX_CHANNELS, MAX_MODEL_LENGTH } from '../../../shared/schemas';
-import { isAgentConfig, isChatRun, seatEngineOf } from '../../../shared/types';
+import { isAgentConfig, isChatRun, seatEngineOf, type SeatEngine } from '../../../shared/types';
+import { lookOf, refreshAgents, useAgentStore } from '../../state/agent-store';
 import type { CodexModelCatalog, GeminiModelCatalog } from '../../../shared/workbench';
 import { openTable, seatRoom, changeSeats, startTable, tableSeats } from '../../runtime/round-table';
 import { workbench } from '../../runtime/workbench';
@@ -15,8 +16,10 @@ import { modelProblem } from './seat-model';
 import { addSeat, draftFromPreset, draftFromTable, draftProblem, patchSeat, pickPreset, placeholders, removePreset, removeSeat, roomNote, roundsRange, runSetup, saveAsPreset, setDriver, setDuty, updatePreset, withKind, type Draft, type SetupDeps, type SetupMode } from './table-setup-model';
 
 const DEPS: SetupDeps = { startTable, openTable, changeSeats };
-const AGENTS = [{ engine: 'claude' as const, label: 'Claude Code' }, { engine: 'codex' as const, label: 'Codex' }, { engine: 'gemini' as const, label: 'Gemini' }];
-const agentOf = (value: string) => value === 'codex' ? 'codex' as const : value === 'gemini' ? 'gemini' as const : 'claude' as const;
+const AGENTS = [{ value: 'claude', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }, { value: 'gemini', label: 'Gemini' }];
+/** A seat's agent as the select names it: a built-in engine, or `custom:<id>` for one of the person's agents that speak ACP (phase 2). */
+const agentValue = (seat: { engine: string; agent?: string }) => seat.engine === 'custom' ? `custom:${seat.agent ?? ''}` : seat.engine;
+const agentOf = (value: string): { engine: SeatEngine; agent?: string } => value.startsWith('custom:') ? { engine: 'custom', agent: value.slice(7) } : { engine: value === 'codex' ? 'codex' : value === 'gemini' ? 'gemini' : 'claude' };
 const KIND_LABEL: Record<TableKind, string> = { discussion: 'Discussion: agents answer each other', hierarchy: 'Hierarchy: plan, build, review' };
 
 /** The models Codex lists, for the model fields' suggestions; none when it cannot be asked (any text can still be typed). */
@@ -68,7 +71,10 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   const sessions = useWorkspaceStore((state) => state.sessions); const rootDirectory = useWorkspaceStore((state) => state.rootDirectory);
   const lead = mode.type === 'new' ? null : sessions.find((session) => session.id === mode.leadId) ?? null;
   /** A table started on a chat: that chat leads, with its own agent and model. */
-  const fixed = useMemo(() => mode.type === 'chat' && lead && isChatRun(lead.config) && isAgentConfig(lead.config) ? { engine: seatEngineOf(lead.config), model: lead.config.model } : undefined, [mode.type, lead?.id]);
+  const fixed = useMemo(() => mode.type === 'chat' && lead && isChatRun(lead.config) && isAgentConfig(lead.config) ? { engine: seatEngineOf(lead.config), model: lead.config.model, ...(lead.config.engine === 'custom' ? { agent: lead.config.agentId } : {}) } : undefined, [mode.type, lead?.id]);
+  // The person's agents that are on and speak ACP can take a seat; one a seat already names stays listed (by its id if it is gone).
+  const agents = useAgentStore((state) => state.agents); useEffect(() => { void refreshAgents(); }, []);
+  const nameOf = (agentId: string) => lookOf(agents, agentId).name;
   const [draft, setDraft] = useState<Draft>(() => {
     if (mode.type === 'edit') return draftFromTable(tableSeats(mode.leadId), lead?.roundTable?.kind === 'hierarchy' ? 'hierarchy' : 'discussion', lead?.roundTable?.rounds ?? 2);
     return draftFromPreset(pickPreset(presets, mode.type === 'new' ? mode.table ?? 'discussion' : 'discussion'), fixed);
@@ -85,7 +91,9 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   }, []);
 
   const editing = mode.type === 'edit'; const hierarchy = draft.kind === 'hierarchy';
-  const room = seatRoom(mode.type === 'new' ? undefined : mode.leadId); const space = roomNote(draft, room, MAX_SEATS); const names = placeholders(draft);
+  const room = seatRoom(mode.type === 'new' ? undefined : mode.leadId); const space = roomNote(draft, room, MAX_SEATS); const names = placeholders(draft, nameOf);
+  const choices = [...AGENTS, ...agents.filter((agent) => agent.active && agent.look.chat).map((agent) => ({ value: `custom:${agent.id}`, label: agent.look.name })),
+    ...draft.seats.filter((seat) => seat.engine === 'custom' && seat.agent && !agents.some((agent) => agent.active && agent.look.chat && agent.id === seat.agent)).map((seat) => ({ value: agentValue(seat), label: nameOf(seat.agent!) }))];
   // More seats than the eight agents and terminals leave room for: the host would refuse it, so it is said here.
   const problem = draftProblem(draft) ?? (draft.seats.length > room ? `This table has ${draft.seats.length} seats, but only ${room} fit now: Trace runs at most ${MAX_CHANNELS} agents and terminals at once, and every seat is one. Take a seat away or close a channel.` : null); const [low, high] = roundsRange(draft.kind);
   const own = presets.some((preset) => preset.id === draft.presetId && !isBuiltInPreset(preset.id));
@@ -125,12 +133,12 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
         {mode.type === 'chat' && <p className="ui-hint">This chat leads the table with its own agent and model{hierarchy ? ', as the builder' : ''}.</p>}
 
         <ol className="table-setup-seats" aria-label="Seats">
-          {draft.seats.map((seat, index) => { const base = `${id}-${seat.key}`; const label = `Seat ${index + 1}`; const why = modelProblem(seat.model); const list = seat.engine === 'codex' ? codexModels : seat.engine === 'gemini' ? geminiModels : claudeSeatModels;
+          {draft.seats.map((seat, index) => { const base = `${id}-${seat.key}`; const label = `Seat ${index + 1}`; const why = modelProblem(seat.model); const list = seat.engine === 'codex' ? codexModels : seat.engine === 'gemini' ? geminiModels : seat.engine === 'custom' ? (agents.find((agent) => agent.id === seat.agent)?.definition?.models?.choices ?? []).map((model) => ({ id: model, name: model })) : claudeSeatModels;
             return <li key={seat.key}><fieldset>
               <legend>{label}{seat.lead ? ' · leads the table' : ''}{seat.status && seat.status !== 'running' ? ` · ${seat.status}` : ''}</legend>
               <div className="table-setup-row">
-                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={seat.engine} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { engine: agentOf(event.target.value), model: '' }))}>{AGENTS.map((agent) => <option key={agent.engine} value={agent.engine}>{agent.label}</option>)}</select></label>
-                <label className="ui-field">Model<SeatModel key={seat.engine} label={label} describedBy={`${base}-model`} invalid={Boolean(why)} model={seat.model} models={list} disabled={Boolean(seat.keepsModel)} onChange={(model) => change(patchSeat(draft, index, { model }))} /></label>
+                <label className="ui-field">Agent<select aria-label={`${label} agent`} value={agentValue(seat)} disabled={seat.keepsAgent} onChange={(event) => change(patchSeat(draft, index, { agent: undefined, ...agentOf(event.target.value), model: '' }))}>{choices.map((agent) => <option key={agent.value} value={agent.value}>{agent.label}</option>)}</select></label>
+                <label className="ui-field">Model<SeatModel key={agentValue(seat)} label={label} describedBy={`${base}-model`} invalid={Boolean(why)} model={seat.model} models={list} disabled={Boolean(seat.keepsModel)} onChange={(model) => change(patchSeat(draft, index, { model }))} /></label>
                 <label className="ui-field">Name<input aria-label={`${label} name`} placeholder={names[index]} maxLength={MAX_SEAT_NAME} value={seat.name} onChange={(event) => change(patchSeat(draft, index, { name: event.target.value }))} /></label>
               </div>
               <small id={`${base}-model`} className={`ui-hint ${why ? 'error-message' : ''}`} role={why ? 'alert' : undefined}>{why || (seat.keepsModel ? 'This chat keeps its model; change it in the channel\'s settings.' : editing && seat.session ? 'Changing the model restarts this agent; its conversation is resumed.' : 'Blank is the CLI\'s default model.')}</small>

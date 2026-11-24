@@ -17,7 +17,7 @@ export const SEAT_DUTIES: readonly SeatDuty[] = ['plan', 'challenge', 'build', '
 export const DUTY_LABEL: Record<SeatDuty, string> = { plan: 'Plans', challenge: 'Challenges the plan', build: 'Builds', review: 'Reviews', final: 'Final review' };
 /** A seat's default name at a hierarchy table, from the first of its duties in this order. */
 const DUTY_NAME: [SeatDuty, string][] = [['build', 'Builder'], ['plan', 'Planner'], ['review', 'Reviewer'], ['challenge', 'Challenger'], ['final', 'Final reviewer']];
-const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
+const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent' };
 /*
  * A Gemini seat takes any seat (from 1.39, the person's decision of 2026-11-24): before, 1.28 to 1.38 held it to reviewing
  * or planning (GEMINI_SEAT_RULE), as it ran only in plan mode and had no chat channel to lead from. GeminiStream now runs
@@ -37,11 +37,13 @@ export interface SeatSettings { name?: string; instructions?: string; duties?: S
 /** A seat as saved with its table (SavedRoundTable.seats): the lead's own entry too, by session id. */
 export interface SavedSeat extends SeatSettings { session: string }
 /** A seat of an open table (RoundTableState.seats), the lead first. */
-export interface TableSeatState extends SeatSettings { sessionId: string; runId: string; engine: SeatEngine }
+/** `agentName`: a custom agent's name (phase 2), its seat's default name. */
+export interface TableSeatState extends SeatSettings { sessionId: string; runId: string; engine: SeatEngine; agentName?: string }
 /** A seat named in a request (table-open, table-seats): a running chat, with what the person set for it. */
 export interface SeatReference extends SeatSettings { sessionId: string; runId: string }
 /** A seat of a preset: started as a chat channel of this engine and model ('' for the CLI's default). */
-export interface TablePresetSeat extends SeatSettings { engine: SeatEngine; model: string }
+/** `agent`: a custom agent's id, for a seat of engine custom (its definition must have `acp`). */
+export interface TablePresetSeat extends SeatSettings { engine: SeatEngine; model: string; agent?: string }
 /**
  * A table the person can start again and again (HubPreferences.tablePresets, and the two built in). The lead, whose
  * channel shows the table, is the first seat at a discussion table and the builder at a hierarchy. `driver`: the index
@@ -105,15 +107,15 @@ export function checkSeats(kind: TableKind, seats: readonly (SeatSettings & { en
 }
 
 /** A seat's name when the person gave none: what it does at a hierarchy table, its agent at a discussion table. */
-export function defaultSeatName(seat: { engine: SeatEngine; duties?: readonly SeatDuty[] }, kind: TableKind): string {
+export function defaultSeatName(seat: { engine: SeatEngine; duties?: readonly SeatDuty[]; agentName?: string }, kind: TableKind): string {
   if (kind === 'hierarchy') for (const [duty, name] of DUTY_NAME) if (seat.duties?.includes(duty)) return name;
-  return ENGINE_NAME[seat.engine];
+  return (seat.engine === 'custom' && seat.agentName) || ENGINE_NAME[seat.engine];
 }
 /**
  * The name each seat goes by, in order: its own, or its default; two seats that would share a name are numbered
  * ("Reviewer", "Reviewer 2"), so a prompt or a label never leaves it open who is meant.
  */
-export function seatNames(seats: readonly { name?: string; engine: SeatEngine; duties?: readonly SeatDuty[] }[], kind: TableKind): string[] {
+export function seatNames(seats: readonly { name?: string; engine: SeatEngine; duties?: readonly SeatDuty[]; agentName?: string }[], kind: TableKind): string[] {
   const seen = new Map<string, number>();
   return seats.map((seat) => {
     const base = seat.name?.trim() || defaultSeatName(seat, kind); const count = (seen.get(base.toLowerCase()) ?? 0) + 1; seen.set(base.toLowerCase(), count);
