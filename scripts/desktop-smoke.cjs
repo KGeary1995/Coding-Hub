@@ -141,6 +141,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.deepEqual(listed.channels.map((channel) => [channel.channel, channel.running, channel.you]), [[1, true, false], [2, true, true]]);
     await page.keyboard.type('channel-send 1 Hello from the other channel'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => { const data = window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''); return data.includes('ECHO:[Message from CH2') && data.includes('ECHO:Hello from the other channel'); });
+    // Closing the window hides Trace (1.34.0): its channels keep running, and it comes back with them as they were.
+    const mainWindow = (method) => app.evaluate(({ BrowserWindow }, name) => { const win = BrowserWindow.getAllWindows().find((item) => item.getTitle() === 'Trace'); return name === 'close' ? (win.close(), true) : name === 'show' ? (win.show(), true) : win.isVisible(); }, method);
+    await mainWindow('close'); await page.waitForTimeout(1000);
+    assert.equal(await mainWindow('visible'), false, 'closing the window hides it'); assert.equal(await page.evaluate(() => document.querySelectorAll('.session-tile[data-status="running"]').length), 2, 'its channels keep running');
+    await mainWindow('show'); await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('after-hiding'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('ECHO:after-hiding'));
     // A turn that ends while the person is in another channel shows Done until they look at it (1.32.1).
     const turns = () => page.evaluate(() => (window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').match(/TURN:ended/g) ?? []).length);
     await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('end-turn-later'); await page.keyboard.press('Enter');

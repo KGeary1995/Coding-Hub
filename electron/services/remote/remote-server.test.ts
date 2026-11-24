@@ -304,6 +304,19 @@ describe('phone remote', () => {
     idle = 600; server.checkDesktop(); expect(resizes).toHaveLength(2);
   });
 
+  it('waits with a size asked without force while Trace is in front, and gives it back when Trace comes to the front', async () => {
+    const { server, running } = await remote(); const resizes: number[][] = []; let front = true;
+    Object.assign(running[0], { cols: 120, rows: 40 }); const host = (server as unknown as { host: RemoteHost }).host;
+    host.resize = (_reference, cols, rows) => { resizes.push([cols, rows]); Object.assign(running[0], { cols, rows }); }; host.idleSeconds = () => 600; host.inFront = () => front;
+    await server.setEnabled(true); const token = await paired(server); const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    // A tile on a linked computer (no force): nobody has touched this computer for ten minutes, but Trace is in front here.
+    await fetch(base(server) + '/api/size', { method: 'POST', headers, body: JSON.stringify({ sessionId: 's1', runId: 'r1', cols: 40, rows: 20 }) });
+    server.checkDesktop(); expect(resizes).toEqual([]);
+    // Trace in the background (or hidden): the other size is drawn; brought to the front again: this computer's comes back.
+    front = false; server.checkDesktop(); expect(resizes).toEqual([[40, 20]]);
+    front = true; server.checkDesktop(); expect(resizes).toEqual([[40, 20], [120, 40]]);
+  });
+
   it('lets a phone that may start agents read and change a channel\'s settings, and no other phone', async () => {
     const { server } = await remote(); const changes: unknown[] = []; const host = (server as unknown as { host: RemoteHost }).host;
     host.channelSettings = async (sessionId) => ({ sessionId, title: 'One', engine: 'claude', chat: false, running: false, permissions: 'edits', model: 'claude-opus-5-5', models: [{ id: 'claude-opus-5-5', name: 'Opus 5.5' }] });
