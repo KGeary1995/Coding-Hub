@@ -136,6 +136,8 @@ export const openRepositorySchema = z.object({ directory: directory.min(1) }).st
 export const repositoryReferenceSchema = z.object({ repositoryId: z.string().uuid() }).strict();
 export const repositoryPathSchema = repositoryReferenceSchema.extend({ path: directory }).strict();
 export const gitDiffSchema = repositoryPathSchema.extend({ path: directory.min(1), area: z.enum(['working', 'staged', 'untracked']) }).strict();
+/** A full commit id (SHA-1 or SHA-256), never a ref or a revision expression: Git gets nothing it could read as an option. */
+export const gitCommitSchema = repositoryReferenceSchema.extend({ sha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/) }).strict();
 
 /** Requests from the window to a chat run. Images are base64 (Claude's limit is about 5 MB each; 10 per message). */
 export const chatRequestSchema = z.discriminatedUnion('action', [
