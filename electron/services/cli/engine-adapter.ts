@@ -65,7 +65,6 @@ export function buildLaunch(config: CLIEngineConfig, engine: EngineInfo): { args
 export function launchedLevel(config: CLIEngineConfig, engine: EngineInfo): PermissionLevel {
   return config.permissions === undefined && !engine.supportsPermissions ? 'ask' : permissionLevel(config);
 }
-export const GEMINI_ASK_SETTINGS = JSON.stringify({ agentMode: '' });
 /** Claude's modes per level; `ask` keeps the person's own settings. Codex chats take theirs in the app-server protocol. */
 export const CLAUDE_MODE = { edits: 'acceptEdits', full: 'bypassPermissions' } as const;
 /**
@@ -74,9 +73,9 @@ export const CLAUDE_MODE = { edits: 'acceptEdits', full: 'bypassPermissions' } a
  */
 function permissionArgs(config: CLIEngineConfig, engine: EngineInfo): string[] {
   const level = permissionLevel(config); const chat = config.engine !== 'gemini' && config.chat === true;
-  // agy's own default is Auto (1.5.7+: edits and commands without asking), so Ask names its Default mode, which asks
-  // before edits and commands, for this run only (--settings is never saved).
-  if (config.engine === 'gemini' && engine.supportsPermissions) return level === 'ask' ? ['--settings', GEMINI_ASK_SETTINGS] : level === 'edits' ? ['--mode', 'accept-edits'] : ['--dangerously-skip-permissions'];
+  // Ask is read-only for Gemini (the owner's decision of 2026-11-24): agy's plan mode, which does not change the project
+  // (seen with agy 1.5.16: asked to write files, it wrote none). agy's own default is Auto, so a level is always named.
+  if (config.engine === 'gemini' && engine.supportsPermissions) return level === 'ask' ? ['--mode', 'plan'] : level === 'edits' ? ['--mode', 'accept-edits'] : ['--dangerously-skip-permissions'];
   if (level === 'ask' && !(chat && config.engine === 'claude')) return [];
   if (!engine.supportsPermissions) {
     // The default on a CLI too old for these flags: its own settings, as before; only a level the person chose is refused.

@@ -72,8 +72,8 @@ describe('Gemini CLI launch', () => {
     expect(buildLaunch({ ...gemini, permissions: 'edits' }, agy)).toEqual({ args: ['--mode', 'accept-edits'], env: { AGY_CLI_OSC7501: 'on' } });
     expect(buildLaunch({ ...gemini, model: 'gemini-4-neon-xhigh', permissions: 'edits' }, agy).args).toEqual(['--model', 'gemini-4-neon-xhigh', '--mode', 'accept-edits']);
   });
-  it('starts Ask in agy’s Default mode (agy’s own default, Auto, asks nothing), and Full access without prompts', () => {
-    expect(buildLaunch({ ...gemini, permissions: 'ask' }, agy).args).toEqual(['--settings', '{"agentMode":""}']);
+  it('starts Ask read-only, in agy’s plan mode (agy’s own default, Auto, asks nothing), and Full access without prompts', () => {
+    expect(buildLaunch({ ...gemini, permissions: 'ask' }, agy).args).toEqual(['--mode', 'plan']);
     expect(buildLaunch({ ...gemini, permissions: 'full' }, agy).args).toEqual(['--dangerously-skip-permissions']);
     // No setting is the default, Allow edits.
     expect(buildLaunch(gemini, agy).args).toEqual(['--mode', 'accept-edits']);

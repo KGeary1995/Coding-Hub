@@ -1,5 +1,11 @@
 ## What's new
 
+1.40.1 makes Ask mean read-only for Gemini.
+
+- **Gemini at Ask only reads.** In a terminal and in a chat, Gemini at **Ask** now runs in its plan mode: it answers questions and makes plans, but does not change your files. If it still asks to change a file, Trace says no and tells you so in the chat. To let it edit, choose **Allow edits**. A Round Table led by Gemini at Ask discusses but does not edit. Claude Code and Codex are unchanged.
+- **Tried:** unit tests; and with the real Gemini (agy 1.5.16), asked in plan mode to create a file and change another, it changed neither.
+- **Not tried yet:** a Gemini chat at Ask inside Trace with the real Gemini.
+
 1.40.0 lets you add any command-line agent to Trace yourself, without waiting for a new version of Trace.
 
 - **Add an agent.** Agent setup → **Agents** → **Add an agent**. There are three ways:
