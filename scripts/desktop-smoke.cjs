@@ -141,6 +141,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.deepEqual(listed.channels.map((channel) => [channel.channel, channel.running, channel.you]), [[1, true, false], [2, true, true]]);
     await page.keyboard.type('channel-send 1 Hello from the other channel'); await page.keyboard.press('Enter');
     await page.waitForFunction(() => { const data = window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''); return data.includes('ECHO:[Message from CH2') && data.includes('ECHO:Hello from the other channel'); });
+    // An approval Claude Code shows without its hook is read from the screen (1.35.3, herdr's rules), and the agent working
+    // again clears it.
+    await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('screen-ask'); await page.keyboard.press('Enter');
+    await first.locator('.session-attention').filter({ hasText: 'Do you want to run the build?' }).waitFor({ timeout: 15000 });
+    await page.keyboard.type('screen-work'); await page.keyboard.press('Enter');
+    await first.locator('.session-attention').waitFor({ state: 'detached', timeout: 15000 });
     // Closing the window hides Trace (1.34.0): its channels keep running, and it comes back with them as they were.
     const mainWindow = (method) => app.evaluate(({ BrowserWindow }, name) => { const win = BrowserWindow.getAllWindows().find((item) => item.getTitle() === 'Trace'); return name === 'close' ? (win.close(), true) : name === 'show' ? (win.show(), true) : win.isVisible(); }, method);
     await mainWindow('close'); await page.waitForTimeout(1000);
