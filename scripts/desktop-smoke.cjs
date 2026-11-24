@@ -265,6 +265,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
     // The page's Refresh reaches the delivery reading too (before 1.30.3 it kept the files it had read before): the list offers to stage the new file.
     await page.getByRole('button', { name: 'Stage later.md', exact: true }).waitFor({ timeout: 15000 });
+    // History reads the commits and the chosen one's files, and only reads (the index is checked below).
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.getByRole('button', { name: /^HEAD, main: Desktop fixture baseline, [0-9a-f]{7} by Fixture, / }).waitFor({ timeout: 15000 });
+    await page.locator('.commit-files li').first().waitFor();
+    await page.getByRole('button', { name: 'Uncommitted', exact: true }).click();
+    await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
     // A file opened from the command menu shows in the Files tree, its folder opened to it (1.31.1).
     await page.keyboard.press('Control+Shift+P'); await page.getByLabel('Search commands', { exact: true }).fill('/working desktop edit');
     await page.getByRole('option').filter({ hasText: 'main.ts' }).first().click();

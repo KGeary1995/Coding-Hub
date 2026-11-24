@@ -9,6 +9,9 @@
 .tr-repo > .ui-page-head { flex: none; }
 .tr-subhead-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); line-height: 20px; }
 .tr-subhead-select select { max-width: 240px; }
+/* Changes has the most actions (Uncommitted / History too): they wrap under each other rather than run off a narrow window. */
+.tr-changes > .ui-page-head > .ui-page-actions { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.tr-changes > .ui-page-head > div:not(.ui-page-actions) { min-width: 140px; }
 /* A message fills the page as a card with the shared empty state in it (ui-card and ui-empty are in the markup). */
 .repository-empty { flex: 1; min-height: 180px; }
 .tr-repo .repository-message { min-height: 240px; }
@@ -20,7 +23,10 @@
 /* The two cards start on one line: the delivery card begins below the branch line (a 20 px badge and the 12 px gap). */
 .tr-changes-grid:has(.git-context) > .tr-delivery { margin-top: 32px; }
 .tr-changes-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-.tr-changes-main > .ui-banner { flex: none; }
+.tr-changes-main > .ui-banner, .tr-changes-view > .ui-banner { flex: none; }
+/* Changes or History: each view's parts are the column's own items; the hidden one (the diff, kept for its comments) is out. */
+.tr-changes-view { display: contents; }
+.tr-changes-view[hidden] { display: none; }
 .git-context { flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .git-context code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); color: var(--tr-fg-dim); background: none; }
 .git-context .ui-badge svg { width: 12px; height: 12px; }
@@ -134,6 +140,45 @@
 .tr-step-note { flex: none; }
 .tr-delivery-result { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .tr-delivery-result pre { align-self: stretch; max-height: 160px; }
+
+/* History: the commit list (graph, badges, subject) wider than the commit's details beside it. Rows touch, so a lane's
+   lines run on from row to row; their height is ROW_HEIGHT in CommitHistory.tsx. */
+.commit-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.repository-workbench.commit-workbench { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.commit-scroll { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 4px 0; list-style: none; }
+.commit-row { width: 100%; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 8px; border: 0; background: none; color: var(--tr-fg); text-align: left; font: var(--tr-t-control); }
+.commit-row:hover { background: var(--tr-hover); }
+.commit-row.selected { background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); color: var(--tr-fg-strong); }
+.commit-row:focus-visible { outline: 2px solid var(--tr-accent); outline-offset: -2px; }
+/* Many lanes are cut at a third of the row rather than squeezing the subject out. */
+.commit-graph { flex: none; align-self: stretch; height: 100%; max-width: 33%; overflow: hidden; }
+.commit-graph path { fill: none; stroke: var(--lane); stroke-width: 2; }
+.commit-dot { fill: var(--lane); stroke: var(--tr-term); stroke-width: 2; }
+.commit-dot.merge { fill: var(--tr-term); stroke: var(--lane); }
+.commit-dot.head { stroke: var(--tr-fg-strong); }
+.commit-lane-0 { --lane: var(--tr-accent); } .commit-lane-1 { --lane: var(--tr-ch-claude); } .commit-lane-2 { --lane: var(--tr-success); } .commit-lane-3 { --lane: var(--tr-st-waiting); }
+.commit-lane-4 { --lane: var(--tr-ch-codex); } .commit-lane-5 { --lane: var(--tr-ch-planner); } .commit-lane-6 { --lane: var(--tr-you); } .commit-lane-7 { --lane: var(--tr-st-limit); }
+.commit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.commit-subject { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.commit-subject .ui-badge { max-width: 40%; height: 18px; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; font-family: var(--tr-font-mono); font-weight: 500; }
+.commit-subject strong, .commit-main small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-subject strong { font-weight: 500; }
+.commit-row.selected .commit-subject strong { font-weight: 600; }
+.commit-main small { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+.commit-main small code { font: var(--tr-t-meta); background: none; }
+.commit-detail { overflow: hidden; }
+.commit-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.commit-body > .ui-banner { flex: none; margin: 0 16px 12px; }
+.commit-meta { flex-wrap: wrap; margin: 0; }
+.commit-message { flex: none; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--tr-line-faint); font: var(--tr-t-term); color: var(--tr-fg); white-space: pre-wrap; overflow-wrap: anywhere; background: none; }
+.commit-files-title { margin: 0; padding: 12px 16px 4px; font: 600 12px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.commit-files { margin: 0; padding: 0 8px 12px; list-style: none; }
+.commit-files li { display: flex; align-items: center; gap: 12px; min-height: 28px; padding: 0 8px; border-radius: var(--tr-r-small); }
+.commit-files li:hover { background: var(--tr-hover); }
+.commit-file-path { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font: var(--tr-t-meta); color: var(--tr-fg-muted); }
+.commit-file-path > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-file-path > span:first-child:not(:last-child) { color: var(--tr-fg-faint); }
+.commit-file-path > svg { flex: none; color: var(--tr-fg-dim); }
 @container shell (max-width: 1180px) { .tr-changes-grid { grid-template-columns: minmax(0, 1fr) 300px; } .repository-workbench { grid-template-columns: 220px minmax(0, 1fr); } }
 /* A narrow window: the delivery card goes under the review card and the page scrolls. Sharing the window's height
    instead left the diff six lines at 940 × 700. */
@@ -144,6 +189,9 @@
   .tr-changes-main { height: 480px; }
   .tr-changes-grid:has(.git-context) > .tr-delivery { margin-top: 0; }
   .tr-delivery-scroll { overflow-y: visible; }
+  /* History: the commit list above the chosen commit, each with the width for its text. */
+  .repository-workbench.commit-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+  .commit-list { border-right: 0; border-bottom: 1px solid var(--tr-line); }
 }
 
 /* The workspace explorer beside the tiles; over them in a narrow window. */

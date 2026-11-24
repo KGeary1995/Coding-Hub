@@ -274,3 +274,12 @@ export interface GitFileDiff {
   truncated: boolean;
   conflicted: boolean;
 }
+
+/** A branch, remote-tracking branch or tag pointing at a commit in the history; `current` marks the checked-out branch. */
+export interface GitRef { name: string; kind: 'branch' | 'remote' | 'tag'; current?: true }
+export interface GitCommit { sha: string; parents: string[]; author: string; date: string; subject: string; refs: GitRef[] }
+/** Changes → History: HEAD, the local branches and their upstreams, newest first; `limited` when more commits exist than were read. */
+export interface GitLog { head: string | null; branch: string | null; commits: GitCommit[]; limited: boolean }
+export interface GitCommitFile { path: string; originalPath: string | null; additions: number | null; deletions: number | null }
+/** One commit's full message and its files against its first parent (a merge's own changes onto the branch it joined). */
+export interface GitCommitDetail { sha: string; parents: string[]; author: string; date: string; message: string; files: GitCommitFile[]; limited: boolean }
