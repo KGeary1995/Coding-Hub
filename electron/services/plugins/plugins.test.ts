@@ -64,7 +64,9 @@ describe('the plugins service', () => {
     plugins.fire('channel.needs-you', 's1', { channel: 3, message: 'Allow rm?' }); plugins.fire('channel.needs-you', 's1', { channel: 3, message: 'Again' });
     await until(() => fs.existsSync(out) && fs.readFileSync(out, 'utf8').split('\n').length >= 3);
     expect(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).sort()).toEqual(['action||2||true', 'event|channel.needs-you|3|Allow rm?|true']);
-    const runs = await plugins.execute({ action: 'plugin-log', id: 'test.plugin' }) as { ok: boolean }[]; expect(runs).toHaveLength(2); expect(runs.every((run) => run.ok)).toBe(true);
+    // A run is recorded once its program has exited, which can be a moment after it wrote its last line.
+    let runs: { ok: boolean }[] = []; for (let i = 0; i < 100 && runs.length < 2; i++) { runs = await plugins.execute({ action: 'plugin-log', id: 'test.plugin' }) as { ok: boolean }[]; if (runs.length < 2) await new Promise((resolve) => setTimeout(resolve, 50)); }
+    expect(runs).toHaveLength(2); expect(runs.every((run) => run.ok)).toBe(true);
   });
   it('stops running a plugin that is turned off, and says why a run failed', async () => {
     const { folder, out } = plugin({ actions: [{ id: 'go', title: 'Go', command: ['./write.js', 'action'] }, { id: 'bad', title: 'Bad', command: ['./missing.js'] }] });
