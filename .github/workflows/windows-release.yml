@@ -78,6 +78,7 @@ jobs:
       - run: node scripts/screen-service-smoke.cjs
       - run: node scripts/phone-screen-smoke.cjs
       - run: node scripts/runner-smoke.cjs
+      - run: node scripts/runner-desktop-smoke.cjs
       - run: npm run dist:win
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}

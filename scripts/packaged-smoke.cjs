@@ -28,6 +28,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.locator('.session-tile').first().getByRole('button', { name: 'Start channel', exact: true }).click();
     await page.waitForFunction(() => window.events.some((event) => event.type === 'data' && event.data.includes('READY')));
     assert.equal(await page.evaluate(() => window.events.some((event) => event.type === 'exit')), false, 'the CLI exited instead of running');
+    // Stopped before closing: in the installed app the channel runs in the background runner, which quitting leaves running.
+    const started = await page.evaluate(() => window.events.find((event) => event.type === 'started'));
+    assert.equal((await page.evaluate((run) => window.codingHub.stopSession({ sessionId: run.sessionId, runId: run.runId }), started)).ok, true, 'the channel stopped');
     console.log(`PASS: packaged app (${path.basename(executable)}) starts a CLI in a real terminal.`);
   } finally {
     await app?.close().catch(() => {});

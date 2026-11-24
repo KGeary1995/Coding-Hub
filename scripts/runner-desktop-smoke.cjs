@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { tileControl } = require('./lib/navigate.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
@@ -54,8 +55,9 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
     assert.equal(await channel(page).getByRole('button', { name: 'Start channel', exact: true }).count(), 0, 'the channel shows as running');
     console.log('the Trace opened next took the channel up, with its screen, and typed into it');
 
-    await channel(page).getByRole('button', { name: 'Stop CH2', exact: true }).click();
-    await channel(page).getByRole('button', { name: 'Start channel', exact: true }).waitFor();
+    await (await tileControl(channel(page), 'Stop')).click();
+    // Stopped from Trace, it ends: the runner holds nothing more.
+    await page.getByRole('status', { name: /^Channel 2 finished/ }).waitFor();
     console.log('runner desktop smoke passed');
   } catch (error) {
     console.error(error); process.exitCode = 1;

@@ -101,6 +101,10 @@ A real failure shows the notice "Session output could not be saved. Live termina
 
 Before 1.11.3, Trace recorded no context for Claude, because Claude Code's transcript has no window size. From 1.11.3 the tile shows the tokens in context, for example `ctx 241K`, with no percentage. Codex reports its window, so Codex tiles show a percentage and can enter the limit state. Don't add a guessed Claude window: default-model sessions have been seen above 240K tokens, so a 200K guess would put tiles into the limit state for no reason.
 
+### Channels did not come back after Trace opened again, or a runner keeps running
+
+With **Keep channels running after Trace quits** on (1.36.0), terminal channels run in Trace's background runner. If they did not come back, `~/.coding-hub/runner/runner.log` says when the runner started (with its process ID) and any fault it had. A channel that ended while Trace was closed comes back stopped, as after any quit. The runner shows in Task Manager as **Trace Runner** (on Windows), and its programs run under it. Ending it ends every channel it holds; it also ends by itself a minute after its last channel stops with Trace closed. If Trace cannot start the runner, channels run inside Trace instead, as before 1.36.0, and stop when it quits.
+
 ### A channel shows Failed with "The terminal process could not start"
 
 The message names the cause. From source, run `npm run rebuild:native`, because node-pty must match Electron's ABI. Also check that the CLI starts in a normal terminal.

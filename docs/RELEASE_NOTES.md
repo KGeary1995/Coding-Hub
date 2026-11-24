@@ -1,5 +1,15 @@
 ## What's new
 
+1.36.0 keeps terminal channels running after Trace quits, crashes or updates, and brings them back when it opens.
+
+- **Closing Trace by mistake no longer stops your agents.** Claude Code, Codex and Gemini CLI terminals, and shells, now run in a small background part of Trace (the runner). Quit, a crash or an update leaves them working; when Trace opens again each one is back in its tile, still running, with what it wrote meanwhile on screen. Settings → Preferences → **Keep channels running after Trace quits** (on by default, the installed app only) turns it off.
+- **Stopping them:** each channel's **Stop**, or **Stop all channels and quit** in the tray menu. Restarting the computer stops them, and **Start channels again when Trace opens** brings the agents back on their conversations, as before.
+- **Approvals still reach you** for a channel that kept running: Trace's hook servers come back on the ports they had, with each run's token, and the screen check from 1.35.3 is there if a port was taken.
+- **Not followed again for such a channel:** its per-run usage entry and a session token limit. The run's log also lacks what it wrote while Trace was closed. Chat channels still stop when Trace quits.
+- **Why a copy:** the runner runs from its own copy of the files it needs in `~/.coding-hub/runner/kits/` (about 265 MB on Windows), because Trace's installer stops everything running from its install folder before an update.
+- **Tried:** unit tests for the runner's protocol, its output buffer, the runner, Trace's connection to it, the copy, PtyManager taking a channel up, and the hook servers' ports; `npm run test:runner` (a real terminal kept while nothing is connected, from a real copy, with the runner leaving when idle); and a new end-to-end test that kills Trace's main process while a channel runs, opens Trace again, and finds the channel back with its screen, answering, and then stopped from Trace. The desktop smoke test passes with the runner off.
+- **Not tried:** an installed build being updated while channels run; a Mac (the runner runs from Trace's own Electron there for now); real Claude Code and Codex hooks after a restart.
+
 1.35.3 reads Claude Code's and Codex's screens as a second check of what they are doing, with rules taken from herdr:
 
 - **An approval the CLI did not announce still shows as Needs you.** If Claude Code shows its confirm or select form, or Codex shows "Allow command?" or "Action Required", and the CLI's own signal (Claude's hook, Codex's notice) did not say so within 5 seconds, the tile says Needs you with the question from the screen.

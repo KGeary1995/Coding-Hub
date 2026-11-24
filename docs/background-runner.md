@@ -1,6 +1,6 @@
 # Background runner: plan for review
 
-Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Step 1 (spike) and step 2 (runner and protocol) are built; Trace does not use the runner yet.
+Status: **reviewed by the owner** (2026-11-24); both questions answered (section 8). Steps 1 to 3 are built (1.36.0): terminal channels run in the runner and are taken up again when Trace opens. Steps 4 to 6 are still to do.
 
 **Goal:** channels keep running when Trace quits, crashes or updates, and Trace finds them again when it opens. 1.34.0
 covers closing the window (Trace stays in the tray); this covers the rest.
