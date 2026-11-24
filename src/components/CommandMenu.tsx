@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { channelsOf, useWorkspaceStore, type NavigationView } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
+import { ADVANCED_VIEWS, useAdvanced } from '../state/simple-mode';
 import { refreshEngines, startSession, stopSession } from '../runtime/use-native-host';
 import { workbench } from '../runtime/workbench';
 import { COMMAND_SCOPES, matchRange, parseQuery, searchesFiles, type CommandScope } from '../runtime/command-search';
@@ -93,6 +94,7 @@ export function CommandMenu() {
     const timer = setTimeout(() => { void workbench<SearchResults>({ action: 'flow-search', query: text, directory: scope === 'memory' ? null : rootDirectory, includeOutput: false }).then((result) => { if (live) { setHits(result.hits); setLimited(result.limited); } }).catch(() => { if (live) setHits([]); }); }, 300);
     return () => { live = false; clearTimeout(timer); };
   }, [open, scope, text, rootDirectory]);
+  const advanced = useAdvanced();
   const items = useMemo(() => {
     const go = (view: NavigationView) => () => setView(view);
     const actions: Omit<Item, 'group' | 'glyph'>[] = [
@@ -129,7 +131,8 @@ export function CommandMenu() {
         ? [{ id: `stop-${session.id}`, label: `Stop CH${index + 1} · ${channelNameNow(session)}`, run: () => void stopSession(session.id) }]
         : session.status !== 'starting' ? [{ id: `start-${session.id}`, label: `Start CH${index + 1} · ${channelNameNow(session)}`, run: () => { setView('workspace'); void startSession(session.id); } }] : []),
     ];
-    const all: Item[] = actions.map((action) => { const key = viewKey(action.id as NavigationView); return { ...action, group: 'actions' as const, glyph: '>', ...(key ? { shortcut: `G ${key.toUpperCase()}` } : {}) }; });
+    // Simple mode: the advanced views, and running a verification profile, are left out (src/state/simple-mode.ts).
+    const all: Item[] = actions.filter((action) => advanced || !(ADVANCED_VIEWS.includes(action.id as NavigationView) || action.id.startsWith('check-'))).map((action) => { const key = viewKey(action.id as NavigationView); return { ...action, group: 'actions' as const, glyph: '>', ...(key ? { shortcut: `G ${key.toUpperCase()}` } : {}) }; });
     sessions.forEach((session, index) => {
       const state = channelState(session, usageFor(session, usage)); const meta = CHANNEL_STATES[state];
       all.push({ id: `channel-${session.id}`, group: 'channels', label: `CH${index + 1} · ${channelNameNow(session)}`, glyph: meta.glyph, tone: state === 'working' ? session.config.engine : state,
@@ -142,7 +145,7 @@ export function CommandMenu() {
     }
     // Actions and channels match on their label; search hits already matched their content.
     return all.filter((item) => (scope === 'all' || scope === item.group) && (item.group === 'files' || item.group === 'memory' || !text || matchRange(item.label, text)));
-  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange, checks, plugins]);
+  }, [sessions, computers, usage, hits, scope, text, rootDirectory, setView, arrange, checks, plugins, advanced]);
   useEffect(() => { setSelected(0); }, [scope, text]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [selected]);
   const run = (item: Item | undefined) => { if (!item) return; setOpen(false); item.run(); };

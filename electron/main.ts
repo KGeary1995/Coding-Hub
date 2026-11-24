@@ -18,7 +18,7 @@ import type { AccountLabel, AccountLabels } from '../shared/accounts';
 import type { ChannelEngine } from '../shared/types';
 import { REMOTE_PORT, type ChannelControl, type ChannelTranscript, type RemoteChannelChange, type RemoteChannelSettings, type RemoteResumeRequest } from '../shared/remote';
 import { CLAUDE_MODELS, modelLabel } from '../shared/model-name';
-import type { NativeResume } from '../shared/workbench';
+import type { NativeResume, Task } from '../shared/workbench';
 import { ProjectSetup } from './services/repository/project-setup';
 import { AccountLoginManager } from './services/cli/account-login-manager';
 import { app, shell, nativeImage, clipboard, ClipboardItem, BrowserWindow, dialog, ipcMain, Menu, Tray, webContents, crashReporter, powerMonitor, safeStorage, Notification, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron';
@@ -46,6 +46,8 @@ import { BackgroundRunner } from './services/runner/background';
 import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
+import { AutoChecks } from './services/workbench/auto-checks';
+import { EditorBridge, installVSCodeExtension, vscodeStatus } from './services/editor/editor-bridge';
 import { Plugins, type PluginContext } from './services/plugins/plugins';
 import { PluginApi } from './services/plugins/plugin-api';
 import type { PluginEventName } from '../shared/plugins';
@@ -68,7 +70,7 @@ import { load, save } from './services/workbench/local-store';
 import { isNewerVersion, latestMacRelease, startMacUpdate } from './services/updates/mac-script-update';
 import { LinkedAlerts } from './services/remote/linked-alerts';
 import { usageAlerts, type DesktopAlert } from './services/alerts';
-import { channelName } from '../shared/channel-name';
+import { channelName, DEFAULT_TITLES } from '../shared/channel-name';
 import { hiddenSeatIds } from '../shared/table-seats';
 import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
@@ -190,6 +192,26 @@ const channelTools = new ChannelTools({
   replies: (sessionId, count) => channelReplies(sessionId, count),
   send: (sessionId, text) => sendToChannel(sessionId, text),
 });
+/** Automatic project checks (1.38.0): the project's own checks after an agent's turn changes files; a failure goes back to that agent. */
+const autoChecks = new AutoChecks({
+  enabled: () => { try { return hub?.preferences().autoChecks !== false; } catch { return false; } },
+  canMessage: (sessionId) => { const channel = channelList().find((item) => item.sessionId === sessionId); return Boolean(channel?.running && !channelTools.waitingOf(sessionId)); },
+  send: (sessionId, text) => sendToChannel(sessionId, text),
+  publish: (status) => { sendToRenderer(IPC_CHANNELS.autoCheckEvent, status); },
+});
+/** The VS Code extension's way in (1.38.0): it lists the running agent channels and sends one the code selected there. */
+const editorBridge = new EditorBridge({
+  channels: () => channelList().filter((channel) => channel.running && channel.engine !== 'shell').map((channel) => ({ channel: channel.channel, sessionId: channel.sessionId, name: channel.name, engine: DEFAULT_TITLES[channel.engine as ChannelEngine] ?? channel.engine, waiting: Boolean(channelTools.waitingOf(channel.sessionId)) })),
+  send: (sessionId, text) => sendToChannel(sessionId, text),
+});
+/** Passes an agent channel's start and turn ends to the automatic checks, by its folder; a seat's turn counts only as its table's. */
+function checkEvent(event: 'started' | 'turn-ended', sessionId: string) {
+  try {
+    const channels = workspaceChannels(); const own = channels.find((session) => session.id === sessionId); if (!own || own.seatedAt || own.engine === 'shell') return;
+    const folder = manager.running().find((run) => run.sessionId === sessionId)?.cwd; if (!folder) return;
+    if (event === 'started') void autoChecks.started(folder); else autoChecks.turnEnded(sessionId, folder);
+  } catch { hostHealth?.record('auto-checks-failed'); }
+}
 /** Event hooks (1.33.1): built once storage is known, below; until then events run none. */
 let eventHooks: EventHooks | null = null;
 /** Trace plugins (1.35.0, docs/plugins.md) and their API: built once storage is known, below. */
@@ -237,9 +259,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   try { channelTools.onSessionEvent(event); } catch { hostHealth?.record('channel-tools-event-failed'); }
   if (event.type === 'started' || event.type === 'exit') try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); }
   if (event.type === 'attention') hookEvent('needs-you', event.sessionId, event.message);
-  else if (event.type === 'answered' && event.finished) hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.');
+  else if (event.type === 'answered' && event.finished) { hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.'); checkEvent('turn-ended', event.sessionId); }
   else if (event.type === 'exit' && event.diagnostic) hookEvent('failed', event.sessionId, event.diagnostic);
-  if (event.type === 'started') hookEvent('started', event.sessionId, 'The channel started.');
+  if (event.type === 'started') { hookEvent('started', event.sessionId, 'The channel started.'); checkEvent('started', event.sessionId); }
   else if (event.type === 'exit') hookEvent('stopped', event.sessionId, event.diagnostic ?? 'The channel stopped.');
   // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
   // file, before the run is ended below. For any other run this is nothing new to telemetry.
@@ -271,6 +293,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (envelope.event.type === 'ready') try { hub?.telemetry?.setGeminiConversation(envelope.runId, envelope.event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
   sendToRenderer(IPC_CHANNELS.chatEvent, envelope, owner);
   try { channelTools.onChat(envelope); } catch { hostHealth?.record('channel-tools-event-failed'); }
+  if (envelope.event.type === 'done' && !envelope.event.isError) checkEvent('turn-ended', envelope.sessionId);
   if (envelope.event.type === 'done') hookEvent(envelope.event.isError ? 'failed' : 'turn-ended', envelope.sessionId, envelope.event.isError ? envelope.event.error ?? 'The turn ended with an error.' : 'The agent ended its turn.');
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
@@ -284,7 +307,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (config.resumeId) {
       const saved = new Map((storage?.load()?.sessions ?? []).map((session) => [session.id, session.config]));
       if (manager.running().some((other) => other.runId !== run.runId && other.engine === 'gemini' && (saved.get(other.sessionId) as { resumeId?: string } | undefined)?.resumeId === config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.');
-      if (!nativeSessions.source('gemini', config.resumeId)) throw new HubError('NATIVE_SESSION', 'Gemini CLI no longer has this conversation. Clear the resume, or pick another from Session history.');
+      if (!nativeSessions.source('gemini', config.resumeId)) throw new HubError('NATIVE_SESSION', 'Gemini no longer has this conversation. Clear the resume, or pick another from Session history.');
     }
     return;
   }
@@ -304,7 +327,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
   // Then the channel tools, when turned on, join that list (or start it). Codex takes the three that only look (list,
   // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
-  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it.
+  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it. The task tools ride the same
+  // server when their own setting is on (either one adds it); list_tasks only looks, adding or updating a task asks.
   const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
     const server = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
@@ -314,7 +338,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
         const file = path.join(folder, `${run.runId}.mcp.json`); fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'trace-channels': server } }), { mode: 0o600 }); channelToolFiles.set(run.runId, file);
         if (launch.args.at(-2) === '--mcp-config') launch.args.push(file); else launch.args.push('--mcp-config', file);
       } catch { channelTools.unregister(run.runId); }
-    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
+    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
     else channelTools.unregister(run.runId);
   }
 }), abandonLaunch: (run) => { attention.unregister(run.runId); channelTools.unregister(run.runId); const file = channelToolFiles.get(run.runId); if (file) { channelToolFiles.delete(run.runId); fs.rm(file, { force: true }, () => {}); } hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {
@@ -737,6 +761,7 @@ else app.whenReady().then(() => {
   const ports = savedPorts();
   void attention.start(ports.attention).then(() => savePorts()).catch(() => hostHealth?.record('attention-endpoint-unavailable'));
   void channelTools.start(ports.tools).then(() => savePorts()).catch(() => hostHealth?.record('channel-tools-unavailable'));
+  void editorBridge.start().catch(() => hostHealth?.record('editor-bridge-unavailable'));
   // The tray icon from the start, so Quit is always within reach, once the preferences can be read.
   setTimeout(() => { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } }, 1500);
   hostHealth = new HostHealth(storageRoot);
@@ -813,13 +838,22 @@ else app.whenReady().then(() => {
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
+  /** The board changed outside the window (an agent's task tools, a plugin): it reads it again at once, not at its next 30 s look. */
+  const tasksChanged = () => { sendToRenderer(IPC_CHANNELS.tasksChanged, null); };
+  channelTools.tasks = {
+    enabled: () => { try { return hub?.preferences().taskTools !== false; } catch { return false; } },
+    folderOf: (runId) => manager.running().find((run) => run.runId === runId)?.cwd ?? null,
+    list: () => tasks.list(), changed: tasksChanged, notes: (id, notes) => tasks.setNotes(id, notes),
+    add: async (fields) => await tasks.execute({ action: 'task-save', ...fields, sessionId: null, scope: ['**'], status: 'queued', verificationId: null }) as Task,
+    status: async (id, status) => await tasks.execute({ action: 'task-status', id, status }) as Task,
+  };
   // Plugins: the API they call back on, and the service that runs them (docs/plugins.md).
   pluginApi = new PluginApi({
     plugin: (id, token) => plugins?.pluginOfToken(id, token) ?? null,
     channels: () => channelList(), replies: (sessionId, count) => channelReplies(sessionId, count), waiting: (sessionId) => channelTools.waitingOf(sessionId), wait: (sessionId, timeout) => channelTools.waitFor(sessionId, timeout),
     send: (sessionId, text) => sendToChannel(sessionId, text), control: (sessionId, control) => controlChannel(sessionId, control), add: (engine, chat) => addChannel(engine, chat),
     tasks: () => { const shown = channelList(); return (tasks.list()).map((task) => ({ id: task.id, title: task.title, status: task.status, channel: shown.find((item) => item.sessionId === task.sessionId)?.channel ?? null })); },
-    addTask: async (title, details, sessionId) => { const directory = storage?.load()?.rootDirectory; if (!directory) throw new HubError('PLUGIN_API_PROJECT', 'Open a project in Trace first: a task belongs to one.'); const saved = await tasks.execute({ action: 'task-save', title, ...(details ? { details } : {}), directory, sessionId, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as { id: string }; return { id: saved.id }; },
+    addTask: async (title, details, sessionId) => { const directory = storage?.load()?.rootDirectory; if (!directory) throw new HubError('PLUGIN_API_PROJECT', 'Open a project in Trace first: a task belongs to one.'); const saved = await tasks.execute({ action: 'task-save', title, ...(details ? { details } : {}), directory, sessionId, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as { id: string }; tasksChanged(); return { id: saved.id }; },
     notify: (title, body) => desktopAlert({ title, body, target: { view: 'skills' } }, true),
   });
   void pluginApi.start().catch(() => hostHealth?.record('plugin-api-unavailable'));
@@ -868,7 +902,7 @@ else app.whenReady().then(() => {
     pasteImage: async (reference, data) => {
       const run = manager.running().find((item) => item.sessionId === reference.sessionId && item.runId === reference.runId);
       if (!run) throw new HubError('STALE_SESSION', 'That channel is no longer running here.');
-      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.');
+      if (run.engine === 'shell' || run.engine === 'gemini') throw new HubError('PASTE_SHELL', 'Images paste into Claude Code and Codex channels, not terminals or Gemini.');
       const image = nativeImage.createFromBuffer(data); if (image.isEmpty()) throw new HubError('PASTE_IMAGE', 'That image could not be read.');
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' }) })]);
       manager.writeRemote(reference, process.platform === 'win32' ? '\x1bv' : '\x16');
@@ -1078,6 +1112,8 @@ else app.whenReady().then(() => {
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('hook-')) return eventHooks!.execute(payload);
+    if (action === 'editor-status') return vscodeStatus();
+    if (action === 'editor-connect') { await installVSCodeExtension(app.getVersion(), path.join(app.getPath('temp'), 'trace-vscode')); return vscodeStatus(); }
     if (action.startsWith('plugin-')) return plugins!.execute(payload);
     // A task the agent says is done: plugins hear it (task.ready-for-review).
     if (action === 'task-status') { const result = await tasks.execute(payload); const value = result as { status?: string; id?: string; title?: string } | null; if (value?.status === 'review') plugins?.fire('task.ready-for-review', value.id ?? '', { project: storage?.load()?.rootDirectory ?? null, message: value.title ?? '' }); return result; }
@@ -1101,7 +1137,7 @@ else app.whenReady().then(() => {
   });
   // On Windows an update leaves the background runner's channels running (it runs outside the install folder), so they do
   // not hold an update back. A Mac's runner still runs from the app an update replaces.
-  busyJobs = () => (background && process.platform === 'win32' ? manager.hasLocalSessions : manager.hasSessions) || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
+  busyJobs = () => (background && process.platform === 'win32' ? manager.hasLocalSessions : manager.hasSessions) || autoChecks.running || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
   updates = new UpdateService({
     version: app.getVersion(),
     enabled: updatesEnabled(app.isPackaged, process.platform, process.resourcesPath, Boolean(process.env.PORTABLE_EXECUTABLE_DIR), macUpdates()),
@@ -1137,6 +1173,8 @@ else app.whenReady().then(() => {
   handle(IPC_CHANNELS.readFile, (owner, payload) => repositoryFiles.read(owner, payload));
   handle(IPC_CHANNELS.gitStatus, (owner, payload) => repositoryGit.status(owner, payload));
   handle(IPC_CHANNELS.gitDiff, (owner, payload) => repositoryGit.diff(owner, payload));
+  handle(IPC_CHANNELS.gitLog, (owner, payload) => repositoryGit.log(owner, payload));
+  handle(IPC_CHANNELS.gitCommit, (owner, payload) => repositoryGit.commit(owner, payload));
   handle(IPC_CHANNELS.loadWorkspace, async () => {
     const database = localStorage();
     const { workspace, removedChannels, rootDirectory } = database.loadMigrated();
@@ -1256,7 +1294,7 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   if (delivery?.running || workflows?.running || worktrees?.active) { if (window) void dialog.showMessageBox(window, { type: 'info', message: 'Wait for the reviewed workflow or worktree operation to finish before quitting.' }); return; }
-  quitting = true;
+  quitting = true; editorBridge.stop();
   // The channels running now start again on their conversations when Trace next opens, unless that is turned off.
   try { saveResume(storageRoot, hub?.preferences().resumeOnStart === false ? [] : manager.running().map((run) => run.sessionId)); } catch { hostHealth?.record('resume-list-failed'); }
   // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).

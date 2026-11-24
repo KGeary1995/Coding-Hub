@@ -150,6 +150,10 @@ describe('native history and task scope', () => {
     // Folder scopes saved before stricter validation (`src/`) stay readable; empty and dot segments are still rejected.
     await tasks.execute({ action: 'task-save', title: 'Folder', directory: root, sessionId: null, scope: ['src/'], status: 'queued', notes: '', verificationId: null }); expect(tasks.list()).toHaveLength(2);
     for (const bad of ['src//a.ts', 'src/./a.ts']) await expect(tasks.execute({ action: 'task-save', title: 'Bad', directory: root, sessionId: null, scope: [bad], status: 'queued', notes: '', verificationId: null })).rejects.toThrow();
+    // The task tools' note changes the notes alone, within their limit.
+    expect(tasks.setNotes(record.id, 'CH2: done the parser')).toMatchObject({ id: record.id, title: 'Task', scope: ['src/**'], status: 'queued', notes: 'CH2: done the parser' });
+    expect(() => tasks.setNotes(record.id, 'x'.repeat(2001))).toThrow(); expect(tasks.list().find((item) => item.id === record.id)?.notes).toBe('CH2: done the parser');
+    expect(() => tasks.setNotes(randomUUID(), 'x')).toThrow(/no longer here/);
   });
   it('sends a task as one message, and follows what its agent changes from then on', async () => {
     expect(taskPrompt({ title: 'Add a dark mode switch', details: 'In Settings.\nKeep the current look as default.', scope: ['src/settings/**'] })).toBe('Task: Add a dark mode switch. In Settings. Keep the current look as default. Change only these files or folders: src/settings/**. If the task needs others, ask me first. ' + SIGNAL_INSTRUCTION);

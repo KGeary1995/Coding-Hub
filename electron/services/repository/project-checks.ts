@@ -7,6 +7,15 @@ import type { CheckName, CheckResult, ProjectAudit } from '../../../shared/proje
 import { hostEnvironment, nodeScriptCommand } from '../cli/discovery';
 import { onChildEnd, stopTree } from './process-tree';
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('inspect'), directory: z.string().max(4096) }).strict(), z.object({ action: z.literal('run'), directory: z.string().max(4096), script: z.enum(['test', 'typecheck', 'lint']) }).strict()]);
+/** npm on PATH (its npm-cli.js on Windows, so it runs with node and opens no console window); automatic checks use it too. */
+export function npmCLI(): string {
+  const env = hostEnvironment(); const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+  for (const directory of env[pathKey].split(path.delimiter).filter(Boolean)) {
+    const candidates = process.platform === 'win32' ? [path.join(directory.replace(/^"|"$/g, ''), 'node_modules/npm/bin/npm-cli.js')] : [path.join(directory, 'npm')];
+    for (const candidate of candidates) try { const resolved = fs.realpathSync(candidate); if (fs.statSync(resolved).isFile() && (process.platform === 'win32' || resolved.endsWith('npm-cli.js'))) return resolved; } catch { /* Try the next PATH entry. */ }
+  }
+  throw new HubError('NPM_UNAVAILABLE', 'npm was not found. Run project checks in your system terminal or install Node.js and restart the app.');
+}
 export class ProjectChecks {
   private child: ChildProcess | null = null;
   get running() { return Boolean(this.child); }
@@ -36,14 +45,6 @@ export class ProjectChecks {
     }
     return report;
   }
-  private npmCLI(): string {
-    const env = hostEnvironment(); const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
-    for (const directory of env[pathKey].split(path.delimiter).filter(Boolean)) {
-      const candidates = process.platform === 'win32' ? [path.join(directory.replace(/^"|"$/g, ''), 'node_modules/npm/bin/npm-cli.js')] : [path.join(directory, 'npm')];
-      for (const candidate of candidates) try { const resolved = fs.realpathSync(candidate); if (fs.statSync(resolved).isFile() && (process.platform === 'win32' || resolved.endsWith('npm-cli.js'))) return resolved; } catch { /* Try the next PATH entry. */ }
-    }
-    throw new HubError('NPM_UNAVAILABLE', 'npm was not found. Run project checks in your system terminal or install Node.js and restart the app.');
-  }
   async execute(input: unknown, confirm: () => Promise<boolean>): Promise<ProjectAudit | CheckResult> {
     const parsed = schema.safeParse(input); if (!parsed.success) throw new HubError('INVALID_CHECK_REQUEST', 'Invalid project check request.'); const request = parsed.data;
     const report = this.inspect(request.directory); if (request.action === 'inspect') return report;
@@ -51,7 +52,7 @@ export class ProjectChecks {
     if (!report.scripts.includes(request.script)) throw new HubError('CHECK_UNAVAILABLE', 'This project does not define that npm script.');
     if (!await confirm()) return { script: request.script, exitCode: null, output: 'Check cancelled.', truncated: false, timedOut: false, cancelled: true };
     if (this.running) throw new HubError('CHECK_BUSY', 'A project check is already running.');
-    const npm = this.npmCLI();
+    const npm = npmCLI();
     return new Promise((resolve, reject) => {
       // nodeScriptCommand: a console node.exe on Windows (no new console window), else Trace as Node without leaking ELECTRON_RUN_AS_NODE to the script.
       const program = nodeScriptCommand(npm, hostEnvironment());

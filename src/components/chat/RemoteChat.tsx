@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowDown, ImagePlus, MessagesSquare, Send, Square, Users, X } from 'lucide-react';
+import { ArrowDown, ImagePlus, MessagesSquare, Mic, Send, Square, Users, X } from 'lucide-react';
+import { startDictation, withSpoken } from '../../runtime/dictation';
 import type { ChatEnvelope, ChatImage, ChatRequest } from '../../../shared/chat';
 import type { ChatReplay } from '../../../shared/remote';
 import { applyChatEvent, chatAnswered, chatStarted, useChatStore } from '../../state/chat-store';
@@ -40,10 +41,12 @@ export interface RemoteChatProps {
   className?: string;
   /** Opens a Round Table on this chat (the phone, when it may start agents); the error message, or null. */
   openTable?: () => Promise<string | null>;
+  /** Offers the microphone (the phone, where the browser takes dictation); the words fill the box and are sent with Send. */
+  dictation?: boolean;
 }
 
 const same = (id: string) => id;
-export function RemoteChat({ sessionId, runId, engine, running, send, follow, keyOf = same, className = '', openTable }: RemoteChatProps) {
+export function RemoteChat({ sessionId, runId, engine, running, send, follow, keyOf = same, className = '', openTable, dictation = false }: RemoteChatProps) {
   const [opening, setOpening] = useState(false);
   const chat = useChatStore((state) => state.threads[keyOf(sessionId)] ?? EMPTY);
   const table = chat.table ?? null;
@@ -57,6 +60,13 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
   const scroller = useRef<HTMLDivElement>(null); const pinned = useRef(true); const [away, setAway] = useState(false); const file = useRef<HTMLInputElement>(null); const input = useRef<HTMLTextAreaElement>(null);
   // Every seat's events are followed while the table is open.
   useEffect(() => follow && hiddenIds.length ? followSeats(follow, hiddenIds) : undefined, [hiddenKey, follow]);
+  const [listening, setListening] = useState(false); const stopListening = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopListening.current?.(), []);
+  const listen = () => {
+    if (stopListening.current) { stopListening.current(); return; }
+    const before = text; setError(''); setListening(true);
+    stopListening.current = startDictation((spoken) => setText(withSpoken(before, spoken)), (failure) => { stopListening.current = null; setListening(false); if (failure) setError(failure); });
+  };
   const views = useMemo(() => table ? seatViews(table, engine, { builderWorking: 'The builder', plannerWorking: 'The planner', plannerColour: 'claude' }, sessionId) : [], [table, engine, sessionId]);
   const sources: SeatThread[] = table ? views.map((seat) => ({ seat, thread: seat.lead ? chat : threads[hiddenIds.indexOf(seat.id)] ?? EMPTY })) : [{ seat: { id: sessionId, engine, lead: true, name: AGENT[engine], working: AGENT[engine], duties: [], driver: false, colour: engine }, thread: chat }];
   const entries = useMergedThread(sources);
@@ -107,7 +117,8 @@ export function RemoteChat({ sessionId, runId, engine, running, send, follow, ke
         <button type="button" className="chat-icon" aria-label="Attach images or take a photo" disabled={!live} onClick={() => file.current?.click()}><ImagePlus size={18} /></button>
         {openTable && !table && live && <button type="button" className="chat-icon" aria-label={`Round Table: add ${engine === 'claude' ? 'Codex' : 'Claude'}`} title={opening ? 'Adding the other agent…' : `Round Table: bring ${engine === 'claude' ? 'Codex' : 'Claude Code'} into this conversation`} disabled={opening} onClick={() => { setOpening(true); setError(''); void openTable().then((failure) => { setOpening(false); if (failure) setError(failure); }); }}><Users size={18} /></button>}
         <input ref={file} type="file" accept="image/*" multiple hidden onChange={(event) => { void attach([...(event.target.files ?? [])]); event.target.value = ''; }} />
-        <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} />
+        {dictation && <button type="button" className={`chat-icon${listening ? ' listening' : ''}`} aria-label="Speak a message" aria-pressed={listening} title={listening ? 'Listening… tap to stop' : 'Speak a message'} disabled={!live} onClick={listen}><Mic size={18} /></button>}
+        <textarea ref={input} rows={1} value={text} disabled={!live} placeholder={listening ? 'Listening… tap the microphone to stop' : placeholder} aria-label={table ? 'Message to the Round Table' : `Message to ${agent}`} onChange={(event) => setText(event.target.value)} onKeyDown={onKey} />
         {/* While agents work, Stop stays beside the box, and Send joins it once something is written or attached (before 1.31.2
             Send took Stop's place as soon as anything was typed, so a reply could not be stopped while writing the next message). */}
         {busy && <button type="button" className="chat-icon stop" aria-label={table ? `Stop ${views.length > 2 ? 'all' : 'both'} agents` : `Stop ${agent}'s reply`} onClick={stop}><Square size={16} /></button>}

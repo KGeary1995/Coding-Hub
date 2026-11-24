@@ -61,7 +61,7 @@ describe('Gemini CLI plan limits', () => {
     expect(limits).toMatchObject({ engine: 'gemini', account: 'Default', windows: [{ label: 'Session', usedPercent: 10 }], error: null });
   });
   it('says the check failed when agy does not report its limits', async () => {
-    expect(await readGeminiLimits(agy, {}, probe('1.5.12', 'Please sign in', 1).probe as never)).toMatchObject({ windows: [], failed: true, error: 'Gemini CLI did not report usage limits. Check that it is signed in.' });
+    expect(await readGeminiLimits(agy, {}, probe('1.5.12', 'Please sign in', 1).probe as never)).toMatchObject({ windows: [], failed: true, error: 'Gemini did not report usage limits. Check that it is signed in.' });
   });
 });
 

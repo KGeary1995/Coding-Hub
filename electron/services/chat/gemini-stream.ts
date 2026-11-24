@@ -53,22 +53,22 @@ export class GeminiStream implements ChatStream {
 
   start() {
     this.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, (response) => {
-      if (response.error) return this.fail(`Gemini CLI did not start its session (${this.errorText(response)}).`);
+      if (response.error) return this.fail(`Gemini did not start its session (${this.errorText(response)}).`);
       this.request('session/new', { cwd: this.options.cwd, mcpServers: [] }, (created) => {
         const result = record(created.result); const sessionId = text(result.sessionId);
-        if (created.error || !sessionId) return this.fail(`Gemini CLI did not open a session (${this.errorText(created)}).`);
+        if (created.error || !sessionId) return this.fail(`Gemini did not open a session (${this.errorText(created)}).`);
         this.sessionId = sessionId; this.readConfig(result.configOptions);
         const models = record(result.models); const offered = Array.isArray(models.availableModels) ? models.availableModels.map((model) => text(record(model).modelId)) : [];
         const wanted = this.model;
-        if (wanted && offered.length && !offered.includes(wanted)) return this.fail(`Gemini CLI does not offer ${wanted} on this account. Choose another model for this seat.`);
+        if (wanted && offered.length && !offered.includes(wanted)) return this.fail(`Gemini does not offer ${wanted} on this account. Choose another model for this seat.`);
         const planMode = () => this.request('session/set_mode', { sessionId, modeId: 'plan' }, (mode) => {
-          if (mode.error) return this.fail(`Gemini CLI would not switch to plan mode (${this.errorText(mode)}).`);
-          if (!this.confirmed()) this.confirmTimer = setTimeout(() => { if (!this.ready && !this.failed) this.fail(`Gemini CLI did not confirm ${wanted || 'its model'} in plan mode (it reports ${this.describe()}), so Trace does not use it.`); }, this.options.confirmMs ?? CONFIRM_MS);
+          if (mode.error) return this.fail(`Gemini would not switch to plan mode (${this.errorText(mode)}).`);
+          if (!this.confirmed()) this.confirmTimer = setTimeout(() => { if (!this.ready && !this.failed) this.fail(`Gemini did not confirm ${wanted || 'its model'} in plan mode (it reports ${this.describe()}), so Trace does not use it.`); }, this.options.confirmMs ?? CONFIRM_MS);
           this.check();
         });
         if (!wanted) return planMode();
         this.request('session/set_model', { sessionId, modelId: wanted }, (model) => {
-          if (model.error) return this.fail(`Gemini CLI would not switch to ${wanted} (${this.errorText(model)}).`);
+          if (model.error) return this.fail(`Gemini would not switch to ${wanted} (${this.errorText(model)}).`);
           planMode();
         });
       });
@@ -106,7 +106,7 @@ export class GeminiStream implements ChatStream {
       if (count !== this.turn.count) return;
       this.flush(); this.turn.busy = false;
       const result = record(response.result); const stop = text(result.stopReason);
-      if (response.error) this.emit({ type: 'done', isError: true, error: `Gemini CLI: ${this.errorText(response)}` });
+      if (response.error) this.emit({ type: 'done', isError: true, error: `Gemini: ${this.errorText(response)}` });
       else if (stop === 'cancelled') this.emit({ type: 'done', isError: true, error: 'Stopped.' });
       else if (stop === 'refusal') this.emit({ type: 'done', isError: true, error: 'Gemini refused to answer.' });
       else this.emit({ type: 'done', isError: false, error: null });

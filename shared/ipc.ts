@@ -3,10 +3,11 @@ import type { ChatEnvelope, ChatRequest } from './chat';
 import type { WorkbenchRequest, WorkbenchResponse } from './workbench';
 import type { ScreenEvent, ScreenRequest, ScreenResponse } from './screen';
 import type { CoachingRequest, CoachingResponse, LiveTip } from './coaching';
+import type { AutoCheckStatus } from './auto-checks';
 import type { DesignRequest, DesignResponse } from './design';
 import type { ProjectRequest, ProjectResponse } from './projects';
 import type { AccountRequest, AccountResponse, AccountEvent } from './accounts';
-import type { ChannelConfig, ChannelEngine, CLIEngine, SavedWorkspace, StorageInfo, SessionHistoryRun, RunLog, RepositoryContext, DirectoryListing, FilePreview, GitStatus, GitFileDiff, DiffArea } from './types';
+import type { ChannelConfig, ChannelEngine, CLIEngine, SavedWorkspace, StorageInfo, SessionHistoryRun, RunLog, RepositoryContext, DirectoryListing, FilePreview, GitStatus, GitFileDiff, DiffArea, GitLog, GitCommitDetail } from './types';
 import type { ProjectCheckRequest, ProjectAudit, CheckResult } from './project-checks';
 import type { ProjectToolsRequest, ProjectToolsResponse } from './project-tools';
 import type { UpdateRequest, UpdateStatus } from './updates';
@@ -82,6 +83,9 @@ export interface CodingHubHost {
   readFile(request: { repositoryId: string; path: string }): Promise<HostResult<FilePreview>>;
   gitStatus(request: { repositoryId: string }): Promise<HostResult<GitStatus>>;
   gitDiff(request: { repositoryId: string; path: string; area: DiffArea }): Promise<HostResult<GitFileDiff>>;
+  /** Changes → History: read-only, nothing here checks out, merges or rewrites. */
+  gitLog(request: { repositoryId: string }): Promise<HostResult<GitLog>>;
+  gitCommit(request: { repositoryId: string; sha: string }): Promise<HostResult<GitCommitDetail>>;
   /** `removedChannels`: Gemini channels a workspace saved by 1.19 or 1.20 had, dropped on load (Trace runs no Gemini now). */
   /** `rootDirectory`: the saved project folder when nothing but Gemini channels was saved (`workspace` is null then). */
   /** `resume`: the channels running when Trace last quit, to start again (1.32.0). */
@@ -115,6 +119,9 @@ export interface CodingHubHost {
   screen(request: ScreenRequest): Promise<HostResult<ScreenResponse>>;
   onScreenEvent(listener: (event: ScreenEvent) => void): () => void;
   onCoachingEvent(listener: (tip: LiveTip) => void): () => void;
+  onAutoCheckEvent(listener: (status: AutoCheckStatus) => void): () => void;
+  /** The Tasks board changed outside the window (an agent's task tools, a plugin): read it again. */
+  onTasksChanged(listener: () => void): () => void;
   /** A desktop notification was clicked: open what it is about. */
   onAlertClick(listener: (target: AlertTarget) => void): () => void;
   /** A chat channel: send a message (with images), answer an approval, or interrupt the reply. */
@@ -165,6 +172,8 @@ export const IPC_CHANNELS = {
   readFile: 'coding-hub:read-file',
   gitStatus: 'coding-hub:git-status',
   gitDiff: 'coding-hub:git-diff',
+  gitLog: 'coding-hub:git-log',
+  gitCommit: 'coding-hub:git-commit',
   loadWorkspace: 'coding-hub:load-workspace',
   saveWorkspace: 'coding-hub:save-workspace',
   listHistory: 'coding-hub:list-history',
@@ -189,6 +198,8 @@ export const IPC_CHANNELS = {
   screen: 'coding-hub:screen',
   screenEvent: 'coding-hub:screen-event',
   coachingEvent: 'coding-hub:coaching-event',
+  autoCheckEvent: 'coding-hub:auto-check-event',
+  tasksChanged: 'coding-hub:tasks-changed',
   alertClick: 'coding-hub:alert-click',
   chat: 'coding-hub:chat',
   chatEvent: 'coding-hub:chat-event',

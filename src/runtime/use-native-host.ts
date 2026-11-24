@@ -13,7 +13,7 @@ import { reportWindowHealth } from './window-health';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { loadLiveCoaching, receiveTip } from '../state/coaching-store';
 import { jumpToChannel } from '../components/shell/StatusBar';
-import { chainTasks, returnTasks, startTaskAutomation, taskTurnDone } from '../state/task-store';
+import { chainTasks, loadTasks, refreshTaskWatch, returnTasks, startTaskAutomation, taskTurnDone } from '../state/task-store';
 import { useChatStore } from '../state/chat-store';
 
 /**
@@ -47,6 +47,8 @@ import { askForHandoff } from './auto-handoff';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 import { isAgentConfig, isChatRun } from '../../shared/types';
+import { autoStartInOrder } from './start-order';
+import { receiveAutoCheck } from '../state/auto-check-store';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -120,6 +122,9 @@ export function useNativeHost() {
     // Another computer's chat channels: their events, into this window's chat store, kept apart by computer.
     const unsubscribeLinkedChat = host.onLinkedChatEvent((event) => { const keyOf = linkedChatKey(event.id); if (event.type === 'chat') receiveChat(event.envelope, keyOf); else receiveReplay(event.replay, keyOf); });
     const unsubscribeCoaching = host.onCoachingEvent(receiveTip); void loadLiveCoaching();
+    const unsubscribeChecks = host.onAutoCheckEvent(receiveAutoCheck);
+    // An agent (task tools) or a plugin changed the Tasks board: shown at once.
+    const unsubscribeTasks = host.onTasksChanged(() => { void loadTasks().then(() => refreshTaskWatch()); });
     // A clicked desktop notification opens what it is about.
     const unsubscribeAlerts = host.onAlertClick((target) => { if ('sessionId' in target) jumpToChannel(target.sessionId); else if ('computerId' in target) useWorkspaceStore.setState({ computerId: target.computerId, activeView: 'computer' }); else useWorkspaceStore.getState().setView(target.view); });
     // A phone resumed a conversation from its History: a channel for it here, as Session history's Resume makes.
@@ -136,7 +141,8 @@ export function useNativeHost() {
       if (!result.ok) { useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: result.error.message }); return; }
       useWorkspaceStore.getState().hydrate(result.value.workspace, result.value.info, result.value.removedChannels, result.value.rootDirectory);
       loaded = true;
-      if (result.value.resume || result.value.kept) void resumeChannels(result.value.resume ?? [], result.value.kept ?? []);
+      // Channels that were running come back first; Start in order then runs only if none did (src/runtime/start-order.ts).
+      void (result.value.resume || result.value.kept ? resumeChannels(result.value.resume ?? [], result.value.kept ?? []) : Promise.resolve()).then(() => autoStartInOrder());
       let previous = JSON.stringify(savedWorkspace());
       let generation = 0;
       // What the saved workspace is made of: when none of these changed (a status line, a view), nothing is serialized.
@@ -161,7 +167,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
+    return () => { cancelled = true; onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }

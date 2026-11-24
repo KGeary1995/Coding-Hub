@@ -1,5 +1,27 @@
 ## What's new
 
+1.38.0 does more on its own and shows less you don't need, with ideas taken from herdr's plugins.
+
+- **Simple by default.** Menus, the command menu and Settings show only the everyday parts. AI coaching, verification profiles, shared memory and rules, MCP servers, event hooks, engine and worktree details, model pricing and a few preferences come back with **Settings → Show advanced tools**. Nothing was removed.
+- **Your project is checked after each agent turn.** When Claude Code, Codex or Gemini ends a turn that changed files, Trace runs the project's own checks: its `typecheck` and `test` scripts in package.json, or `cargo test`, or `go test ./...`. The result shows on the channel. A failure goes back to that agent to fix, up to 3 times in a row, then it is over to you. Turn it off in Settings → Preferences → **Check the project after each agent turn**. The checks are the project's own commands, run as you. A project without such scripts is not checked.
+- **Start in order.** Give channels a step (each channel's settings → Start in order). A shell can have a command typed once it starts, an agent a first request, and a step can wait for a text in its output, such as a dev server's "ready". Channels with a step start on their own, lowest first, when the workspace opens (unless channels are already running) and when a template is applied. An agent's first request is sent once it is ready, after any trust prompt. **Start in order** on the top bar runs it again.
+- **Speak a message on the phone.** A microphone next to Send, in terminal and chat channels. Your words fill the box, and nothing is sent until you press Send. It uses your phone's speech service: Apple's on an iPhone, Google's on Android.
+- **Search inside past conversations.** Session history → Native: type some words and press **Search inside conversations** to find every Claude Code and Codex conversation that mentions them. The matching lines are highlighted, with Resume in a new channel. It searches what you and the agents wrote, not tool output. Gemini's conversations are not searched.
+- **Commit history on Changes.** **History**, next to **Uncommitted**, shows the latest 200 commits with a branch graph and labels for HEAD, branches, remote branches and tags. Choose a commit to see its message and the files it changed. It only reads the repository.
+- **Agents can use the Tasks board.** Claude Code and Codex channels can list their project's tasks, add one to To do, and move one to Working or Ready for review with a signed note. Only you mark a task Done, remove it, or change its title. Each change asks your permission as the CLI usually does. It is on by default; turn it off in Settings → Preferences → **Let agents read and update Tasks**.
+- **Send code from VS Code.** Settings → VS Code → **Connect VS Code** installs Trace's extension. In VS Code, right-click selected code, choose **Send to a Trace channel**, pick a running agent and say what to do. The code arrives with its file and lines. There are no keys to copy: the extension finds Trace through a key Trace writes for your user only. A channel waiting for your approval is not sent to.
+- **Gemini is called Gemini,** as Claude Code and Codex carry no "CLI". Channels still named "Gemini CLI" count as the default name.
+- **Fixed:** a flaky failure in a release build. When Git's output passed its limit, Trace stopped only the first Git process, and the rest kept running in the repository.
+- **Tried:**
+  - Unit tests for every change, including the automatic checks with real npm scripts and the editor bridge's refusals.
+  - VS Code's own installer installing the extension into a test folder.
+  - All desktop smoke tests, with the advanced views reached through the new switch.
+- **Not tried:**
+  - Dictation on a real phone.
+  - The automatic checks and Start in order with the real Claude Code and Codex.
+  - The extension used inside a real VS Code window.
+  - History on a very large repository.
+
 1.37.0 installs Trace plugins from GitHub.
 
 - **Install from GitHub** on Skills & plugins → Trace plugins: `owner/repo` (or a folder inside it), with an optional branch, tag or commit. Trace fetches it with this computer's Git, so private repositories work when Git is signed in to GitHub here; Trace never sees a token.

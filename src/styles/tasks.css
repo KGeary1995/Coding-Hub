@@ -28,6 +28,8 @@
 /* Not a warning or a failed outcome (.error-message): those keep the danger colour. */
 .task-card p:not(.error-message) { color: var(--tr-fg-muted); }
 .task-card small { font: var(--tr-t-small); color: var(--tr-fg-dim); overflow-wrap: anywhere; }
+/* Notes keep their lines: an agent's note is a line of its own, signed CHn: (task tools). */
+.task-card .task-notes { white-space: pre-line; }
 .task-card ul { margin: 4px 0 0; padding-left: 16px; }
 .task-card code { font: var(--tr-t-meta); color: var(--tr-fg); overflow-wrap: anywhere; }
 .task-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--tr-line-faint); }

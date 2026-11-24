@@ -24,7 +24,7 @@ describe('Round Table seats', () => {
     const builder = { engine: 'claude' as const, duties: ['build' as const] };
     expect(checkSeats('hierarchy', [builder, { ...gemini, duties: ['plan', 'final'] }, { ...gemini, duties: ['challenge', 'review'] }], 0)).toBeNull();
     expect(checkSeats('hierarchy', [{ ...gemini, duties: ['build'] }, { ...claude, duties: ['plan', 'final'] }], 0)).toBe(GEMINI_SEAT_RULE);
-    expect(defaultSeatName(gemini, 'discussion')).toBe('Gemini CLI'); expect(seatNames([claude, gemini, gemini], 'discussion')).toEqual(['Claude Code', 'Gemini CLI', 'Gemini CLI 2']);
+    expect(defaultSeatName(gemini, 'discussion')).toBe('Gemini'); expect(seatNames([claude, gemini, gemini], 'discussion')).toEqual(['Claude Code', 'Gemini', 'Gemini 2']);
   });
   it('takes any number of discussion seats from two to eight', () => {
     const seats = (count: number): SeatSettings[] => Array.from({ length: count }, () => ({}));

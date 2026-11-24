@@ -7,6 +7,7 @@ import type { LinkedChatEvent, LinkedComputerEvent, RemoteControlRequest, Remote
 import type { ChatEnvelope } from '../shared/chat';
 import type { ScreenEvent } from '../shared/screen';
 import type { LiveTip } from '../shared/coaching';
+import type { AutoCheckStatus } from '../shared/auto-checks';
 
 // Sandbox preloads cannot require project modules; keep the allowlisted channel literal here.
 const host: CodingHubHost = {
@@ -40,6 +41,8 @@ const host: CodingHubHost = {
   readFile: (request) => ipcRenderer.invoke('coding-hub:read-file', request),
   gitStatus: (request) => ipcRenderer.invoke('coding-hub:git-status', request),
   gitDiff: (request) => ipcRenderer.invoke('coding-hub:git-diff', request),
+  gitLog: (request) => ipcRenderer.invoke('coding-hub:git-log', request),
+  gitCommit: (request) => ipcRenderer.invoke('coding-hub:git-commit', request),
   loadWorkspace: () => ipcRenderer.invoke('coding-hub:load-workspace'),
   saveWorkspace: (workspace) => ipcRenderer.invoke('coding-hub:save-workspace', workspace),
   listHistory: () => ipcRenderer.invoke('coding-hub:list-history'),
@@ -88,10 +91,20 @@ const host: CodingHubHost = {
     ipcRenderer.on('coding-hub:screen-event', receive);
     return () => ipcRenderer.removeListener('coding-hub:screen-event', receive);
   },
+  onTasksChanged: (listener) => {
+    const receive = () => listener();
+    ipcRenderer.on('coding-hub:tasks-changed', receive);
+    return () => ipcRenderer.removeListener('coding-hub:tasks-changed', receive);
+  },
   onAlertClick: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: AlertTarget) => listener(value);
     ipcRenderer.on('coding-hub:alert-click', receive);
     return () => ipcRenderer.removeListener('coding-hub:alert-click', receive);
+  },
+  onAutoCheckEvent: (listener) => {
+    const receive = (_event: Electron.IpcRendererEvent, value: AutoCheckStatus) => listener(value);
+    ipcRenderer.on('coding-hub:auto-check-event', receive);
+    return () => ipcRenderer.removeListener('coding-hub:auto-check-event', receive);
   },
   onCoachingEvent: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, value: LiveTip) => listener(value);

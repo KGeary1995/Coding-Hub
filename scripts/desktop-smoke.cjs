@@ -5,7 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { waitForPage } = require('./lib/wait.cjs');
-const { openView, addChannel, tileControl, setCodexModel } = require('./lib/navigate.cjs');
+const { openView, addChannel, tileControl, setCodexModel, showAdvanced } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 
@@ -265,6 +265,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
     // The page's Refresh reaches the delivery reading too (before 1.30.3 it kept the files it had read before): the list offers to stage the new file.
     await page.getByRole('button', { name: 'Stage later.md', exact: true }).waitFor({ timeout: 15000 });
+    // History reads the commits and the chosen one's files, and only reads (the index is checked below).
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.getByRole('button', { name: /^HEAD, main: Desktop fixture baseline, [0-9a-f]{7} by Fixture, / }).waitFor({ timeout: 15000 });
+    await page.locator('.commit-files li').first().waitFor();
+    await page.getByRole('button', { name: 'Uncommitted', exact: true }).click();
+    await page.getByRole('button', { name: 'Untracked later.md', exact: true }).waitFor();
     // A file opened from the command menu shows in the Files tree, its folder opened to it (1.31.1).
     await page.keyboard.press('Control+Shift+P'); await page.getByLabel('Search commands', { exact: true }).fill('/working desktop edit');
     await page.getByRole('option').filter({ hasText: 'main.ts' }).first().click();
@@ -298,6 +304,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'Application updates', exact: true }).waitFor();
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'status' }))).value.phase, 'disabled');
+    // Model pricing and the other advanced settings show with Settings → Show advanced tools (simple mode, 1.38.0).
+    await showAdvanced(page);
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'check' }))).error.code, 'UPDATES_DISABLED');
     assert.equal((await page.evaluate(() => window.codingHub.updates({ action: 'check', url: 'https://untrusted.invalid' }))).error.code, 'INVALID_UPDATE_REQUEST');
     await page.getByLabel('Local Drive folder', { exact: true }).fill(driveFolder);
@@ -455,9 +463,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
     await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
-    // + Channel lists Terminal, Claude Code, Codex, Gemini CLI, then both Round Tables (two channels are open, so both fit).
+    // + Channel lists Terminal, Claude Code, Codex, Gemini, then both Round Tables (two channels are open, so both fit).
     await page.getByRole('button', { name: 'New channel', exact: true }).click();
-    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini CLI', 'Round Table', 'Round Table (hierarchy)']);
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini', 'Round Table', 'Round Table (hierarchy)']);
     await page.keyboard.press('Escape');
     // Deliberately close immediately after a layout change; the host requests a final snapshot.
     await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click();

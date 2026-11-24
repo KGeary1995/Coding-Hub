@@ -34,7 +34,7 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
   </>;
 }
 
-const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', shell: 'Terminal' } as const;
+const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', shell: 'Terminal' } as const;
 
 /**
  * A chat channel on another computer: its conversation, written to and answered from here. Its recent events are read

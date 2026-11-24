@@ -34,6 +34,11 @@ export class Tasks {
   constructor(private root: string, private verification: Verification) {}
   list(): Task[] { return load(this.root, 'tasks.json', z.array(task).max(200), []); }
   private write(tasks: Task[]) { save(this.root, 'tasks.json', tasks); }
+  /** A task's notes alone (the task tools append an agent's note); everything else, its check included, stays as it is. */
+  setNotes(id: string, notes: string): Task {
+    const tasks = this.list(); const current = tasks.find((t) => t.id === id); if (!current) throw new HubError('TASK_MISSING', 'This task is no longer here.');
+    const value = task.parse({ ...current, notes }) as Task; this.write([...tasks.filter((t) => t.id !== id), value]); return value;
+  }
   async execute(input: unknown): Promise<Task[] | Task | TaskAudit | TaskSent | TaskWatch | TaskDetail | null> {
     const request = schema.parse(input); let tasks = this.list(); if (request.action === 'task-list') return tasks;
     if (request.action === 'task-save') {

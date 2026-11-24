@@ -51,7 +51,7 @@ export async function sendTask(id: string) {
   const session = useWorkspaceStore.getState().sessions.find((item) => item.id === task.sessionId);
   if (!session || session.status !== 'running' || !session.runId) throw new Error('Start that channel first, then send the task.');
   // A task's outcome is read back from the CLI's transcript, which Gemini CLI keeps in a form Trace does not read.
-  if (!isChatEngineConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini CLI.');
+  if (!isChatEngineConfig(session.config)) throw new Error('Give tasks to Claude Code or Codex channels, not terminals or Gemini.');
   // A terminal waiting on an approval would take the prompt's Enter as the answer (often Yes): the person answers first.
   if (!session.config.chat && session.attention) throw new Error('That channel is waiting for you. Answer what it asks first, then send the task.');
   // A hierarchy channel whose table is not open would give the task to the builder alone, unplanned and unreviewed.

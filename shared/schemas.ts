@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { hiddenSeatIds } from './table-seats';
+import { MAX_COMMAND, MAX_STEP, MAX_WAIT_SECONDS, MAX_WAIT_TEXT } from './start-order';
 
 const identifier = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 // Brackets allow Claude Code context suffixes such as `sonnet[1m]`; the leading character still prevents flags.
@@ -75,6 +76,7 @@ const sessionFields = {
   id: identifier, title: z.string().min(1).max(160), binding,
   budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
   preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
+  startup: z.object({ order: z.number().int().min(1).max(MAX_STEP), command: z.string().min(1).max(MAX_COMMAND).optional(), prompt: z.string().min(1).max(4000).optional(), waitFor: z.string().min(1).max(MAX_WAIT_TEXT).optional(), waitSeconds: z.number().int().min(5).max(MAX_WAIT_SECONDS).optional() }).strict().optional(),
   createdAt: z.string().datetime(),
 };
 const seatDuty = z.enum(['plan', 'challenge', 'build', 'review', 'final']);
@@ -134,6 +136,8 @@ export const openRepositorySchema = z.object({ directory: directory.min(1) }).st
 export const repositoryReferenceSchema = z.object({ repositoryId: z.string().uuid() }).strict();
 export const repositoryPathSchema = repositoryReferenceSchema.extend({ path: directory }).strict();
 export const gitDiffSchema = repositoryPathSchema.extend({ path: directory.min(1), area: z.enum(['working', 'staged', 'untracked']) }).strict();
+/** A full commit id (SHA-1 or SHA-256), never a ref or a revision expression: Git gets nothing it could read as an option. */
+export const gitCommitSchema = repositoryReferenceSchema.extend({ sha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/) }).strict();
 
 /** Requests from the window to a chat run. Images are base64 (Claude's limit is about 5 MB each; 10 per message). */
 export const chatRequestSchema = z.discriminatedUnion('action', [

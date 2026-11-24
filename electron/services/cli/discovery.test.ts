@@ -169,11 +169,11 @@ describe('Gemini CLI on PATH', () => {
     const native = path.join(bin, process.platform === 'win32' ? 'agy.exe' : 'agy');
     if (process.platform === 'win32') {
       await writeFile(path.join(scripts, 'agy.cmd'), '@echo off');
-      await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+      await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini \(agy\) was not found/);
     }
     await writeFile(native, 'MZ', { mode: 0o755 });
     expect((await findExecutable('gemini', { PATH: [scripts, bin].join(path.delimiter) })).file).toBe(native);
-    await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini CLI \(agy\) was not found/);
+    await expect(findExecutable('gemini', { PATH: scripts })).rejects.toThrow(/Gemini \(agy\) was not found/);
   });
 });
 

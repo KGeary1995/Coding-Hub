@@ -9,6 +9,8 @@ import { addLinkedChannel, useLinkedStore, waitingOn } from '../../state/linked-
 import { BookOpen, Cable, Puzzle, ChartColumn, CircleHelp, CircleUserRound, Columns2, Files, Folder, FolderCog, FolderOpen, Grid2X2, GraduationCap, History, ListChecks, Monitor, Network, PanelLeft, Plus, Rows2, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Search, UsersRound, type LucideIcon } from 'lucide-react';
 import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } from '../../state/workspace-store';
 import { CommandMenu } from '../CommandMenu';
+import { StartOrderButton } from './StartOrderButton';
+import { shownViews, useAdvanced } from '../../state/simple-mode';
 import { MenuButton, type MenuItem } from './MenuButton';
 import { TraceMark } from './TraceMark';
 import { ENGINE_ICONS } from '../tile/engine-icons';
@@ -28,7 +30,7 @@ export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIco
 ];
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
 const CHANNEL_KINDS = {
-  shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' }, gemini: { label: 'Gemini CLI', icon: ENGINE_ICONS.gemini, tone: 'gemini' },
+  shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' }, gemini: { label: 'Gemini', icon: ENGINE_ICONS.gemini, tone: 'gemini' },
   table: { label: 'Round Table', icon: UsersRound, tone: 'you' }, hierarchy: { label: 'Round Table (hierarchy)', icon: Network, tone: 'planner' },
 } as const;
 const channelItem = (kind: keyof typeof CHANNEL_KINDS, onSelect: () => void): MenuItem => { const { label, icon: Icon, tone } = CHANNEL_KINDS[kind]; return { label, icon: <span className={`ui-avatar small ${tone}`} aria-hidden="true"><Icon /></span>, onSelect }; };
@@ -63,6 +65,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
+  const advanced = useAdvanced();
   const insight = INSIGHT_VIEWS.find((item) => item.view === activeView);
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
@@ -92,16 +95,17 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
           <Monitor size={16} aria-hidden="true" />{computer.name}{waiting > 0 && <span className="tr-tab-badge ui-count waiting" aria-label={`${waiting} waiting`}>{waiting}</span>}</button>; })}
     </nav>
     <span className="tr-divider" aria-hidden="true" />
-    <MenuButton ariaLabel="Insight views" active={Boolean(insight)} label={<span className="tr-menu-label">{insight?.label ?? 'Insight'}</span>} items={toItems(INSIGHT_VIEWS)} />
+    <MenuButton ariaLabel="Insight views" active={Boolean(insight)} label={<span className="tr-menu-label">{insight?.label ?? 'Insight'}</span>} items={toItems(shownViews(INSIGHT_VIEWS, advanced))} />
     <span className="tr-spacer" />
     {activeView === 'workspace' && <div className="tr-seg tr-segmented" role="group" aria-label="Grid arrangement">
       <button className={explorer ? 'active' : ''} aria-label={explorer ? 'Hide explorer' : 'Show explorer'} title={explorer ? 'Hide explorer' : 'Show explorer'} aria-pressed={explorer} onClick={onToggleExplorer}><PanelLeft size={16} /></button>
       {[{ mode: 'columns' as const, icon: Columns2, label: 'Split vertically: columns' }, { mode: 'rows' as const, icon: Rows2, label: 'Split horizontally: rows' }, { mode: 'grid' as const, icon: Grid2X2, label: 'Arrange in grid' }].map(({ mode, icon: Icon, label }) =>
         <button key={mode} className={layoutMode === mode ? 'active' : ''} aria-label={label} title={label} aria-pressed={layoutMode === mode} onClick={() => arrange(mode)}><Icon size={16} /></button>)}
     </div>}
+    {activeView === 'workspace' && <StartOrderButton />}
     <CommandMenu />
     <button className="tr-icon icon-button" aria-label="Open help" title="Help & AI guide" onClick={() => setView('help')}><CircleHelp size={16} /></button>
-    <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal size={16} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(SETUP_VIEWS)} />
+    <MenuButton ariaLabel="Agent setup" active={setupActive} label={<><SlidersHorizontal size={16} aria-hidden="true" /><span className="tr-wide-label">Agent setup</span></>} items={toItems(shownViews(SETUP_VIEWS, advanced))} />
     {setup && <TableSetup mode={{ type: 'new', table: setup }} onFailure={tableFailed} onClose={() => { setSetup(null); document.querySelector<HTMLElement>('.tr-new-channel .tr-menu-button')?.focus(); }} />}
     <MenuButton className="tr-new-channel" buttonClassName="button primary" ariaLabel="New channel" title={!other && sessions.length >= MAX_CHANNELS ? channelsFullNote(sessions) ?? undefined : undefined} disabled={other ? !other.connected || other.channels.length >= MAX_CHANNELS : sessions.length >= MAX_CHANNELS} label={<><Plus size={16} aria-hidden="true" /><span className="tr-wide-label">Channel</span></>} items={channelMenu} />
   </header>;

@@ -206,7 +206,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // Nothing but Gemini seats was saved (here, or already dropped by the host): the default channels, in the saved folder.
     const workspace = migrated.workspace;
     if (!workspace && migrated.rootDirectory) { set({ rootDirectory: migrated.rootDirectory, loadNotice, storageInfo, persistenceReady: true, persistenceStatus: 'saved', persistenceError: null }); return; }
-    const sessions = workspace?.sessions.map((session): Session => ({ ...session, status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));
+    // A Gemini channel still named "Gemini CLI" (its default before 1.38.0) takes today's default name.
+    const sessions = workspace?.sessions.map((session): Session => ({ ...session, ...(session.config.engine === 'gemini' && session.title === 'Gemini CLI' ? { title: DEFAULT_TITLES.gemini } : {}), status: 'idle' as const, pid: null, runId: null, runningCwd: null, error: null, endedAt: null, exitCode: null, logFile: null }));
     // A workspace from 1.16 gave a Round Table's partner its own tile: laid out again without it.
     const seated = sessions ? seatedIds(sessions) : new Set<string>();
     const tiles = workspace && sessions && workspace.tiles.some((tile) => seated.has(tile.sessionId)) ? arrangeTiles(sessions, workspace.layoutMode) : workspace && first ? widenShortRow(workspace.tiles, workspace.layoutMode) : workspace?.tiles;
@@ -298,7 +299,7 @@ export function savedWorkspace(state = useWorkspaceStore.getState()): SavedWorks
   return {
     version: 1, rootDirectory: state.rootDirectory,
     // A table whose hidden seats are all gone is not saved, unless it still holds findings that could not be saved to memory.
-    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(roundTable && (hiddenSeatIds(roundTable, id).some((seat) => state.sessions.some((item) => item.id === seat)) || roundTable.findings?.length) ? { roundTable } : {}) })),
+    sessions: state.sessions.map(({ id, title, config, binding, createdAt, budget, preparedRequest, roundTable, startup }) => ({ id, title, config, binding, createdAt, ...(budget ? { budget } : {}), ...(preparedRequest ? { preparedRequest } : {}), ...(startup ? { startup } : {}), ...(roundTable && (hiddenSeatIds(roundTable, id).some((seat) => state.sessions.some((item) => item.id === seat)) || roundTable.findings?.length) ? { roundTable } : {}) })),
     // Saved tiles always match the channels, whichever path added or removed a hidden seat.
     tiles: fitTiles(state.sessions, state.tiles, state.layoutMode), layoutMode: state.layoutMode,
     focusedSessionId: state.focusedSessionId && channelsOf(state.sessions).some((session) => session.id === state.focusedSessionId) ? state.focusedSessionId : null,

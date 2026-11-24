@@ -16,11 +16,11 @@ export function GeminiModelPicker({ id, config, onChange }: { id: string; config
   const listed = catalog?.models.some((item) => item.model === config.model);
   return <label className="model-control ui-field">Model
     {catalog ? <select aria-label="gemini model" value={config.model} onChange={(event) => onChange({ ...config, model: event.target.value })}>
-      <option value="">Gemini CLI’s default</option>
+      <option value="">Gemini’s default</option>
       {catalog.models.map((item) => <option key={item.model} value={item.model}>{item.displayName}</option>)}
       {config.model && !listed && <option value={config.model}>{config.model} · saved, not listed now</option>}
-    </select> : <input aria-label="gemini model" placeholder="Gemini CLI’s default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />}
-    <small className="ui-hint">{busy ? 'Loading models from Gemini CLI…' : catalog ? `${catalog.models.length} models your account can use, as Gemini CLI lists them. The name includes the effort (Low to XHigh).` : 'Enter an exact model ID, or leave blank for Gemini CLI’s default.'} Applies when the channel starts.</small>
+    </select> : <input aria-label="gemini model" placeholder="Gemini’s default" list={`models-${id}`} maxLength={MAX_MODEL_LENGTH} value={config.model} onChange={(event) => { const model = modelValue(event.target.value); if (model !== null) onChange({ ...config, model }); }} spellCheck={false} />}
+    <small className="ui-hint">{busy ? 'Loading models from Gemini…' : catalog ? `${catalog.models.length} models your account can use, as Gemini lists them. The name includes the effort (Low to XHigh).` : 'Enter an exact model ID, or leave blank for Gemini’s default.'} Applies when the channel starts.</small>
     <button type="button" className="quiet-button small" disabled={busy} onClick={() => setRevision((value) => value + 1)}>Refresh Gemini models</button>
     {error && <small className="ui-hint error-message" role="alert">{error}</small>}
   </label>;

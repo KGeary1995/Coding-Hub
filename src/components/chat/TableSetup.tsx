@@ -15,7 +15,7 @@ import { modelProblem } from './seat-model';
 import { addSeat, draftFromPreset, draftFromTable, draftProblem, patchSeat, pickPreset, placeholders, removePreset, removeSeat, roomNote, roundsRange, runSetup, saveAsPreset, setDriver, setDuty, updatePreset, withKind, type Draft, type SetupDeps, type SetupMode } from './table-setup-model';
 
 const DEPS: SetupDeps = { startTable, openTable, changeSeats };
-const AGENTS = [{ engine: 'claude' as const, label: 'Claude Code' }, { engine: 'codex' as const, label: 'Codex' }, { engine: 'gemini' as const, label: 'Gemini CLI' }];
+const AGENTS = [{ engine: 'claude' as const, label: 'Claude Code' }, { engine: 'codex' as const, label: 'Codex' }, { engine: 'gemini' as const, label: 'Gemini' }];
 const agentOf = (value: string) => value === 'codex' ? 'codex' as const : value === 'gemini' ? 'gemini' as const : 'claude' as const;
 const KIND_LABEL: Record<TableKind, string> = { discussion: 'Discussion: agents answer each other', hierarchy: 'Hierarchy: plan, build, review' };
 
@@ -138,7 +138,7 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
                 <small className="ui-hint tnum">{seat.instructions.length.toLocaleString('en-US')} of {MAX_SEAT_INSTRUCTIONS.toLocaleString('en-US')} characters</small></label>
               {hierarchy
                 ? <div role="group" aria-label={`${label} duties`} className="table-setup-duties">{SEAT_DUTIES.map((duty) => <label key={duty} className="ui-check"><input type="checkbox" checked={seat.duties.includes(duty)} disabled={duty === 'build' || seat.lead} onChange={(event) => change(setDuty(draft, index, duty, event.target.checked))} />{DUTY_LABEL[duty]}</label>)}</div>
-                : <label className="ui-check"><input type="radio" name={`${id}-driver`} checked={draft.driver === index} disabled={seat.engine === 'gemini'} onChange={() => change(setDriver(draft, index))} />Edits files <span className="ui-hint">{seat.engine === 'gemini' ? '(a Gemini CLI seat reviews or plans; it does not edit)' : '(the others review and stay read-only)'}</span></label>}
+                : <label className="ui-check"><input type="radio" name={`${id}-driver`} checked={draft.driver === index} disabled={seat.engine === 'gemini'} onChange={() => change(setDriver(draft, index))} />Edits files <span className="ui-hint">{seat.engine === 'gemini' ? '(a Gemini seat reviews or plans; it does not edit)' : '(the others review and stay read-only)'}</span></label>}
               {hierarchy && seat.lead && <small className="ui-hint">The builder leads the table and only builds; the other seats stay read-only.</small>}
               {!seat.lead && <button type="button" className="quiet-button small" aria-label={`Remove ${label}`} onClick={() => change(removeSeat(draft, index))}><Trash2 size={13} />Remove seat</button>}
             </fieldset></li>; })}

@@ -17,13 +17,13 @@ export const SEAT_DUTIES: readonly SeatDuty[] = ['plan', 'challenge', 'build', '
 export const DUTY_LABEL: Record<SeatDuty, string> = { plan: 'Plans', challenge: 'Challenges the plan', build: 'Builds', review: 'Reviews', final: 'Final review' };
 /** A seat's default name at a hierarchy table, from the first of its duties in this order. */
 const DUTY_NAME: [SeatDuty, string][] = [['build', 'Builder'], ['plan', 'Planner'], ['review', 'Reviewer'], ['challenge', 'Challenger'], ['final', 'Final reviewer']];
-const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+const ENGINE_NAME: Record<SeatEngine, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
 /**
  * A Gemini CLI seat reviews or plans and never edits: Trace runs it in Gemini CLI's plan mode and declines its file
  * changes. So it cannot lead a table (the lead's channel shows it, and a hierarchy's lead builds), be the discussion
  * seat that edits, or build.
  */
-export const GEMINI_SEAT_RULE = 'A Gemini CLI seat reviews or plans: it cannot lead the table, edit files or build.';
+export const GEMINI_SEAT_RULE = 'A Gemini seat reviews or plans: it cannot lead the table, edit files or build.';
 export const MAX_SEAT_NAME = 40;
 export const MAX_SEAT_INSTRUCTIONS = 4000;
 export const MAX_TABLE_PRESETS = 20;

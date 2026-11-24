@@ -42,7 +42,7 @@ function base64(bytes: Uint8Array) { let text = ''; for (let i = 0; i < bytes.le
 /** Sends an image to a channel on a linked computer; what went wrong shows above that computer's channels. */
 function sendImage(entry: Entry, computerId: string, sessionId: string, engine: ChannelEngine, image: string) {
   const runId = entry.runId; if (!runId) return;
-  if (engine === 'shell' || engine === 'gemini') { useLinkedStore.setState({ addError: 'Images paste into Claude Code and Codex channels, not terminals or Gemini CLI.' }); return; }
+  if (engine === 'shell' || engine === 'gemini') { useLinkedStore.setState({ addError: 'Images paste into Claude Code and Codex channels, not terminals or Gemini.' }); return; }
   useLinkedStore.setState({ addError: '' });
   entry.queue = entry.queue.then(() => workbench({ action: 'linked-paste-image', id: computerId, sessionId, runId, image })).catch((error: Error) => useLinkedStore.setState({ addError: error.message }));
 }

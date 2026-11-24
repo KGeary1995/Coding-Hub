@@ -68,9 +68,9 @@ describe('a discussion table with three seats', () => {
     tables.open(1, A, [{ sessionId: 'a', runId: A }, { sessionId: 'b', runId: B }], 'a', 1);
     expect(modes).toEqual({ [A]: false, [B]: true }); expect(last().seats!.map((seat) => seat.engine)).toEqual(['claude', 'gemini']);
     // What Gemini CLI asks to write (its protocol names any file change so) is declined, as for any reviewer.
-    expect(ask(B, 'r1', 'File changes')).toBe('Trace declined File changes for Gemini CLI: the reviewer does not edit files. Swap the driver to let it.');
+    expect(ask(B, 'r1', 'File changes')).toBe('Trace declined File changes for Gemini: the reviewer does not edit files. Swap the driver to let it.');
     expect(answers).toEqual([{ runId: B, requestId: 'r1', allow: false }]);
-    expect(() => tables.setDriver(A, 'b')).toThrow(/Gemini CLI seat reviews or plans/); expect(() => tables.setDriver(A, 'gemini')).toThrow(/Gemini CLI seat reviews or plans/);
+    expect(() => tables.setDriver(A, 'b')).toThrow(/Gemini seat reviews or plans/); expect(() => tables.setDriver(A, 'gemini')).toThrow(/Gemini seat reviews or plans/);
     // A message goes to both, and each then reads what the other said.
     tables.send(A, 'What is this project?', []); expect(to(B).at(-1)!.text).toContain('What is this project?');
     reply(A, 'A scratch project.'); reply(B, 'About lighthouses.');

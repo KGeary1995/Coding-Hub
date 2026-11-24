@@ -4,7 +4,7 @@ const { realpath, mkdtemp } = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { _electron } = require('playwright-core');
-const { openView, addChannel } = require('./lib/navigate.cjs');
+const { openView, addChannel, showAdvanced } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 (async () => {
@@ -86,8 +86,11 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('heading', { name: 'Usage', exact: true }).waitFor();
     await page.keyboard.press('g'); await page.keyboard.press('w');
     await page.locator('.session-tile').first().waitFor();
-    // AI coaching and Verification are in the Insight menu itself (1.31.5; before, on a More tools page), and the menu
-    // names the view it is on.
+    // Simple mode (1.38.0): the Insight menu holds the everyday views; AI coaching and Verification join them (in the
+    // menu itself, 1.31.5) once Settings → Show advanced tools is on. The menu names the view it is on.
+    await page.getByRole('button', { name: 'Insight views', exact: true }).click();
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'Search']);
+    await page.keyboard.press('Escape'); await showAdvanced(page);
     await page.getByRole('button', { name: 'Insight views', exact: true }).click();
     assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Usage', 'Session history', 'Files', 'Search', 'AI coaching', 'Verification profiles']);
     await page.getByRole('menuitem', { name: 'Verification profiles', exact: true }).click();
