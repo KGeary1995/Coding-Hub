@@ -265,11 +265,10 @@ else if (args.startsWith('serve --bg --https=443')) {
     assert.ok(narrow.page <= narrow.width && !narrow.past.length && narrow.title >= 72, `the channel screen at 320 px: ${JSON.stringify(narrow)}`); await phoneSize(390);
     // The phone's own Back (Android's Back button, the iPhone's swipe) leaves the channel for the list, not the app (1.31.6).
     await phone.goBack(); await phone.locator('#channel-list button').first().waitFor(); assert.ok(phone.url().startsWith(`http://127.0.0.1:${PORT}`), 'still in the app');
-    // The phone's + Channel offers terminals only (chats come with a Round Table). A chat channel is still added through
-    // the same request (linked computers and older phone apps send it), so the chat checks below use that.
+    // The phone's + Channel offers each agent as a terminal and, from 1.39.1, as a chat, as the computer's does. The chat
+    // checks below add theirs through the same request the menu sends.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
-    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini'], 'the phone\'s + Channel order');
-    assert.equal(await phone.getByRole('menuitem', { name: /chat/i }).count(), 0, 'no Claude chat or Codex chat on the phone\'s + Channel');
+    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini', 'Claude Code chat', 'Codex chat', 'Gemini chat'], 'the phone\'s + Channel order');
     await phone.locator('#add-channel').click();
     assert.equal(await phone.evaluate(async () => (await fetch('/api/channel-add', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'claude', chat: true }) })).status), 200);
     await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();

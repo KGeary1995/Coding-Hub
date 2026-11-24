@@ -31,6 +31,7 @@ export const SETUP_VIEWS: { view: NavigationView; label: string; icon: LucideIco
 /** What + Channel adds, each with its avatar: an engine's is the one its tile shows. */
 const CHANNEL_KINDS = {
   shell: { label: 'Terminal', icon: ENGINE_ICONS.shell, tone: 'shell' }, claude: { label: 'Claude Code', icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { label: 'Codex', icon: ENGINE_ICONS.codex, tone: 'codex' }, gemini: { label: 'Gemini', icon: ENGINE_ICONS.gemini, tone: 'gemini' },
+  claudeChat: { label: 'Claude Code chat', icon: ENGINE_ICONS.claude, tone: 'claude' }, codexChat: { label: 'Codex chat', icon: ENGINE_ICONS.codex, tone: 'codex' }, geminiChat: { label: 'Gemini chat', icon: ENGINE_ICONS.gemini, tone: 'gemini' },
   table: { label: 'Round Table', icon: UsersRound, tone: 'you' }, hierarchy: { label: 'Round Table (hierarchy)', icon: Network, tone: 'planner' },
 } as const;
 const channelItem = (kind: keyof typeof CHANNEL_KINDS, onSelect: () => void): MenuItem => { const { label, icon: Icon, tone } = CHANNEL_KINDS[kind]; return { label, icon: <span className={`ui-avatar small ${tone}`} aria-hidden="true"><Icon /></span>, onSelect }; };
@@ -70,7 +71,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
-  // The order is the person's: Terminal, Claude Code, Codex, Gemini CLI, then the Round Tables (on the phone too).
+  // The order is the person's: Terminal, Claude Code, Codex, Gemini, their chats, then the Round Tables (on the phone too).
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   // The tiles of the plugins that are on (docs/plugins.md), read again when the view changes (after Skills & plugins).
   const [tiles, setTiles] = useState<{ plugin: string; tile: string; title: string; name: string }[]>([]);
@@ -79,6 +80,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const channelMenu: MenuItem[] = other
     ? (['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine)))
     : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
+      // The same agents as chats (1.39.0): the conversation in Trace's own view instead of the CLI's terminal.
+      ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelItem(`${engine}Chat`, () => useWorkspaceStore.getState().addChatSession(engine))),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
       ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : []),
       ...tiles.map((item): MenuItem => ({ label: `${item.title} (${item.name})`, icon: <span className="ui-avatar small shell" aria-hidden="true"><Puzzle /></span>, onSelect: () => addPluginTile({ id: item.plugin, tile: item.tile }, item.title) }))];
