@@ -81,7 +81,8 @@ describe('chat transcripts', () => {
   });
 });
 
-describe('Gemini conversations', () => {
+/** Each test writes a real SQLite conversation (250 steps in one): longer than the 5 s default on a busy Windows runner. */
+describe('Gemini conversations', { timeout: 60_000 }, () => {
   const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-transcript-'));
   it('reads what the person typed and what Gemini replied, thought and ran, not its tools\' output or agy\'s own messages', () => {
     const file = writeGeminiConversation(home(), [
