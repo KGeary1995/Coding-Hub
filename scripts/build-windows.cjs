@@ -9,8 +9,6 @@ function run(file, args) {
   if (result.status !== 0) throw new Error(`Release command failed with exit ${result.status ?? result.signal}.`);
 }
 try {
-  // An installed Trace always has the background runner's job-object helper: this fails without C++ build tools.
-  if (process.platform === 'win32') { const helper = spawnSync(process.execPath, [path.join(__dirname, 'build-jobs-helper.cjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, TRACE_REQUIRE_JOBS_HELPER: '1' } }); if (helper.status !== 0 || !fs.existsSync(path.join(root, 'dist-electron', 'native', 'trace-jobs.exe'))) throw new Error('The job-object helper trace-jobs.exe could not be built.'); }
   const args = process.argv.slice(2);
   const signed = args.includes('--signed'); if (signed) args.splice(args.indexOf('--signed'), 1);
   if (signed && (process.platform !== 'win32' || !process.env.CSC_LINK || !process.env.WINDOWS_PUBLISHER_NAME)) throw new Error('Signed builds require native Windows, CSC_LINK, and the public WINDOWS_PUBLISHER_NAME. Configure certificate/password securely in build settings.');
@@ -22,6 +20,8 @@ try {
     else throw new Error('Supported arguments: --output <folder>, --version <stable-version>.');
   }
   releaseVersion(version);
+  // An installed Trace always has the background runner's job-object helper: this fails without C++ build tools.
+  if (process.platform === 'win32') { const helper = spawnSync(process.execPath, [path.join(__dirname, 'build-jobs-helper.cjs')], { cwd: root, stdio: 'inherit', env: { ...process.env, TRACE_REQUIRE_JOBS_HELPER: '1' } }); if (helper.status !== 0 || !fs.existsSync(path.join(root, 'dist-electron', 'native', 'trace-jobs.exe'))) throw new Error('The job-object helper trace-jobs.exe could not be built.'); }
   const stage = createStage(output);
   console.log(`Build staging directory: ${stage}`);
   const builder = path.join(path.dirname(require.resolve('electron-builder/package.json')), 'out/cli/cli.js');
