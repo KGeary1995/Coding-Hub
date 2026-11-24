@@ -1,7 +1,7 @@
 import { redactDiagnostic } from '../shared/productivity';
 import { Workflows } from './services/workbench/workflows';
 import { Delivery } from './services/workbench/delivery';
-import { ChildProcess, execFile } from 'node:child_process';
+import { ChildProcess, execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import { Diagnostics } from './services/workbench/diagnostics';
@@ -33,7 +33,7 @@ import { randomUUID } from 'node:crypto';
 import { chatHistory, chatText, taskHistory } from './services/chat/transcript';
 import { macScreenLock } from './services/remote/screen-lock';
 import { clipboardPreviewType, COPY_LIMIT, IPC_CHANNELS, type HostResult } from '../shared/ipc';
-import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment } from './services/cli/discovery';
+import { adoptLoginShellPath, discoverEngine, findExecutable, freshHostEnvironment, hostEnvironment } from './services/cli/discovery';
 import { geminiConversationSince, geminiHome } from './services/cli/gemini-conversations';
 import { HubError } from './services/cli/engine-adapter';
 import { ClaudeProfiles } from './services/cli/claude-profiles';
@@ -44,6 +44,9 @@ import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
+import { Plugins, type PluginContext } from './services/plugins/plugins';
+import { PluginApi } from './services/plugins/plugin-api';
+import type { PluginEventName } from '../shared/plugins';
 import { gpuCrashWindows, HostHealth, mainStalls, pruneCrashDumps, timed } from './services/storage/host-health';
 import { chatRequestSchema, finishWorkspaceFlushSchema, openLinkSchema, permissionLevel, resizeSessionSchema, webLink, windowHealthSchema } from '../shared/schemas';
 import { DOWNLOADS_URL } from '../shared/updates';
@@ -150,28 +153,58 @@ const repositoryGit = new RepositoryGit(repositoryFiles);
  * that on. A Round Table counts as its lead's channel, and a message to it goes to the table; to a chat it goes in as a chat
  * message, to a terminal as a line.
  */
+/** This computer's channels in order, a Round Table counted as its lead's (for the channel tools and plugins). */
+function channelList() { const running = new Map(manager.running().map((run) => [run.sessionId, run])); return workspaceChannels().filter((session) => !session.seatedAt).map((session, index) => ({ channel: index + 1, sessionId: session.id, name: session.title, engine: session.engine, running: running.has(session.id), waiting: null, folder: running.get(session.id)?.cwd ?? null })); }
+/** A channel's last `count` replies, from its CLI's own conversation, as text. */
+function channelReplies(sessionId: string, count: number) { return (channelTranscript(sessionId)?.messages ?? []).flatMap((message) => message.role === 'assistant' ? [message.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n').trim()] : []).filter(Boolean).slice(-count).map((text) => text.slice(-8000)); }
+/** Types a message into a running channel: a chat gets it as a message (a Round Table's lead passes it to the table), a terminal as a line. */
+async function sendToChannel(sessionId: string, text: string) {
+  const run = manager.running().find((item) => item.sessionId === sessionId); if (!run) throw new HubError('CHANNEL_TOOLS_STOPPED', 'That channel is not running.');
+  // A Round Table's lead passes it to the table, as a message typed there does (1.33.2; before, the lead alone got it).
+  if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: manager.leadsTable(run.runId) ? 'table-send' : 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
+}
+/** What a plugin action is about (docs/plugins.md, section 3): the project, the channel it was asked on, its folder and branch. */
+function pluginContext(sessionId?: string, repository?: string): PluginContext {
+  const channel = sessionId ? channelList().find((item) => item.sessionId === sessionId) : undefined; const folder = repository ?? channel?.folder ?? storage?.load()?.rootDirectory ?? null;
+  let branch: string | null = null; if (folder) try { branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: folder, encoding: 'utf8', timeout: 2000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; } catch { /* Not a Git folder. */ }
+  return { project: storage?.load()?.rootDirectory ?? null, channel: channel?.channel ?? null, channelName: channel?.name ?? null, folder, branch };
+}
+/**
+ * The `trace` helper's launcher (TRACE_CLI): a small script that runs trace-cli.js with Trace's own runtime, so a plugin
+ * written as a shell or PowerShell script can call the plugin API in one line. Written again at each start.
+ */
+function writeTraceCli(folder: string) {
+  const cli = path.join(__dirname, 'services', 'plugins', 'trace-cli.js');
+  const file = path.join(folder, process.platform === 'win32' ? 'trace.cmd' : 'trace');
+  const text = process.platform === 'win32' ? `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath}" "${cli}" %*\r\n` : `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${process.execPath}" "${cli}" "$@"\n`;
+  // Storage that cannot be written (Trace then runs without it) leaves plugins without the helper, not Trace unstarted.
+  try { fs.mkdirSync(folder, { recursive: true, mode: 0o700 }); fs.writeFileSync(file, text, { mode: 0o755 }); } catch { hostHealth?.record('trace-cli-unwritable'); }
+  return file;
+}
 const channelTools = new ChannelTools({
   enabled: () => { try { return hub?.preferences().channelTools === true; } catch { return false; } },
-  channels: () => { const running = new Map(manager.running().map((run) => [run.sessionId, run])); return workspaceChannels().filter((session) => !session.seatedAt).map((session, index) => ({ channel: index + 1, sessionId: session.id, name: session.title, engine: session.engine, running: running.has(session.id), waiting: null, folder: running.get(session.id)?.cwd ?? null })); },
+  channels: () => channelList(),
   sessionOf: (runId) => manager.running().find((run) => run.runId === runId)?.sessionId ?? null,
-  replies: (sessionId, count) => (channelTranscript(sessionId)?.messages ?? []).flatMap((message) => message.role === 'assistant' ? [message.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n').trim()] : []).filter(Boolean).slice(-count).map((text) => text.slice(-8000)),
-  send: async (sessionId, text) => {
-    const run = manager.running().find((item) => item.sessionId === sessionId); if (!run) throw new HubError('CHANNEL_TOOLS_STOPPED', 'That channel is not running.');
-    // A Round Table's lead passes it to the table, as a message typed there does (1.33.2; before, the lead alone got it).
-    if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: manager.leadsTable(run.runId) ? 'table-send' : 'send', sessionId, runId: run.runId, text, images: [] }); else manager.writeRemote({ sessionId, runId: run.runId }, text + '\r');
-  },
+  replies: (sessionId, count) => channelReplies(sessionId, count),
+  send: (sessionId, text) => sendToChannel(sessionId, text),
 });
 /** Event hooks (1.33.1): built once storage is known, below; until then events run none. */
 let eventHooks: EventHooks | null = null;
+/** Trace plugins (1.35.0, docs/plugins.md) and their API: built once storage is known, below. */
+let plugins: Plugins | null = null; let pluginApi: PluginApi | null = null;
 /** Runs the person's event hooks for a channel's event, named as the window names it. Seats count as their table's channel. */
-function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed', sessionId: string, message: string) {
-  if (!eventHooks) return;
+function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed' | 'started' | 'stopped', sessionId: string, message: string) {
+  if (!eventHooks && !plugins) return;
   try {
     const channels = workspaceChannels(); const own = channels.find((session) => session.id === sessionId); const lead = own?.seatedAt ? channels.find((session) => session.id === own.seatedAt) : own;
     const shown = channels.filter((session) => !session.seatedAt); const index = lead ? shown.indexOf(lead) : -1; if (index < 0) return;
     // A seat's turn ending says nothing about the table's work: only its lead's (or an approval or failure) is passed on.
     if (event === 'turn-ended' && own?.seatedAt) return;
-    eventHooks.fire(event, lead!.id, { channel: index + 1, name: lead!.title, message, folder: manager.running().find((run) => run.sessionId === lead!.id)?.cwd ?? null });
+    const folder = manager.running().find((run) => run.sessionId === lead!.id)?.cwd ?? null;
+    if (event === 'needs-you' || event === 'turn-ended' || event === 'failed') eventHooks?.fire(event, lead!.id, { channel: index + 1, name: lead!.title, message, folder });
+    // A seat starting or stopping is its table's business: only the lead's is passed on to plugins.
+    if ((event === 'started' || event === 'stopped') && own?.seatedAt) return;
+    plugins?.fire(`channel.${event}` as PluginEventName, lead!.id, { project: storage?.load()?.rootDirectory ?? null, channel: index + 1, channelName: lead!.title, folder, message });
   } catch { hostHealth?.record('event-hook-failed'); }
 }
 /** The channel-tools MCP server's settings file for each Claude run, removed when the run ends. */
@@ -191,6 +224,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (event.type === 'attention') hookEvent('needs-you', event.sessionId, event.message);
   else if (event.type === 'answered' && event.finished) hookEvent('turn-ended', event.sessionId, 'The agent ended its turn.');
   else if (event.type === 'exit' && event.diagnostic) hookEvent('failed', event.sessionId, event.diagnostic);
+  if (event.type === 'started') hookEvent('started', event.sessionId, 'The channel started.');
+  else if (event.type === 'exit') hookEvent('stopped', event.sessionId, event.diagnostic ?? 'The channel stopped.');
   // A Gemini CLI terminal names its conversation as it quits (pty-manager): its usage is read from that conversation's
   // file, before the run is ended below. For any other run this is nothing new to telemetry.
   if (event.type === 'conversation') try { hub?.telemetry?.setGeminiConversation(event.runId, event.conversationId); } catch { hostHealth?.record('telemetry-read-failed'); }
@@ -755,6 +790,26 @@ else app.whenReady().then(() => {
   const diagnostics = new Diagnostics(claudeProfiles);
   verification = new Verification(storageRoot, async (profile) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run verification', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run trusted project commands', message: `${profile.name} — ${profile.directory}`, detail: profile.steps.map((step) => `${step.label}: ${step.tool} ${JSON.stringify(step.args)}`).join('\n') + `\nCommands and package hooks run with your local permissions. Timeout: ${profile.timeoutSeconds}s per step.` })).response === 0 && !updateRestart);
   const tasks = new Tasks(storageRoot, verification);
+  // Plugins: the API they call back on, and the service that runs them (docs/plugins.md).
+  pluginApi = new PluginApi({
+    plugin: (id, token) => plugins?.pluginOfToken(id, token) ?? null,
+    channels: () => channelList(), replies: (sessionId, count) => channelReplies(sessionId, count), waiting: (sessionId) => channelTools.waitingOf(sessionId), wait: (sessionId, timeout) => channelTools.waitFor(sessionId, timeout),
+    send: (sessionId, text) => sendToChannel(sessionId, text), control: (sessionId, control) => controlChannel(sessionId, control), add: (engine, chat) => addChannel(engine, chat),
+    tasks: () => { const shown = channelList(); return (tasks.list()).map((task) => ({ id: task.id, title: task.title, status: task.status, channel: shown.find((item) => item.sessionId === task.sessionId)?.channel ?? null })); },
+    addTask: async (title, details, sessionId) => { const directory = storage?.load()?.rootDirectory; if (!directory) throw new HubError('PLUGIN_API_PROJECT', 'Open a project in Trace first: a task belongs to one.'); const saved = await tasks.execute({ action: 'task-save', title, ...(details ? { details } : {}), directory, sessionId, scope: ['**'], status: 'queued', notes: '', verificationId: null }) as { id: string }; return { id: saved.id }; },
+    notify: (title, body) => desktopAlert({ title, body, target: { view: 'skills' } }, true),
+  });
+  void pluginApi.start().catch(() => hostHealth?.record('plugin-api-unavailable'));
+  const traceCli = writeTraceCli(path.join(storageRoot, 'plugins', 'bin'));
+  plugins = new Plugins(storageRoot, {
+    version: app.getVersion(), environment: () => hostEnvironment(),
+    api: (id, token) => ({ url: pluginApi?.url(id, token) ?? '', cli: traceCli }),
+    confirm: async (preview) => (await dialog.showMessageBox(window!, { type: 'warning', buttons: ['Add plugin', 'Cancel'], defaultId: 1, cancelId: 1, title: preview.title, message: `${preview.title}? It runs as you, on this computer, and nobody has reviewed it.`,
+      detail: [`Folder: ${preview.folder}`, `Version ${preview.manifest.version}${preview.manifest.description ? ` · ${preview.manifest.description}` : ''}`, `It may use Trace to: ${preview.manifest.permissions.length ? preview.manifest.permissions.join(', ') : 'nothing'}`, '', 'Every command it may run:', ...preview.commands.map((item) => `  ${item.what}: ${item.command.map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ')}`)].join('\n') })).response === 0,
+    context: (sessionId, repository) => pluginContext(sessionId, repository),
+    failed: (name, what, why) => desktopAlert({ title: `${name} failed`, body: `${what}: ${why}`, target: { view: 'skills' } }),
+  });
+  setTimeout(() => plugins?.fire('trace.started', 'trace', { project: storage?.load()?.rootDirectory ?? null }), 3000);
   eventHooks = new EventHooks(storageRoot, async (item) => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Save event hook', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run a program on an event', message: `When a channel ${item.event === 'needs-you' ? 'needs you' : item.event === 'turn-ended' ? 'ends its turn' : 'fails'}, Trace will run:`, detail: [item.program, ...item.args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ') + '\n\nIt runs as you, without a shell, with the channel\'s number, name, folder and message in TRACE_* environment variables. Save it only if you trust this program.' })).response === 0);
   const experiments = new Experiments(storageRoot, (id) => Boolean(storage?.history().some((run) => run.runId === id)));
   const readyForBackup = async () => { if (manager.hasSessions || accounts.active || projectSetup.active || worktrees?.active || projectChecks?.running || verification?.running || delivery?.running || workflows?.running) throw new HubError('BACKUP_BUSY', 'Stop all channels and verification jobs before backing up or restoring.'); if (!storage || !workspaceLoaded) throw new HubError('BACKUP_STORAGE', 'Load a writable workspace before backing up.'); await flushWorkspace(); if (!lastFlushSucceeded) throw new HubError('BACKUP_SAVE', 'Save the workspace successfully before backing up.'); };
@@ -998,6 +1053,9 @@ else app.whenReady().then(() => {
     if (['verification-run', 'backup-create', 'backup-restore', 'backup-import'].includes(action)) refuseDuringScriptUpdate();
     if (action.startsWith('verification-')) return verification!.execute(payload);
     if (action.startsWith('hook-')) return eventHooks!.execute(payload);
+    if (action.startsWith('plugin-')) return plugins!.execute(payload);
+    // A task the agent says is done: plugins hear it (task.ready-for-review).
+    if (action === 'task-status') { const result = await tasks.execute(payload); const value = result as { status?: string; id?: string; title?: string } | null; if (value?.status === 'review') plugins?.fire('task.ready-for-review', value.id ?? '', { project: storage?.load()?.rootDirectory ?? null, message: value.title ?? '' }); return result; }
     if (action.startsWith('task-')) return tasks.execute(payload);
     if (action.startsWith('experiment-') || action.startsWith('trial-')) return experiments.execute(payload);
     if (action.startsWith('backup-')) return backups!.execute(payload);
@@ -1009,7 +1067,13 @@ else app.whenReady().then(() => {
   projectChecks = new ProjectChecks((directory) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Shared rules storage is unavailable.'); hub.rules.verifyLaunch(directory); });
   handle(IPC_CHANNELS.projectChecks, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate(); return projectChecks!.execute(payload, async () => (await dialog.showMessageBox(window!, { type: 'question', buttons: ['Run project code', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Run project check', message: 'Run this project’s npm script?', detail: 'Tests, typecheck, or lint scripts and their npm pre/post hooks execute project code with your local permissions. Only run checks in projects you trust. Output is capped and the check stops after 60 seconds.' })).response === 0 && !updateRestart); });
   worktrees = new WorktreeService(storageRoot, directoryInUse);
-  handle(IPC_CHANNELS.projectTools, (_owner, payload) => { if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate(); return worktrees!.execute(payload); });
+  handle(IPC_CHANNELS.projectTools, async (_owner, payload) => {
+    if (updateRestart) throw new HubError('HOST_CLOSING', 'The app is restarting.'); refuseDuringScriptUpdate();
+    const result = await worktrees!.execute(payload);
+    // A new worktree: plugins hear it (worktree.created), with its folder and branch.
+    const made = result as { directory?: string; branch?: string } | null; if ((payload as { action?: string })?.action === 'worktree-create' && made?.directory) plugins?.fire('worktree.created', made.directory, { project: storage?.load()?.rootDirectory ?? null, folder: made.directory, branch: made.branch ?? null });
+    return result;
+  });
   busyJobs = () => manager.hasSessions || accounts.active || projectSetup.active || Boolean(projectChecks?.running) || Boolean(verification?.running) || Boolean(backups?.busy) || Boolean(delivery?.running) || Boolean(workflows?.running) || Boolean(worktrees?.active);
   updates = new UpdateService({
     version: app.getVersion(),
@@ -1188,7 +1252,7 @@ app.on('before-quit', (event) => {
     await autoMemory?.drain(10000)?.catch(() => hostHealth?.record('shutdown-stop-failed'));
     // Then those summaries reach Drive, or another computer starts without them.
     await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed')); await savingUsage;
-    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); tray?.destroy(); tray = null; modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
+    try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); plugins?.close(); pluginApi?.close(); tray?.destroy(); tray = null; modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
     finally { if (reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate) app.relaunch(); app.quit(); }
   });
 });
