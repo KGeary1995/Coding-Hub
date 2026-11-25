@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
-import { channelProject, inActiveProject, otherProjects, shownChannels, useShownChannels, useWorktrees, within } from './projects';
+import { channelProject, inActiveProject, mergeTiles, otherProjects, shownChannels, useShownChannels, useWorktrees, within } from './projects';
 import { useWorkspaceStore } from './workspace-store';
 
 const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }, patch: Partial<Session> = {}): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null, ...patch } as Session);
@@ -40,4 +40,15 @@ describe('a channel’s project (several projects, step 6)', () => {
     expect(useShownChannels.getState().settled).toBeNull();
     expect(shownChannels([moved, b, added], '/code/alpha', []).map((item) => item.id)).toEqual([]);
   });
+  it('keeps the hidden channels\' tiles below the shown ones, so the saved grid never overlaps', () => {
+    const tile = (sessionId: string, x: number, y: number) => ({ sessionId, x, y, w: 6, h: 12, minW: 3, minH: 10 });
+    // c and d (another project) sat at the top; a and b were laid out afresh there too.
+    const merged = mergeTiles([tile('a', 0, 12), tile('c', 0, 0), tile('d', 6, 0), tile('b', 6, 12)], [tile('a', 0, 0), tile('b', 6, 0)]);
+    expect(merged).toEqual([tile('c', 0, 12), tile('d', 6, 12), tile('a', 0, 0), tile('b', 6, 0)]);
+    const overlaps = merged.some((one, index) => merged.slice(index + 1).some((other) => one.x < other.x + other.w && one.x + one.w > other.x && one.y < other.y + other.h && one.y + one.h > other.y));
+    expect(overlaps).toBe(false);
+    // Nothing hidden: the grid's own layout.
+    expect(mergeTiles([tile('a', 0, 5)], [tile('a', 0, 0)])).toEqual([tile('a', 0, 0)]);
+  });
 });
+

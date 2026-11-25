@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Session } from '../../shared/types';
+import type { GridTile, Session } from '../../shared/types';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { channelDirectory } from './channel-names';
 import { useWorkspaceStore } from './workspace-store';
@@ -45,4 +45,13 @@ export function shownChannels(channels: Session[], rootDirectory: string | null,
   // Settled once the worktrees are known (a worktree's channel belongs to its repository's project), not before.
   if (!settled) { const shown = channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)); if (useWorktrees.getState().loaded) queueMicrotask(() => useShownChannels.setState({ settled: { known: channels.map((session) => session.id), shown: shown.map((session) => session.id) } })); return shown; }
   return channels.filter((session) => !settled.known.includes(session.id) || settled.shown.includes(session.id));
+}
+/**
+ * The saved tiles after the shown ones moved (the grid lays out only the shown ones, afresh from the top): the hidden
+ * channels' tiles keep their order among themselves, below the shown ones, since a saved workspace must not overlap.
+ */
+export function mergeTiles(saved: GridTile[], moved: GridTile[]): GridTile[] {
+  const hidden = saved.filter((tile) => !moved.some((item) => item.sessionId === tile.sessionId)); if (!hidden.length) return moved;
+  const shift = Math.max(0, Math.max(0, ...moved.map((tile) => tile.y + tile.h)) - Math.min(...hidden.map((tile) => tile.y)));
+  return [...hidden.map((tile) => ({ ...tile, y: tile.y + shift })), ...moved];
 }

@@ -2,7 +2,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import { arrangeTiles, channelsOf, useWorkspaceStore } from '../state/workspace-store';
-import { refreshWorktrees, shownChannels, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
+import { mergeTiles, refreshWorktrees, shownChannels, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
 import { SessionTile } from './SessionTile';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -29,7 +29,7 @@ export function SessionGrid() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // With some hidden, the shown ones are laid out afresh (their saved places would leave gaps); a change there keeps the hidden ones' places.
+  // With some hidden, the shown ones are laid out afresh (their saved places would leave gaps); the hidden ones go below them.
   const layout = useMemo(() => (filtered ? arrangeTiles(sessions, layoutMode) : tiles).map(({ sessionId, ...tile }) => ({ i: sessionId, ...tile })), [filtered, sessions, layoutMode, tiles]);
   // A standard tile spans twelve grid rows. Fit the selected arrangement to the
   // canvas; user-resized tiles can extend it and remain reachable by scrolling.
@@ -52,7 +52,7 @@ export function SessionGrid() {
       draggableCancel="button,input,select,.terminal-viewport"
       compactType="vertical"
       resizeHandles={['se']}
-      onLayoutChange={(next) => { const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? [...tiles.filter((tile) => !moved.some((item) => item.sessionId === tile.sessionId)), ...moved] : moved); }}
+      onLayoutChange={(next) => { const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
     >
       {sessions.map((session) => { const index = channels.indexOf(session); return <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>; })}
     </GridLayout>}
