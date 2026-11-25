@@ -67,6 +67,7 @@ import { loadPreviews, receivePreview } from '../state/preview-store';
 import { lookOf, useAgentStore } from '../state/agent-store';
 import { validResumeId } from '../../shared/agent-definition';
 import { channelDirectory } from '../state/channel-names';
+import { rememberProjects } from './recent-projects';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -121,6 +122,7 @@ export function useNativeHost() {
       if (envelope.event.type === 'table' && envelope.event.closed) void forgetTable(envelope.sessionId); });
     // A saved Round Table is opened again once both of its chats run (after a restart).
     const unsubscribeTables = useWorkspaceStore.subscribe(restoreTables);
+    const stopRecent = rememberProjects();
     const stopTasks = startTaskAutomation();
     // A closed Round Table's findings that could not be written to shared memory stay with its channel (Needs you lists
     // them, with Save to memory): they are tried again every few minutes, so a Drive folder that came back needs no click.
@@ -195,7 +197,7 @@ export function useNativeHost() {
       if (!cancelled) useWorkspaceStore.setState({ persistenceReady: true, persistenceStatus: 'error', persistenceError: 'The saved workspace could not be loaded. Automatic saving is disabled.' });
     });
     void refreshEngines();
-    return () => { cancelled = true; window.removeEventListener('focus', seenOnReturn); onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeUndo(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); unsubscribeScheduled(); unsubscribePreview(); };
+    return () => { cancelled = true; window.removeEventListener('focus', seenOnReturn); onWebGLContextLost(null); clearInterval(syncTimer); clearInterval(findingsTimer); unsubscribeSave(); stopRecent(); unsubscribe(); unsubscribeErrors(); unsubscribeFlush(); unsubscribeUsage(); unsubscribeLinked(); unsubscribeLinkedChat(); unsubscribeTables(); unsubscribeResume(); unsubscribeCoaching(); unsubscribeChecks(); unsubscribeUndo(); unsubscribeTasks(); unsubscribeAlerts(); stopTasks(); unsubscribeControl(); unsubscribeChat(); unsubscribeScheduled(); unsubscribePreview(); };
   }, []);
   useEffect(() => { releaseRemovedTerminals(sessions.map((session) => session.id)); }, [sessions]);
 }
