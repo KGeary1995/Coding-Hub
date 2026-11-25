@@ -1,5 +1,15 @@
 ## What's new
 
+1.46.0 organises channels by project, syncs your projects between computers, and makes controlling administrator apps over screen sharing safe.
+
+- **Channels by project.** The grid shows the open project's channels only. A channel belongs to the folder it works in (a worktree to the repository it came from). Opening another project keeps the open one's channels with it, and the other projects' channels keep running. The project menu lists each project with channels, and **All projects** shows every channel at once. A channel's status bar chip, Needs you or a notice opens its project. Changing a channel's folder in its settings no longer moves it out of sight while you type; it joins its new folder's project the next time you switch.
+- **Recent projects**, the last ten opened on this computer, are in the project menu, one press each. **Changes** and **Files** open on the folder of the channel you last used when it is not the project's.
+- **Projects sync between your computers.** With device sync on, each computer shares its recent projects that have a GitHub remote. The project menu offers another computer's project that this one has not opened, to clone here into a folder you pick.
+- **Controlling administrator apps over screen sharing is no longer a way into administrator rights.** **Also control apps running as administrator** used to run Trace itself as administrator, from files your account can change. It now sets up a small helper in `Program Files\Trace Input`, which only administrators can change, checked against the copy in this Trace before Windows asks. The helper does nothing but press keys and move the mouse. If you use the option, turn it off and on once to move to the helper; Settings says so until then.
+- **Fixed:** a Round Table set up from an idle channel with its own folder listed the project's Codex models instead of its own folder's.
+- **For developers:** tests and checks no longer open Trace on your screen (`CODING_HUB_TEST_HIDDEN`, on in every smoke test); the chat streams' ids can be given from outside, for the background runner's chats (`docs/plans/runner-chat-channels.md`).
+- **Not tried yet:** the administrator helper on a real Windows PC (it is built and checked by the Windows release candidate), and project sync between two real computers.
+
 1.45.0 gives the terminal more room on a laptop, shows the automatic handoff as it happens, and makes sure typed requests reach Claude Code.
 
 - **More room for the terminal.** The check result and **Undo last turn** share one row, and a passed check goes after 8 seconds (a failure stays until you close it). A channel 560 px or wider shows its context, tokens and activity in its header instead of a row under the terminal. Sent pictures are one slim line. On a laptop's screen (under 1600 points wide), terminals left at the default font size 13 show at 12; a size you set yourself is kept. In a laptop-sized window a channel's terminal gains about four lines.
