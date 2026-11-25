@@ -275,7 +275,9 @@ else if (args.startsWith('serve --bg --https=443')) {
     { const appServer = require('node:http').createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<title>Phone app</title><h1 style="font:64px sans-serif">Phone app</h1>'); });
       await new Promise((resolve) => appServer.listen(0, '127.0.0.1', resolve)); const appPort = appServer.address().port;
       try {
-        await page.locator(`.session-tile[data-session="${codexId}"] .xterm-helper-textarea`).focus(); await page.keyboard.type(`http://127.0.0.1:${appPort}/`); await page.keyboard.press('Enter');
+        // Typed by the phone (the computer's window shows Settings here), as its keys send text.
+        const typed = await phone.evaluate(async ([sessionId, text]) => { const auth = { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }; const channel = (await (await fetch('/api/channels', { headers: auth })).json()).find((item) => item.sessionId === sessionId); return (await fetch('/api/input', { method: 'POST', headers: auth, body: JSON.stringify({ sessionId, runId: channel.runId, data: text + '\r' }) })).status; }, [codexId, `http://127.0.0.1:${appPort}/`]);
+        assert.equal(typed, 200, 'the phone typed the app address into the channel');
         const picture = (id) => phone.evaluate(async (sessionId) => { const response = await fetch('/api/preview?sessionId=' + encodeURIComponent(sessionId), { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } }); return { status: response.status, body: await response.json() }; }, id);
         let shown = null; for (let i = 0; i < 60 && !(shown && shown.status === 200); i++) { shown = await picture(codexId); if (shown.status !== 200) await new Promise((resolve) => setTimeout(resolve, 250)); }
         assert.equal(shown.status, 200, `the phone's app picture: ${JSON.stringify(shown.body).slice(0, 200)}`);
