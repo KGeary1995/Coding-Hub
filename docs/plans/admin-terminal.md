@@ -104,6 +104,16 @@ Non-goals:
 - **The phone and linked computers.** Typing into an administrator channel from the phone would make the phone an
   administrator console. The default should be read-only there (see Open questions).
 
+## Owner's answers (2026-11-25)
+
+- **Agents:** shells only. Agents never run as administrator.
+- **Phone and other computers:** typing into an administrator channel is allowed from them too, not only seeing it.
+- **Windows' `sudo`:** turned on on the owner's PC. That makes option B (`sudo --inline <shell>` in an ordinary channel) the
+  smallest way to a real administrator channel. Windows shows the prompt, the shell runs elevated in the same console,
+  and Trace adds the Admin marking and stops it with the channel. The trade-off is inline mode's: while the channel
+  runs, other programs running as the owner can also type into it.
+- Still to choose: the button (C), or the channel by way of B (or A, if B falls short).
+
 ## Open questions for the owner
 
 1. Is step 1 (a button that opens an elevated Windows Terminal outside Trace) enough for now, or is a real administrator
