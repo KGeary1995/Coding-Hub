@@ -389,7 +389,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
   // Then the channel tools, when turned on, join that list (or start it). Codex takes the three that only look (list,
   // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
-  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it. The task tools ride the same
+  // codex-cli 0.171.0); sending a message still asks, which a chat shows as a card (an MCP elicitation, codex-stream.ts). The task tools ride the same
   // server when their own setting is on (either one adds it); list_tasks only looks, adding or updating a task asks.
   const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
