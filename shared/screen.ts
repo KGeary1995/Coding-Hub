@@ -10,6 +10,13 @@ export const SCREEN_SERVICE_PORT = 47822;
 export const SCREEN_SERVICE_PATH = '/api/screen';
 /** Where the administrator input helper listens, on this computer only (electron/services/remote/input-relay.ts). */
 export const SCREEN_INPUT_PORT = 47823;
+/**
+ * The protected administrator helper (native/trace-input.c, from 1.46): the pipe it listens on for this Windows user, and
+ * where Settings copies it (a folder only administrators can change). The user's name keeps two accounts' pipes apart.
+ */
+export const inputPipeName = (user: string) => user.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'user';
+export const inputPipePath = (user: string) => `\\\\.\\pipe\\trace-input-${inputPipeName(user)}`;
+export const INPUT_HELPER_FOLDER = 'Trace Input';
 /** `trace`: Trace's own screen server on that computer (Windows). `system`: that computer's own (macOS Screen Sharing). */
 export type ScreenKind = 'trace' | 'system';
 /** The sign-in a Mac asks for: its user name and password, saved encrypted on this computer when the person asks. */

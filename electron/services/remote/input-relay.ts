@@ -10,7 +10,7 @@ const MAX_CLIENTS = 4;
 /** Longer than any command the screen service writes; a line that grows past it ends the connection. */
 const MAX_LINE = 64;
 /** The helper's commands as screen-input.ts writes them, and nothing else: this side runs as administrator. */
-const COMMAND = /^(?:m -?\d{1,6} -?\d{1,6} \d{1,5} -?\d{1,6}|k \d{1,3} [01] [01]|c \d{1,7} [01])$/;
+export const COMMAND = /^(?:m -?\d{1,6} -?\d{1,6} \d{1,5} -?\d{1,6}|k \d{1,3} [01] [01]|c \d{1,7} [01])$/;
 /** SendInput's button flags: pressed → released (left, right, middle). */
 const BUTTON_UP: [number, number][] = [[0x0002, 0x0004], [0x0008, 0x0010], [0x0020, 0x0040]];
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));

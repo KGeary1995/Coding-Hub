@@ -1,10 +1,14 @@
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
 import http from 'node:http';
 import os from 'node:os';
 import { app } from 'electron';
 import { HubError } from '../cli/engine-adapter';
 import { save } from '../workbench/local-store';
-import { SCREEN_INPUT_PORT, SCREEN_SERVICE_PATH, SCREEN_SERVICE_PORT, type ScreenShareStatus } from '../../../shared/screen';
+import { INPUT_HELPER_FOLDER, inputPipeName, inputPipePath, SCREEN_INPUT_PORT, SCREEN_SERVICE_PATH, SCREEN_SERVICE_PORT, type ScreenShareStatus } from '../../../shared/screen';
 import { localScreenToken, SHARE_FILE, shareSetting } from './screen-service-server';
 import type { RunTailscale } from './tailscale';
 
@@ -31,21 +35,48 @@ const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
 export const commandLine = (args: string[]) => args.map((arg) => `"${arg.replace(/"/g, '').replace(/(\\+)$/, '$1$1')}"`).join(' ');
 const encode = (script: string) => Buffer.from(script, 'utf16le').toString('base64');
 
+/** Where the protected helper is copied, and its process ended, as PowerShell lines (Program Files: administrators only). */
+const HELPER_PLACE = [`$folder = Join-Path $env:ProgramFiles ${quote(INPUT_HELPER_FOLDER)}`, "$target = Join-Path $folder 'trace-input.exe'"];
+const STOP_HELPER = "Get-Process -Name 'trace-input' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $target } | Stop-Process -Force -ErrorAction SilentlyContinue";
 /**
  * The script that registers the task, run as administrator: at sign-in of this Windows user, with their highest rights,
  * only while they are signed in (it needs their desktop), never stopped for running long, started again if it fails.
+ * The task runs the protected helper (native/trace-input.c, from 1.46), not Trace: it is copied from this Trace into
+ * Program Files\Trace Input, a folder only administrators and SYSTEM may change, and checked against the SHA-256 Trace
+ * measured before asking Windows' permission, so a file swapped in between is not set up. Trace's updates never touch it.
  */
-export function registerTaskScript(executable: string, args: string[], user: string) {
+export function registerTaskScript(helper: string, sha256: string, user: string) {
   return [
     "$ErrorActionPreference = 'Stop'",
-    `$action = New-ScheduledTaskAction -Execute ${quote(executable)} -Argument ${quote(commandLine(args))}`,
+    ...HELPER_PLACE,
+    'New-Item -ItemType Directory -Force -Path $folder | Out-Null',
+    // Administrators and SYSTEM may change it; users may read and run it, and nothing is inherited from above.
+    "& icacls.exe $folder /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null",
+    "if ($LASTEXITCODE -ne 0) { throw 'The helper folder could not be protected.' }",
+    `Stop-ScheduledTask -TaskName ${quote(TASK_NAME)} -ErrorAction SilentlyContinue`, STOP_HELPER,
+    `Copy-Item -LiteralPath ${quote(helper)} -Destination $target -Force`,
+    `if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne ${quote(sha256.toUpperCase())}) { Remove-Item -LiteralPath $target -Force; throw 'The helper changed before it could be copied, so nothing was set up.' }`,
+    `$action = New-ScheduledTaskAction -Execute $target -Argument ${quote(inputPipeName(user.split('\\').pop() ?? user))}`,
     `$trigger = New-ScheduledTaskTrigger -AtLogOn -User ${quote(user)}`,
     `$principal = New-ScheduledTaskPrincipal -UserId ${quote(user)} -LogonType Interactive -RunLevel Highest`,
     '$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
     `Register-ScheduledTask -TaskName ${quote(TASK_NAME)} -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`,
   ].join('\n');
 }
-export const removeTaskScript = () => `$ErrorActionPreference = 'Stop'\nUnregister-ScheduledTask -TaskName ${quote(TASK_NAME)} -Confirm:$false -ErrorAction SilentlyContinue`;
+/** Removes the task, ends the helper and deletes its folder (and a task from before 1.46, which ran Trace itself). */
+export const removeTaskScript = () => ["$ErrorActionPreference = 'Stop'", `Unregister-ScheduledTask -TaskName ${quote(TASK_NAME)} -Confirm:$false -ErrorAction SilentlyContinue`, ...HELPER_PLACE, STOP_HELPER, 'Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue'].join('\n');
+/** The helper this Trace ships (dist-electron/native, built by scripts/build-jobs-helper.cjs) and its SHA-256, or null. */
+export function shippedHelper(appPath: string): { file: string; sha256: string } | null {
+  const file = path.join(appPath, 'dist-electron', 'native', 'trace-input.exe');
+  try { return { file, sha256: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }; } catch { return null; }
+}
+/** Whether the protected helper's pipe answers (it accepts and closes at once; nothing is sent). */
+export function pipeAnswers(pipe: string, wait = 1500) {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.connect(pipe); const timer = setTimeout(() => { socket.destroy(); resolve(false); }, wait);
+    socket.on('connect', () => { clearTimeout(timer); socket.end(); resolve(true); }); socket.on('error', () => { clearTimeout(timer); resolve(false); });
+  });
+}
 /** Runs a script as administrator: Windows asks the person first. Its exit code comes back; a refusal fails. */
 export function elevatedScript(script: string) {
   return [
@@ -85,7 +116,11 @@ export class ScreenShare {
     const before = shareSetting(this.root); const admin = elevated ?? before.elevated === true;
     if (enabled) await this.serve();
     // The task first: if Windows' permission is refused, nothing else changes.
-    if (admin !== (before.elevated === true)) await this.elevate(admin ? registerTaskScript(process.execPath, this.args(true), this.user()) : removeTaskScript(), admin);
+    if (admin !== (before.elevated === true)) {
+      let script = removeTaskScript();
+      if (admin) { const helper = this.helper(); if (!helper) throw new HubError('SCREEN_HELPER', 'This copy of Trace has no administrator helper (it was built without the Windows C++ build tools), so apps running as administrator cannot be controlled.'); script = registerTaskScript(helper.file, helper.sha256, this.user()); }
+      await this.elevate(script, admin);
+    }
     save(this.root, SHARE_FILE, { enabled, ...(admin ? { elevated: true } : {}) }); this.login(enabled);
     // An administrator service from before 1.28.1 holds the screen port: with its option off it quits by itself, and the ordinary one can start.
     if (enabled) { if (!admin && before.elevated === true && this.outdated((await this.health())?.version)) await this.gone(); await this.start(); }
@@ -117,7 +152,10 @@ export class ScreenShare {
     });
     const before = this.problem;
     this.problem = answer && answer.ok === false ? `This computer’s screen cannot be shared: ${typeof answer.error === 'string' && answer.error ? answer.error.slice(0, 300) : 'the screen could not be captured'}. Turn “Share this screen” off and on again under Settings → Other computers.`
-      : setting.elevated && !(await this.health(this.inputPort)) ? 'This computer’s screen is shared, but apps running as administrator cannot be controlled: the part of Trace that runs as administrator is not running. Turn “Also control apps running as administrator” off and on again under Settings → Other computers.' : null;
+      : setting.elevated && !(await this.pipeAnswers(this.pipe)) ? (await this.health(this.inputPort)
+        // A task from before 1.46 runs Trace itself as administrator, from files this account can change: still working, but replaced once the option is set up again.
+        ? 'Apps running as administrator are controlled through an older part of Trace that runs from files your account can change. Turn “Also control apps running as administrator” off and on again under Settings → Other computers to use the protected helper instead.'
+        : 'This computer’s screen is shared, but apps running as administrator cannot be controlled: the part of Trace that runs as administrator is not running. Turn “Also control apps running as administrator” off and on again under Settings → Other computers.') : null;
     if (this.problem && this.problem !== before) try { this.onProblem(this.problem); } catch { /* Telling the person must not stop the check. */ }
     return this.problem;
   }
@@ -166,6 +204,8 @@ export class ScreenShare {
    * answering. One an update left behind is ended first, once for each version, as above.
    */
   private async startInput() {
+    // The protected helper (1.46) answers on its pipe: nothing to start.
+    if (await this.pipeAnswers(this.pipe)) return;
     const health = await this.health(this.inputPort);
     if (health) {
       const version = `input ${health.version ?? ''}`; if (!this.outdated(health.version) || this.replaced.has(version)) return;
@@ -174,8 +214,12 @@ export class ScreenShare {
     }
     const result = await this.run('schtasks.exe', ['/Run', '/TN', TASK_NAME]);
     if (result.code !== 0) throw new HubError('SCREEN_TASK', `The part of Trace that controls apps running as administrator could not be started (${result.output.trim() || `schtasks ${result.code}`}). Turn “Also control apps running as administrator” off and on again.`);
-    for (let i = 0; i < 40 && !(await this.health(this.inputPort)); i++) await new Promise((resolve) => setTimeout(resolve, 250));
+    for (let i = 0; i < 40 && !(await this.pipeAnswers(this.pipe, 250)) && !(await this.health(this.inputPort)); i++) await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  /** The protected helper's pipe for this Windows user, and how it is asked (a stand-in for tests). */
+  pipe = inputPipePath(os.userInfo().username); pipeAnswers = pipeAnswers;
+  /** The helper this Trace ships, set up in Program Files when the option is turned on (a stand-in for tests). */
+  helper = () => shippedHelper(app.getAppPath());
   private async elevate(script: string, adding: boolean) {
     const result = await this.run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encode(elevatedScript(script))]);
     if (result.code === 0) return;
