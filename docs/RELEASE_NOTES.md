@@ -1,5 +1,11 @@
 ## What's new
 
+1.41.1 makes Codex start again in projects where shared memory was installed into the project.
+
+- **Fixed: Codex stopped as it started.** In a project where **Memory** → install into project had added Trace's memory server to `.codex/config.toml`, every Codex channel quit at once with "failed to load workspace requirements: invalid data". Trace passed Codex only an approval for that server, which Codex does not join to the project's own entry. Trace now passes the whole entry again, with the project's own memory key, so the channel uses the same notes as before.
+- **Tried:** unit tests; and with the real Codex (0.164.0 and 0.172.0) in such a project: the old start fails, the new one starts, and Codex used the shared memory without asking.
+- **Not tried yet:** the packaged app on Windows with a project set up this way.
+
 1.41.0 completes agents you add yourself (Agent setup → **Agents**).
 
 - **From a list.** **Add an agent** → **From a list**:
