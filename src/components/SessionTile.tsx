@@ -150,6 +150,9 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     : state === 'limit' ? <button className="tr-action limit" title={shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`} onClick={() => setView('memory')}>{HANDOFF_LABEL[shown]}</button>
     : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
+  // The channel's numbers: in its header when the tile is wide enough, else in its footer (tile.css).
+  const scope = (place: 'head' | 'foot') => <ScopeStrip place={place} sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={custom || engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
+        tokensTitle={custom ? 'Trace does not count a custom agent’s tokens.' : engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />;
   const facts = [
     stopping ? 'Stopping the CLI and what it started…' : session.pid ? 'Running' : session.status === 'starting' ? 'Checking the CLI…' : session.exitCode !== null ? (session.exitCode === 0 ? 'Ended normally' : `Ended with exit code ${session.exitCode}`) : 'Ready to start',
     cwd ? `Folder ${folderName(cwd)}` : 'No folder chosen',
@@ -171,6 +174,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
           <span className="tr-spacer" />
+          {scope('head')}
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {account && <span className="tr-profile-chip account-profile-chip ui-badge" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           {preview && <button className="tr-action ghost" title={`Open the app at ${previewLabel(preview.url)}`} aria-label={`Open the app at ${previewLabel(preview.url)} from channel ${channel}`} onClick={() => void openPreview(session.id)}><AppWindow size={12} aria-hidden="true" />Preview</button>}
@@ -223,8 +227,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
-      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={custom || engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
-        tokensTitle={custom ? 'Trace does not count a custom agent’s tokens.' : engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+      {scope('foot')}
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}

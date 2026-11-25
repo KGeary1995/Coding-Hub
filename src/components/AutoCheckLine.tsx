@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CircleCheck, CircleX, LoaderCircle, X } from 'lucide-react';
-import { dismissAutoCheck, useAutoCheckStore } from '../state/auto-check-store';
+import { dismissAutoCheck, PASSED_SHOWN_MS, useAutoCheckStore } from '../state/auto-check-store';
 
 /** The channel's last automatic check (1.38.0): running, passed, or failed with what it printed. */
 export function AutoCheckLine({ sessionId }: { sessionId: string }) {
   const status = useAutoCheckStore((state) => state.bySession[sessionId]); const [open, setOpen] = useState(false);
+  // A pass goes by itself after a few seconds (unless its output is open); a newer result for the channel keeps its own time.
+  useEffect(() => {
+    if (status?.state !== 'passed' || open) return;
+    const timer = setTimeout(() => { if (useAutoCheckStore.getState().bySession[sessionId] === status) dismissAutoCheck(sessionId); }, PASSED_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [status, open, sessionId]);
   if (!status) return null;
   const Icon = status.state === 'running' ? LoaderCircle : status.state === 'passed' ? CircleCheck : CircleX;
   return <div className={`auto-check ${status.state}`} role="status" title={status.folder}>

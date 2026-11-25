@@ -243,6 +243,14 @@
 .tr-foot-item { flex: none; display: inline-flex; align-items: center; gap: 6px; }
 .tr-foot-item > svg { flex: none; color: var(--tr-fg-faint); }
 .tr-tile-foot .tr-scope-limit { flex: none; width: 56px; height: 4px; }
+/* The channel's numbers sit in its header when the tile has room (560 px and wider: a laptop's tiles spare no footer
+   row), else in its footer as before. Short there: no labels, a smaller meter and trace, the rate in the trace's tooltip. */
+.tr-tile-head .tr-scope.in-head { flex: 0 1 auto; height: auto; min-width: 0; padding: 0; gap: 10px; overflow: hidden; }
+.tr-tile-head .tr-scope.in-head .tr-foot-label { display: none; }
+.tr-tile-head .tr-scope.in-head .tr-scope-limit { width: 36px; }
+.tr-tile-head .tr-scope.in-head .tr-scope-plot { width: 56px; margin-left: 0; }
+.tr-scope.in-foot { display: none; }
+@container (max-width: 559px) { .tr-scope.in-head { display: none; } .tr-scope.in-foot { display: flex; } }
 .tr-foot-value { flex: none; font-weight: 600; color: var(--tr-fg); }
 .tr-foot-value.hot { color: var(--tr-st-limit); }
 .tr-scope-plot { flex: none; width: 96px; height: 14px; margin-left: auto; display: block; }

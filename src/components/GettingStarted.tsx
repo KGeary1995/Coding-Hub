@@ -27,7 +27,7 @@ export function guideSteps({ root, running, turned, checked, phoneSeen }: { root
 export function GettingStarted() {
   const { loaded, seen } = useHubStore(useShallow((state) => ({ loaded: state.preferencesLoaded, seen: state.preferences.guideSeen === true })));
   const { root, running, view } = useWorkspaceStore(useShallow((state) => ({ root: state.rootDirectory, running: state.sessions.some((session) => isAgentConfig(session.config) && session.status === 'running'), view: state.activeView })));
-  const checked = useAutoCheckStore((state) => Object.keys(state.bySession).length > 0);
+  const checked = useAutoCheckStore((state) => state.ran);
   const { turned, phoneSeen, open } = useGuideStore(); const [error, setError] = useState('');
   if (!loaded || seen || view !== 'workspace') return null;
   const hide = () => { const preferences = { ...useHubStore.getState().preferences, guideSeen: true }; void hubCall({ action: 'save-preferences', preferences }).then(() => useHubStore.getState().setPreferences(preferences), (e: Error) => setError(e.message)); };

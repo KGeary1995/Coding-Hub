@@ -5,6 +5,12 @@ import { ScopeStrip } from './ScopeStrip';
 const strip = (props: Partial<Parameters<typeof ScopeStrip>[0]>) => renderToStaticMarkup(<ScopeStrip sessionId="s1" state="working" engine="codex" limit={null} limitLabel="Context 13% (near its limit from 80%)" {...props} />);
 
 describe('a channel’s footer', () => {
+  it('in the header, says the same in short: the meter and share, "tok", the trace without its rate line', () => {
+    const head = strip({ limit: 0.41, tokens: 1_700_000, engine: 'claude', place: 'head' });
+    expect(head).toContain('in-head'); expect(head).toContain('<b class="tr-foot-value ">41%</b>'); expect(head).toContain('</b> tok</span>'); expect(head).not.toContain('tok today');
+    expect(head).toContain('tr-scope-trace'); expect(head).not.toContain('chars/s</span>'); expect(head).toContain('Terminal output over the last two minutes');
+    expect(strip({ tokens: 5 })).toContain('in-foot');
+  });
   it('draws a share as a meter with its percentage, named by the meter', () => {
     const html = strip({ limit: 0.13, tokens: 105 });
     expect(html).toContain('role="img" aria-label="Context 13% (near its limit from 80%)"');
