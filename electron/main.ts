@@ -495,7 +495,8 @@ function channelProjects(): { project: string; directory: string }[] {
  */
 function desktopAlert(alert: DesktopAlert, always = false) {
   try { if (hub?.preferences().alerts === false) return; } catch { /* Unreadable preferences: alerts stay on. */ }
-  if (!Notification.isSupported() || (!always && window && !window.isDestroyed() && window.isFocused())) return;
+  // A test's Trace is hidden (CODING_HUB_TEST_HIDDEN): its alerts never reach the person's screen as banners.
+  if (TEST_HIDDEN || !Notification.isSupported() || (!always && window && !window.isDestroyed() && window.isFocused())) return;
   const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
   notice.on('click', () => { if (!window || window.isDestroyed() || TEST_HIDDEN) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.alertClick, alert.target); });
   notice.show();
@@ -808,6 +809,10 @@ async function quitFromTrace(stopChannels = false) {
  * but is never shown, brought forward or put in the Dock, so a smoke test does not open Trace over their work.
  */
 const TEST_HIDDEN = process.env.CODING_HUB_TEST_HIDDEN === '1';
+// As early as it can be: a background app from the start, with no Dock icon even for a moment, never made the active app.
+if (TEST_HIDDEN && process.platform === 'darwin') { try { app.dock?.hide(); app.setActivationPolicy?.('accessory'); } catch { /* Set again once ready. */ } }
+// Nor does it open the person's browser: a link it would open is only noted (a test that checks one replaces this itself).
+if (TEST_HIDDEN) { const opened: string[] = []; (globalThis as { traceTestOpened?: string[] }).traceTestOpened = opened; shell.openExternal = async (url: string) => { opened.push(url); }; }
 /** Opened at sign-in: the window waits hidden, with the tray icon, until the person opens it (only while closing the window keeps Trace running). */
 function startedHidden() {
   if (!closeToTray()) return false;
@@ -896,7 +901,7 @@ function createWindow(hidden = false) {
     if (closeToTray()) {
       updateTray(); if (!tray) { hostHealth?.record('tray-unavailable'); } else {
         current.hide();
-        if (!toldAboutTray && Notification.isSupported()) { toldAboutTray = true; const notice = new Notification({ title: 'Trace is still running', body: `Your channels keep going. Open Trace from its icon in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}, or quit it there.` }); notice.on('click', showWindow); notice.show(); }
+        if (!toldAboutTray && !TEST_HIDDEN && Notification.isSupported()) { toldAboutTray = true; const notice = new Notification({ title: 'Trace is still running', body: `Your channels keep going. Open Trace from its icon in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}, or quit it there.` }); notice.on('click', showWindow); notice.show(); }
         return;
       }
     }
@@ -1512,7 +1517,7 @@ It runs without a shell. Save it only if you trust this program.` })).response =
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   // Opened at sign-in: the window loads (channels need it) but stays hidden in the tray; with no tray, it shows.
   const hidden = startedHidden(); createWindow(hidden || TEST_HIDDEN);
-  if (TEST_HIDDEN) { if (process.platform === 'darwin') app.dock?.hide(); } else if (hidden) { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } if (!tray) window?.show(); }
+  if (TEST_HIDDEN) { if (process.platform === 'darwin') { app.dock?.hide(); app.setActivationPolicy?.('accessory'); } } else if (hidden) { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } if (!tray) window?.show(); }
   applyLoginItem();
   updates.start();
   // Today's usage against the budgets set in Settings, and the plan limits the CLIs last reported (Usage and the status
@@ -1529,7 +1534,7 @@ It runs without a shell. Save it only if you trust this program.` })).response =
     } catch { hostHealth?.record('usage-alerts-failed'); }
   })); }, 60000);
   // On a Mac, opening Trace from the Dock or Finder while it quits raises this, not second-instance: it opens afterwards.
-  app.on('activate', () => { if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); else showWindow(); });
+  app.on('activate', () => { if (TEST_HIDDEN) return; if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); else showWindow(); });
 }).catch(() => {
   // Without this, a failure while starting left Trace running with no window, and opening it again showed nothing.
   hostHealth?.record('host-start-failed');

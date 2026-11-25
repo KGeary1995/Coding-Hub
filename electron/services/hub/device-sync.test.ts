@@ -5,7 +5,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_PREFERENCES, type HubPreferences, type UsageRecord } from '../../../shared/hub';
 import type { ProjectTemplate } from '../../../shared/productivity';
-import { DeviceSync, SYNC_FOLDER } from './device-sync';
+import { DeviceSync, githubRepository, SYNC_FOLDER } from './device-sync';
+import { execFileSync } from 'node:child_process';
 import { RulesService } from './rules';
 import { load, save } from '../workbench/local-store';
 import { templateSchema } from '../workbench/workflows';
@@ -309,5 +310,24 @@ describe('device sync of custom agents', () => {
     const drive = temporary(); const desk = withAgents(drive, 'desk');
     desk.sync.sync(); fs.writeFileSync(path.join(shared(drive), 'odd.json'), '{"version":1}');
     expect(desk.sync.sync().error).toContain('shared agent definition could not be read'); expect((await desk.agents.list()).agents).toEqual([]);
+  });
+});
+
+describe('projects between computers (several projects; the owner’s choice of 2026-11-25)', () => {
+  const repo = (remote: string | null) => { const dir = temporary(); execFileSync('git', ['init', '-q'], { cwd: dir }); if (remote) execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: dir }); return dir; };
+  it('reads a GitHub remote as owner/repository, and nothing else', () => {
+    expect(githubRepository('https://github.com/KGeary1995/Coding-Hub.git')).toBe('KGeary1995/Coding-Hub');
+    expect(githubRepository('git@github.com:acme/web-app.git\n')).toBe('acme/web-app'); expect(githubRepository('https://github.com/acme/x')).toBe('acme/x');
+    expect(githubRepository('https://gitlab.com/acme/x.git')).toBeNull(); expect(githubRepository('/local/bare.git')).toBeNull();
+  });
+  it('offers the other computer\'s projects with a GitHub remote, and not one this computer has opened', () => {
+    const drive = temporary(); const mac = computer(drive, 'Mac'); const pc = computer(drive, 'PC');
+    mac.preferences = { ...mac.preferences, recentProjects: [repo('https://github.com/acme/web-app.git'), repo(null), repo('https://gitlab.com/acme/other.git')] };
+    mac.sync.sync(true); pc.sync.sync(true);
+    expect(pc.sync.syncedProjects()).toEqual([{ name: expect.any(String), repository: 'acme/web-app', machine: 'Mac' }]);
+    // Once the PC has its own clone of it, it is not offered there again.
+    pc.preferences = { ...pc.preferences, recentProjects: [repo('git@github.com:acme/web-app.git')] }; pc.sync.sync(true);
+    expect(pc.sync.syncedProjects()).toEqual([]);
+    expect(mac.sync.syncedProjects()).toEqual([]);
   });
 });

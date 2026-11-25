@@ -35,6 +35,8 @@ export type HubRequest =
   | { action: 'drive-status' }
   | { action: 'device-sync-status' }
   | { action: 'device-sync-now' }
+  /** The other computers' projects (GitHub repositories) this one has not opened: name, owner/repository, computer. */
+  | { action: 'synced-projects' }
   | { action: 'device-sync-resolve'; document: SyncedDocument; keep: 'local' | 'remote' }
   | { action: 'drive-sync'; project: string };
 export interface MemoryNote { id: string; project: string; title: string; content: string; author: CLIEngine | 'human'; createdAt: string; supersedes?: string }
@@ -75,7 +77,9 @@ export interface SharedRules { content: string; revision: string; directories: s
 export interface MemoryEntry { engine: CLIEngine; file: string; key: string | null; root: string | null; current: boolean }
 /** A memory project on this computer (memory-projects). */
 export interface MemoryProject { key: string; notes: number; latest: string }
-export type HubResponse = Pick<PublishedCatalog, 'asOf' | 'claudeModels'> | import('./commit-refs').CommitStatus | MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
+/** A project another computer opened: its folder's name, its GitHub owner/repository, and that computer's name. */
+export interface SyncedProject { name: string; repository: string; machine: string }
+export type HubResponse = SyncedProject[] | Pick<PublishedCatalog, 'asOf' | 'claudeModels'> | import('./commit-refs').CommitStatus | MemoryProject[] | MemoryEntry[] | string[] | MemoryConflict[] | SharedRules | ConfigInventory | MemoryNote[] | MemoryNote | UsageRecord[] | HubPreferences | DriveStatus | DeviceSyncStatus | string | { uploaded: number; downloaded: number } | null;
 export const DEFAULT_DRIVE_FOLDER = '1X057crI-PHRV3ie1tl5btF4bUbuhxzwM';
 export const DEFAULT_PREFERENCES: HubPreferences = { folderId: DEFAULT_DRIVE_FOLDER, driveDirectory: 'G:\\My Drive\\Coding Hub', terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [] };
 

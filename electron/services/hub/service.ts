@@ -38,7 +38,7 @@ export const hubRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('memory-install'), project: projectSchema.optional(), directory: dir }).strict(),
   z.object({ action: z.literal('save-preferences'), preferences: preferencesSchema }).strict(),
   z.object({ action: z.literal('device-sync-resolve'), document: z.enum(['settings', 'rules']), keep: z.enum(['local', 'remote']) }).strict(),
-  ...(['usage', 'catalog', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
+  ...(['usage', 'catalog', 'preferences', 'drive-status', 'drive-connect', 'drive-disconnect', 'device-sync-status', 'device-sync-now', 'synced-projects'] as const).map((action) => z.object({ action: z.literal(action) }).strict()),
   z.object({ action: z.literal('drive-sync'), project: projectSchema }).strict(),
 ]);
 export class HubService {
@@ -149,6 +149,7 @@ export class HubService {
       case 'device-sync-status': return this.devices.status();
       // Sync now publishes this computer's usage at once; the 30-second tick does so at most every few minutes.
       case 'device-sync-now': return this.devices.sync(true);
+      case 'synced-projects': return this.devices.syncedProjects();
       case 'device-sync-resolve': return this.devices.resolve(request.document, request.keep);
       case 'drive-status': return this.drive.status();
       case 'drive-connect': return this.drive.status();

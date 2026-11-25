@@ -18,7 +18,8 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 import { refreshAgents, useAgentStore } from '../../state/agent-store';
 import { EngineAvatar } from '../tile/EngineAvatar';
 import { useHubStore } from '../../state/hub-store';
-import { otherProjects, useWorktrees, within } from '../../state/projects';
+import { otherProjects, useAllProjects, useWorktrees, within } from '../../state/projects';
+import { cloneSyncedProject, useSyncedProjects } from '../../runtime/recent-projects';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
@@ -72,13 +73,17 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   // The project menu opens a recent project in one press (several projects, step 4); the open one is not listed.
-  const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list);
+  const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list); const synced = useSyncedProjects((state) => state.list); const cloneError = useSyncedProjects((state) => state.error);
   // The other projects with channels first (the grid shows only the active project's), then the recent ones.
   const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees);
   const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory;
+  const allProjects = useAllProjects((state) => state.on); const pickProject = (folder: string) => { useAllProjects.setState({ on: false }); useWorkspaceStore.getState().setRootDirectory(folder); };
   const recentItems: MenuItem[] = [
-    ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => useWorkspaceStore.getState().setRootDirectory(folder) })),
-    ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 6).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => useWorkspaceStore.getState().setRootDirectory(directory) })),
+    ...(withChannels.length || allProjects ? [{ label: 'All projects', detail: allProjects ? 'Every project’s channels are shown' : 'Show every project’s channels at once', icon: <Folder size={16} aria-hidden="true" />, current: allProjects, onSelect: () => useAllProjects.setState({ on: !allProjects }) }] : []),
+    ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),
+    ...(cloneError ? [{ label: 'Clone failed', detail: cloneError, onSelect: () => useSyncedProjects.setState({ error: null }) }] : []),
+    ...synced.map((item) => ({ label: item.name, detail: `On ${item.machine} · ${item.repository} · clone here`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => void cloneSyncedProject(item).catch(() => {}) })),
+    ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 6).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(directory) })),
   ];
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
   const advanced = useAdvanced();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
-import { channelProject, inActiveProject, otherProjects, within } from './projects';
+import { channelProject, inActiveProject, otherProjects, shownChannels, useShownChannels, useWorktrees, within } from './projects';
 import { useWorkspaceStore } from './workspace-store';
 
 const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }, patch: Partial<Session> = {}): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null, ...patch } as Session);
@@ -28,5 +28,16 @@ describe('a channel’s project (several projects, step 6)', () => {
     // The first project opened: channels set to the workspace follow it, as before.
     useWorkspaceStore.setState({ rootDirectory: null, sessions: [channel('a')] }); useWorkspaceStore.getState().setRootDirectory('/code/alpha');
     expect(useWorkspaceStore.getState().sessions[0].binding).toEqual({ mode: 'workspace' });
+  });
+  it('settles which channels show when a project opens: a folder typed in a channel\'s settings does not hide it', async () => {
+    useWorktrees.setState({ list: [], loaded: true }); useShownChannels.setState({ settled: null });
+    const a = channel('a'); const b = channel('b', { mode: 'independent', cwd: '/code/beta' });
+    expect(shownChannels([a, b], '/code/alpha', []).map((item) => item.id)).toEqual(['a']); await Promise.resolve();
+    // Channel a now has another folder (being typed); a new channel c is added: both show until another project opens.
+    const moved = channel('a', { mode: 'independent', cwd: '/code/gam' }); const added = channel('c', { mode: 'independent', cwd: '/code/delta' });
+    expect(shownChannels([moved, b, added], '/code/alpha', []).map((item) => item.id)).toEqual(['a', 'c']);
+    useWorkspaceStore.setState({ rootDirectory: '/code/one' }); useWorkspaceStore.setState({ rootDirectory: '/code/alpha' });
+    expect(useShownChannels.getState().settled).toBeNull();
+    expect(shownChannels([moved, b, added], '/code/alpha', []).map((item) => item.id)).toEqual([]);
   });
 });

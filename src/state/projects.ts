@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Session } from '../../shared/types';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { channelDirectory } from './channel-names';
+import { useWorkspaceStore } from './workspace-store';
 
 /**
  * Several projects (step 6, docs/plans/several-projects.md; the owner's choice of 2026-11-25: the grid shows the active
@@ -9,8 +10,10 @@ import { channelDirectory } from './channel-names';
  * worktree came from; a folder inside the project counts as the project. Nothing new is saved with a channel (an older
  * Trace reading a synced template would refuse a field it does not know): it is worked out from its binding.
  */
-export const useWorktrees = create<{ list: ManagedWorktree[] }>(() => ({ list: [] }));
-export async function refreshWorktrees() { const result = await window.codingHub?.projectTools({ action: 'worktree-list' }).catch(() => null); if (result?.ok) useWorktrees.setState({ list: result.value as ManagedWorktree[] }); }
+export const useWorktrees = create<{ list: ManagedWorktree[]; loaded: boolean }>(() => ({ list: [], loaded: false }));
+/** All projects in the grid at once (the project menu's All projects; the owner's choice of 2026-11-25), until a project is picked. */
+export const useAllProjects = create<{ on: boolean }>(() => ({ on: false }));
+export async function refreshWorktrees() { const result = await window.codingHub?.projectTools({ action: 'worktree-list' }).catch(() => null); useWorktrees.setState({ list: result?.ok ? result.value as ManagedWorktree[] : useWorktrees.getState().list, loaded: true }); }
 
 const clean = (folder: string) => folder.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 /** Whether `folder` is `project` or inside it (paths compared as Windows does, without case). */
@@ -27,4 +30,19 @@ export function otherProjects(channels: Session[], rootDirectory: string | null,
   const counts = new Map<string, { folder: string; channels: number }>();
   for (const session of channels) { if (inActiveProject(session, rootDirectory, worktrees)) continue; const folder = channelProject(session, rootDirectory, worktrees); if (!folder) continue; const key = clean(folder); counts.set(key, { folder, channels: (counts.get(key)?.channels ?? 0) + 1 }); }
   return [...counts.values()];
+}
+
+/**
+ * Which channels the grid shows, settled when a project opens: changing a channel's folder in its settings does not move
+ * it out of sight while it is being typed, and a channel added later shows in the project it was added in. Opening
+ * another project settles it again (`settled` null: worked out from the rule above).
+ */
+export const useShownChannels = create<{ settled: { known: string[]; shown: string[] } | null }>(() => ({ settled: null }));
+useWorkspaceStore.subscribe((state, previous) => { if (state.rootDirectory !== previous.rootDirectory) useShownChannels.setState({ settled: null }); });
+/** The channels shown: by the rule once, then as settled (new channels shown). Settles it when it is not. */
+export function shownChannels(channels: Session[], rootDirectory: string | null, worktrees: readonly ManagedWorktree[]): Session[] {
+  const settled = useShownChannels.getState().settled;
+  // Settled once the worktrees are known (a worktree's channel belongs to its repository's project), not before.
+  if (!settled) { const shown = channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)); if (useWorktrees.getState().loaded) queueMicrotask(() => useShownChannels.setState({ settled: { known: channels.map((session) => session.id), shown: shown.map((session) => session.id) } })); return shown; }
+  return channels.filter((session) => !settled.known.includes(session.id) || settled.shown.includes(session.id));
 }

@@ -148,7 +148,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.keyboard.type('screen-work'); await page.keyboard.press('Enter');
     await first.locator('.session-attention').waitFor({ state: 'detached', timeout: 15000 });
     // Closing the window hides Trace (1.34.0): its channels keep running, and it comes back with them as they were.
-    const mainWindow = (method) => app.evaluate(({ BrowserWindow }, name) => { const win = BrowserWindow.getAllWindows().find((item) => item.getTitle() === 'Trace'); return name === 'close' ? (win.close(), true) : name === 'show' ? (win.show(), true) : win.isVisible(); }, method);
+    const mainWindow = (method) => app.evaluate(({ BrowserWindow }, name) => { const win = BrowserWindow.getAllWindows().find((item) => item.getTitle() === 'Trace'); return name === 'close' ? (win.close(), true) : name === 'show' ? (process.env.CODING_HUB_TEST_HIDDEN === '1' || win.show(), true) : win.isVisible(); }, method);
     await mainWindow('close'); await page.waitForTimeout(1000);
     assert.equal(await mainWindow('visible'), false, 'closing the window hides it'); assert.equal(await page.evaluate(() => document.querySelectorAll('.session-tile[data-status="running"]').length), 2, 'its channels keep running');
     await mainWindow('show'); await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('after-hiding'); await page.keyboard.press('Enter');
@@ -499,6 +499,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     app = await _electron.launch({ executablePath: require('electron'), args, env });
     const restored = await app.firstWindow();
     restored.on('pageerror', (error) => errors.push(error.stack));
+    // Channel 2 works in the second project, so it shows under that project (1.46.0): All projects shows both channels.
+    await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
+    await restored.getByRole('button', { name: /^Project /, exact: false }).first().click(); await restored.getByRole('menuitem', { name: /^All projects/ }).click();
     await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 2);
     assert.equal(await restored.getByRole('button', { name: 'Start channel', exact: true }).count(), 2);
     const saved = await restored.evaluate(() => window.codingHub.loadWorkspace());
@@ -596,7 +599,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await restored.getByLabel('New project name', { exact: true }).fill('new-desktop-project');
     await restored.getByLabel('Initialize a Git repository (requires Git)', { exact: true }).uncheck();
     await restored.getByRole('button', { name: 'Create and open project', exact: true }).click();
-    await restored.waitForFunction(() => document.querySelector('.tr-detail-facts')?.textContent.includes('new-desktop-project'));
+    // It opens (1.46.0: the channels already open stay with their own project instead of moving to it).
+    await restored.getByRole('button', { name: 'Project new-desktop-project', exact: true }).waitFor();
     // The workspace is saved once changes settle.
     await waitForPage(restored, async (expected) => (await window.codingHub.loadWorkspace()).value.workspace.rootDirectory === expected, path.join(root, 'new-desktop-project'), 'The new project was not saved as the workspace root.');
     if (process.env.CODING_HUB_TEST_SCREENSHOT) await restored.screenshot({ path: process.env.CODING_HUB_TEST_SCREENSHOT, fullPage: true });

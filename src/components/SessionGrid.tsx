@@ -2,7 +2,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import { arrangeTiles, channelsOf, useWorkspaceStore } from '../state/workspace-store';
-import { inActiveProject, refreshWorktrees, useWorktrees } from '../state/projects';
+import { refreshWorktrees, shownChannels, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
 import { SessionTile } from './SessionTile';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -13,7 +13,9 @@ export function SessionGrid() {
   // Only the active project's channels (several projects, step 6); the others keep running and their numbers.
   const worktrees = useWorktrees((state) => state.list);
   useEffect(() => { void refreshWorktrees(); }, [channels.length]);
-  const sessions = useMemo(() => channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)), [channels, rootDirectory, worktrees]);
+  const allShown = useAllProjects((state) => state.on);
+  const settled = useShownChannels((state) => state.settled);
+  const sessions = useMemo(() => allShown ? channels : shownChannels(channels, rootDirectory, worktrees), [allShown, channels, rootDirectory, worktrees, settled]);
   const filtered = sessions.length !== channels.length;
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
