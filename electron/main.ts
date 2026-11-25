@@ -363,7 +363,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (plugin) { autoMemory?.prepare(run, config.model, info, launch); const toolsUrl = channelTools.register(run.runId); if (toolsUrl) launch.env.CODING_HUB_CHANNEL_TOOLS_URL = toolsUrl; }
     // At Allow edits (shared/safe-actions.ts): the safe commands, as agy matches them exactly, and Trace's own tools that
     // Codex runs without asking, beside the person's own rules. A terminal only: `agy acp` (a chat, a Round Table seat)
-    // takes no --settings and stopped at once with its help (before 1.44.0); there Trace answers each request itself.
+    // takes no --settings (agy 1.5.16 prints its help and exits 1). There file changes at Allow edits are allowed by
+    // acp-stream.ts, and every command, safe or not, comes as an approval card.
     const safe = hub?.preferences().safeActions !== false;
     if (!config.chat && permissionLevel(config) === 'edits' && info.supportsSettings && (safe || plugin)) {
       let own: unknown = {}; try { own = (JSON.parse(fs.readFileSync(path.join(geminiHome(), 'settings.json'), 'utf8')) as { permissions?: unknown }).permissions; } catch { /* None saved. */ }
