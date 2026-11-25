@@ -1,5 +1,18 @@
 ## What's new
 
+1.44.0 adds Review again, catches a turn's end a CLI forgot to report, compacts chats after their handoff, and lines up emoji in terminals.
+
+- **Review again.** When a hierarchy Round Table's final review still asks for changes after its two rounds, **Review again** on its bar runs one more round: the builder makes the changes, the reviewers check them, and the final review runs again. Up to five final reviews per task.
+- **A turn's end that the CLI did not report.** When a Claude Code or Codex terminal stops showing work and stays quiet for 8 seconds without saying its turn ended, Trace ends the turn itself, so Done, tasks and automatic checks are not left waiting. A turn's end is never counted twice. Any agent whose CLI sends OSC 7501 status, as Gemini does, is read the same way.
+- **Chats are compacted after their handoff.** Near the end of its context, a Claude Code or Codex chat that saved its handoff is compacted, as terminal channels already were. The conversation shows `/compact`.
+- **⚠️ and ✔️ line up in terminals.** Emoji made wide by a variation selector now take the two columns the CLIs draw them in, so the text after them is no longer a column off.
+- **Fixed: a Codex chat refused Trace's tools that ask first** (send a message to a channel, add or update a task) without showing you anything: Codex now asks through a question Trace did not answer. They come as approval cards now. Checked with codex-cli 0.172.0: list, add and update a task from a Codex chat.
+- **Fixed: Gemini at a Round Table, or as a chat, stopped as it started** when set to Allow edits (the default): since 1.39.0 Trace gave it a terminal-only setting that its chat mode refuses (seen with agy 1.5.16; whether older agy versions refused it too was not checked). A Gemini chat or seat at Allow edits now asks before every command with an approval card; the safe commands run without asking only in a Gemini terminal. Checked with the real Gemini (agy 1.5.16) and Claude Code: Gemini reviewing a discussion, Gemini leading one, and a hierarchy with Gemini challenging and reviewing, and with Gemini planning and giving the final review (it approved).
+- **Fixed:** a click on a channel's Controls could miss while a busy chat's state word changed (Working, Done, Your turn), because the word changed the header's layout under the pointer. The state stays one width now.
+- **Prices** checked against Anthropic's, OpenAI's and Google's pages on 2026-11-25: unchanged.
+- **Tried:** unit tests (each new behaviour), the desktop and terminal smoke tests, `/compact` in Claude Code's chat mode with the real Claude Code (2.1.332), and the emoji widths on Node 22 and 24.
+- **Not tried yet:** Review again with real agents, the turn-end check with a real CLI that missed its signal, and Codex's compaction with the real Codex.
+
 1.43.0 keeps your computers reachable from each other, and makes **New channel** shorter.
 
 - **Open Trace when you sign in.** Trace now starts in the tray when you sign in, so your phone and other computers can reach this computer after a restart or an update, without anyone opening Trace. It's on by default, set on each computer: Settings → Preferences → **Open Trace when you sign in**. On Windows it is **Trace** under Settings → Apps → Startup; if you turn it off there, Trace leaves it off.

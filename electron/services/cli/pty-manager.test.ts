@@ -518,6 +518,30 @@ describe('Chat channels', () => {
 });
 
 
+describe('OSC 7501 from agents other than Gemini (1.43.0)', () => {
+  const ESC = String.fromCharCode(27); const BEL = String.fromCharCode(7);
+  const status = (body: string) => `${ESC}]7501;${body}${BEL}`; const notify = (text: string) => `${ESC}]9;${text}${BEL}`;
+  function codexFixture() {
+    const processes: FakePty[] = []; const events: SessionEvent[] = [];
+    const spawn = vi.fn(() => { const pty = new FakePty(); processes.push(pty); return pty as unknown as IPty; });
+    const manager = new PtyManager((_owner, event) => events.push(event), { stopDependencies: { platform: 'linux', signalGroup: () => {} }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }) });
+    managers.push(manager);
+    return { processes, events, start: () => manager.start(1, { sessionId: 'cdx', cwd: process.cwd(), config: { engine: 'codex' as const, model: '', reasoningEffort: null }, cols: 80, rows: 24 }) };
+  }
+  const told = (events: SessionEvent[]) => events.filter((event) => ['attention', 'answered'].includes(event.type)).map((event) => event.type === 'attention' ? ['attention', event.message] : ['answered', 'finished' in event ? event.finished : false]);
+  it('reads a question, its answer and the turn’s end from any CLI that sends it', async () => {
+    const { processes, events, start } = codexFixture(); await start(); const pty = processes[0];
+    pty.data(status('state=working')); pty.data(status(`state=blocked:kind=permission:msg=${Buffer.from('Approve Bash: npm test').toString('base64')}`));
+    pty.data(status('state=working')); pty.data(status('state=done'));
+    expect(told(events)).toEqual([['attention', 'Approve Bash: npm test'], ['answered', false], ['answered', true]]);
+  });
+  it('tells a turn’s end once when the CLI’s own notification and OSC 7501 both say so', async () => {
+    const { processes, events, start } = codexFixture(); await start(); const pty = processes[0];
+    pty.data(status('state=working')); pty.data(notify('agent-turn-complete: done')); pty.data(status('state=idle'));
+    expect(told(events)).toEqual([['answered', true]]);
+  });
+});
+
 describe('Gemini CLI terminal runs', () => {
   const ESC = String.fromCharCode(27); const BEL = String.fromCharCode(7);
   const status = (body: string) => `${ESC}]7501;${body}${BEL}`;

@@ -22,6 +22,12 @@ describe('the hierarchy bar says which model is at work', () => {
     // A seat with no tokens yet shows none, and has no tooltip.
     expect(html).toMatch(/<li class=""><i class="seat-hex seat-codex"[^>]*><\/i><strong>Codex<\/strong><span>Reviewer · running<\/span><\/li>/);
   });
+  it('offers Review again while the final review still asks for changes after its rounds, until the most rounds (1.43.0)', () => {
+    const idle = (state: RoundTableState) => renderToStaticMarkup(<ChainBar table={state} busy={false} plannerName="Fable 5.2" builderName="Opus 5.5" seats={seats} onRequest={() => {}} />);
+    const at = (finalRound: number, verdict: 'changes' | null) => { const base = table('needs-you'); return { ...base, chain: { ...base.chain!, finalRound, verdict } }; };
+    expect(idle(at(2, 'changes'))).toContain('>Review again</button>'); expect(idle(at(2, 'changes'))).toContain('round 3 of at most 5');
+    expect(idle(at(5, 'changes'))).not.toContain('Review again'); expect(idle(at(2, null))).not.toContain('Review again');
+  });
   it('labels the planner’s messages with its model, in its own colour', () => {
     const html = renderToStaticMarkup(<Item item={{ kind: 'assistant', id: 'a', blocks: [{ type: 'text', text: 'The plan.' }], streaming: '' }} results={{}} agent="Fable 5.2" author="planner" role="Planner" answer={() => () => {}} view={() => {}} />);
     expect(html).toContain('table-planner'); expect(html).toContain('Fable 5.2 · Planner');

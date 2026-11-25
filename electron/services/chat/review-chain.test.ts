@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatEnvelope, ChatEvent, ChatImage } from '../../../shared/chat';
+import { MAX_FINAL_ROUNDS, type ChatEnvelope, type ChatEvent, type ChatImage } from '../../../shared/chat';
 import type { TableHost } from './round-table';
 import { FINAL_ROUNDS, isReview, legacySeats, REVIEW_ROUNDS, ReviewChains, verdictOf } from './review-chain';
 import { SIGNAL_INSTRUCTION } from '../../../shared/task-signal';
@@ -171,6 +171,26 @@ describe('hierarchy Round Table', () => {
     expect(sent.at(-1)!.text).toContain('Task t-0123abcd: Add a footer.'); expect(sent.at(-1)!.text).not.toContain(SIGNAL_INSTRUCTION); expect(sent.at(-1)!.text).toContain('TASK BLOCKED:');
     expect(verdictOf('Looks right.\nAPPROVED\nTASK COMPLETE')).toEqual({ approved: true }); expect(verdictOf('CHANGES NEEDED: rename it\n**TASK COMPLETE**')).toEqual({ approved: false, changes: 'rename it' });
     expect(verdictOf('TASK COMPLETE')).toBeNull();
+  });
+  it('runs one more fix, review and final review a press with Review again, up to MAX_FINAL_ROUNDS (1.43.0)', async () => {
+    const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER)); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);
+    await reply(BUILDER, 'Built.'); await reply(REVIEWER, 'NO FINDINGS');
+    for (let round = 0; round < FINAL_ROUNDS; round++) { await reply(PLANNER, 'CHANGES NEEDED: rename it'); await reply(BUILDER, 'Renamed.'); await reply(REVIEWER, 'NO FINDINGS'); }
+    await reply(PLANNER, 'CHANGES NEEDED: still wrong'); expect(last().chain).toMatchObject({ step: 'needs-you', verdict: 'changes', finalRound: FINAL_ROUNDS });
+    // Review again: the builder gets the final review's own words, then the reviewer, then the final review, numbered past two.
+    chains.reviewAgain(BUILDER); expect(sent.at(-1)!.runId).toBe(BUILDER);
+    expect(sent.at(-1)!.text).toContain('asks for changes:\n\nstill wrong'); expect(sent.at(-1)!.text).not.toContain('after 2 rounds');
+    await reply(BUILDER, 'Fixed.'); expect(sent.at(-1)!.runId).toBe(REVIEWER); await reply(REVIEWER, 'NO FINDINGS');
+    expect(sent.at(-1)!.runId).toBe(PLANNER); expect(sent.at(-1)!.text).toContain(`(${FINAL_ROUNDS + 1} of ${FINAL_ROUNDS + 1})`);
+    await reply(PLANNER, 'APPROVED'); expect(last().chain).toMatchObject({ step: 'done', verdict: 'approved' });
+    // Only at a final review that still asks for changes, and never past MAX_FINAL_ROUNDS.
+    expect(() => chains.reviewAgain(BUILDER)).toThrow(/still asks to change/);
+    const other = setup(); other.chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER)); other.chains.send(BUILDER, 'Add a footer.', []); await other.reply(PLANNER, 'Plan'); other.chains.plan(BUILDER, true);
+    await other.reply(BUILDER, 'Built.'); await other.reply(REVIEWER, 'NO FINDINGS');
+    for (let round = 0; round < FINAL_ROUNDS; round++) { await other.reply(PLANNER, 'CHANGES NEEDED: x'); await other.reply(BUILDER, 'Done.'); await other.reply(REVIEWER, 'NO FINDINGS'); }
+    await other.reply(PLANNER, 'CHANGES NEEDED: x');
+    for (let round = FINAL_ROUNDS; round < MAX_FINAL_ROUNDS; round++) { other.chains.reviewAgain(BUILDER); await other.reply(BUILDER, 'Done.'); await other.reply(REVIEWER, 'NO FINDINGS'); await other.reply(PLANNER, 'CHANGES NEEDED: x'); }
+    expect(other.last().chain).toMatchObject({ step: 'needs-you', finalRound: MAX_FINAL_ROUNDS }); expect(() => other.chains.reviewAgain(BUILDER)).toThrow(/has run 5 times/);
   });
   it('takes the person’s reply while the table waits for them as part of the same task, and plans it again once the final review is reached', async () => {
     const { chains, sent, reply, last } = setup(); chains.open(1, BUILDER, legacySeats(REVIEWER, PLANNER)); chains.send(BUILDER, 'Add a footer.', []); await reply(PLANNER, 'Plan'); chains.plan(BUILDER, true);

@@ -72,6 +72,12 @@ export class CodexStream implements ChatStream {
       });
     });
   }
+  /** Codex compacts a thread as a turn of its own (thread/compact/start, then turn/started and turn/completed: `done`). */
+  compact() {
+    const go = () => { this.turnId = null; this.interruptWanted = false; this.request('thread/compact/start', { threadId: this.threadId }, (response) => { if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not compact the conversation.' }); }); };
+    if (this.failed) { this.emit({ type: 'done', isError: true, error: `${this.failed} Restart the channel to try again.` }); return; }
+    if (this.threadId) go(); else this.queued.push(go);
+  }
   send(message: string, images: ChatImage[]) {
     const go = () => {
       const input = [...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` })), ...(message ? [{ type: 'text', text: message, text_elements: [] }] : [])];
@@ -105,6 +111,7 @@ export class CodexStream implements ChatStream {
     const approval = this.approvals.get(requestId); if (!approval) return false;
     this.approvals.delete(requestId);
     // Current requests take accept / acceptForSession / decline; the older ones approved / approved_for_session / denied.
+    if (approval.method === 'mcpServer/elicitation/request') { this.line({ id: approval.id, result: allow ? { action: 'accept', content: {} } : { action: 'decline', content: null } }); this.emit({ type: 'permission-done', requestId }); return true; }
     const legacy = approval.method === 'execCommandApproval' || approval.method === 'applyPatchApproval';
     const decision = allow ? (allowEdits ? (legacy ? 'approved_for_session' : 'acceptForSession') : (legacy ? 'approved' : 'accept')) : (legacy ? 'denied' : 'decline');
     this.line({ id: approval.id, result: { decision } });
@@ -139,6 +146,10 @@ export class CodexStream implements ChatStream {
         this.approvals.set(requestId, { id: message.id as number | string, method });
         const files = Object.keys(record(params.fileChanges ?? params.changes));
         this.emit({ type: 'permission', requestId, toolName: 'File changes', description: text(params.reason) || (files.length ? files.map((file) => file.split(/[\\/]/).pop()).join(', ') : 'Edit files in this project'), input: { files }, canAllowEdits: true });
+      } else if (method === 'mcpServer/elicitation/request' && record(params._meta).codex_approval_kind === 'mcp_tool_call') {
+        // An MCP tool call to approve (Codex 0.172): answered as an elicitation. Declining it with an error read as "user rejected".
+        const meta = record(params._meta); this.approvals.set(requestId, { id: message.id as number | string, method });
+        this.emit({ type: 'permission', requestId, toolName: text(meta.tool_name) || 'MCP tool', description: text(params.message), input: record(meta.tool_params), canAllowEdits: false });
       } else this.line({ id: message.id, error: { code: -32601, message: `Trace does not handle ${method}.` } });
       return;
     }

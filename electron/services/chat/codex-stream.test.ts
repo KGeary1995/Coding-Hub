@@ -11,6 +11,18 @@ function codex(options: import('./codex-stream').CodexThreadOptions = { cwd: '/p
   return { stream, sent, events, reply, notify };
 }
 
+describe('Codex chat compaction (1.43.0)', () => {
+  it('compacts the thread with thread/compact/start, and its turn ends the way a message’s does', () => {
+    const { stream, sent, events, reply, notify } = codex(); stream.start(); reply(1, {}); reply(2, { thread: { id: 't' } });
+    stream.compact(); expect(sent.at(-1)).toMatchObject({ method: 'thread/compact/start', params: { threadId: 't' } });
+    reply((sent.at(-1) as { id: number }).id, {}); notify('turn/started', { turn: { id: 'c1' } }); notify('turn/completed', { turn: { id: 'c1', status: 'completed' } });
+    expect(events.filter((event) => event.type === 'done')).toEqual([{ type: 'done', isError: false, error: null }]);
+    // Refused: the turn ends with Codex's reason.
+    stream.compact(); stream.push(JSON.stringify({ id: (sent.at(-1) as { id: number }).id, error: { message: 'nothing to compact' } }) + '\n');
+    expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'nothing to compact' });
+  });
+});
+
 describe('Codex chat permissions', () => {
   it('starts a thread at the channel’s level and sends a changed level with the next turn only', () => {
     const { stream, sent, reply } = codex({ cwd: '/p', model: '', reasoningEffort: null, permissions: 'full' });
@@ -127,6 +139,20 @@ describe('Codex chat protocol', () => {
     // A failed start says so.
     const failed = codex(); failed.stream.start(); failed.reply(1, {}); failed.stream.push(JSON.stringify({ id: 2, error: { message: 'Not signed in' } }) + '\n');
     expect(failed.events).toEqual([{ type: 'done', isError: true, error: 'Not signed in' }]);
+  });
+  it('asks about an MCP tool call (an elicitation, as codex-cli 0.172 sends it) and answers accept or decline; other elicitations are still declined', () => {
+    const { stream, sent, events, reply } = codex();
+    stream.start(); reply(1, {}); reply(2, { thread: { id: 't' } });
+    const ask = (id: number, tool: string) => stream.push(JSON.stringify({ id, method: 'mcpServer/elicitation/request', params: { threadId: 't', turnId: 'u', serverName: 'trace-channels', mode: 'form', _meta: { codex_approval_kind: 'mcp_tool_call', persist: ['session', 'always'], tool_name: tool, tool_params: { title: 'Probe' } }, message: `Allow the trace-channels MCP server to run tool "${tool}"?`, requestedSchema: { type: 'object', properties: {} } } }) + '\n');
+    ask(0, 'add_task'); ask(1, 'update_task');
+    expect(events.filter((event) => event.type === 'permission')).toEqual([
+      { type: 'permission', requestId: 'codex-0', toolName: 'add_task', description: 'Allow the trace-channels MCP server to run tool "add_task"?', input: { title: 'Probe' }, canAllowEdits: false },
+      { type: 'permission', requestId: 'codex-1', toolName: 'update_task', description: 'Allow the trace-channels MCP server to run tool "update_task"?', input: { title: 'Probe' }, canAllowEdits: false },
+    ]);
+    expect(stream.answer('codex-0', true)).toBe(true); expect(sent.at(-1)).toEqual({ id: 0, result: { action: 'accept', content: {} } });
+    expect(stream.answer('codex-1', false)).toBe(true); expect(sent.at(-1)).toEqual({ id: 1, result: { action: 'decline', content: null } });
+    stream.push(JSON.stringify({ id: 9, method: 'mcpServer/elicitation/request', params: { threadId: 't', serverName: 'x', mode: 'form', message: 'Your name?', requestedSchema: { type: 'object', properties: { name: { type: 'string' } } } } }) + '\n');
+    expect(sent.at(-1)).toMatchObject({ id: 9, error: { code: -32601 } });
   });
   it('skips lines that are not messages instead of throwing', () => {
     const { stream, events } = codex(); stream.start();

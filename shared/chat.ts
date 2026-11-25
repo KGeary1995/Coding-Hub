@@ -134,8 +134,12 @@ export interface RoundTableState {
 /** How many images a waiting message has: their data on the owning computer, only the count on a phone or linked computer. */
 export const waitingImageCount = (table: Pick<RoundTableState, 'waitingImages' | 'waitingImageCount'> | undefined) => table?.waitingImages?.length ?? table?.waitingImageCount ?? 0;
 export const ROUND_TABLE_MAX_ROUNDS = 5;
+/** The most final reviews of one task: two by themselves (FINAL_ROUNDS), then each Review again the person asks for (1.43.0). */
+export const MAX_FINAL_ROUNDS = 5;
 export type ChatRequest =
   | { action: 'send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
+  /** Compacts the conversation (1.43.0): Claude Code's /compact, Codex's thread/compact/start. Trace asks for it after an automatic handoff. */
+  | { action: 'compact'; sessionId: string; runId: string }
   | { action: 'answer'; sessionId: string; runId: string; requestId: string; allow: boolean; allowEdits?: boolean }
   | { action: 'interrupt'; sessionId: string; runId: string }
   /** What the agent may do without asking, from now on (this computer's window only). */
@@ -150,6 +154,8 @@ export type ChatRequest =
   | { action: 'table-plan'; sessionId: string; runId: string; approve: boolean; note: string }
   /** Picks a stopped hierarchy table up at its step; `skipChallenge`: a stopped challenge is left out instead. */
   | { action: 'table-continue'; sessionId: string; runId: string; skipChallenge?: boolean }
+  /** A hierarchy whose final review still asks for changes after its rounds: one more fix, review and final review (1.43.0). */
+  | { action: 'table-review-again'; sessionId: string; runId: string }
   /** A message kept from before a restart: send it now, or drop it. */
   | { action: 'table-waiting'; sessionId: string; runId: string; send: boolean }
   /** Removes a task from Tasks waiting at a hierarchy table: the one at `index`, only if it still starts with `head`. */

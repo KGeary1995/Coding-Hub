@@ -24,4 +24,12 @@ describe('reading an agent\'s state from its screen (herdr\'s rules, a subset)',
     // A flicker of one reading changes nothing.
     expect(watch.push({ state: 'blocked' })).toBeNull(); expect(watch.push({ state: 'working' })).toBeNull();
   });
+  it('says when the agent starts working, and when a working screen settles, each once it is read twice (1.43.0)', () => {
+    const watch = new ScreenWatch();
+    expect(watch.push({ state: 'working' })).toBeNull(); expect(watch.push({ state: 'working' })).toBe('working');
+    expect(watch.push({ state: 'unknown' })).toBeNull(); expect(watch.push({ state: 'unknown' })).toBe('settled');
+    // Settled once: more quiet readings say nothing; a blocked one after work is a question, not an end.
+    expect(watch.push({ state: 'unknown' })).toBeNull();
+    watch.push({ state: 'working' }); watch.push({ state: 'working' }); watch.push({ state: 'blocked' }); expect(watch.push({ state: 'blocked' })).toBe('blocked');
+  });
 });

@@ -270,6 +270,20 @@ else if (args.startsWith('serve --bg --https=443')) {
     assert.ok(narrow.page <= narrow.width && !narrow.past.length && narrow.title >= 72, `the channel screen at 320 px: ${JSON.stringify(narrow)}`); await phoneSize(390);
     // The phone's own Back (Android's Back button, the iPhone's swipe) leaves the channel for the list, not the app (1.31.6).
     await phone.goBack(); await phone.locator('#channel-list button').first().waitFor(); assert.ok(phone.url().startsWith(`http://127.0.0.1:${PORT}`), 'still in the app');
+    // The app preview's picture for a phone (1.39.0; untested end to end before 1.44.0): an app address a channel prints is
+    // pictured off screen and sent to the phone as a JPEG data URL, with the address; a channel that printed none says so.
+    { const appServer = require('node:http').createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<title>Phone app</title><h1 style="font:64px sans-serif">Phone app</h1>'); });
+      await new Promise((resolve) => appServer.listen(0, '127.0.0.1', resolve)); const appPort = appServer.address().port;
+      try {
+        // Typed by the phone (the computer's window shows Settings here), as its keys send text.
+        const typed = await phone.evaluate(async ([sessionId, text]) => { const auth = { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }; const channel = (await (await fetch('/api/channels', { headers: auth })).json()).find((item) => item.sessionId === sessionId); return (await fetch('/api/input', { method: 'POST', headers: auth, body: JSON.stringify({ sessionId, runId: channel.runId, data: text + '\r' }) })).status; }, [codexId, `http://127.0.0.1:${appPort}/`]);
+        assert.equal(typed, 200, 'the phone typed the app address into the channel');
+        const picture = (id) => phone.evaluate(async (sessionId) => { const response = await fetch('/api/preview?sessionId=' + encodeURIComponent(sessionId), { headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token') } }); return { status: response.status, body: await response.json() }; }, id);
+        let shown = null; for (let i = 0; i < 60 && !(shown && shown.status === 200); i++) { shown = await picture(codexId); if (shown.status !== 200) await new Promise((resolve) => setTimeout(resolve, 250)); }
+        assert.equal(shown.status, 200, `the phone's app picture: ${JSON.stringify(shown.body).slice(0, 200)}`);
+        assert.ok(shown.body.image.startsWith('data:image/jpeg;base64,') && shown.body.image.length > 1000, 'a JPEG picture of the app'); assert.equal(shown.body.url, `http://127.0.0.1:${appPort}/`);
+        const none = await picture(claudeId); assert.equal(none.status, 409, 'a channel that printed no address has no picture');
+      } finally { appServer.close(); } }
     // The phone's + Channel offers each agent as a terminal and, from 1.39.1, as a chat, as the computer's does: from 1.43.0
     // one row each with CLI and Chat, each keeping its full name. The chat checks below add theirs through the same request
     // the menu sends.

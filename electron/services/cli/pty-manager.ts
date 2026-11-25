@@ -114,6 +114,8 @@ export interface HeldTerminals {
 /** A title the CLI gives its terminal (OSC 0 or 2): Claude Code's task summary, for phones. */
 const TITLE = /\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g;
 export const HIGH_WATER = 1024 * 1024; export const LOW_WATER = 256 * 1024; const STALL_MS = 5000;
+/** How long a run whose screen stopped showing work must stay quiet before Trace takes the turn as ended (settledTurn). */
+export const SETTLED_MS = !process.env.CODING_HUB_TEST_SETTLED_MS ? 8000 : Number(process.env.CODING_HUB_TEST_SETTLED_MS);
 interface ManagedRun {
   owner: number;
   /** Codex reports approval requests as OSC 9 notifications in its output. */
@@ -124,6 +126,12 @@ interface ManagedRun {
   gemini?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string; since: number; known: Set<string> };
   /** A custom agent's run: Needs you and Done from the signals its definition names (agents/status.ts). */
   custom?: CustomStatusReader;
+  /** Any other agent's OSC 7501 status, herdr's protocol, which Gemini speaks (1.43.0): read the same way, if the CLI sends it. */
+  status7501?: { reader: GeminiStatusReader; last: GeminiStatus['state'] | null; asked?: string };
+  /** When the screen last showed the agent start working, and when Trace last heard a turn end (the window was told). */
+  workingAt?: number; turnEndAt?: number;
+  /** The screen showed the agent stop working: the turn's end is confirmed once it stays quiet (settledTurn). */
+  settle?: ReturnType<typeof setTimeout>;
   /** A custom agent's name: its Round Table seat's default name. */
   agentName?: string;
   session: RunningSession;
@@ -218,6 +226,8 @@ export class PtyManager {
   notifyResolved(runId: string, finished = false) {
     const run = [...this.runs.values()].find((candidate) => candidate.session.runId === runId);
     if (!run || run.finished) return;
+    // One turn's end, told by its CLI and by the screen (or OSC 7501) as well, is told once.
+    if (finished) { const now = Date.now(); if (run.turnEndAt && now - run.turnEndAt < 3000 && (run.workingAt ?? 0) < run.turnEndAt) return; run.turnEndAt = now; }
     this.send(run.owner, { type: 'answered', sessionId: run.session.sessionId, runId, at: new Date().toISOString(), ...(finished ? { finished: true as const } : {}) });
   }
 
@@ -364,7 +374,7 @@ export class PtyManager {
       session.pid = pty.pid;
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
+      const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}), ...(session.engine !== 'gemini' && session.engine !== 'shell' && !chat ? { status7501: { reader: new GeminiStatusReader(), last: null } } : {}) };
       if (held) run.held = true;
       if (request.config.engine === 'custom') { run.agentName = agentName; if (!chat) run.custom = this.customReader(run, customStatus, request.cols, request.rows); }
       // The first request went in as arguments: the agent's first turn is under way without an Enter, and is not typed again.
@@ -395,7 +405,7 @@ export class PtyManager {
   private adopt(owner: number, held: { pty: IPty; meta: HeldMeta; tail: string }): RunningSession {
     const session: RunningSession = { ...held.meta.session, pid: held.pty.pid };
     let resolveExit!: () => void; const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
-    const run: ManagedRun = { owner, session, pty: held.pty, ...(held.meta.nativeKey ? { nativeKey: held.meta.nativeKey } : {}), outputTail: held.tail.slice(-OUTPUT_TAIL), pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}) };
+    const run: ManagedRun = { owner, session, pty: held.pty, ...(held.meta.nativeKey ? { nativeKey: held.meta.nativeKey } : {}), outputTail: held.tail.slice(-OUTPUT_TAIL), pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}), ...(session.engine !== 'gemini' && session.engine !== 'shell' ? { status7501: { reader: new GeminiStatusReader(), last: null } } : {}) };
     run.held = true; this.runs.set(session.sessionId, run);
     if (held.meta.config.engine === 'custom') { let status: AgentDefinition['status'] | null = null; try { status = this.dependencies.customStatus?.(held.meta.config.agentId) ?? null; } catch { /* Read without signals. */ } run.custom = this.customReader(run, status, held.pty.cols, held.pty.rows); }
     this.watchTerminal(run); held.pty.onExit(({ exitCode, signal }) => this.finish(run, exitCode, signal));
@@ -420,13 +430,17 @@ export class PtyManager {
       else if (!run.flushTimer) run.flushTimer = setTimeout(() => this.flush(run), 16);
       if (run.osc) for (const message of run.osc.push(data)) { if (codexApproval(message)) this.notifyAttention(run.session.runId, message); else this.notifyResolved(run.session.runId, true); }
       if (run.gemini) for (const status of run.gemini.reader.push(data)) this.geminiStatus(run, status);
+      if (run.status7501) for (const status of run.status7501.reader.push(data)) this.agentStatus(run, run.status7501, status);
       run.custom?.push(data);
     });
     // Claude Code and Codex terminals: their screen is read too, to catch an approval their own signal missed and to
     // clear a "needs you" once they work again (rules after herdr's).
     if ((session.engine === 'claude' || session.engine === 'codex') && !process.env.CODING_HUB_NO_SCREEN_STATE) run.screen = new ScreenReader(session.engine, pty.cols, pty.rows, () => run.title ?? '', (change, message) => {
       if (run.finished) return;
+      if (change === 'working' || change === 'resolved') { run.workingAt = Date.now(); if (run.settle) { clearTimeout(run.settle); run.settle = undefined; } }
       if (change === 'resolved') { this.notifyResolved(run.session.runId); return; }
+      if (change === 'working') return;
+      if (change === 'settled') { this.settledTurn(run); return; }
       this.flush(run); this.send(run.owner, { type: 'attention', sessionId: run.session.sessionId, runId: run.session.runId, message: message ?? 'Waiting for your answer', at: new Date().toISOString() });
     });
   }
@@ -494,6 +508,12 @@ export class PtyManager {
       run.turnOpen = true; run.chat.send(request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
+    else if (request.action === 'compact') {
+      if (!run.chat.compact) throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation from Trace.');
+      if (run.turnOpen) throw new HubError('CHAT_BUSY', 'The agent is still answering. Compact once its turn has ended.');
+      run.turnOpen = true; run.chat.compact();
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: '/compact', images: 0 } }); } catch { /* The thread shows it from the window's own send. */ }
+    }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else if (request.action === 'interrupt') run.chat.interrupt();
     else if (request.action === 'permissions') {
@@ -532,6 +552,7 @@ export class PtyManager {
     }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
+    else if (request.action === 'table-review-again') this.chains.reviewAgain(request.runId);
     else if (request.action === 'table-next-drop') { if (!this.chains.has(request.runId)) throw new HubError('TABLE_STEP', 'Only a hierarchy Round Table keeps tasks from Tasks waiting.'); this.chains.dropNext(request.runId, request.index, request.head); }
     else if (this.chains.has(request.runId)) {
       // Only the builder edits at a hierarchy; the rest works as at any table.
@@ -638,12 +659,29 @@ export class PtyManager {
    * A Gemini CLI status: waiting for the person is a notice; working again after it, the notice is answered; idle, done
    * or failed after work, the turn ended. agy says idle when it opens too, which ends nothing.
    */
-  private geminiStatus(run: ManagedRun, status: GeminiStatus) {
-    const last = run.gemini!.last; const asked = run.gemini!.asked; run.gemini!.last = status.state; run.gemini!.asked = status.state === 'blocked' ? status.message : undefined;
+  private geminiStatus(run: ManagedRun, status: GeminiStatus) { this.agentStatus(run, run.gemini!, status); }
+  /** An OSC 7501 status, from Gemini or (1.43.0) any other agent that sends it, against what that run last said. */
+  private agentStatus(run: ManagedRun, said: { last: GeminiStatus['state'] | null; asked?: string }, status: GeminiStatus) {
+    const last = said.last; const asked = said.asked; said.last = status.state; said.asked = status.state === 'blocked' ? status.message : undefined;
     // agy may say blocked again while it still waits on the same question: that is one notice, not another.
     if (status.state === 'blocked') { if (last !== 'blocked' || asked !== status.message) this.notifyAttention(run.session.runId, status.message); }
     else if (status.state === 'working') { if (last === 'blocked') this.notifyResolved(run.session.runId); }
     else if (last === 'working' || last === 'blocked') this.notifyResolved(run.session.runId, true);
+  }
+
+  /**
+   * The screen showed the agent stop working (screen-reader.ts): the turn has ended if the run stays quiet, the screen
+   * does not show it working again, and the CLI's own signal (a hook, a notification) did not say so already. Only then
+   * does Trace end the turn itself, so a missed hook still ends it, and a pause between steps does not (1.43.0).
+   */
+  private settledTurn(run: ManagedRun) {
+    if (run.settle) clearTimeout(run.settle);
+    run.settle = setTimeout(() => {
+      run.settle = undefined; if (run.finished || !run.screen) return;
+      const since = run.workingAt ?? 0;
+      if (Date.now() - run.screen.wroteAt < SETTLED_MS - 500 || (run.turnEndAt ?? 0) >= since) return;
+      this.notifyResolved(run.session.runId, true);
+    }, SETTLED_MS); run.settle.unref?.();
   }
 
   /** A custom run's status reader: waiting is a notice, its going away answers it, and a turn's end is `finished`. */
@@ -658,7 +696,7 @@ export class PtyManager {
 
   private finish(run: ManagedRun, exitCode: number, signal?: number) {
     if (run.finished) return;
-    run.screen?.dispose(); run.custom?.dispose();
+    run.screen?.dispose(); run.custom?.dispose(); if (run.settle) clearTimeout(run.settle);
     // Gemini CLI prints the conversation to resume as it quits; stopped by Trace it prints none, so agy's list says.
     if (run.gemini && !run.chat) {
       const printed = [...run.outputTail.matchAll(/agy --conversation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)].at(-1)?.[1];
@@ -702,7 +740,7 @@ export class PtyManager {
     this.closing = true;
     for (const reservation of this.pending.values()) reservation.cancelled = true;
     if (!stopHeld) for (const run of [...this.runs.values()]) if (run.held && !run.finished) {
-      run.finished = true; if (run.stall) clearTimeout(run.stall); if (run.flushTimer) clearTimeout(run.flushTimer); run.screen?.dispose(); run.custom?.dispose();
+      run.finished = true; if (run.stall) clearTimeout(run.stall); if (run.flushTimer) clearTimeout(run.flushTimer); run.screen?.dispose(); run.custom?.dispose(); if (run.settle) clearTimeout(run.settle);
       this.runs.delete(run.session.sessionId); run.resolveExit();
     }
     await Promise.all([...new Set([...this.runs.values()].map((run) => run.owner))].map((owner) => this.stopOwner(owner)));

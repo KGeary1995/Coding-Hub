@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ArrowLeftRight, Asterisk, Bot, ChevronDown, ChevronRight, MessagesSquare, Settings2, Sparkle, Square, TerminalSquare, User, X } from 'lucide-react';
 import type { Finding } from '../../../shared/findings';
-import { isTracePrompt, late, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
+import { isTracePrompt, late, MAX_FINAL_ROUNDS, waitingImageCount, type ChatBlock, type ChatImage, type PlanChallenge, type RoundTableState } from '../../../shared/chat';
 import type { ChatItem, ChatThread, ToolResult } from '../../state/chat-store';
 import type { SeatEngine, Session } from '../../../shared/types';
 import { Markdown } from './Markdown';
@@ -366,6 +366,8 @@ export function ChainBar({ table, busy, plannerName, builderName, onRequest, det
     {step === 'plan-review' && <button className="button primary small chain-act" onClick={() => onRequest({ action: 'table-plan', approve: true, note: '' })}>Approve plan</button>}
     {!detached && step === 'stopped' && chain?.stoppedAt && !table.stopping && <button className="quiet-button small chain-act" onClick={() => onRequest({ action: 'table-continue' })}>Continue</button>}
     {!detached && challengeStopped && !table.stopping && <button className="quiet-button small chain-act" title={`Show the plan to you without ${challengerLabel ? `${challengerLabel}'s challenge` : 'the challenges'}`} onClick={() => onRequest({ action: 'table-continue', skipChallenge: true })}>Continue without the challenge</button>}
+    {/* The final review still asks for changes after its rounds (1.43.0): one more fix, review and final review. */}
+    {!detached && step === 'needs-you' && chain?.verdict === 'changes' && chain.finalRound < MAX_FINAL_ROUNDS && !busy && <button className="quiet-button small chain-act" title={`The builder makes the changes the final review asks for, the reviewers check them, then the final review again (round ${chain.finalRound + 1} of at most ${MAX_FINAL_ROUNDS})`} onClick={() => onRequest({ action: 'table-review-again' })}>Review again</button>}
     {busy && <button className="button danger small chain-act" title="Stop the step that is running" onClick={() => onRequest({ action: 'table-stop' })}><Square size={12} /><span className="table-label">Stop</span></button>}
     {!full && reviewers.length > 0 && !detached && <label className="table-rounds" title="Review rounds: how many times the reviewers review and the builder fixes, before the final review"><span className="table-label">Review rounds</span><select aria-label="Review rounds" disabled={busy} value={table.rounds} onChange={(event) => onRequest({ action: 'table-rounds', rounds: Number(event.target.value) })}>{[1, 2, 3, 4, 5].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>}
     {onSeats && <button className="quiet-button small" disabled={busy} title={busy ? 'Seats can be changed when the Round Table is not working' : 'Add or remove agents, and change their names, duties, instructions and models'} onClick={onSeats}><Settings2 size={13} /><span className="table-label">Seats</span></button>}
@@ -414,4 +416,4 @@ function ChainFold({ summary, children }: { summary: ReactNode; children: ReactN
 }
 /** One seat at a hierarchy table, for its bar. */
 export interface ChainSeat { id?: string; role: string; /** The agent and model, when the seat's name does not say it. */ detail?: string; name: string; colour: SeatColour; state: string; tokens: number }
-export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean } | { action: 'table-next-drop'; index: number; head: string };
+export type ChainAction = { action: 'table-plan'; approve: boolean; note: string } | { action: 'table-continue'; skipChallenge?: boolean } | { action: 'table-review-again' } | { action: 'table-rounds'; rounds: number } | { action: 'table-stop' } | { action: 'table-close' } | { action: 'table-waiting'; send: boolean } | { action: 'table-next-drop'; index: number; head: string };

@@ -362,9 +362,11 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     const plugin = geminiPluginReady();
     if (plugin) { autoMemory?.prepare(run, config.model, info, launch); const toolsUrl = channelTools.register(run.runId); if (toolsUrl) launch.env.CODING_HUB_CHANNEL_TOOLS_URL = toolsUrl; }
     // At Allow edits (shared/safe-actions.ts): the safe commands, as agy matches them exactly, and Trace's own tools that
-    // Codex runs without asking, beside the person's own rules.
+    // Codex runs without asking, beside the person's own rules. A terminal only: `agy acp` (a chat, a Round Table seat)
+    // takes no --settings (agy 1.5.16 prints its help and exits 1). There file changes at Allow edits are allowed by
+    // acp-stream.ts, and every command, safe or not, comes as an approval card.
     const safe = hub?.preferences().safeActions !== false;
-    if (permissionLevel(config) === 'edits' && info.supportsSettings && (safe || plugin)) {
+    if (!config.chat && permissionLevel(config) === 'edits' && info.supportsSettings && (safe || plugin)) {
       let own: unknown = {}; try { own = (JSON.parse(fs.readFileSync(path.join(geminiHome(), 'settings.json'), 'utf8')) as { permissions?: unknown }).permissions; } catch { /* None saved. */ }
       launch.args.push('--settings', geminiSafeSettings(own, plugin ? GEMINI_TOOL_RULES : [], safe));
     }
@@ -388,7 +390,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   autoMemory?.prepare(run, config.model, info, launch, config.memoryKey);
   // Then the channel tools, when turned on, join that list (or start it). Codex takes the three that only look (list,
   // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
-  // codex-cli 0.171.0); sending a message still asks, and a chat therefore still refuses it. The task tools ride the same
+  // codex-cli 0.171.0); sending a message still asks, which a chat shows as a card (an MCP elicitation, codex-stream.ts). The task tools ride the same
   // server when their own setting is on (either one adds it); list_tasks only looks, adding or updating a task asks.
   const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
