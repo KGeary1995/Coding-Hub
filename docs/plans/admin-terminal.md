@@ -1,6 +1,8 @@
 # A terminal channel that runs as administrator (Windows)
 
-Status: plan for the owner's review (2026-11-25). Nothing here is built. The owner asked for a way to "run terminal in
+Status: **closed (2026-11-25): nothing to build.** The owner chose to keep how Trace already works: with Windows' `sudo`
+set to Inline, every Terminal channel Trace opens runs as administrator (option B, in Trace since 1.15.0). See "Owner's
+answers". The rest is kept as the record of the options. Originally: plan for the owner's review (2026-11-25). The owner asked for a way to "run terminal in
 administrator mode when needed", separately from screen sharing's administrator helper (admin-screen-service.md).
 
 ## Problem
@@ -112,9 +114,12 @@ Non-goals:
   smallest way to a real administrator channel. Windows shows the prompt, the shell runs elevated in the same console,
   and Trace adds the Admin marking and stops it with the channel. The trade-off is inline mode's: while the channel
   runs, other programs running as the owner can also type into it.
-- Still to choose: the button (C), or the channel by way of B (or A, if B falls short).
+- **Decision:** every Terminal channel Trace opens may be administrator. No per-channel switch, no button (C), no admin
+  runner (A): today's behaviour (B, since 1.15.0) stays as it is. With `sudo` set otherwise, a Terminal channel stays
+  ordinary and prints how to set sudo to Inline. The owner believes their PC is set to Inline; a Terminal channel there
+  is titled "PowerShell (administrator)" when it is.
 
-## Open questions for the owner
+## Open questions for the owner (answered above)
 
 1. Is step 1 (a button that opens an elevated Windows Terminal outside Trace) enough for now, or is a real administrator
    channel (A) needed?
