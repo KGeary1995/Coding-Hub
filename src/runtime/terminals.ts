@@ -4,7 +4,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { workbench } from './workbench';
 import type { Session } from '../../shared/types';
-import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun, SUBMIT_DELAY_MS } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
@@ -221,6 +221,12 @@ function sendSize(id: string, entry: TerminalEntry, cols: number, rows: number) 
   }).catch(() => reportInputError(id, 'The native terminal connection was lost.'));
 }
 
+/** Types a request into an agent's terminal and sends it: the text, then its Enter on its own (SUBMIT_DELAY_MS). */
+export async function submitTerminal(id: string, text: string): Promise<boolean> {
+  if (!await writeTerminal(id, text)) return false;
+  await new Promise((resolve) => setTimeout(resolve, SUBMIT_DELAY_MS));
+  return writeTerminal(id, '\r');
+}
 export function writeTerminal(id: string, data: string): Promise<boolean> {
   const entry = terminals.get(id);
   const run = entry?.run;

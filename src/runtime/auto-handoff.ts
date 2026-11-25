@@ -5,7 +5,7 @@ import { LIMIT_THRESHOLD, usageFor } from '../state/channel-state';
 import { leadOf, useWorkspaceStore } from '../state/workspace-store';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { chatFailed, chatSent } from '../state/chat-store';
-import { writeTerminal } from './terminals';
+import { submitTerminal } from './terminals';
 import { contextShare, setHandoffPhase } from '../state/handoff-store';
 
 /**
@@ -53,7 +53,7 @@ async function compactAfterHandoff(session: Session, sessions: Session[]): Promi
     if (!handoffSaved(await hubCall<MemoryNote[]>({ action: 'memory-list', project }), session.config.engine, pending.at)) return false;
   } catch { return false; }
   waiting.delete(runId); setHandoffPhase(session.id, runId, 'saved');
-  if (!session.config.chat) { const sent = await writeTerminal(session.id, '/compact\r'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); return sent; }
+  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); return sent; }
   if (!window.codingHub) return false;
   chatSent(session.id, '/compact', []);
   const result = await window.codingHub.chat({ action: 'compact', sessionId: session.id, runId }).catch(() => null);
@@ -77,6 +77,6 @@ export async function askForHandoff(sessionId: string, wait = 1500): Promise<boo
     if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The handoff request could not be sent.'); asked.delete(runId); return false; }
     setHandoffPhase(session.id, runId, 'asked'); return true;
   }
-  const sent = await writeTerminal(session.id, text + '\r'); if (!sent) asked.delete(runId); else setHandoffPhase(session.id, runId, 'asked');
+  const sent = await submitTerminal(session.id, text); if (!sent) asked.delete(runId); else setHandoffPhase(session.id, runId, 'asked');
   return sent;
 }

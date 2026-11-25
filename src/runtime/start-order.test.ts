@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../shared/types';
 
 const fake = vi.hoisted(() => ({ watchers: new Map<string, (data: string) => void>(), typed: [] as [string, string][], started: [] as string[], fail: new Set<string>(), asked: [] as (string | undefined)[], prompted: false }));
-vi.mock('./terminals', () => ({ watchOutput: (id: string, watch: (data: string) => void) => { fake.watchers.set(id, watch); return () => fake.watchers.delete(id); }, writeTerminal: async (id: string, data: string) => { fake.typed.push([id, data]); return true; } }));
+vi.mock('./terminals', () => ({ watchOutput: (id: string, watch: (data: string) => void) => { fake.watchers.set(id, watch); return () => fake.watchers.delete(id); }, writeTerminal: async (id: string, data: string) => { fake.typed.push([id, data]); return true; },
+  // A request and its Enter (sent on its own by the real one) are recorded as one, as these tests read them.
+  submitTerminal: async (id: string, text: string) => { fake.typed.push([id, text + '\r']); return true; } }));
 vi.mock('./use-native-host', async () => {
   const { useWorkspaceStore } = await import('../state/workspace-store');
   return { startSession: async (id: string, options: { firstRequest?: string } = {}) => {

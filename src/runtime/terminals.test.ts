@@ -24,9 +24,10 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: FakeWebgl }));
 const copied: string[] = [];
 vi.stubGlobal('document', { createElement: () => new FakeElement() });
-vi.stubGlobal('window', { codingHub: { copyText: async (text: string) => { copied.push(text); } } });
+const written: { data: string; at: number }[] = [];
+vi.stubGlobal('window', { codingHub: { copyText: async (text: string) => { copied.push(text); }, writeSession: async (input: { data: string }) => { written.push({ data: input.data, at: Date.now() }); return { ok: true, value: null }; }, resizeSession: async () => ({ ok: true, value: null }) } });
 
-const { getTerminal, onWebGLContextLost, releaseRemovedTerminals } = await import('./terminals');
+const { getTerminal, onWebGLContextLost, releaseRemovedTerminals, routeTerminalEvent, submitTerminal } = await import('./terminals');
 const { useHubStore } = await import('../state/hub-store');
 const { createSession, useWorkspaceStore } = await import('../state/workspace-store');
 
@@ -78,5 +79,16 @@ describe('a CLI setting the clipboard (OSC 52)', () => {
   it('is honoured just after a key press in Claude Code and Codex channels, never in a plain terminal', () => {
     const agent = terminalFor(createSession('claude')); agent.element.emit('keydown'); osc!(`c;${request}`); expect(copied).toEqual(['copied text']);
     const shell = terminalFor(createSession('shell')); shell.element.emit('keydown'); osc!(`c;${request}`); expect(copied).toEqual(['copied text']);
+  });
+});
+
+describe('a request typed into an agent’s terminal', () => {
+  afterEach(() => { releaseRemovedTerminals([]); written.length = 0; });
+  it('is typed, then sent with an Enter of its own a moment later (a burst with its Enter was taken as a paste)', async () => {
+    const session = { ...createSession('claude'), status: 'running' as const, runId: 'r1' }; terminalFor(session);
+    routeTerminalEvent({ type: 'started', sessionId: session.id, runId: 'r1', engine: 'claude', pid: 1, cwd: '/p' } as never);
+    expect(await submitTerminal(session.id, 'Fix sum.js')).toBe(true);
+    expect(written.map((item) => item.data)).toEqual(['Fix sum.js', '\r']);
+    expect(written[1].at - written[0].at).toBeGreaterThanOrEqual(150);
   });
 });

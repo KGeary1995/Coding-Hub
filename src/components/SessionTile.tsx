@@ -25,7 +25,7 @@ import { chatFailed, chatSent, useChatStore } from '../state/chat-store';
 import { tableRequest } from '../runtime/round-table';
 import { PastedImages } from './PastedImages';
 import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
-import { focusTerminal, writeTerminal } from '../runtime/terminals';
+import { focusTerminal, submitTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
 import { HANDOFF_DETAIL, HANDOFF_LABEL, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
@@ -92,7 +92,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const chat = isChatRun(session.config);
   // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
-  const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
+  const sendPrompt = async (text: string) => { if (!chat) return submitTerminal(session.id, text); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };

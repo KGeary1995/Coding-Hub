@@ -9,7 +9,7 @@ import { agentLook } from '../../shared/agent-look';
 
 const typed: { id: string; data: string }[] = [];
 // A terminal's screen needs a DOM: what is typed into one is recorded instead, and its output stays quiet.
-vi.mock('./terminals', () => ({ focusTerminal: () => {}, routeTerminalEvent: () => {}, terminalDimensions: () => ({ cols: 100, rows: 24 }), releaseRemovedTerminals: () => {}, watchOutput: () => () => {}, writeTerminal: async (id: string, data: string) => { typed.push({ id, data }); return true; } }));
+vi.mock('./terminals', () => ({ focusTerminal: () => {}, routeTerminalEvent: () => {}, terminalDimensions: () => ({ cols: 100, rows: 24 }), releaseRemovedTerminals: () => {}, watchOutput: () => () => {}, writeTerminal: async (id: string, data: string) => { typed.push({ id, data }); return true; }, submitTerminal: async (id: string, text: string) => { typed.push({ id, data: text + '\r' }); return true; } }));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); typed.length = 0; useTaskStore.setState({ tasks: [] }); });
 
 const TASK = '33333333-3333-4333-8333-333333333333'; const CHANNEL = '44444444-4444-4444-8444-444444444444';

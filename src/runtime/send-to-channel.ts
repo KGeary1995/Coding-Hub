@@ -1,6 +1,6 @@
 import { isChatRun, type Session } from '../../shared/types';
 import { chatFailed, chatSent, useChatStore } from '../state/chat-store';
-import { writeTerminal } from './terminals';
+import { submitTerminal } from './terminals';
 
 /**
  * Types a prompt into a running channel as the person would: a chat channel gets it as a message (one leading a Round
@@ -9,7 +9,7 @@ import { writeTerminal } from './terminals';
  */
 export async function sendToChannel(session: Session, text: string): Promise<boolean> {
   const runId = session.runId;
-  if (!isChatRun(session.config) || !window.codingHub || !runId) return writeTerminal(session.id, text + '\r');
+  if (!isChatRun(session.config) || !window.codingHub || !runId) return submitTerminal(session.id, text);
   const table = useChatStore.getState().threads[session.id]?.table;
   // A hierarchy's lead is marked busy by its chain, not by this message.
   chatSent(session.id, text, [], table?.kind !== 'hierarchy');
