@@ -44,14 +44,17 @@ describe('Claude attention endpoint', () => {
     expect((await post(url, { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' })).status).toBe(200);
     expect(seen).toEqual([[runId, 'Claude needs your permission to use Bash']]);
   });
-  it('takes the context window from a terminal’s status line and answers with nothing for it to show', async () => {
+  it('takes the context window from a terminal’s status line and answers with the model and how full the context is', async () => {
     const windows: [string, number][] = [];
     const server = new AttentionServer(() => {}, () => {}, () => {}, (runId, size) => windows.push([runId, size])); servers.push(server); await server.start();
     const runId = randomUUID(); const url = server.register(runId)!;
     const reply = await post(`${url}/status`, { model: { id: 'claude-haiku-5-5' }, context_window: { context_window_size: 1000000, used_percentage: 6 } });
-    expect(reply.status).toBe(204); expect(await reply.text()).toBe('');
-    await post(`${url}/status`, { context_window: { context_window_size: 'big' } }); await post(`${url}/status`, 'not json');
-    expect(windows).toEqual([[runId, 1000000]]);
+    expect(reply.status).toBe(200); expect(await reply.text()).toBe('context 6% of 1M');
+    // Before the first reply Claude passes no share; the model's name loses any control character.
+    expect(await (await post(`${url}/status`, { model: { display_name: 'Haiku\u001b[2J 5.5' }, context_window: { context_window_size: 200000, used_percentage: null } })).text()).toBe('Haiku[2J 5.5 · 200k context');
+    expect(await (await post(`${url}/status`, { model: { display_name: 'Opus 5.5' }, context_window: { context_window_size: 1500000, used_percentage: 56.4 } })).text()).toBe('Opus 5.5 · context 56% of 1.5M');
+    await post(`${url}/status`, { context_window: { context_window_size: 'big' } }); expect(await (await post(`${url}/status`, 'not json')).text()).toBe('');
+    expect(windows).toEqual([[runId, 1000000], [runId, 200000], [runId, 1500000]]);
     const settings = JSON.parse(claudeAttentionSettings(url, 'C:\\Windows\\System32\\curl.exe', true));
     expect(settings.statusLine).toEqual({ type: 'command', command: `"C:/Windows/System32/curl.exe" -s -m 2 -X POST --data-binary @- ${url}/status` });
     expect(JSON.parse(claudeAttentionSettings(url, 'C:\\Windows\\System32\\curl.exe')).statusLine).toBeUndefined();
