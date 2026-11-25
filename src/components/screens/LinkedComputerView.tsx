@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import { arrangeLinked, loadPlaces, ROW_HEIGHT, savePlaces } from '../../state/linked-layout';
-import { CircleAlert, Download, GripVertical, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
+import { CircleAlert, Download, GripVertical, History, LoaderCircle, MessagesSquare, Monitor, MonitorOff, MonitorPlay, OctagonPause, Play, RotateCcw, Square, X } from 'lucide-react';
 import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedComputer, RemoteChannel } from '../../../shared/remote';
 import type { ChatRequest } from '../../../shared/chat';
 import { TranscriptView } from '../chat/TranscriptView';
@@ -12,6 +12,7 @@ import { useLinkedStore } from '../../state/linked-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES } from '../../state/channel-state';
 import { LinkedScreen } from './LinkedScreen';
+import { LinkedHistory } from './LinkedHistory';
 import { LinkedTipStrip } from '../tile/LiveTipStrip';
 import { ENGINE_ICONS } from '../tile/engine-icons';
 
@@ -122,7 +123,9 @@ export function LinkedComputerView() {
   const computerId = useWorkspaceStore((state) => state.computerId);
   const computer = useLinkedStore((state) => state.computers.find((item) => item.id === computerId));
   const addError = useLinkedStore((state) => state.addError);
+  // The tab shows its channels, its screen or its conversations (History), one at a time.
   const [screenOf, setScreenOf] = useState<string | null>(null); const showScreen = Boolean(computer && screenOf === computer.id);
+  const [historyOf, setHistoryOf] = useState<string | null>(null); const showHistory = Boolean(computer && historyOf === computer.id) && !showScreen;
   // Every channel's current screen, whenever the tab opens, reconnects, or a channel starts a new run.
   const runs = computer?.channels.map((channel) => `${channel.sessionId}:${channel.runId}`).join() ?? '';
   useEffect(() => { if (computer?.connected) void workbench({ action: 'linked-watch', id: computer.id }).catch(() => {}); }, [computer?.id, computer?.connected, runs]);
@@ -134,10 +137,11 @@ export function LinkedComputerView() {
       <span className={`linked-computer-status ${!computer.connected && computer.error ? 'off' : ''}`}>{computer.connected ? `${computer.channels.length} ${computer.channels.length === 1 ? 'channel' : 'channels'}` : computer.error ?? 'Connecting…'}</span>
       <span className="tr-spacer" />
       <UpdateThere computer={computer} />
+      <button className="tr-detail-button" aria-pressed={showHistory} disabled={!computer.connected && !showHistory} title={`${computer.name}'s Claude Code, Codex and Gemini conversations, to resume there`} onClick={() => { setScreenOf(null); setHistoryOf(showHistory ? null : computer.id); }}><History size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showHistory ? 'Channels' : 'History'}</span></button>
       {/* Its own screen-sharing server answers even while Trace there is closed. */}
-      <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => setScreenOf(showScreen ? null : computer.id)}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
+      <button className="tr-detail-button" aria-pressed={showScreen} title={`Show and control ${computer.name}'s screen (macOS Screen Sharing)`} onClick={() => { setHistoryOf(null); setScreenOf(showScreen ? null : computer.id); }}><MonitorPlay size={13} className="tr-detail-icon" /><span className="tr-detail-label">{showScreen ? 'Channels' : 'Screen'}</span></button></header>
     {addError && <div className="ui-banner danger" role="alert"><CircleAlert aria-hidden="true" /><span>{addError}</span><button className="icon-button small" aria-label="Dismiss this notice" onClick={() => useLinkedStore.setState({ addError: '' })}><X /></button></div>}
-    {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : <>
+    {showScreen ? <LinkedScreen key={computer.id} computer={computer} onClose={() => setScreenOf(null)} /> : showHistory ? <LinkedHistory key={computer.id} computer={computer} onChannels={() => setHistoryOf(null)} /> : <>
       {computer.connected && !computer.channels.length && <div className="ui-empty linked-empty"><Monitor aria-hidden="true" /><h3>No channels on {computer.name}</h3><p>Add one with + Channel.</p></div>}
       {/* Not connected and no reason yet: still connecting, which is not a failure. */}
       {!computer.connected && !computer.error && computer.linked && <div className="ui-empty linked-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h3>Connecting to {computer.name}…</h3></div>}

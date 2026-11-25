@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedChatEvent, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel } from '../../../shared/remote';
+import type { ChannelControl, ChannelTranscript, ChatReplay, LinkedChatEvent, LinkedComputer, LinkedComputerEvent, LinkedScreenState, RemoteChannel, RemoteHistoryItem } from '../../../shared/remote';
 import type { ChatEnvelope, ChatEvent, ChatRequest } from '../../../shared/chat';
 import { ChatReplayBuffer, CHAT_REPLAY_EVENTS } from './chat-replay';
 import type { ChannelEngine } from '../../../shared/types';
@@ -30,6 +30,9 @@ type Link = z.infer<typeof linkSchema>;
 export const LINK_LIMIT = 20;
 const limitReached = () => new HubError('LINK_LIMIT', `Trace links at most ${LINK_LIMIT} computers. Unlink one in Settings → Other computers, then link again.`);
 const channelSchema = z.object({ sessionId: z.string().max(100), channel: z.number().int(), title: z.string().max(200), engine: z.enum(['claude', 'codex', 'gemini', 'shell']), runId: z.string().max(100).nullable(), running: z.boolean(), attention: z.string().max(2000).nullable(), cols: dimensions.cols.nullable().catch(null), rows: dimensions.rows.nullable().catch(null), topic: z.string().max(200).optional(), failed: z.string().max(300).optional(), coaching: z.object({ id: z.uuid(), tips: z.array(z.string().max(500)).max(4), review: z.object({ advice: z.string().max(2000), rewrite: z.string().max(8000) }).nullable() }).optional(), chat: z.literal(true).optional(), table: z.enum(['claude', 'codex', 'gemini']).optional(), account: z.object({ name: z.string().min(1).max(120), tone: z.number().int().min(0).max(20) }).optional() });
+/** Another computer's conversation list (its RemoteHistoryItem[], at most HISTORY_LIMIT there): the key as /api/history-resume takes it, long titles cut. */
+const HISTORY_SCHEMA = z.array(z.object({ key: z.string().min(1).max(200), engine: z.enum(['claude', 'codex', 'gemini']), title: z.string().max(10000).transform((title) => title.slice(0, 300)),
+  folder: z.string().max(500), modified: z.string().max(40) })).max(100);
 const RETRY_MAX = 30000;
 /** A link must stay up this long before its retry delay starts again from 2 s, so one that keeps dropping backs off (herdr's rule). */
 export const STABLE_MS = 60000;
@@ -316,6 +319,24 @@ export class LinkedComputers implements RemoteRelay {
     const link = this.linked(id);
     try { return ((await (await this.request(link, `api/transcript?sessionId=${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(20000) })).json()) as { transcript?: ChannelTranscript }).transcript ?? null; }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to read its conversations from here.`); throw error; }
+  }
+  /**
+   * That computer's CLI conversations (its phones' History, GET /api/history, from 1.16), checked here: at most 100, each
+   * key as its resume takes it, titles cut to 300 characters. A conversation stays on the computer whose CLI keeps it.
+   */
+  async history(id: string): Promise<RemoteHistoryItem[]> {
+    const link = this.linked(id); let body: unknown;
+    try { body = await (await this.request(link, 'api/history', { signal: AbortSignal.timeout(20000) })).json(); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to see its conversations from here.`); throw error; }
+    const listed = HISTORY_SCHEMA.safeParse(body);
+    if (!listed.success) throw new HubError('LINK_FAILED', `${link.name} sent a conversation list Trace could not read.`);
+    return listed.data;
+  }
+  /** Resumes one of its conversations there, as a new channel in its own workspace (its window adds it, as its phones' Resume does). */
+  async resumeHistory(id: string, key: string) {
+    const link = this.linked(id);
+    try { await this.request(link, 'api/history-resume', { method: 'POST', body: JSON.stringify({ key }), signal: AbortSignal.timeout(30000) }); }
+    catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to resume its conversations from here.`); throw error; }
   }
   /** A chat request (send, answer, interrupt, Round Table) for a chat channel there. A Trace there before chat routes answers 404. */
   async chat(id: string, request: ChatRequest) {

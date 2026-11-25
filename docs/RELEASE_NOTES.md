@@ -1,5 +1,13 @@
 ## What's new
 
+1.42.0 shows your other computer's conversations, and resumes them there.
+
+- **History on another computer's tab.** Open your other computer's tab and choose **History**: its Claude Code, Codex and Gemini conversations are listed, newest first, with a filter by title, folder or agent. **Resume** continues one on that computer: it is added there as a new channel, which shows on its tab here, ready to start.
+- **Why not on this computer?** Each CLI keeps its conversations in its own folder on the computer that ran them, filed under the project's path there (`C:\Users\…` on Windows, `/Users/…` on a Mac). Trace does not copy them between computers, so a conversation always continues where it was held. Your phone's **History** already worked this way.
+- Needs Trace's window open on the other computer. Only this computer needs 1.42.0: the other one answers from Trace 1.16 on.
+- **Tried:** unit tests, including a stand-in for the other computer, a list it cannot read, and an older Trace there.
+- **Not tried yet:** the tab with two real computers, and the screen by hand.
+
 1.41.1 makes Codex start again in projects where shared memory was installed into the project.
 
 - **Fixed: Codex stopped as it started.** In a project where **Memory** → install into project had added Trace's memory server to `.codex/config.toml`, every Codex channel quit at once with "failed to load workspace requirements: invalid data". Trace passed Codex only an approval for that server, which Codex does not join to the project's own entry. Trace now passes the whole entry again, with the project's own memory key, so the channel uses the same notes as before.

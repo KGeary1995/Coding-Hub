@@ -49,3 +49,8 @@
    computer (encrypted)" in the sign-in form. */
 .linked-screen-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--tr-fg-muted); font: 400 13px/16px var(--tr-font-ui); }
 .linked-update-confirm { display: inline-flex; align-items: center; gap: 8px; font: 400 12px/16px var(--tr-font-ui); }
+/* Another computer's conversations (History on its tab). */
+.linked-history { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: auto; }
+.linked-history-head { display: flex; align-items: center; gap: 8px; }
+.linked-history-head .ui-input { flex: 1; min-width: 0; max-width: 420px; }
+.linked-history-list .ui-row { align-items: center; }
