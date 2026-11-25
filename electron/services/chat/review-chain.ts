@@ -1,4 +1,4 @@
-import { late, type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
+import { late, MAX_FINAL_ROUNDS, type ChainStep, type ChatEnvelope, type ChatImage, type PlanChallenge, type RoundTableState, type SavedChain } from '../../../shared/chat';
 import { HubError } from '../cli/engine-adapter';
 import { apply, type Finding, findingsFor, makeRoomForFinding, MAX_FINDINGS, parseAnswers, parseChallengeAnswers, parseChallenges, parseFindings, unreadLines, unreadNotice } from '../../../shared/findings';
 import { allowAtFull, checkTable, checkWaiting, cut, instructionsFor, isEdit, KEEP_IMAGES, agentName, leadFirst, list, settings, type SeatInput, type TableHost } from './round-table';
@@ -37,6 +37,8 @@ interface Seat { runId: string; sessionId: string; engine: SeatEngine; agentName
 interface Chain {
   /** Every seat, the builder (the lead) first. */
   owner: number; cwd: string; builder: Seat; seats: Seat[]; rounds: number;
+  /** What the final review asked to change when its rounds ran out (the note then says so too), for Review again. */
+  finalChanges?: string;
   step: ChainStep; stoppedAt: ChainStep | null; task: string; images: ChatImage[]; plan: string; report: string; reviewRound: number; finalRound: number;
   verdict: 'approved' | 'changes' | null; note: string; findings: Finding[];
   /** This task's challenges, and whether its plan was challenged yet (once per task). */
@@ -309,7 +311,7 @@ export class ReviewChains {
     const record = chain.findings.length ? chain.findings.map((finding) => `${finding.id} (${finding.severity}, ${finding.status}): ${finding.text}${finding.response ? ` · builder: ${finding.response}` : ''}${finding.check ? ` · reviewer: ${finding.check}` : ''}`).join('\n') : 'No findings.';
     const whose = challengers.length === 1 ? `${capital(this.called(chain, challengers[0]))}'s` : 'The';
     const challenges = chain.challenges.length ? `\n\n${whose} challenges to the plan:\n${chain.challenges.map((challenge) => `${challenge.id} (${challenge.severity}, ${challenge.answer ?? 'not answered'}): ${challenge.text}${challenge.reason ? ` · ${challenge.reason}` : ''}`).join('\n')}` : '';
-    return `[Step: final review${chain.finalRound ? `, again after changes (${chain.finalRound} of ${FINAL_ROUNDS})` : ''}] The task:\n\n${chain.task}\n\n${capital(own)} plan:\n\n${cut(chain.plan)}\n\nThe builder's latest report:\n\n${cut(chain.report)}\n\nThe review record:\n${record}${challenges}\n\nCheck the finished work in the files against the task, ${own} plan and the findings. End with the line APPROVED, or CHANGES NEEDED: and what to change.`;
+    return `[Step: final review${chain.finalRound ? `, again after changes (${chain.finalRound} of ${Math.max(FINAL_ROUNDS, chain.finalRound)})` : ''}] The task:\n\n${chain.task}\n\n${capital(own)} plan:\n\n${cut(chain.plan)}\n\nThe builder's latest report:\n\n${cut(chain.report)}\n\nThe review record:\n${record}${challenges}\n\nCheck the finished work in the files against the task, ${own} plan and the findings. End with the line APPROVED, or CHANGES NEEDED: and what to change.`;
   }
   private finalFixPrompt(chain: Chain) { const final = this.finalSeat(chain); return `[Step: changes from the final review] ${final ? capital(this.called(chain, final)) : 'The final review'} asks for changes:\n\n${chain.note}\n\nMake them, then report what you changed.`; }
 
@@ -466,6 +468,19 @@ export class ReviewChains {
    * Picks a stopped chain up at its step (after Stop, or a restart), with the seat whose turn it was. `skipChallenge`:
    * the rest of a stopped challenge is left out (challenges already raised are still answered).
    */
+  /**
+   * Review again (1.43.0): the final review still asks for changes after its rounds, and the person wants one more round
+   * of the same loop: the builder makes those changes, the reviewers check them, then the final review again. One round
+   * a press, up to MAX_FINAL_ROUNDS in all; the table then asks the person again if it still asks for changes.
+   */
+  reviewAgain(leadRunId: string) {
+    const chain = this.leading(leadRunId);
+    if (chain.step !== 'needs-you' || chain.verdict !== 'changes') throw new HubError('TABLE_STEP', 'Review again is for a build the final review still asks to change.');
+    if (this.busy(chain)) throw new HubError('TABLE_STOPPING', 'An agent is still working. Try again once it has stopped.');
+    if (chain.finalRound >= MAX_FINAL_ROUNDS) throw new HubError('TABLE_ROUNDS', `The final review has run ${MAX_FINAL_ROUNDS} times for this task. Reply with what to do, give the table a new task, or close it.`);
+    chain.note = chain.finalChanges ?? chain.note; chain.finalChanges = undefined; chain.blocked = null;
+    chain.finalRound++; chain.reviewRound = chain.rounds - 1; this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return this.state(chain);
+  }
   continue(leadRunId: string, skipChallenge = false) {
     const chain = this.leading(leadRunId); const step = chain.stoppedAt;
     if (chain.step !== 'stopped' || !step) throw new HubError('TABLE_STEP', 'Nothing was stopped part way.');
@@ -639,7 +654,7 @@ export class ReviewChains {
       if (!verdict) { if (followUp) { if (!this.replan(chain, null, false)) heldAtFinal(); return; } chain.step = 'needs-you'; chain.note = `${who} ended its final review without APPROVED or CHANGES NEEDED.`; this.publish(chain); return; }
       chain.verdict = 'changes'; chain.note = verdict.changes;
       if (chain.finalRound >= FINAL_ROUNDS && followUp) { if (!this.replan(chain, null, false)) heldAtFinal(); return; }
-      if (chain.finalRound >= FINAL_ROUNDS) { chain.step = 'needs-you'; chain.note = `${who} still asks for changes after ${FINAL_ROUNDS} rounds: ${verdict.changes}`; this.publish(chain); return; }
+      if (chain.finalRound >= FINAL_ROUNDS) { chain.step = 'needs-you'; chain.finalChanges = verdict.changes; chain.note = `${who} still asks for changes after ${Math.max(FINAL_ROUNDS, chain.finalRound)} rounds: ${verdict.changes}`; this.publish(chain); return; }
       // Back to the fix step: the builder makes the changes, the reviewers check them once more, then the final review again.
       // With a message from the person waiting, turn() sends it all to the planner instead (replan).
       chain.finalRound++; chain.reviewRound = chain.rounds - 1; this.turn(chain, chain.builder, 'fixing', this.fixPrompt(chain)); return;

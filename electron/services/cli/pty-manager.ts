@@ -532,6 +532,7 @@ export class PtyManager {
     }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
+    else if (request.action === 'table-review-again') this.chains.reviewAgain(request.runId);
     else if (request.action === 'table-next-drop') { if (!this.chains.has(request.runId)) throw new HubError('TABLE_STEP', 'Only a hierarchy Round Table keeps tasks from Tasks waiting.'); this.chains.dropNext(request.runId, request.index, request.head); }
     else if (this.chains.has(request.runId)) {
       // Only the builder edits at a hierarchy; the rest works as at any table.
