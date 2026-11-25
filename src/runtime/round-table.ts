@@ -13,6 +13,7 @@ import { itemTitle } from '../../shared/memory-items';
 import type { Finding } from '../../shared/findings';
 import { settled, startSession, stopSession } from './use-native-host';
 import { isAgentConfig, isChatRun, seatEngineOf } from '../../shared/types';
+import { channelDirectory } from '../state/channel-names';
 
 const NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent' } as const;
 /** A preset seat's agent by name: a custom agent's own (phase 2). */
@@ -121,7 +122,7 @@ const findingLine = (finding: Finding) => [`${finding.id} (${finding.severity}),
  */
 export async function keepFindings(lead: Session): Promise<number> {
   const findings = lead.roundTable?.findings ?? []; const open = findings.filter((finding) => finding.status !== 'verified');
-  const directory = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
+  const directory = channelDirectory(lead, useWorkspaceStore.getState().rootDirectory);
   // A Gemini lead has no memory project of its own: its folder's is used.
   if (!findings.length || !isAgentConfig(lead.config)) return 0;
   const memoryKey = 'memoryKey' in lead.config ? lead.config.memoryKey : undefined;
@@ -328,7 +329,7 @@ export async function changeSeats(leadId: string, plan: SeatPlan): Promise<strin
   if (plan.rounds !== undefined && (!Number.isInteger(plan.rounds) || plan.rounds < (hierarchy ? 1 : 0) || plan.rounds > 5)) return hierarchy ? 'A hierarchy Round Table reviews between 1 and 5 rounds.' : 'A Round Table discusses between 0 and 5 rounds.';
   const fresh = seats.filter((seat) => !seat.session); const removed = current.filter(({ seat }) => seat.session !== leadId && !named.includes(seat.session)).map(({ seat }) => seat.session);
   if (sessions.length + fresh.length > MAX_CHANNELS) return tableFull(seats.length);
-  const cwd = lead.runningCwd ?? (lead.binding.mode === 'independent' ? lead.binding.cwd : useWorkspaceStore.getState().rootDirectory);
+  const cwd = channelDirectory(lead, useWorkspaceStore.getState().rootDirectory);
   if (fresh.length && !cwd) return 'Choose a workspace root or an independent repository folder first.';
   const open = tableOf(leadId); const leadRun = lead.status === 'running' ? lead.runId : null; const previousDriver = tableSeats(leadId).find((seat) => seat.driver)?.session;
   if (open && !leadRun) return 'This chat is not running.';

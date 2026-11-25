@@ -15,7 +15,7 @@ import { channelsOf, hiddenSeats, useWorkspaceStore } from '../state/workspace-s
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
-import { useChannelName } from '../state/channel-names';
+import { channelDirectory, useChannelName } from '../state/channel-names';
 import { modelLabel } from '../../shared/model-name';
 import { ChatView } from './chat/ChatView';
 import { TranscriptView } from './chat/TranscriptView';
@@ -79,7 +79,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   /** The app this channel's run printed the address of (1.39.0): Preview opens it beside the channels. */
   const offer = usePreviewStore((s) => s.offers[session.id]); const preview = session.status === 'running' ? offer : undefined;
   const { engines, rootDirectory, focusedSessionId, toggleFocus, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore(useShallow((s) => ({ engines: s.engines, rootDirectory: s.rootDirectory, focusedSessionId: s.focusedSessionId, toggleFocus: s.toggleFocus, addSession: s.addSession, updateConfig: s.updateConfig, updateBinding: s.updateBinding, setView: s.setView })));
-  const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
+  const cwd = channelDirectory(session, rootDirectory);
   const engine = session.config.engine;
   const claude = engine === 'claude';
   const shell = engine === 'shell';

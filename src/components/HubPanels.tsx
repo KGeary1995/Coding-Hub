@@ -24,6 +24,7 @@ import { ENGINE_ICONS } from './tile/engine-icons';
 import { rebaseDraft } from '../state/rebase-draft';
 import { EventHooksCard } from './EventHooksCard';
 import { TracePlugins } from './TracePlugins';
+import { channelDirectory } from '../state/channel-names';
 
 /**
  * The budget fields kept to their ranges: when a field is left and on save, not on each keystroke, which turned the
@@ -43,7 +44,7 @@ function Feedback({ error, notice }: { error: string; notice: string }) { return
 /** How each engine is named on these pages; its avatar uses the same glyph as its channel tile. */
 const ENGINE_NAMES = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' } as const;
 function ProjectSelect({ directory, onChange }: { directory: string | null; onChange: (directory: string | null) => void }) {
-  const { rootDirectory, sessions } = useWorkspaceStore(); const directories = [...new Set([rootDirectory, ...sessions.map((s) => s.runningCwd ?? (s.binding.mode === 'independent' ? s.binding.cwd : rootDirectory))].filter((d): d is string => !!d))];
+  const { rootDirectory, sessions } = useWorkspaceStore(); const directories = [...new Set([rootDirectory, ...sessions.map((s) => channelDirectory(s, rootDirectory))].filter((d): d is string => !!d))];
   return <label className="ui-field hub-project">Project context<select value={directory ?? ''} onChange={(e) => onChange(e.target.value || null)}><option value="">User configuration only</option>{directories.map((d) => <option key={d} value={d}>{d}</option>)}</select></label>;
 }
 /** The page heading (ui-page-head): the same icon as the page's entry in the Agent setup menu, the title, one line, actions. */

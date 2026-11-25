@@ -14,6 +14,7 @@ import { loadTasks, OUTCOME_TEXT, refreshTaskWatch, removeTask, saveTask, sendTa
 import { isAgentConfig } from '../../shared/types';
 import { ConfirmStep } from './ConfirmStep';
 import { ScheduledJobsCard } from './ScheduledJobsCard';
+import { channelDirectory } from '../state/channel-names';
 
 const EMPTY_FORM = { id: '', title: '', details: '', sessionId: '', directory: '', files: '', notes: '', verificationId: '' };
 /** "Only these files": blank means the whole project. */
@@ -63,7 +64,7 @@ export function TasksPanel() {
   // A Round Table's hidden seats are not offered: tasks go to the channel that leads it.
   // Tasks read their outcome from the CLI's transcript: Claude Code and Codex only.
   const agents = channelsOf(sessions).filter((session) => isAgentConfig(session.config));
-  const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory) ?? '' : rootDirectory ?? ''; };
+  const folderOf = (sessionId: string) => { const session = sessions.find((item) => item.id === sessionId); return session ? channelDirectory(session, rootDirectory) ?? '' : rootDirectory ?? ''; };
   const channelLabel = (sessionId: string | null) => { const number = channelNumber(sessions, sessionId); const session = sessions.find((item) => item.id === sessionId); return number && session ? `CH${number} · ${channelNameNow(session)}` : 'No channel'; };
   /** Until the first list arrives, the board says it is loading rather than that there are no tasks. */
   const [loaded, setLoaded] = useState(false);

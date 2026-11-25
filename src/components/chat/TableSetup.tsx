@@ -14,6 +14,7 @@ import { useHubStore } from '../../state/hub-store';
 import { ConfirmStep } from '../ConfirmStep';
 import { modelProblem } from './seat-model';
 import { addSeat, draftFromPreset, draftFromTable, draftProblem, patchSeat, pickPreset, placeholders, removePreset, removeSeat, roomNote, roundsRange, runSetup, saveAsPreset, setDriver, setDuty, updatePreset, withKind, type Draft, type SetupDeps, type SetupMode } from './table-setup-model';
+import { channelDirectory } from '../../state/channel-names';
 
 const DEPS: SetupDeps = { startTable, openTable, changeSeats };
 const AGENTS = [{ value: 'claude', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }, { value: 'gemini', label: 'Gemini' }];
@@ -81,7 +82,8 @@ export function TableSetup({ mode, onClose, onFailure }: { mode: SetupMode; onCl
   });
   const [error, setError] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [deleting, setDeleting] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const directory = lead?.runningCwd ?? rootDirectory;
+  // The lead's own folder when it has one (an independent repository), running or not (before, an idle lead's was ignored).
+  const directory = lead ? channelDirectory(lead, rootDirectory) : rootDirectory;
   const claudeIds = useHubStore((state) => state.catalog.claudeModels); const claudeSeatModels = useMemo<NamedModel[]>(() => claudeIds.map((id) => ({ id, name: modelLabel(id) })), [claudeIds]);
   const codexModels = useCodexModels(draft.seats.some((seat) => seat.engine === 'codex'), directory); const geminiModels = useGeminiModels(draft.seats.some((seat) => seat.engine === 'gemini'));
   useEffect(() => {

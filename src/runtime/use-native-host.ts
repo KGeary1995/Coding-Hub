@@ -66,6 +66,7 @@ import { scheduledRun } from './scheduled-run';
 import { loadPreviews, receivePreview } from '../state/preview-store';
 import { lookOf, useAgentStore } from '../state/agent-store';
 import { validResumeId } from '../../shared/agent-definition';
+import { channelDirectory } from '../state/channel-names';
 
 export async function refreshEngines() {
   if (!window.codingHub) return;
@@ -375,7 +376,7 @@ export function remoteAdd(engine: ChannelEngine, chat = false, like?: string, ag
   if (chat && engine !== 'shell') useWorkspaceStore.getState().addChatSession(engine, named); else useWorkspaceStore.getState().addSession(engine, undefined, named);
   // In the folder another channel works in (a Round Table's seat), whatever the workspace root is now.
   const source = like ? useWorkspaceStore.getState().sessions.find((session) => session.id === like) : undefined;
-  if (source) { const cwd = source.runningCwd ?? (source.binding.mode === 'independent' ? source.binding.cwd : null); const added = useWorkspaceStore.getState().sessions.at(-1);
+  if (source) { const cwd = channelDirectory(source, null); const added = useWorkspaceStore.getState().sessions.at(-1);
     if (added && added.id !== source.id) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((session) => session.id === added.id ? { ...session, binding: cwd ? { mode: 'independent', cwd } : { ...source.binding } } : session) })); }
   return useWorkspaceStore.getState().sessions.length > before ? undefined : 'The channel could not be added.';
 }
