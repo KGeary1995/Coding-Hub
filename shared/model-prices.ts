@@ -9,7 +9,7 @@ import type { PriceRate } from './hub';
  * What the estimates leave out: a prompt over a model's long-context threshold costs more (Claude Haiku 5.5 over 100K
  * tokens, OpenAI's models over 272K), and the logs Trace reads do not say which requests those were.
  */
-export const PRICES_AS_OF = '2026-11-22';
+export const PRICES_AS_OF = '2026-11-25';
 
 /**
  * Claude: cache reads at the model's own rate. Cache writes at the 1-hour rate (2x input): Claude Code writes its
@@ -35,7 +35,7 @@ export const BUILT_IN_PRICES: readonly PriceRate[] = [
   claude('claude-sonnet-5-5', 2, 10, 0.1), claude('claude-sonnet-5', 2, 10, 0.2), claude('claude-sonnet-4-6', 3, 15, 0.3), claude('claude-sonnet-4-5', 3, 15, 0.3), claude('claude-sonnet-4', 3, 15, 0.3),
   claude('claude-haiku-5-5', 0.1, 0.5, 0.01), claude('claude-haiku-4-5', 1, 5, 0.1),
   openai('gpt-6.2-astra', 8, 0.4, 40), openai('gpt-6.2-sol', 2, 0.1, 10), openai('gpt-6-astra', 10, 1, 50), openai('gpt-6.1-sol', 2, 0.1, 10), openai('gpt-6.1-terra', 1, 0.05, 5),
-  openai('gpt-6-luna', 0.1, 0.01, 0.5), openai('gpt-6-sol', 2, 0.2, 10), openai('gpt-5.6-sol', 4, 0.4, 20), openai('gpt-5.6-terra', 2, 0.2, 12), openai('gpt-5.6-luna', 0.2, 0.02, 1.2),
+  openai('gpt-6-luna', 0.1, 0.01, 0.5), openai('gpt-6-sol', 2, 0.2, 10), /* Promotional until 2026-11-30 (the page does not say the price after): check again then. */ openai('gpt-5.6-sol', 4, 0.4, 20), openai('gpt-5.6-terra', 2, 0.2, 12), openai('gpt-5.6-luna', 0.2, 0.02, 1.2),
   openai('gpt-5.5', 5, 0.5, 30), openai('gpt-5.5-pro', 30, null, 180), openai('gpt-5.4', 2.5, 0.25, 15), openai('gpt-5.4-pro', 30, null, 180), openai('gpt-5.4-mini', 0.75, 0.075, 4.5), openai('gpt-5.4-nano', 0.2, 0.02, 1.25),
   openai('gpt-5.3-codex', 1.75, 0.175, 14), openai('gpt-5.2', 1.75, 0.175, 14), openai('gpt-5.2-pro', 21, null, 168), openai('gpt-5.1', 1.25, 0.125, 10),
   openai('gpt-5', 1.25, 0.125, 10), openai('gpt-5-mini', 0.25, 0.025, 2), openai('gpt-5-nano', 0.05, 0.005, 0.4), openai('gpt-5-pro', 15, null, 120),
