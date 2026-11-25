@@ -32,7 +32,7 @@ Trace has no model API client and never touches credentials: the CLIs own sign-i
 ## Commands
 
 ```sh
-npm ci                 # Node >= 22.13 (node:sqlite); postinstall checks node-pty
+npm ci                 # Node >= 22.18 (node:sqlite; Vitest needs 22.18); postinstall checks node-pty
 npm run dev            # app with reload
 npm run typecheck      # renderer + host + host tests
 npm test               # vitest (unit)

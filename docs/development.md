@@ -6,7 +6,7 @@ How to build, run and test Trace from source. [architecture.md](architecture.md)
 
 | Need | Why |
 |---|---|
-| **Node.js 22.13 or later** (CI pins 22.16.0) | `engines` requires it. Host code and Vitest use `node:sqlite` (`DatabaseSync`), so an older Node fails `npm test` |
+| **Node.js 22.18 or later** (CI pins 22.21.0) | `engines` requires it. Before 22.18, Vitest cannot load `@xterm/addon-unicode-graphemes` (its tables fail to inflate: "Data error"), so every test that touches a terminal fails; plain Node and Electron load it. Host code and Vitest use `node:sqlite` (`DatabaseSync`), so an older Node fails `npm test` |
 | **Git** | Git review, worktrees and most smoke tests create real repositories |
 | **Windows** | Nothing extra: node-pty ships ConPTY binaries. Use `npm.cmd` in PowerShell if script execution is restricted. Turn on **Developer Mode** if you want the symbolic-link tests to run; without it they are skipped |
 | **macOS** | Xcode Command Line Tools. Mac packaging only runs on macOS |

@@ -41,7 +41,7 @@
     "test:phone-screen": "npm run build && node scripts/phone-screen-smoke.cjs"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "5.3.0",
