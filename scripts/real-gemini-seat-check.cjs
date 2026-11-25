@@ -2,7 +2,7 @@
 // your own logins, in the built app, on a scratch project and scratch Trace data. Uses a little of both plans (the
 // Claude seat runs Haiku). A discussion table of two: Claude Code leads and edits, Gemini CLI reviews. It checks that
 // the Gemini seat answers under its own name (from 1.39 it may also edit or lead; this check keeps it a reviewer), and that its usage is counted.
-// Usage: npm run build && node scripts/real-gemini-seat-check.cjs <outDir> [--hierarchy [--gemini-planner] | --full | --gemini-lead]
+// Usage: npm run build && node scripts/real-gemini-seat-check.cjs <outDir> [--hierarchy [--gemini-planner] | --full | --gemini-lead | --codex-lead]
 // --full: instead, the table is set to Full access and each seat is asked to run a command; no approval may appear.
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
@@ -32,7 +32,10 @@ const thread = (page) => page.locator('.chat-view.at-table .chat-thread').last()
     await page.waitForSelector('.tr-empty, .session-tile'); await page.getByRole('button', { name: 'Open project', exact: true }).click(); await page.waitForSelector('.session-tile');
     // --gemini-lead (1.39): Gemini leads and drives, Claude Code (Haiku) reviews.
     const geminiLead = process.argv.includes('--gemini-lead');
+    // --codex-lead: Codex leads and drives, Gemini reviews (Gemini and Codex at one table).
+    const codexLead = process.argv.includes('--codex-lead');
     await startTable(page, 'Round Table', async (panel) => {
+      if (codexLead) { await panel.getByLabel('Seat 1 agent', { exact: true }).selectOption('codex'); await panel.getByLabel('Seat 2 agent', { exact: true }).selectOption('gemini'); await panel.getByLabel('Rounds', { exact: true }).selectOption('1'); await shot(page, '01-setup'); return; }
       if (geminiLead) { await panel.getByLabel('Seat 1 agent', { exact: true }).selectOption('gemini'); await panel.getByLabel('Seat 2 agent', { exact: true }).selectOption('claude'); await panel.getByLabel('Seat 2 model', { exact: true }).selectOption('claude-haiku-5-5'); await panel.getByLabel('Rounds', { exact: true }).selectOption('1'); await shot(page, '01-setup'); return; }
       await panel.getByLabel('Seat 1 model', { exact: true }).selectOption('claude-haiku-5-5');
       // Every seat is offered Gemini (from 1.39 it may lead and edit too); here the second seat is Gemini, as a reviewer.
@@ -64,7 +67,7 @@ const thread = (page) => page.locator('.chat-view.at-table .chat-thread').last()
     note('thread', { tail: text.slice(-1800), gemini: /Gemini\s*·\s*Review/.test(text), claude: /Claude Code\s*·\s*Driver/.test(text), lighthouse: (text.match(/lighthouse/gi) ?? []).length });
     const today = await page.evaluate(async () => (await window.codingHub.workbench({ action: 'usage-today' })));
     note('usage-today', today);
-    if (!/Your turn/i.test(status)) failed = 'The table did not finish in time.'; else if (geminiLead ? !/Gemini\s*·\s*Driver/.test(text) || !/Claude Code\s*·\s*Review/.test(text) : !/Gemini\s*·\s*Review/.test(text)) failed = geminiLead ? 'No replies labelled as Gemini driving and Claude Code reviewing.' : 'No reply labelled as the Gemini CLI seat.';
+    if (!/Your turn/i.test(status)) failed = 'The table did not finish in time.'; else if (codexLead ? !/Codex\s*·\s*Driver/.test(text) || !/Gemini\s*·\s*Review/.test(text) : geminiLead ? !/Gemini\s*·\s*Driver/.test(text) || !/Claude Code\s*·\s*Review/.test(text) : !/Gemini\s*·\s*Review/.test(text)) failed = codexLead ? 'No replies labelled as Codex driving and Gemini reviewing.' : geminiLead ? 'No replies labelled as Gemini driving and Claude Code reviewing.' : 'No reply labelled as the Gemini CLI seat.';
     if (!failed && process.argv.includes('--hierarchy')) {
       // 2. A hierarchy: Claude Code (Haiku) builds and plans, Gemini CLI challenges the plan and reviews the work.
       await page.getByRole('button', { name: 'Close the Round Table', exact: true }).click(); await page.waitForTimeout(8000);
@@ -93,5 +96,5 @@ const thread = (page) => page.locator('.chat-view.at-table .chat-thread').last()
     note('page-errors', { errors }); fs.writeFileSync(path.join(out, 'log.json'), JSON.stringify(log, null, 2));
     await app.close().catch(() => {}); if (process.env.KEEP_TRACE_DATA) console.log('kept', root); else await removeFolder(root);
   }
-  if (failed) { console.error('FAILED:', failed); process.exitCode = 1; } else console.log('PASS: a Gemini CLI seat answered at a Round Table led by Claude Code.');
+  if (failed) { console.error('FAILED:', failed); process.exitCode = 1; } else console.log(`PASS: a Gemini seat answered at a Round Table (${process.argv.includes('--codex-lead') ? 'Codex leading' : process.argv.includes('--gemini-lead') ? 'Gemini leading' : 'Claude Code leading'}${process.argv.includes('--hierarchy') ? ', hierarchy' : ''}).`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
