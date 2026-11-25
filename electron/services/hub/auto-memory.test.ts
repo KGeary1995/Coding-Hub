@@ -237,7 +237,9 @@ describe('project-installed memory servers', () => {
     const auto = track(new AutoMemory({ memory, enabled: () => true, ...current, scratch: path.join(root, 'scratch') }));
     const codex = { args: [] as string[] }; auto.prepare(run('codex', project), '', info('codex'), codex);
     expect(fs.readFileSync(path.join(project, '.codex', 'config.toml'), 'utf8')).toContain(JSON.stringify(current.executable));
-    expect(codex.args.some((arg) => arg.startsWith('mcp_servers.coding-hub-memory.command='))).toBe(false); expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
+    // Trace's repaired entry is passed whole with the approval (an approval alone is a server with no command, and Codex exits), keeping the entry's key.
+    expect(codex.args).toContain(`mcp_servers.coding-hub-memory.command=${JSON.stringify(current.executable)}`); expect(codex.args).toContain(`mcp_servers.coding-hub-memory.args=${JSON.stringify([current.server, memory.root, key])}`);
+    expect(codex.args).toContain('mcp_servers.coding-hub-memory.default_tools_approval_mode="approve"');
     const claude = { args: [] as string[] }; auto.prepare(run('claude', project), '', info('claude'), claude);
     expect(JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf8')).mcpServers['coding-hub-memory']).toEqual(custom);
     expect(claude.args).not.toContain('--mcp-config');

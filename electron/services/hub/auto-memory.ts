@@ -164,7 +164,7 @@ const READY_FOR_MS = 30000;
 /** Memory MCP config files prepare() writes, one per run: `<runId>.mcp.json`. */
 const RUN_CONFIG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mcp\.json$/i;
 /** A memory server the project configured itself; `key` and `root` are null when the entry is not one Trace wrote. */
-export interface Configured { engine: ChatEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean }
+export interface Configured { engine: ChatEngine; file: string; key: string | null; root: string | null; /** It runs this Trace's own program and memory server (after any repair), not just a file of that name. */ trace?: boolean; /** Its arguments, with this Trace's server first (after any repair). */ args?: string[] }
 
 /** The folder whose `.mcp.json` and `.codex/config.toml` sessions there read: the repository's top folder, else the folder. */
 export function projectConfigRoot(directory: string) { return gitLocation(directory)?.root ?? path.resolve(directory); }
@@ -268,7 +268,7 @@ export class AutoMemory {
         this.notice(`repaired:${file}`, `Trace updated the memory server paths in ${file}, which pointed at a program that no longer exists. Restart CLIs started outside Trace to use it.`);
       } catch { this.notice(`repair-failed:${file}`, `The memory server in ${file} points at a program that no longer exists, and Trace could not update it. Fix or remove the coding-hub-memory entry.`); }
     }
-    return { engine, file, key: args[2], root: args[1], trace };
+    return { engine, file, key: args[2], root: args[1], trace, args: [server, ...args.slice(1)] };
   }
 
   /**
@@ -330,7 +330,11 @@ export class AutoMemory {
       }
     } else if (info.supportsConfig) {
       extra.push('--config', `developer_instructions=${JSON.stringify(codexInstructions(run.cwd, context))}`);
-      if (!configured) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
+      // Trace's own project entry is passed again whole, with its own arguments (so its key and notes): Codex (0.164.0 to
+      // 0.172.0, checked 2026-11-24) does not merge a --config field into a server from the project's config.toml, so the
+      // approval line alone is a server with no command and Codex exits ("failed to load workspace requirements").
+      const own = !configured ? server.args : configured.trace ? configured.args : undefined;
+      if (own) extra.push('--config', `mcp_servers.${SERVER}.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.${SERVER}.args=${JSON.stringify(own)}`, '--config', `mcp_servers.${SERVER}.env={ELECTRON_RUN_AS_NODE="1"}`);
       // Codex asks before every MCP tool call. A chat (and a Round Table reviewer) has no prompt for it, so Trace's own
       // notes tools were refused there ("user rejected MCP tool call"). They only read and write Trace's notes; an entry
       // that runs any other program, even one named memory-server.js, keeps Codex's own asking.
