@@ -23,8 +23,8 @@ function useSetupStatus() {
   useEffect(() => { void window.codingHub?.updates({ action: 'status' }).then((result) => { if (result.ok) setVersion(result.value.version); }).catch(() => {}); }, []);
   const connected = accounts?.filter((item) => item.state === 'authenticated').length ?? 0;
   const status: Partial<Record<NavigationView, { text: string; tone: 'success' | 'warning' | 'neutral' }>> = {
-    // GitHub is optional (project cloning only): it alone not being signed in is no warning.
-    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking', tone: 'neutral' },
+    // GitHub is optional (project cloning only): it alone not being signed in is no warning. So is Gemini until it is installed.
+    accounts: accounts ? { text: `${connected} of ${accounts.length} connected`, tone: accounts.every((item) => item.provider === 'github' || (item.provider === 'gemini' && !item.installed) || item.state === 'authenticated') ? 'success' : 'warning' } : { text: 'Checking', tone: 'neutral' },
     memory: automaticMemory ? { text: 'On for every project', tone: 'success' } : { text: 'Off', tone: 'neutral' },
   };
   return { status, version };

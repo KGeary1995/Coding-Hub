@@ -37,9 +37,9 @@ export function recentProjects(runs: SessionHistoryRun[], limit = 5) {
   return [...latest].sort((a, b) => b[1].localeCompare(a[1])).slice(0, limit).map(([directory, at]) => ({ directory, at }));
 }
 
-const ENGINE_NAMES: Record<AccountConnection['provider'], string> = { claude: 'Claude Code', codex: 'Codex CLI', github: 'GitHub CLI' };
+const ENGINE_NAMES: Record<AccountConnection['provider'], string> = { claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini', github: 'GitHub CLI' };
 /** The same marks and tones as the new-channel menu (Topbar.tsx); GitHub is not an engine, so it stays neutral. */
-const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; tone: string }> = { claude: { icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { icon: ENGINE_ICONS.codex, tone: 'codex' }, github: { icon: Github, tone: 'neutral' } };
+const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; tone: string }> = { claude: { icon: ENGINE_ICONS.claude, tone: 'claude' }, codex: { icon: ENGINE_ICONS.codex, tone: 'codex' }, gemini: { icon: ENGINE_ICONS.gemini, tone: 'gemini' }, github: { icon: Github, tone: 'neutral' } };
 
 /** Workspace with no project: a centred welcome with the ways in, then recent folders and what is installed. */
 export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
@@ -99,7 +99,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
           {item.state === 'authenticated' ? <span className="ui-badge success dot">Signed in</span> : <button className="button small" onClick={() => setView('accounts')} aria-label={`Sign in to ${ENGINE_NAMES[item.provider]}`}>{item.installed ? 'Sign in' : 'Set up'}</button>}
         </li>; })}</ul>
           : enginesError ? <div className="ui-empty danger" role="alert"><CircleAlert aria-hidden="true" /><h3>Engines not checked</h3><p>{enginesError}</p><button className="button secondary" onClick={() => setView('accounts')}>Open Accounts & connections</button></div>
-          : window.codingHub ? <div className="ui-empty" role="status"><Cpu aria-hidden="true" /><h3>Checking engines</h3><p>Looking for Claude Code, Codex and GitHub CLI.</p></div>
+          : window.codingHub ? <div className="ui-empty" role="status"><Cpu aria-hidden="true" /><h3>Checking engines</h3><p>Looking for Claude Code, Codex, Gemini and GitHub CLI.</p></div>
           : <div className="ui-empty"><Cpu aria-hidden="true" /><h3>Engines not checked</h3><p>The desktop app checks local CLIs.</p></div>}
       </section>
     </div>
