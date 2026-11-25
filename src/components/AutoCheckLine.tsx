@@ -9,7 +9,7 @@ export function AutoCheckLine({ sessionId }: { sessionId: string }) {
   const Icon = status.state === 'running' ? LoaderCircle : status.state === 'passed' ? CircleCheck : CircleX;
   return <div className={`auto-check ${status.state}`} role="status" title={status.folder}>
     <Icon size={14} aria-hidden="true" className={status.state === 'running' ? 'spin' : undefined} />
-    <span>{status.summary}</span>
+    <span title={status.summary}>{status.summary}</span>
     {status.output && <button type="button" className="quiet-button small" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide output' : 'Show output'}</button>}
     {status.state !== 'running' && <button type="button" className="quiet-button small icon-button" aria-label="Dismiss check result" onClick={() => dismissAutoCheck(sessionId)}><X size={12} /></button>}
     {open && status.output && <pre className="auto-check-output">{status.output}</pre>}

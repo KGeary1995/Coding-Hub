@@ -130,6 +130,12 @@
 .auto-check { --tone: var(--tr-accent); flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 var(--tr-tile-inset) 4px; padding: 2px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--tr-r-small); background: color-mix(in srgb, var(--tone) 12%, transparent); color: var(--tr-fg); font: 400 12px/22px var(--tr-font-ui); }
 .auto-check.passed { --tone: var(--tr-success); } .auto-check.failed { --tone: var(--tr-danger); }
 .auto-check > svg { flex: none; color: var(--tone); } .auto-check > span { flex: 1; min-width: 0; }
+/* The check result and Undo last turn side by side (each at least 240px, else they wrap); an opened output takes the row. */
+.tile-bars { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 var(--tr-tile-inset) 4px; } .tile-bars:empty { display: none; }
+.tile-bars > .auto-check { flex: 1 1 240px; min-width: 0; margin: 0; } .tile-bars > .auto-check:has(.auto-check-output) { flex-basis: 100%; }
+/* A status sentence stays on one line; Undo's question (confirm-step) wraps, as it must be read whole. */
+.tile-bars > .auto-check > span:not(.confirm-step) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-bars > .auto-check:has(.confirm-step) { flex-basis: 100%; }
 .auto-check .spin { animation: tr-auto-check-spin 1s linear infinite; } @keyframes tr-auto-check-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .auto-check .spin { animation: none; } }
 /* Undo last turn where it cannot work (not a Git folder): its reason is the tooltip. */
@@ -283,7 +289,10 @@
 .pasted-remove { position: absolute; top: -8px; right: -8px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--tr-line-control); border-radius: 50%; background: var(--tr-surface); color: var(--tr-fg-dim); }
 .pasted-remove:hover, .pasted-remove:focus-visible { border-color: var(--tr-line-strong); color: var(--tr-fg-strong); }
 /* Sent images are smaller and quieter: a record, not something about to go out. */
-.pasted-images li.sent .pasted-thumb img { height: 36px; max-width: 72px; opacity: .8; }
+.pasted-images li.sent .pasted-thumb img { height: 24px; max-width: 48px; opacity: .8; }
+/* Sent images are only a reminder: one slim line (the heading beside small pictures), not a second row of thumbnails. */
+.pasted-group.sent { flex-direction: row; align-items: center; gap: 8px; } .pasted-group.sent ul { padding-top: 8px; }
+.pasted-images li.sent .pasted-number { left: 2px; bottom: 2px; font-size: 10px; line-height: 12px; }
 
 /* ---------- Settings: opens under the header, built from shared fields ---------- */
 .session-config { flex-shrink: 0; min-width: 0; max-height: 55%; overflow-y: auto; margin: 0; padding: 4px calc(var(--tr-tile-inset) + 12px) 16px; border: 0; }
