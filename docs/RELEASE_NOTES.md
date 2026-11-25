@@ -1,8 +1,9 @@
 ## What's new
 
-1.44.1 asks you less often: agents run Trace's tools that only look without asking, and Gemini chats run the safe commands as Gemini terminals do.
+1.44.1 asks you less often: agents run Trace's tools that only look, and its shared memory tools, without asking, and Gemini chats run the safe commands as Gemini terminals do.
 
 - **Claude Code no longer asks before Trace's tools that only look** (list and read channels, wait for a channel, list tasks), as Codex and Gemini already did. Sending a message to a channel, adding or updating a task still asks. Checked with the real Claude Code: a chat listed tasks without asking, and asked before adding and updating one.
+- **Claude Code no longer asks before the shared memory tools** (read notes, save a handoff, list and resolve open items and decisions), as Codex and Gemini already did. Checked with the real Claude Code: a chat listed open items and saved a handoff with no approval; without the change, both asked.
 - **A Gemini chat or Round Table seat at Allow edits runs the safe commands without asking** (Settings → Let agents run safe commands without asking), and Trace's own tools that a Gemini terminal runs without asking. As in a terminal, a command must be written exactly as listed: `git status` runs, `git status && rm -rf src` asks. Checked with the real Gemini (agy 1.5.16) at a table Gemini led.
 - **Tried:** unit tests, and the two real checks above.
 

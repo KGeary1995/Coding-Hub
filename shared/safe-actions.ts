@@ -38,7 +38,10 @@ export function geminiSafeSettings(own: unknown, allow: readonly string[] = [], 
  * file. Sending a message, adding or updating a task still asks.
  */
 export const LOOK_ONLY_TOOLS: readonly string[] = ['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'];
-/** Claude Code's permission rules for them (its MCP tools are named mcp__<server>__<tool>; Trace's server is trace-channels). */
+/** Trace's shared memory tools: every agent runs them without asking (Claude Code from 1.44.1, the owner's decision of 2026-11-25). */
+export const MEMORY_TOOLS: readonly string[] = ['memory_context', 'read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item'];
+/** Claude Code's permission rules for them (its MCP tools are named mcp__<server>__<tool>; Trace's servers are trace-channels and coding-hub-memory). */
 export const claudeLookOnlyRules = () => LOOK_ONLY_TOOLS.map((tool) => `mcp__trace-channels__${tool}`);
+export const claudeMemoryRules = () => MEMORY_TOOLS.map((tool) => `mcp__coding-hub-memory__${tool}`);
 /** The Claude Code permission rules for those commands. */
 export const safeActionRules = () => SAFE_COMMANDS.map((command) => `Bash(${command}:*)`);

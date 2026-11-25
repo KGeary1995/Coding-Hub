@@ -50,7 +50,7 @@ import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
 import { AutoChecks } from './services/workbench/auto-checks';
-import { claudeLookOnlyRules, geminiSafeSettings, LOOK_ONLY_TOOLS, safeActionRules } from '../shared/safe-actions';
+import { claudeLookOnlyRules, claudeMemoryRules, geminiSafeSettings, LOOK_ONLY_TOOLS, safeActionRules } from '../shared/safe-actions';
 import { TurnSnapshots } from './services/repository/turn-snapshots';
 import { PreviewOffers } from './services/workbench/preview-offers';
 import { AppPreview } from './services/workbench/app-preview';
@@ -386,8 +386,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     const claudeHome = config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
     const statusLine = !config.chat && !ownStatusLine(claudeHome, run.cwd);
     // At Allow edits, the safe commands run without asking unless the person turned that off (shared/safe-actions.ts).
-    // Trace's tools that only look run without asking at every level, as for Codex (the owner's decision of 2026-11-25).
-    const allow = [...(permissionLevel(config) === 'edits' && hub?.preferences().safeActions !== false ? safeActionRules() : []), ...(toolsUrl && info.supportsMcpConfig ? claudeLookOnlyRules() : [])];
+    // Trace's tools that only look, and its shared memory tools, run without asking at every level, as for Codex (the
+    // owner's decisions of 2026-11-25). A rule for a server this run does not have matches nothing.
+    const allow = [...(permissionLevel(config) === 'edits' && hub?.preferences().safeActions !== false ? safeActionRules() : []), ...(toolsUrl && info.supportsMcpConfig ? claudeLookOnlyRules() : []), ...(info.supportsMcpConfig ? claudeMemoryRules() : [])];
     if (url) { launch.args.push('--settings', claudeAttentionSettings(url, supportsSessionHook(info.version) ? systemCurl() : null, statusLine, allow)); Object.assign(launch.env, withLoopbackNoProxy({ ...process.env, ...launch.env })); }
   }
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);

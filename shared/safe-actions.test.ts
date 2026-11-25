@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeLookOnlyRules, geminiSafeSettings, LOOK_ONLY_TOOLS, safeActionRules, SAFE_COMMANDS } from './safe-actions';
+import { claudeLookOnlyRules, claudeMemoryRules, geminiSafeSettings, LOOK_ONLY_TOOLS, safeActionRules, SAFE_COMMANDS } from './safe-actions';
 import { claudeAttentionSettings } from '../electron/services/cli/attention';
 
 describe('safe actions', () => {
@@ -27,6 +27,7 @@ describe('safe actions for Gemini', () => {
   });
   it('lets Claude Code run Trace’s tools that only look, by the names it gives MCP tools (seen in a real Claude chat)', () => {
     expect(claudeLookOnlyRules()).toEqual(['mcp__trace-channels__list_channels', 'mcp__trace-channels__read_channel', 'mcp__trace-channels__wait_for_channel', 'mcp__trace-channels__list_tasks']);
+    expect(claudeMemoryRules()).toEqual(['mcp__coding-hub-memory__memory_context', 'mcp__coding-hub-memory__read_memory', 'mcp__coding-hub-memory__write_handoff', 'mcp__coding-hub-memory__list_decisions', 'mcp__coding-hub-memory__retire_decision', 'mcp__coding-hub-memory__list_open_items', 'mcp__coding-hub-memory__resolve_open_item']);
     expect(LOOK_ONLY_TOOLS).not.toContain('send_to_channel'); expect(LOOK_ONLY_TOOLS).not.toContain('add_task'); expect(LOOK_ONLY_TOOLS).not.toContain('update_task');
   });
 });
