@@ -13,9 +13,10 @@ import { writeTerminal } from './terminals';
  * turn has ended, once each time a run climbs to the limit: compacting brings the context down, and the next climb asks
  * again. Only for the context window, not for a token or cost budget, which a handoff does nothing about.
  *
- * Once the handoff is in the project's memory, a terminal channel is compacted (`/compact`, which Claude Code and Codex
- * both have) when that turn ends, so the person does not have to: the notes are safe, and the context is freed. A chat
- * channel is not: whether its agent takes `/compact` as a message was not checked.
+ * Once the handoff is in the project's memory, the channel is compacted when that turn ends, so the person does not
+ * have to: the notes are safe, and the context is freed. A terminal gets `/compact`, which Claude Code and Codex both
+ * have; a chat (1.43.0) the `compact` request: Claude Code takes /compact as a message there too (2.1.332), and Codex
+ * has thread/compact/start.
  */
 
 /** The share of the context window in use (0 when the CLI has not reported both numbers). */
@@ -42,17 +43,23 @@ const waiting = new Map<string, { at: number; turns: number }>();
 /** Whether that agent saved a note in the project's memory after it was asked (a few seconds' slack for clocks). */
 export const handoffSaved = (notes: Pick<MemoryNote, 'author' | 'createdAt'>[], engine: 'claude' | 'codex', since: number) => notes.some((note) => note.author === engine && new Date(note.createdAt).getTime() >= since - 5000);
 
-/** After the turn that followed the request: compacts a terminal channel whose agent saved its handoff. Returns whether it did. */
+/** After the turn that followed the request: compacts a channel whose agent saved its handoff. Returns whether it did. */
 async function compactAfterHandoff(session: Session, sessions: Session[]): Promise<boolean> {
   const runId = session.runId!; const pending = waiting.get(runId); if (!pending) return false;
   if (++pending.turns > 3) { waiting.delete(runId); return false; }
-  if (!isChatEngineConfig(session.config) || session.config.chat || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
+  if (!isChatEngineConfig(session.config) || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
   const directory = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : useWorkspaceStore.getState().rootDirectory); if (!directory) return false;
   try {
     const project = session.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory });
     if (!handoffSaved(await hubCall<MemoryNote[]>({ action: 'memory-list', project }), session.config.engine, pending.at)) return false;
   } catch { return false; }
-  waiting.delete(runId); return writeTerminal(session.id, '/compact\r');
+  waiting.delete(runId);
+  if (!session.config.chat) return writeTerminal(session.id, '/compact\r');
+  if (!window.codingHub) return false;
+  chatSent(session.id, '/compact', []);
+  const result = await window.codingHub.chat({ action: 'compact', sessionId: session.id, runId }).catch(() => null);
+  if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); return false; }
+  return true;
 }
 
 /** A channel's turn ended: asks its agent for a handoff if one is due. `wait`: the turn's last usage arrives a moment after it ends. */

@@ -11,6 +11,18 @@ function codex(options: import('./codex-stream').CodexThreadOptions = { cwd: '/p
   return { stream, sent, events, reply, notify };
 }
 
+describe('Codex chat compaction (1.43.0)', () => {
+  it('compacts the thread with thread/compact/start, and its turn ends the way a message’s does', () => {
+    const { stream, sent, events, reply, notify } = codex(); stream.start(); reply(1, {}); reply(2, { thread: { id: 't' } });
+    stream.compact(); expect(sent.at(-1)).toMatchObject({ method: 'thread/compact/start', params: { threadId: 't' } });
+    reply((sent.at(-1) as { id: number }).id, {}); notify('turn/started', { turn: { id: 'c1' } }); notify('turn/completed', { turn: { id: 'c1', status: 'completed' } });
+    expect(events.filter((event) => event.type === 'done')).toEqual([{ type: 'done', isError: false, error: null }]);
+    // Refused: the turn ends with Codex's reason.
+    stream.compact(); stream.push(JSON.stringify({ id: (sent.at(-1) as { id: number }).id, error: { message: 'nothing to compact' } }) + '\n');
+    expect(events.at(-1)).toEqual({ type: 'done', isError: true, error: 'nothing to compact' });
+  });
+});
+
 describe('Codex chat permissions', () => {
   it('starts a thread at the channel’s level and sends a changed level with the next turn only', () => {
     const { stream, sent, reply } = codex({ cwd: '/p', model: '', reasoningEffort: null, permissions: 'full' });

@@ -34,6 +34,8 @@ export interface ChatStream {
   setPermissions(level: PermissionLevel): void;
   /** The level the person set for this channel (a Round Table's read-only seat keeps it, for what it may do without asking). */
   permissions(): PermissionLevel;
+  /** Compacts the conversation as one turn, where the agent can (1.43.0): it ends with `done`, as a message's turn does. */
+  compact?(): void;
 }
 
 export class ClaudeStream implements ChatStream {
@@ -72,6 +74,8 @@ export class ClaudeStream implements ChatStream {
    * (a background task of its own finished): its end is `settled`, for the display only.
    */
   private owed = 0;
+  /** Claude Code takes /compact as a message in this mode too (seen with 2.1.332: a compact_boundary, then its result). */
+  compact() { this.send('/compact', []); }
   send(message: string, images: ChatImage[]) {
     this.stopped = false; this.owed++;
     const content = [...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } })), ...(message ? [{ type: 'text', text: message }] : [])];

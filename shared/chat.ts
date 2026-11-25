@@ -138,6 +138,8 @@ export const ROUND_TABLE_MAX_ROUNDS = 5;
 export const MAX_FINAL_ROUNDS = 5;
 export type ChatRequest =
   | { action: 'send'; sessionId: string; runId: string; text: string; images: ChatImage[] }
+  /** Compacts the conversation (1.43.0): Claude Code's /compact, Codex's thread/compact/start. Trace asks for it after an automatic handoff. */
+  | { action: 'compact'; sessionId: string; runId: string }
   | { action: 'answer'; sessionId: string; runId: string; requestId: string; allow: boolean; allowEdits?: boolean }
   | { action: 'interrupt'; sessionId: string; runId: string }
   /** What the agent may do without asking, from now on (this computer's window only). */

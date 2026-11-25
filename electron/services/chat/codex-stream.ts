@@ -72,6 +72,12 @@ export class CodexStream implements ChatStream {
       });
     });
   }
+  /** Codex compacts a thread as a turn of its own (thread/compact/start, then turn/started and turn/completed: `done`). */
+  compact() {
+    const go = () => { this.turnId = null; this.interruptWanted = false; this.request('thread/compact/start', { threadId: this.threadId }, (response) => { if (response.error) this.emit({ type: 'done', isError: true, error: text(record(response.error).message) || 'Codex did not compact the conversation.' }); }); };
+    if (this.failed) { this.emit({ type: 'done', isError: true, error: `${this.failed} Restart the channel to try again.` }); return; }
+    if (this.threadId) go(); else this.queued.push(go);
+  }
   send(message: string, images: ChatImage[]) {
     const go = () => {
       const input = [...images.map((image) => ({ type: 'image', url: `data:${image.mediaType};base64,${image.data}` })), ...(message ? [{ type: 'text', text: message, text_elements: [] }] : [])];

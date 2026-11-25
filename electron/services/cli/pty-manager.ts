@@ -508,6 +508,12 @@ export class PtyManager {
       run.turnOpen = true; run.chat.send(request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
+    else if (request.action === 'compact') {
+      if (!run.chat.compact) throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation from Trace.');
+      if (run.turnOpen) throw new HubError('CHAT_BUSY', 'The agent is still answering. Compact once its turn has ended.');
+      run.turnOpen = true; run.chat.compact();
+      try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: '/compact', images: 0 } }); } catch { /* The thread shows it from the window's own send. */ }
+    }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
     else if (request.action === 'interrupt') run.chat.interrupt();
     else if (request.action === 'permissions') {
