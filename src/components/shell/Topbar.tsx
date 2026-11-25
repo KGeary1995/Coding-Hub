@@ -18,6 +18,7 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 import { refreshAgents, useAgentStore } from '../../state/agent-store';
 import { EngineAvatar } from '../tile/EngineAvatar';
 import { useHubStore } from '../../state/hub-store';
+import { otherProjects, useWorktrees, within } from '../../state/projects';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
 export const PRIMARY_VIEWS: { view: NavigationView; label: string }[] = [{ view: 'workspace', label: 'Workspace' }, { view: 'diff', label: 'Changes' }, { view: 'tasks', label: 'Tasks' }, { view: 'projects', label: 'Projects' }];
@@ -71,8 +72,14 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
   const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   // The project menu opens a recent project in one press (several projects, step 4); the open one is not listed.
-  const recent = useHubStore((state) => state.preferences.recentProjects) ?? [];
-  const recentItems: MenuItem[] = recent.filter((directory) => directory !== rootDirectory).slice(0, 6).map((directory) => ({ label: directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory, detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => useWorkspaceStore.getState().setRootDirectory(directory) }));
+  const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list);
+  // The other projects with channels first (the grid shows only the active project's), then the recent ones.
+  const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees);
+  const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory;
+  const recentItems: MenuItem[] = [
+    ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => useWorkspaceStore.getState().setRootDirectory(folder) })),
+    ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 6).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => useWorkspaceStore.getState().setRootDirectory(directory) })),
+  ];
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
   const advanced = useAdvanced();
   const insight = INSIGHT_VIEWS.find((item) => item.view === activeView);

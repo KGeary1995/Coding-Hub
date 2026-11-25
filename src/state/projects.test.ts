@@ -1,0 +1,32 @@
+import { describe, expect, it } from 'vitest';
+import type { Session } from '../../shared/types';
+import { channelProject, inActiveProject, otherProjects, within } from './projects';
+import { useWorkspaceStore } from './workspace-store';
+
+const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }, patch: Partial<Session> = {}): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null, ...patch } as Session);
+const tree = { id: 'w1', repository: '/code/alpha', directory: '/home/.coding-hub/worktrees/w1', branch: 'coding-hub/w1', createdAt: '' };
+
+describe('a channel’s project (several projects, step 6)', () => {
+  it('is its folder, the repository a managed worktree came from, or the project for a folder inside it', () => {
+    expect(channelProject(channel('a'), '/code/alpha', [])).toBe('/code/alpha');
+    expect(channelProject(channel('b', { mode: 'independent', cwd: '/code/beta' }), '/code/alpha', [])).toBe('/code/beta');
+    expect(channelProject(channel('w', { mode: 'independent', cwd: tree.directory }), '/code/beta', [tree])).toBe('/code/alpha');
+    expect(within('/code/alpha/web', '/code/alpha')).toBe(true); expect(within('/code/alphabet', '/code/alpha')).toBe(false);
+    expect(within('C:\\Code\\Alpha\\', 'c:/code/alpha')).toBe(true);
+  });
+  it('decides which channels the grid shows, and lists the other projects with how many channels', () => {
+    const all = [channel('a'), channel('b', { mode: 'independent', cwd: '/code/beta' }), channel('c', { mode: 'independent', cwd: '/code/beta' }), channel('w', { mode: 'independent', cwd: tree.directory })];
+    expect(all.filter((item) => inActiveProject(item, '/code/alpha', [tree])).map((item) => item.id)).toEqual(['a', 'w']);
+    expect(otherProjects(all, '/code/alpha', [tree])).toEqual([{ folder: '/code/beta', channels: 2 }]);
+    // No project open: every channel shows.
+    expect(all.every((item) => inActiveProject(item, null, []))).toBe(true);
+  });
+  it('keeps the open project’s channels with it when another project opens', () => {
+    useWorkspaceStore.setState({ rootDirectory: '/code/alpha', sessions: [channel('a'), channel('b', { mode: 'independent', cwd: '/code/beta' })] });
+    useWorkspaceStore.getState().setRootDirectory('/code/beta');
+    expect(useWorkspaceStore.getState().sessions.map((item) => item.binding)).toEqual([{ mode: 'independent', cwd: '/code/alpha' }, { mode: 'independent', cwd: '/code/beta' }]);
+    // The first project opened: channels set to the workspace follow it, as before.
+    useWorkspaceStore.setState({ rootDirectory: null, sessions: [channel('a')] }); useWorkspaceStore.getState().setRootDirectory('/code/alpha');
+    expect(useWorkspaceStore.getState().sessions[0].binding).toEqual({ mode: 'workspace' });
+  });
+});

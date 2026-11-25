@@ -237,7 +237,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
   // The same state when nothing changed (an `answered` after each Claude tool call, say), so nothing redraws for it.
   applyEvent: (event) => set((state) => { if (event.type === 'data') return state; let changed = false; const sessions = state.sessions.map((session) => { const next = applied(session, event); if (next !== session) changed = true; return next; }); return changed ? { sessions } : state; }),
-  setRootDirectory: (rootDirectory) => set((state) => ({ rootDirectory, sessions: state.sessions.map((session) => session.binding.mode === 'workspace' && session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session) })),
+  // Another project: the channels of the one open stay with it (pinned to its folder), so the grid, which shows the active
+  // project's channels, keeps them under their project (several projects, step 6). With none open before, they follow.
+  setRootDirectory: (rootDirectory) => set((state) => { const before = state.rootDirectory; const pin = before && before !== rootDirectory;
+    return { rootDirectory, sessions: state.sessions.map((session) => session.binding.mode !== 'workspace' ? session : pin ? { ...session, binding: { mode: 'independent' as const, cwd: before } } : session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session) }; }),
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();
