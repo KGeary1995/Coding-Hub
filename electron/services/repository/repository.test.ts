@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,8 @@ import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { FILE_PREVIEW_LIMIT, RepositoryFiles } from './filesystem';
 import { RepositoryGit } from './git';
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 async function fixture(withGit = false) {

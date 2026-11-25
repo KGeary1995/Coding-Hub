@@ -13,6 +13,8 @@ import { RulesService } from '../hub/rules';
 import { WorkspaceStorage } from '../storage/workspace-storage';
 import { budgetAlerts, recoveryAdvice, redactDiagnostic } from '../../../shared/productivity';
 import type { SavedWorkspace } from '../../../shared/types';
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 const roots:string[]=[];
 afterEach(()=>roots.splice(0).forEach((root)=>fs.rmSync(root,{recursive:true,force:true})));
 // Delivery runs git with the user's environment; CI runners have no commit identity configured.

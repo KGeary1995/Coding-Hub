@@ -8,6 +8,8 @@ import type { BuiltInRunningSession, EngineInfo } from '../../../shared/ipc';
 import { AutoMemory, isSessionSummary, lastAssistantMessage, memoryContext, memoryEntries, normalizeRemote, projectMemoryKey, useAutomaticKey } from './auto-memory';
 import { MemoryService } from './memory';
 import type { MemoryNote } from '../../../shared/hub';
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 // prepare() starts git in the background; Windows cannot delete a folder a process is still using.
