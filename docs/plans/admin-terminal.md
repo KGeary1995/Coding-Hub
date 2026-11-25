@@ -5,7 +5,7 @@ administrator mode when needed", separately from screen sharing's administrator 
 
 ## Problem
 
-Every Trace channel runs with the person's own rights. On Windows some work needs administrator rights: installing a
+**Correction (found after the first draft):** since 1.15.0, a Windows Terminal channel already runs as administrator through Windows' `sudo` when sudo is set to Inline (`shellProgram` in `electron/services/cli/pty-manager.ts` reads `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo` `Enabled` = 3 and runs `sudo.exe --inline powershell.exe -NoLogo`). Otherwise it prints how to turn on sudo Inline. So with sudo Inline, every Terminal channel asks for administrator rights; there is no ordinary one. The draft below said every Trace channel runs with the person's own rights, which is wrong for Windows terminals. Agent channels do run with the person's own rights. On Windows some work needs administrator rights: installing a
 service, editing `Program Files` or `HKLM`, `winget` for all users, some build tools. Today the person leaves Trace for
 an elevated Windows Terminal.
 
