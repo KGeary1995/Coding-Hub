@@ -53,7 +53,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
   const project = path.join(root, 'tour-project'); const bin = path.join(root, 'bin');
   const homes = { claude: path.join(root, 'claude'), codex: path.join(root, 'codex') };
   const storage = path.join(root, 'storage');
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage };
+  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CODING_HUB_TEST_HIDDEN: process.env.CODING_HUB_TEST_SHOW === '1' ? '0' : '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   // os.homedir() reads USERPROFILE on Windows and HOME elsewhere: with both in the temp folder, no account, e-mail address,

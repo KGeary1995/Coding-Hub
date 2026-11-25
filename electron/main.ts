@@ -497,7 +497,7 @@ function desktopAlert(alert: DesktopAlert, always = false) {
   try { if (hub?.preferences().alerts === false) return; } catch { /* Unreadable preferences: alerts stay on. */ }
   if (!Notification.isSupported() || (!always && window && !window.isDestroyed() && window.isFocused())) return;
   const notice = new Notification({ title: alert.title, body: alert.body.slice(0, 200) });
-  notice.on('click', () => { if (!window || window.isDestroyed()) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.alertClick, alert.target); });
+  notice.on('click', () => { if (!window || window.isDestroyed() || TEST_HIDDEN) return; if (window.isMinimized()) window.restore(); window.show(); window.focus(); sendToRenderer(IPC_CHANNELS.alertClick, alert.target); });
   notice.show();
 }
 /** This computer's channel, by number and name as its tile shows it, for alerts. */
@@ -803,13 +803,18 @@ async function quitFromTrace(stopChannels = false) {
   }
   if (stopChannels) stopChannelsOnQuit = true; app.quit();
 }
+/**
+ * Tests and checks run on the person's own computer (CODING_HUB_TEST_HIDDEN=1): the window loads and is driven as usual
+ * but is never shown, brought forward or put in the Dock, so a smoke test does not open Trace over their work.
+ */
+const TEST_HIDDEN = process.env.CODING_HUB_TEST_HIDDEN === '1';
 /** Opened at sign-in: the window waits hidden, with the tray icon, until the person opens it (only while closing the window keeps Trace running). */
 function startedHidden() {
   if (!closeToTray()) return false;
   if (process.argv.includes('--hidden')) return true;
   try { return process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin; } catch { return false; }
 }
-function showWindow() { if (quitting) return; if (!window || window.isDestroyed()) { createWindow(); return; } if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
+function showWindow() { if (quitting || TEST_HIDDEN) return; if (!window || window.isDestroyed()) { createWindow(); return; } if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
 /** The tray's icon: the app's, at tray size (a source checkout has no built phone app, so its own assets folder). */
 function trayImage() {
   for (const file of [path.join(__dirname, '../../dist/phone/icon-192.png'), path.join(__dirname, '../../assets/icon.png')]) { const image = nativeImage.createFromPath(file); if (!image.isEmpty()) return image.resize({ width: 16, height: 16, quality: 'best' }); }
@@ -1506,8 +1511,8 @@ It runs without a shell. Save it only if you trust this program.` })).response =
   });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
   // Opened at sign-in: the window loads (channels need it) but stays hidden in the tray; with no tray, it shows.
-  const hidden = startedHidden(); createWindow(hidden);
-  if (hidden) { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } if (!tray) window?.show(); }
+  const hidden = startedHidden(); createWindow(hidden || TEST_HIDDEN);
+  if (TEST_HIDDEN) { if (process.platform === 'darwin') app.dock?.hide(); } else if (hidden) { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } if (!tray) window?.show(); }
   applyLoginItem();
   updates.start();
   // Today's usage against the budgets set in Settings, and the plan limits the CLIs last reported (Usage and the status
