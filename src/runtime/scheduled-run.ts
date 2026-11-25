@@ -51,8 +51,8 @@ async function noteTask(id: string, note: string) {
 
 /**
  * Sends the run's task once the agent is ready (sendWhenReady); `prompt` when task-send already gave it. Claude Code and Codex: as Send on the Tasks board does.
- * Gemini: Tasks refuses it there, since Trace cannot read Gemini's replies, so its marked prompt is typed here; the task
- * then waits in Working for the person to move it on. Not sent: the task stays in To do and says why.
+ * A Gemini or added agent's terminal: its marked prompt is typed here, and Tasks reads TASK COMPLETE from its screen
+ * (screenSignal), as for one sent from the board. Not sent: the task stays in To do and says why.
  */
 export async function deliver(taskId: string, sessionId: string, prompt?: string) {
   await loadTasks();

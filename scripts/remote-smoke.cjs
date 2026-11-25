@@ -11,6 +11,8 @@ const PORT = 47831;
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
 // its approval prompt from the phone, and remove the phone. Tailscale is not installed here; the page is reached on
 // loopback, which the remote also accepts.
+/** The longest the whole run may take before it fails on its own. */
+const WATCHDOG_MS = 8 * 60000;
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-remote-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
@@ -37,6 +39,9 @@ ${terminalFixture}
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
   let app;
+  // It takes under a minute on the Windows runner. An Electron error box once held it for the job's whole 60 minutes, so
+  // past this it closes the app and fails, saying so (the workflow step has its own limit too).
+  const watchdog = setTimeout(() => { console.error(`remote-smoke: no result after ${WATCHDOG_MS / 60000} minutes; stopping.`); process.exitCode = 1; void Promise.resolve(app?.close()).catch(() => {}).finally(() => process.exit(1)); }, WATCHDOG_MS);
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); const page = await app.firstWindow(); page.setDefaultTimeout(20000);
     await page.waitForSelector('.tr-empty, .session-tile');
@@ -373,6 +378,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
     console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, terminal channels opened at the phone’s size even while the computer is in use, Desktop size remembered on the phone, channels given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
+    clearTimeout(watchdog);
     await app?.close().catch(() => {});
     await removeFolder(root);
   }

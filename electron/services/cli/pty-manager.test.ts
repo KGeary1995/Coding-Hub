@@ -122,6 +122,8 @@ describe('PTY lifecycle and IPC ownership', () => {
   it('starts a cut exit diagnostic at a whole line', () => {
     // Short output is kept whole.
     expect(exitTail('SIZE:85x30\r\nError: invalid model\r\n')).toBe('SIZE:85x30\r\nError: invalid model');
+    // What Codex sends as it exits, before its error: nothing of it is left in front of the error.
+    expect(exitTail('\x1b[<1u\x1b[<1u\x1b[<u\x1b[>4;0m\x1b[0 qError: account/read failed (code -32603)\r\n\x1b[0 q')).toBe('Error: account/read failed (code -32603)');
     // The raw tail (8,192 characters) was cut inside "SIZE:85x30": the fragment before the first line break goes.
     const raw = '5x30\r\n' + '\x1b[0m'.repeat(2038) + 'SIZE:85x13\r\nError: invalid model\r\n';
     expect(raw).toHaveLength(8192); expect(exitTail(raw)).toBe('SIZE:85x13\r\nError: invalid model');

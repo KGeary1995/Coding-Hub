@@ -19,7 +19,9 @@ export async function commitStatus(cwd: string, shas: string[]): Promise<CommitS
   const commits: CommitStatus['commits'] = [];
   for (const sha of shas.filter(isSha).slice(0, MAX_REFS)) {
     try { await git(['cat-file', '-e', `${sha}^{commit}`]); } catch { commits.push({ sha, known: false, remotes: [] }); continue; }
-    let remotes: string[] = []; try { remotes = (await git(['branch', '-r', '--contains', sha, '--format=%(refname:short)'])).split('\n').map((line) => line.trim()).filter((line) => line && !line.endsWith('/HEAD')); } catch { /* Listed as on none. */ }
+    // Full names, without the remotes' HEAD pointers: git 2.48 and later make refs/remotes/origin/HEAD at a fetch, and
+    // %(refname:short) shortens it to plain "origin", which passed for a branch named so.
+    let remotes: string[] = []; try { remotes = (await git(['branch', '-r', '--contains', sha, '--format=%(refname)%09%(symref)'])).split('\n').map((line) => line.trim().split('\t')).filter(([name, target]) => name?.startsWith('refs/remotes/') && !target && !name.endsWith('/HEAD')).map(([name]) => name.slice('refs/remotes/'.length)); } catch { /* Listed as on none. */ }
     commits.push({ sha, known: true, remotes });
   }
   return { checkedAt: new Date().toISOString(), fetchedAt, commits };

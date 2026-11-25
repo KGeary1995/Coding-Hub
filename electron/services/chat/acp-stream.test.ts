@@ -35,6 +35,21 @@ function run(options: { permissions?: 'ask' | 'edits' | 'full'; model?: string; 
 const modes = (received: { method: string | null; params: Record<string, unknown> | null }[]) => received.filter((item) => item.method === 'session/set_mode').map((item) => item.params!.modeId);
 
 describe('custom agent chat over ACP (AcpStream)', () => {
+  it('gives the replies of a resumed run their own ids, so the first one after a restart is not taken for the first one before (1.43.0)', async () => {
+    const first = run({ permissions: 'edits' }); const ready = await first.until(() => first.events.find((event) => event.type === 'ready'), 'ready');
+    first.stream.send('PONG', []); const before = await first.reply();
+    const again = run({ permissions: 'edits', resumeId: ready.type === 'ready' ? ready.conversationId ?? undefined : undefined }); await again.until(() => again.events.find((event) => event.type === 'ready'), 'ready again');
+    again.stream.send('PONG', []); const after = await again.reply();
+    expect(before && before.type === 'assistant' && after && after.type === 'assistant' && before.messageId !== after.messageId).toBe(true);
+  });
+  it('asks for its mode again when the agent changes it by itself between turns, so the next message is not left waiting (1.43.0)', async () => {
+    const { events, received, reply, textOf, stream, until } = run({ permissions: 'edits' });
+    await until(() => events.find((event) => event.type === 'ready'), 'ready');
+    stream.send('drift read-only', []); await reply();
+    // After the turn the agent went to read-only by itself; Trace asks for edits again, and the next message is answered there.
+    await until(() => modes(received()).filter((mode) => mode === 'edits').length >= 2 && true, 'edits asked for again');
+    stream.send('hello again', []); expect(textOf(await reply(2))).toContain('ACP edits fx-small got: hello again');
+  });
   it('opens a session with Trace’s MCP servers, asks for Ask’s mode, and is ready once the agent answers', async () => {
     const { events, received, reply, textOf, stream, until } = run();
     await until(() => events.find((event) => event.type === 'ready'), 'ready');

@@ -287,7 +287,7 @@ export class LinkedComputers implements RemoteRelay {
   async agents(id: string): Promise<AgentLook[]> {
     const link = this.linked(id); let body: { agents?: unknown };
     try { body = await (await this.request(link, 'api/me', { signal: AbortSignal.timeout(5000) })).json() as { agents?: unknown }; } catch { return []; }
-    const listed = z.array(z.object({ id: z.string().regex(AGENT_ID), name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() })).max(20).safeParse(Array.isArray(body.agents) ? body.agents.map((agent) => agent && typeof agent === 'object' ? { id: (agent as AgentLook).id, name: (agent as AgentLook).name, color: (agent as AgentLook).color } : agent) : []);
+    const listed = z.array(z.object({ id: z.string().regex(AGENT_ID), name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), chatOnly: z.literal(true).optional() })).max(20).safeParse(Array.isArray(body.agents) ? body.agents.map((agent) => agent && typeof agent === 'object' ? { id: (agent as AgentLook).id, name: (agent as AgentLook).name, color: (agent as AgentLook).color, ...((agent as AgentLook).chatOnly ? { chatOnly: true as const } : {}) } : agent) : []);
     return listed.success ? listed.data.map((agent) => agentLook(agent)) : [];
   }
   /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */

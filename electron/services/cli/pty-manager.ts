@@ -55,8 +55,14 @@ const OUTPUT_TAIL = 8192;
  * raw tail kept per run, and the 2,000 characters) can fall inside a line or an escape sequence; the text then starts
  * at the next whole line, so a diagnostic never opens with the end of one ("5x30" of "SIZE:85x30").
  */
+/**
+ * Every control sequence whole (ECMA-48: parameters 0x30-0x3f, intermediates 0x20-0x2f, a final 0x40-0x7e). Node's
+ * stripVTControlCharacters leaves those with `<`, `>` or a space, which Codex sends as it exits (`ESC[<1u`, `ESC[>4;0m`,
+ * `ESC[0 q`): their remains stood before the error in the channel's banner (1.43.0).
+ */
+const CONTROL_SEQUENCE = /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
 export function exitTail(output: string): string {
-  const text = stripVTControlCharacters(output.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
+  const text = stripVTControlCharacters(output.replace(/\x1b\[\d*(?:;\d*)?H/g, '\n').replace(CONTROL_SEQUENCE, '')).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
   const kept = text.slice(-2000), at = kept.indexOf('\n');
   const cut = output.length >= OUTPUT_TAIL || text.length > 2000;
   return cut && at >= 0 && kept.slice(at + 1).trim() ? kept.slice(at + 1).trim() : kept;

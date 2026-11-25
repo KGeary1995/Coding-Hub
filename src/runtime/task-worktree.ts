@@ -28,7 +28,7 @@ export async function setUpWorktree(directory: string): Promise<boolean> {
  * (uncommitted changes are not copied), a new chat channel there, the task moved to it, then sent. Parallel tasks then
  * never edit the same files; combine the branches through normal Git review. Each step that fails says where it stopped.
  */
-export async function startTaskInWorktree(id: string, engine: 'claude' | 'codex') {
+export async function startTaskInWorktree(id: string, engine: 'claude' | 'codex' | 'gemini') {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task) throw new Error('This task is no longer here.');
   if (!window.codingHub) throw new Error('Worktrees need the desktop app.');
   if (useWorkspaceStore.getState().sessions.length >= MAX_CHANNELS) throw new Error(`Trace runs at most ${MAX_CHANNELS} channels. Close one first.`);

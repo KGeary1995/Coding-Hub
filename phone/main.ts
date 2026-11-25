@@ -21,7 +21,7 @@ import { PAIRING_PREFIX, type ChannelControl, type ChannelTranscript, type Remot
 import { modelLabel } from '../shared/model-name';
 import { previewLabel } from '../shared/app-preview';
 import { addChannel, changeChannel, channelSettings, chat, control, whoAmI, activeTarget, alertsOn, alertsSupported, api, collectKeys, releaseChannel, sizeChannel, disableAlerts, enableAlerts, follow, homeName, INPUT_LIMIT, pair, revive, send, token, unpair, Unpaired, type StreamEvent, type Target } from './api';
-import { atPhoneSize, FIT_KEY, takenBack } from './size';
+import { atPhoneSize, FIT_KEY, replayAsks, takenBack } from './size';
 import { switcherOrder } from './switcher';
 import { dictationSupported, startDictation, withSpoken } from '../src/runtime/dictation';
 
@@ -351,7 +351,7 @@ function addMenu() {
   const rows: { label: string; ways: Kind[] }[] = [
     { label: 'Terminal', ways: [{ label: 'Terminal', engine: 'shell', chat: false }] },
     ...([['Claude Code', 'claude'], ['Codex', 'codex'], ['Gemini', 'gemini']] as const).map(([label, engine]) => ({ label, ways: [{ label, engine, chat: false }, { label: `${label} chat`, engine, chat: true }] })),
-    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, ways: [{ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id }, ...(agent.chat ? [{ label: `${agent.name} chat`, engine: 'custom' as const, chat: true, agent: agent.id }] : [])] }))];
+    ...(me?.agents ?? []).map((agent) => ({ label: agent.chatOnly ? `${agent.name} chat` : agent.name, ways: [...(agent.chatOnly ? [] : [{ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id }]), ...(agent.chat ? [{ label: `${agent.name} chat`, engine: 'custom' as const, chat: true, agent: agent.id }] : [])] }))];
   const add = (kind: Kind) => async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat, undefined, kind.agent); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } };
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
     ...rows.map((row) => row.ways.length === 1
@@ -559,6 +559,8 @@ let holding = false; let asked: { cols: number; rows: number } | null = null; le
  * with its text shrunk to fit the screen's width. `shownAtPhone`: what the button shows, and so what pressing it does.
  */
 let granted = false; let askAgain = false; let shownAtPhone = false;
+/** The channel was just opened here: its first screen asks for the phone's size (a replay after a reconnect does not). */
+let freshScreen = false;
 /** The person is using the phone: the channel is drawn at the phone's size again. */
 function useChannel() {
   // Already at the phone's size: tell the computer the phone is still in use (at most every few seconds). From 1.35.2 a
@@ -604,7 +606,7 @@ function fitText() {
 function showChannel(sessionId: string) {
   enterInner(); leaveScreen();
   if (current !== sessionId) leaveChannel();
-  current = sessionId; run = null; holding = true; granted = false; disposeTerminal();
+  current = sessionId; run = null; holding = true; granted = false; freshScreen = true; disposeTerminal();
   const channel = channels.find((item) => item.sessionId === sessionId);
   // Set again below if this one is a chat, so a terminal shown after a chat is not taken for that chat.
   closeChat(); shownChat = null;
@@ -924,9 +926,14 @@ function onEvent(event: StreamEvent) {
     return;
   }
   if (event.type === 'replay') {
+    const restarted = run !== null && event.data.runId !== run;
     run = event.data.runId; inOrder((screen) => screen.reset()); resizeTo(event.data.cols, event.data.rows);
-    // A fresh screen (also after reconnecting, when the computer gave the channel back) asks for the phone's size again.
-    terminal.write(event.data.data); sentSize = ''; requestSize(0); return;
+    terminal.write(event.data.data); sentSize = '';
+    // The channel just opened here, or restarted, asks for the phone's size at once. A replay after a reconnect asks for
+    // nothing until the channel is touched (the rule above): before 1.43.0 it took the size by force, even while the
+    // person typed at the computer.
+    if (replayAsks(freshScreen, restarted)) { freshScreen = false; requestSize(0); } else { holding = false; fitText(); }
+    return;
   }
   // Output of a run the channel list has not announced yet (a restart): the computer sends events in order, so it is the
   // newer run, and its first lines (dropped before) start the fresh screen.

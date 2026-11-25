@@ -7,8 +7,19 @@
 - **Open Trace on your other computer.** When your Windows PC can't be reached because Trace is closed there, its tab here offers **Open Trace on** it. With **Share this screen** on, the PC's screen service, which runs from sign-in, starts Trace in its tray, and the tab connects by itself. Only your linked computers can ask; phones can't. On a Mac, or when the computer is asleep, the tab says what to do instead. The PC needs 1.43.0 for this.
 - **Gemini in Accounts.** Accounts → Command-line tools now lists Gemini (`agy`) with its sign-in state, and **Connect Gemini** starts it in the sign-in terminal. When you sign in, choose your Google account and the free or individual option: Google Cloud and Pay As You Go ask for a Cloud project, and quitting at that step leaves Gemini signed out. Fixed on the way: the Accounts check never ran for Gemini, so it showed as not verified even when signed in.
 - **A shorter New channel.** One row per agent, with **CLI** or **Chat**, and one **Round Table** row with **Discussion** or **Hierarchy**. Agents you added get the same row when they have a chat. The phone's **+** menu has the same rows.
+- **Fixed:**
+  - **A chat that continued after Restart showed no reply.** The first answer after a restart got the same name as the first answer before it, so it was added to that old message, or dropped when the words were the same. This hit chats with agents you added and Gemini chats. Also, when such an agent changed its own mode between turns, the next message now goes instead of waiting forever.
+  - **Memory listed commits on a remote branch called "origin"** that does not exist, with git 2.48 and later.
+  - **A phone that reconnected took a channel's size back**, even while you were typing at the computer. Now it waits until you touch the channel on the phone.
+  - **Error lines showed leftover terminal codes** before the message (`1u1uu4;0m q`), from what Codex sends as it exits.
+  - **The restart line said "Claude"** for every agent; it now names the one in the chat.
+  - **Gemini tasks:** **Start in worktree** offers a Gemini chat, and Tasks and scheduled jobs no longer say Trace can't read Gemini: it reads TASK COMPLETE from its screen, and other agents can read its replies.
+  - **The app preview covered Trace's own menus and dialogs** that opened over it; it now steps aside while they are open.
+  - **A notice raised to the top could cover the header of the terminal** you were working in; a failed Round Table partner's notice is shown when its lead's Round Table bar is out of view.
+  - **An agent whose program is its chat server** (like Claude Code's ACP adapter) is offered as a chat only, not as a terminal that would only show the protocol.
 - **Tried:** unit tests (the screen service only opens Trace for a linked computer's key, at most once in 20 seconds, and refuses phones, Funnel and sharing turned off); the desktop and Round Table smoke tests; and Trace started hidden (`--hidden`) loads its window without showing it.
-- **Not tried yet:** the sign-in entry in an installed Trace on Windows and on a Mac, the Quit question by hand, and opening Trace on a real Windows PC from the Mac.
+- **Also tried:** the restart fix with the real Claude Code ACP adapter (the chat continued the conversation after Restart), and Gemini's Accounts row with the real `agy`.
+- **Not tried yet:** the sign-in entry in an installed Trace on Windows and on a Mac, the Quit question by hand, and opening Trace on a real Windows PC from the Mac. The phone's reconnect change was not tried on a phone.
 
 1.42.0 shows your other computer's conversations, and resumes them there.
 

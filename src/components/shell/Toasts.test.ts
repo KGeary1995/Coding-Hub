@@ -55,8 +55,10 @@ describe('where the notices stand', () => {
     expect(place(tiles, 346, { top: 128, raised: true })).toEqual({ raised: true, under: 116, room: 290 });
     // Two end at 356, clear of it.
     expect(place(tiles, 228, { top: 128, raised: true }).room).toBeNull();
-    // A terminal under it sets no limit.
-    expect(place([terminal(52), terminal(412, true)], 346, { top: 128, raised: true }).room).toBeNull();
+    // A terminal that starts under it: the stack ends above its header rows (it covered them before 1.43.0).
+    expect(place([terminal(52), terminal(412, true)], 346, { top: 128, raised: true }).room).toBe(290);
+    // A short stack that ends clear of that header sets no limit.
+    expect(place([terminal(52), terminal(412, true)], 228, { top: 128, raised: true }).room).toBeNull();
   });
   it('steps aside where the message being written leaves less than a notice’s title and first line', () => {
     // The first chat's message box has grown up to 240: 76 px under the stack's top, 64 with the gap.

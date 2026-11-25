@@ -70,7 +70,9 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
     await mkdir(path.join(root, 'drive'), { recursive: true }); await mkdir(storage);
     // Trace's default Drive folder is G:\My Drive\Coding Hub: where it exists, the tour's memory notes and session summaries
     // would sync into the person's real Drive. A throwaway folder takes its place before the app starts.
-    await writeFile(path.join(storage, 'preferences.json'), JSON.stringify({ folderId: 'tour', driveDirectory: path.join(root, 'drive'), terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [{ model: 'fixture-model', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }] }));
+    // guideSeen: the Getting started guide stands over the third tile's header (its Start) on a new profile, and every
+    // scene from the channels on was skipped.
+    await writeFile(path.join(storage, 'preferences.json'), JSON.stringify({ folderId: 'tour', driveDirectory: path.join(root, 'drive'), guideSeen: true, terminalFontSize: 13, terminalWebGL: false, automaticMemory: true, prices: [{ model: 'fixture-model', input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }] }));
     // AppData too: PowerShell finds no AppData folder in a bare home and writes its history into the project instead.
     if (!realUsage) for (const folder of ['Roaming', 'Local']) await mkdir(path.join(env.HOME, 'AppData', folder), { recursive: true });
   };

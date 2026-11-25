@@ -57,6 +57,7 @@ import { askForHandoff } from './auto-handoff';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { UsageRecord, HubPreferences } from '../../shared/hub';
 import { isAgentConfig, isChatRun } from '../../shared/types';
+import { AGENT_NAME } from '../components/chat/seat-view';
 import { autoStartInOrder } from './start-order';
 import { receiveAutoCheck } from '../state/auto-check-store';
 import { guideTurnEnded } from '../state/guide-store';
@@ -129,7 +130,8 @@ export function useNativeHost() {
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       // A chat's thread: Claude Code's or Codex's, or a Round Table's Gemini seat.
       const chatRun = before && isChatRun(before.config);
-      if (event.type === 'started' && before && chatRun) chatStarted(event.sessionId, event.runId, isAgentConfig(before.config) && Boolean(before.config.resumeId));
+      if (event.type === 'started' && before && chatRun) { const config = before.config; const agent = config.engine === 'custom' ? lookOf(useAgentStore.getState().agents, config.agentId).name : config.engine === 'shell' ? undefined : AGENT_NAME[config.engine];
+        chatStarted(event.sessionId, event.runId, isAgentConfig(config) && Boolean(config.resumeId), agent); }
       if (event.type === 'exit' && chatRun) chatEnded(event.sessionId);
       useWorkspaceStore.getState().applyEvent(event);
       try { routeTerminalEvent(event); }

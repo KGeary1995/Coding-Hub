@@ -90,13 +90,16 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const addPluginTile = useWorkspaceStore((state) => state.addPluginTile);
   const channelMenu: MenuItem[] = other
     ? [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine))),
-      ...otherAgents.map((agent): MenuItem => ({ label: agent.name, icon: <span className="ui-avatar small custom" style={{ '--tone': agent.color } as CSSProperties} aria-hidden="true">{agent.initials}</span>, onSelect: () => void addLinkedChannel(other.id, 'custom', agent.id) }))]
+      // Another computer's chats are added there only, so an agent that is a chat only is not offered here.
+      ...otherAgents.filter((agent) => !agent.chatOnly).map((agent): MenuItem => ({ label: agent.name, icon: <span className="ui-avatar small custom" style={{ '--tone': agent.color } as CSSProperties} aria-hidden="true">{agent.initials}</span>, onSelect: () => void addLinkedChannel(other.id, 'custom', agent.id) }))]
     : [channelItem('shell', () => addSession('shell')),
       // Each agent in its terminal (CLI) or as a chat (1.39.0): the same CLI, its conversation in Trace's own view.
       ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelRow(channelItem(engine, () => addSession(engine)),
         [{ label: 'CLI', name: CHANNEL_KINDS[engine].label, onSelect: () => addSession(engine) }, { label: 'Chat', name: CHANNEL_KINDS[`${engine}Chat`].label, onSelect: () => useWorkspaceStore.getState().addChatSession(engine) }])),
       // The agents added on the Agents page; one that speaks ACP comes as a chat too (custom agents, phase 2).
       ...agents.map((agent): MenuItem => { const item: MenuItem = { label: agent.look.name, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => addSession('custom', undefined, { id: agent.id, name: agent.look.name }) };
+        // A chat only (its program is the ACP server itself): no CLI to offer.
+        if (agent.look.chatOnly) return { ...item, label: `${agent.look.name} chat`, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) };
         return agent.look.chat ? channelRow(item, [{ label: 'CLI', name: agent.look.name, onSelect: item.onSelect }, { label: 'Chat', name: `${agent.look.name} chat`, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) }]) : item; }),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
       ...(seatRoom() >= 2 ? [channelRow(channelItem('table', () => setSetup('discussion')), [{ label: 'Discussion', name: CHANNEL_KINDS.table.label, onSelect: () => setSetup('discussion') }, { label: 'Hierarchy', name: CHANNEL_KINDS.hierarchy.label, onSelect: () => setSetup('hierarchy') }])] : []),
