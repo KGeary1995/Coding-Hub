@@ -186,7 +186,11 @@ export type LinkedComputerRequest =
   /** A chat channel there: send, answer, interrupt, or a Round Table request (ChatRequest). */
   | { action: 'linked-chat'; id: string; request: ChatRequest }
   /** That chat channel's recent events (ChatReplay). */
-  | { action: 'linked-chat-history'; id: string; sessionId: string };
+  | { action: 'linked-chat-history'; id: string; sessionId: string }
+  /** That computer's Claude Code, Codex and Gemini conversations, newest first (RemoteHistoryItem[]), for History on its tab. */
+  | { action: 'linked-history'; id: string }
+  /** Resumes one of them there, as a new channel in its own workspace (`key` from linked-history). */
+  | { action: 'linked-history-resume'; id: string; key: string };
 /** Live updates about linked computers for the desktop window. */
 export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }

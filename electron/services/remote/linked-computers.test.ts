@@ -59,6 +59,26 @@ describe('linked computers', () => {
     cleanup.push(() => mac.stop());
     await mac.link(PC, pc.server.pair('computer').pairing!.code); expect(await mac.agents(PC)).toEqual([]);
   });
+  it("lists that computer's conversations and resumes one there, refusing a list it cannot read", async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1'); const resumed: string[] = [];
+    const host = (pc.server as unknown as { host: RemoteHost }).host;
+    host.history = async () => [{ key: 'claude:abc', id: 'abc', engine: 'claude', directory: 'C:\\Users\\k\\Coding-Hub', title: 'x'.repeat(400), modifiedAt: '2026-11-24T20:00:00.000Z' },
+      { key: 'codex:def', id: 'def', engine: 'codex', directory: null, title: 'Fix sync', label: 'Named here', modifiedAt: '2026-11-23T20:00:00.000Z' }];
+    host.resume = async (key) => { if (key !== 'claude:abc' && key !== 'codex:def') throw new Error('unknown'); resumed.push(key); };
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop());
+    await mac.link(PC, pc.server.pair('computer').pairing!.code);
+    const items = await mac.history(PC);
+    expect(items.map((item) => [item.key, item.engine, item.folder, item.title.length])).toEqual([['claude:abc', 'claude', 'Coding-Hub', 300], ['codex:def', 'codex', '', 10]]);
+    expect(items[1].title).toBe('Named here');
+    await mac.resumeHistory(PC, 'codex:def'); expect(resumed).toEqual(['codex:def']);
+    // A list that is not one (a newer or broken Trace there) is refused, not shown.
+    (mac as unknown as { fetcher: unknown }).fetcher = async () => new Response(JSON.stringify([{ key: '', engine: 'aider' }]), { status: 200 });
+    await expect(mac.history(PC)).rejects.toMatchObject({ code: 'LINK_FAILED' });
+    // A Trace there without these routes says to update it.
+    (mac as unknown as { fetcher: unknown }).fetcher = async () => new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 });
+    await expect(mac.history(PC)).rejects.toMatchObject({ code: 'LINK_OLD' }); await expect(mac.resumeHistory(PC, 'codex:def')).rejects.toMatchObject({ code: 'LINK_OLD' });
+  });
   it('connects again at once when this computer wakes from sleep (1.35.1)', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
     const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }, { id: MAC, name: 'MacBook', url: null }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });

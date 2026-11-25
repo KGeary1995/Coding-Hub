@@ -536,6 +536,8 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-agents'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-chat'), id: z.uuid(), request: chatRequestSchema }).strict(),
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
+  z.object({ action: z.literal('linked-history'), id: z.uuid() }).strict(),
+  z.object({ action: z.literal('linked-history-resume'), id: z.uuid(), key: z.string().min(1).max(200) }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
@@ -622,6 +624,8 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-agents') return linked.agents(request.id);
   if (request.action === 'linked-chat') { await linked.chat(request.id, request.request); return null; }
   if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
+  if (request.action === 'linked-history') return linked.history(request.id);
+  if (request.action === 'linked-history-resume') { await linked.resumeHistory(request.id, request.key); return null; }
   if (request.action === 'linked-update') return linked.update(request.id);
   if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
