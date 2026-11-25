@@ -16,12 +16,16 @@ const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
  * "0 chars/s" through every reply; its state badge says it is working. `tokens` is null while a channel's usage is not
  * measured (a Gemini CLI channel before its first request is read): that is drawn as "—", and 0 is a counted zero.
  * Gemini CLI reports no context window, so its footer has the tokens and no context.
+ *
+ * `place` 'head': the same numbers in the tile's header (the owner's choice of 2026-11-25, for the terminal's room), in short
+ * (no labels, "tok" for "tok today", the rate in the trace's tooltip). Which of the two shows follows the tile's width (tile.css).
  */
-export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, limitName = 'Context', chat = false, tokens, tokensTitle = 'New tokens in this channel today', contextUsed }: { sessionId: string; state: ChannelState; engine: ChannelEngine; limit: number | null; limitLabel: string; limitName?: 'Context' | 'Budget'; chat?: boolean; tokens?: number | null; tokensTitle?: string; contextUsed?: number | null }) {
+export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, limitName = 'Context', chat = false, tokens, tokensTitle = 'New tokens in this channel today', contextUsed, place = 'foot' }: { sessionId: string; state: ChannelState; engine: ChannelEngine; limit: number | null; limitLabel: string; limitName?: 'Context' | 'Budget'; chat?: boolean; tokens?: number | null; tokensTitle?: string; place?: 'head' | 'foot'; contextUsed?: number | null }) {
   const samples = useActivityStore((store) => store.samples[sessionId]) ?? EMPTY;
   const rate = samples.at(-1) ?? 0;
   const hot = limit !== null && limit >= LIMIT_THRESHOLD;
-  return <div className={`tr-scope tr-tile-foot state-${state}`}>
+  const head = place === 'head';
+  return <div className={`tr-scope tr-tile-foot state-${state} ${head ? 'in-head' : 'in-foot'}`}>
     {engine !== 'shell' && <>
       {/* With a share to show, the meter carries the name ("Context 13%") and the label is for the eye only; without one
           there is no meter (an empty track read as 0%), and the label is the name of the amount. */}
@@ -29,11 +33,11 @@ export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, limitN
         <span className={`tr-scope-limit ui-meter ${hot ? 'limit' : engine}`} role="img" aria-label={limitLabel}><i style={{ width: `${Math.min(100, Math.round(limit * 100))}%` }} /></span>
         <b className={`tr-foot-value ${hot ? 'hot' : ''}`}>{Math.round(limit * 100)}%</b></span>
         : contextUsed ? <span className="tr-foot-item" title="Tokens in context. Claude Code does not report its context window, so there is no percentage."><Gauge size={12} aria-hidden="true" /><span className="tr-foot-label">Context</span><b className="tr-foot-value">{compact(contextUsed)}</b></span> : null}
-      <span className="tr-foot-item" title={tokensTitle}><Coins size={12} aria-hidden="true" /><b className="tr-foot-value">{tokens === null ? '—' : compact(tokens ?? 0)}</b> tok today</span>
+      <span className="tr-foot-item" title={tokensTitle}><Coins size={12} aria-hidden="true" /><b className="tr-foot-value">{tokens === null ? '—' : compact(tokens ?? 0)}</b> {head ? 'tok' : 'tok today'}</span>
     </>}
     {!chat && <><svg className="tr-scope-plot" viewBox={`0 0 ${TRACE_WIDTH} ${TRACE_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`Terminal output over the last two minutes${rate ? `, ${compact(rate)} characters in the last second` : ', quiet'}`}>
       <path className="tr-scope-trace" d={tracePath(samples)} />
     </svg>
-    <span className="tr-scope-rate" title="Terminal output, characters per second">{compact(rate)} chars/s</span></>}
+    {!head && <span className="tr-scope-rate" title="Terminal output, characters per second">{compact(rate)} chars/s</span>}</>}
   </div>;
 }

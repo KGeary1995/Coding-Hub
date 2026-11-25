@@ -7,6 +7,7 @@ import { needsYou, waited, type NeedsYouItem } from '../../state/needs-you';
 import { jumpToChannel } from './StatusBar';
 import { forgetTable } from '../../runtime/round-table';
 import { useLinkedStore } from '../../state/linked-store';
+import { useHandoffStore } from '../../state/handoff-store';
 
 const ACTION: Record<NeedsYouItem['action'], string> = { answer: 'Answer', retry: 'Open channel', handoff: 'Write handoff', tasks: 'Open Tasks', 'save-findings': 'Save to memory', open: 'Open channel' };
 
@@ -18,7 +19,8 @@ export function NeedsYouCell() {
   const sessions = useWorkspaceStore((s) => s.sessions); const records = useHubStore((s) => s.usage); const tasks = useTaskStore((s) => s.tasks); const computers = useLinkedStore((s) => s.computers);
   const [open, setOpen] = useState(false); const [, tick] = useState(0); const box = useRef<HTMLDivElement>(null);
   const threads = useChatStore((s) => s.threads); const tables = Object.fromEntries(Object.entries(threads).map(([id, thread]) => [id, thread.table]));
-  const items = needsYou(sessions, records, tasks, tables, computers);
+  const phases = useHandoffStore((s) => s.bySession); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
+  const items = needsYou(sessions, records, tasks, tables, computers, { phases, automaticMemory });
   // Waiting times stay current while the list is open; Escape or a click elsewhere closes it.
   useEffect(() => { if (!open) return; const timer = setInterval(() => tick((n) => n + 1), 30000); const close = (e: MouseEvent | KeyboardEvent) => { if (e instanceof KeyboardEvent ? e.key === 'Escape' : !box.current?.contains(e.target as Node)) setOpen(false); }; window.addEventListener('mousedown', close); window.addEventListener('keydown', close); return () => { clearInterval(timer); window.removeEventListener('mousedown', close); window.removeEventListener('keydown', close); }; }, [open]);
   if (!items.length) return null;

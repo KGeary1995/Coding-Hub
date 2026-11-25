@@ -31,6 +31,11 @@ export function screenState(engine: string, lines: string[], title: string): { s
     // After the last prompt marker (›): Codex's own approval and question forms.
     const at = lines.map((line, index) => /^›/.test(line) ? index : -1).filter((index) => index >= 0).at(-1) ?? -1;
     const after = lower(lines.slice(at + 1));
+    // Its startup questions (codex-cli 0.172, seen 2026-11-25): trust this folder, and review a hook before it runs. Read
+    // as asking, so nothing is typed into them (Start in order's first request waits): Enter there trusts the folder,
+    // and "t" trusts every hook.
+    if (after.includes('enter continue') && after.includes('esc back') && lower(lines).includes('trust this folder')) return { state: 'blocked', message: 'Codex asks whether to trust this folder' };
+    if (after.includes('enter review') && after.includes('esc close') && lower(lines).includes('needs review')) return { state: 'blocked', message: 'Codex asks you to review a hook before it runs' };
     if (['allow command?', 'press enter to confirm or esc to cancel', 'enter to submit answer', 'enter to submit all'].some((text) => after.includes(text))) return { state: 'blocked', message: lines.slice(at + 1).find((line) => /\?\s*$/.test(line.trim()))?.trim() ?? 'Codex is waiting for your answer' };
     if (CODEX_SPINNER.test(title)) return { state: 'working' };
     return { state: 'unknown' };

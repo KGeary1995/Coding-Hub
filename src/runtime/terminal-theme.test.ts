@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ENGINE_CURSOR, TERMINAL_THEME } from './terminal-theme';
+import { ENGINE_CURSOR, SMALL_SCREEN_WIDTH, TERMINAL_THEME, terminalFontSize } from './terminal-theme';
 
 /** The hex value a token has in src/tokens.css (the first definition, which is the one on :root). */
 const sheet = readFileSync(resolve(__dirname, '../tokens.css'), 'utf8');
@@ -16,5 +16,14 @@ describe('the terminal theme', () => {
   });
   it('gives each engine its own colour as the cursor', () => {
     expect(ENGINE_CURSOR).toEqual({ claude: token('ch-claude'), codex: token('ch-codex'), gemini: token('ch-gemini'), custom: token('ch-custom'), shell: token('ch-shell') });
+  });
+});
+
+describe('the terminals’ font size', () => {
+  it('shows a size left at the default one smaller on a laptop’s screen, and keeps a size the person set', () => {
+    expect(terminalFontSize(13, 1470)).toBe(12); expect(terminalFontSize(13, SMALL_SCREEN_WIDTH)).toBe(13); expect(terminalFontSize(13, 2560)).toBe(13);
+    expect(terminalFontSize(14, 1470)).toBe(14); expect(terminalFontSize(11, 1470)).toBe(11);
+    // No screen to measure (a test window): as set.
+    expect(terminalFontSize(13, Infinity)).toBe(13);
   });
 });

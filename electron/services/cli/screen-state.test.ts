@@ -15,6 +15,17 @@ describe('reading an agent\'s state from its screen (herdr\'s rules, a subset)',
     expect(screenState('codex', ['› hi'], '⠋ codex')).toEqual({ state: 'working' });
     expect(screenState('codex', ['Allow command? was the old wording', '› next question'], 'codex')).toEqual({ state: 'unknown' });
   });
+  it('sees the startup questions that Enter or a letter would answer: Claude\'s and Codex\'s folder trust, Codex\'s hook review', () => {
+    // As Claude Code 2.1.332 and codex-cli 0.172 drew them (2026-11-25).
+    const claudeTrust = ['Accessing workspace:', '/tmp/project', 'Quick safety check: Is this a project you created or one you trust?', 'Security guide', '❯ No, exit', '  Yes, I trust this folder', 'Enter to confirm · Esc to cancel'];
+    expect(screenState('claude', claudeTrust, 'Claude Code').state).toBe('blocked');
+    const codexTrust = ['Folder access', '/tmp/project', 'Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.', '› 1. Trust and continue', '  2. Back to Agent Command Center', 'enter continue · esc back'];
+    expect(screenState('codex', codexTrust, 'codex')).toEqual({ state: 'blocked', message: 'Codex asks whether to trust this folder' });
+    const hooks = ['Hooks', 'Lifecycle hooks from config and enabled plugins.', '⚠ 1 hook needs review before it can run.', 'Event  Installed  Active  Review  Description', '› SessionStart  1  0  1  When a new session starts', '  SessionEnd  0  0  0  Right before a session ends', 't trust all · enter review · esc close'];
+    expect(screenState('codex', hooks, 'codex')).toEqual({ state: 'blocked', message: 'Codex asks you to review a hook before it runs' });
+    // The words alone, in a reply, are not a question.
+    expect(screenState('codex', ['› explain', 'Press enter review then esc close to leave; trust this folder if you like.'], 'codex').state).toBe('unknown');
+  });
   it('reports a change only once it is read twice in a row, and a stale ask once the agent works again', () => {
     const watch = new ScreenWatch();
     expect(watch.push({ state: 'blocked' })).toBeNull(); expect(watch.push({ state: 'blocked' })).toBe('blocked'); expect(watch.push({ state: 'blocked' })).toBeNull();

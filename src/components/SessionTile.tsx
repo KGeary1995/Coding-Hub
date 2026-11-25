@@ -25,8 +25,9 @@ import { chatFailed, chatSent, useChatStore } from '../state/chat-store';
 import { tableRequest } from '../runtime/round-table';
 import { PastedImages } from './PastedImages';
 import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
-import { focusTerminal, writeTerminal } from '../runtime/terminals';
+import { focusTerminal, submitTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
+import { HANDOFF_DETAIL, HANDOFF_LABEL, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { EngineAvatar } from './tile/EngineAvatar';
@@ -91,7 +92,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const chat = isChatRun(session.config);
   // A chat channel's input is its conversation: prompts go in as messages, interruptions through the chat.
   const chatRun = () => session.runId && window.codingHub ? { codingHub: window.codingHub, runId: session.runId } : null;
-  const sendPrompt = async (text: string) => { if (!chat) return writeTerminal(session.id, text + '\r'); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
+  const sendPrompt = async (text: string) => { if (!chat) return submitTerminal(session.id, text); const run = chatRun(); if (!run) return false; chatSent(session.id, text, []); /* Shown at once and marked busy, as when typed in the chat. */ const result = await run.codingHub.chat({ action: 'send', sessionId: session.id, runId: run.runId, text, images: [] }).catch(() => null); if (!result?.ok) chatFailed(session.id, result && !result.ok ? result.error.message : 'The message could not be sent.'); return Boolean(result?.ok); };
   // A chat leading a Round Table stops the discussion quietly, as the table bar's Stop does; a plain interrupt would end it with a notice.
   const leadsTable = useChatStore((s) => Boolean(s.threads[session.id]?.table));
   const interrupt = () => { if (!chat) { void writeTerminal(session.id, '\x03'); return; } if (leadsTable) { void tableRequest(session.id, { action: 'table-stop' }); return; } const run = chatRun(); if (run) void run.codingHub.chat({ action: 'interrupt', sessionId: session.id, runId: run.runId }); };
@@ -113,6 +114,9 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // Counts, not the list: a change to another channel then does not draw this tile again.
   const sessionCount = useWorkspaceStore((s) => s.sessions.length); const channelCount = useWorkspaceStore((s) => channelsOf(s.sessions).length);
   const state = session.status === 'running' && seatWaiting ? 'waiting' as const : channelState(session, usage); const meta = CHANNEL_STATES[state];
+  // Near its limit: what Trace is doing about the handoff, or (where it cannot ask) the person's button to write one.
+  const handoff = useHandoffStore((s) => handoffPhase(s.bySession, session)); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
+  const shown = state === 'limit' ? handoffShown(session, useWorkspaceStore.getState().sessions, usage, { automaticMemory }, handoff) : 'manual';
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
   const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
@@ -143,14 +147,18 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const action = state === 'idle' ? <button className="tr-action start" aria-label="Start channel" title="Start channel (Enter on the tile)" onClick={start}><Play size={12} aria-hidden="true" />Start<kbd aria-hidden="true">⏎</kbd></button>
     : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
     : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
-    : state === 'limit' ? <button className="tr-action limit" title="Write a handoff in Shared memory before the context runs out. With automatic memory on, Trace also asks the agent to save one when its turn ends." onClick={() => setView('memory')}>Write handoff</button>
+    : state === 'limit' ? <button className="tr-action limit" title={shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`} onClick={() => setView('memory')}>{HANDOFF_LABEL[shown]}</button>
     : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
+  // The channel's numbers: in its header when the tile is wide enough, else in its footer (tile.css).
+  const scope = (place: 'head' | 'foot') => <ScopeStrip place={place} sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={custom || engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
+        tokensTitle={custom ? 'Trace does not count a custom agent’s tokens.' : engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />;
   const facts = [
     stopping ? 'Stopping the CLI and what it started…' : session.pid ? 'Running' : session.status === 'starting' ? 'Checking the CLI…' : session.exitCode !== null ? (session.exitCode === 0 ? 'Ended normally' : `Ended with exit code ${session.exitCode}`) : 'Ready to start',
     cwd ? `Folder ${folderName(cwd)}` : 'No folder chosen',
     usage ? `Cost ${dollars(usage.cost)}` : null,
     context ? `Context ${compact(context.used)} of ${compact(context.limit)}` : contextUsed !== null ? `Context ${compact(contextUsed)}` : null,
+    handoff === 'compacted' ? 'Handoff saved, then compacted' : null,
   ].filter(Boolean);
   // The row stands open while what it opened is in use: the settings, a conversation, the question Close asks.
   const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;
@@ -166,6 +174,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <strong className="tr-tile-name" title={topic ? `${name}: ${topic}` : name}>{name}</strong>
           {topic && <span className="tr-tile-topic" title={topic}>{topic}</span>}
           <span className="tr-spacer" />
+          {scope('head')}
           {shell ? <span className="tr-tile-model model-name" title="Your login shell, or PowerShell on Windows">shell</span> : <span className="tr-tile-model model-name" title={reportedModel ? `Model in use: ${reportedModel}${model ? ` (chosen in this channel's settings: ${model})` : ''}` : model ? `Model chosen in this channel's settings: ${model}` : lastModel ? `Last used: ${lastModel}. The CLI's own default applies until this run reports its model.` : 'The CLI’s own default model (shown once the channel reports it)'}>{modelLabel(reportedModel || model || lastModel || '') || 'CLI default'}</span>}
           {account && <span className="tr-profile-chip account-profile-chip ui-badge" data-account={tone} title={`Claude account: ${account.name}`}>{account.name}</span>}
           {preview && <button className="tr-action ghost" title={`Open the app at ${previewLabel(preview.url)}`} aria-label={`Open the app at ${previewLabel(preview.url)} from channel ${channel}`} onClick={() => void openPreview(session.id)}><AppWindow size={12} aria-hidden="true" />Preview</button>}
@@ -201,8 +210,8 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         {busy && <p className="control-note">Stop the channel to change its next launch settings.</p>}
       </fieldset>}
       {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>{peekCoachingPrompt(session.id)?.label === 'Send first request' ? 'Its first request from Start in order. Finish any CLI trust or setup prompts first.' : 'Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.'}</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
-      <AutoCheckLine sessionId={session.id} />
-      {!shell && <UndoTurnLine sessionId={session.id} channel={channel} folder={cwd} />}
+      {/* One row for the check result and Undo last turn, wrapping only when the tile is too narrow for both: each was a row of its own, which a laptop's tiles could not spare. */}
+      <div className="tile-bars"><AutoCheckLine sessionId={session.id} />{!shell && <UndoTurnLine sessionId={session.id} channel={channel} folder={cwd} />}</div>
       {chat && attention}
       {session.error && <div className={`session-error failure ${strip.open ? 'open' : ''}`} role="alert"><CircleAlert size={14} />{strip.open ? <span>{errorText(session.error)}</span> : <span className="session-error-lines" ref={strip.lines}>{closedError.lines.map((line, at) => <span key={at} title={line}>{line}</span>)}</span>}{!busy && session.exitCode !== null && session.exitCode !== 0 && engine === 'codex' && <button className="quiet-button small" onClick={() => { useWorkspaceStore.getState().resetCodexConfig(session.id); useWorkspaceStore.getState().setSessionError(session.id, 'Model and reasoning overrides cleared. The next launch starts a fresh conversation using local CLI defaults; the old conversation remains in native history.'); }}>Use Codex CLI defaults</button>}{!busy && setupView && <button className="quiet-button small" onClick={() => setView(setupView)}>{SETUP_TARGETS[setupView]}</button>}{(closedError.more || strip.cut || strip.open) && <button className="quiet-button small session-error-more" aria-expanded={strip.open} aria-label={`${strip.open ? 'Show less' : 'Show all'} of channel ${channel}'s error`} onClick={() => strip.setOpen(!strip.open)}>{strip.open ? 'Show less' : 'Show all'}<ChevronDown size={16} aria-hidden="true" /></button>}{/* A narrow tile's header has no room for Open log (tile.css, 400 px), and a tile on screen has no notice to carry it. */}{state === 'failed' && <button className="quiet-button small session-error-log" onClick={openLog}>Open log</button>}</div>}
       {!busy && !profileId && engines.find((item) => item.engine === engine)?.authentication?.state === 'not-authenticated' && <div className="session-error warning" role="status"><TriangleAlert size={14} /><span>CLI reports no login. Open Accounts & connections to sign in before starting.</span></div>}
@@ -218,8 +227,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
           <button className="button primary" aria-label={`Start channel ${channel}`} title="Start this channel (Enter on the tile)" onClick={start}><Play size={14} aria-hidden="true" />Start</button>
         </div>
       </div>}</div>
-      <ScopeStrip sessionId={session.id} state={state} engine={engine} limit={barRatio} limitName={contextRatio !== null ? 'Context' : 'Budget'} chat={chat} tokens={custom || engine === 'gemini' && !measured ? null : today.tokens} contextUsed={contextUsed}
-        tokensTitle={custom ? 'Trace does not count a custom agent’s tokens.' : engine === 'gemini' && !measured ? 'Not measured yet. Gemini records a request when it ends, and Trace reads it within a few seconds; two Gemini channels started in one folder are counted when they quit.' : today.tokens > 0 ? `New tokens in this channel today, across restarts: ${today.tokens.toLocaleString()}.${usage ? ' ' + tokenDetail(usage) : ''}` : usage ? tokenDetail(usage) : 'Waiting for structured CLI usage'} limitLabel={contextRatio !== null ? `Context ${Math.round(contextRatio * 100)}% (near its limit from 80%)` : `Channel budget ${Math.round((barRatio ?? 0) * 100)}% used (near its limit from 80%)`} />
+      {scope('foot')}
       {tasked && <TaskStrip sessionId={session.id} />}
       {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}

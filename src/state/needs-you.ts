@@ -4,7 +4,8 @@ import type { Task } from '../../shared/workbench';
 import { waitingImageCount, type RoundTableState } from '../../shared/chat';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { LinkedComputer } from '../../shared/remote';
-import { channelAlerts } from './channel-state';
+import { channelAlerts, usageFor } from './channel-state';
+import { HANDOFF_DETAIL, handoffPhase, handoffShown } from './handoff-store';
 import { channelsOf } from './workspace-store';
 
 /**
@@ -15,7 +16,7 @@ import { channelsOf } from './workspace-store';
 export interface NeedsYouItem { key: string; kind: 'approval' | 'done' | 'failed' | 'limit' | 'task-blocked' | 'task-stopped' | 'task-unconfirmed' | 'task-quiet' | 'task-review' | 'table-waiting' | 'findings-unsaved' | 'plan-review'; title: string; detail: string; since: string | null; sessionId: string | null; taskId: string | null; action: 'answer' | 'retry' | 'handoff' | 'tasks' | 'save-findings' | 'open'; computerId?: string }
 const ORDER: Record<NeedsYouItem['kind'], number> = { approval: 0, 'task-blocked': 1, failed: 2, 'task-stopped': 3, 'table-waiting': 4, 'task-unconfirmed': 5, 'task-quiet': 6, 'task-review': 7, limit: 8, 'findings-unsaved': 4, 'plan-review': 1, done: 9 };
 
-export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}, computers: LinkedComputer[] = []): NeedsYouItem[] {
+export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Task[], tables: Record<string, RoundTableState | null | undefined> = {}, computers: LinkedComputer[] = [], handoff: { phases: Parameters<typeof handoffPhase>[0]; automaticMemory?: boolean } = { phases: {} }): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   // Findings of a closed table that could not be saved to shared memory: kept with the channel until saved.
   for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) items.push({ key: `s:${session.id}`, kind: 'findings-unsaved', title: 'Round Table findings not saved yet', detail: `${record.findings.length} ${record.findings.length === 1 ? 'finding' : 'findings'} from a closed table could not be written to shared memory.`, since: null, sessionId: session.id, taskId: null, action: 'save-findings' }); }
@@ -29,7 +30,11 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
     const onTask = task ? ` · task: ${task.title}` : '';
     if (alert.state === 'waiting') items.push({ key: `a:${alert.sessionId}`, kind: 'approval', title: alert.text, detail: (session?.attention?.message || 'The agent is asking for your approval.') + onTask, since: session?.attention?.at ?? null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: 'answer' });
     else if (alert.state === 'failed') items.push({ key: `f:${alert.sessionId}`, kind: 'failed', title: alert.text, detail: (session?.error || 'The channel stopped with an error.') + onTask, since: session?.endedAt ?? null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: 'retry' });
-    else items.push({ key: `l:${alert.sessionId}`, kind: 'limit', title: alert.text, detail: 'Near its context or budget limit: write a handoff before it runs out.' + onTask, since: null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: 'handoff' });
+    else {
+      // Near its context limit, a channel Trace saves the handoff for says so and opens the channel; else the person writes it.
+      const shown = session ? handoffShown(session, sessions, usageFor(session, records), { automaticMemory: handoff.automaticMemory }, handoffPhase(handoff.phases, session)) : 'manual';
+      items.push({ key: `l:${alert.sessionId}`, kind: 'limit', title: alert.text, detail: HANDOFF_DETAIL[shown] + onTask, since: null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: shown === 'manual' ? 'handoff' : 'open' });
+    }
   }
   // Channels whose agent finished a turn the person has not looked at yet (1.32.1), after everything that asks something.
   channelsOf(sessions).forEach((session, index) => { if (session.unseen && session.status === 'running' && !session.attention && !items.some((item) => item.sessionId === session.id)) { const task = taskOf(session.id); items.push({ key: `d:${session.id}`, kind: 'done', title: `CH${index + 1} finished its turn`, detail: 'Look at what it did.' + (task ? ` · task: ${task.title}` : ''), since: null, sessionId: session.id, taskId: task?.id ?? null, action: 'open' }); } });

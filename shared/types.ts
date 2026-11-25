@@ -307,3 +307,9 @@ export interface GitLog { head: string | null; branch: string | null; commits: G
 export interface GitCommitFile { path: string; originalPath: string | null; additions: number | null; deletions: number | null }
 /** One commit's full message and its files against its first parent (a merge's own changes onto the branch it joined). */
 export interface GitCommitDetail { sha: string; parents: string[]; author: string; date: string; message: string; files: GitCommitFile[]; limited: boolean }
+/**
+ * How long after a request typed into an agent's terminal its Enter is sent, on its own. Claude Code takes a burst of
+ * input as a paste, in which Enter is a new line: a request written with its Enter in one write was left in its prompt
+ * unsent 3 times in 5 (2.1.332, 2026-11-25), and every time sent once the Enter came 200 ms later.
+ */
+export const SUBMIT_DELAY_MS = 200;

@@ -115,13 +115,18 @@ export class AttentionServer {
     let size = 0; const chunks: Buffer[] = [];
     request.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= 64 * 1024) chunks.push(chunk); });
     request.on('end', () => {
+      let input: { notification_type?: unknown; message?: unknown; session_id?: unknown; context_window?: { context_window_size?: unknown } } | null = null;
+      if (size <= 64 * 1024) try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* Not a hook payload. */ }
+      // The status line prints whatever comes back: the model and how full the context is (statusLineText), since Claude
+      // keeps the row whether or not it has text (an empty answer left an empty row under the prompt, before 1.44.1).
+      if (match[3] === '/status') {
+        response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end(input && typeof input === 'object' ? statusLineText(input as Record<string, unknown>) : '');
+        const window = input?.context_window?.context_window_size; if (typeof window === 'number' && Number.isInteger(window) && window > 0) this.onContextWindow(match[1], window); return;
+      }
       // SessionStart is a command hook (curl): an empty 204 keeps anything from being added to Claude's context.
-      // The status line prints whatever comes back, so its answer is empty too (an empty status line).
-      if (match[3] === '/session' || match[3] === '/status') { response.writeHead(204); response.end(); } else done(200);
-      if (size > 64 * 1024) return;
+      if (match[3] === '/session') { response.writeHead(204); response.end(); } else done(200);
+      if (!input || typeof input !== 'object') return;
       try {
-        const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { notification_type?: unknown; message?: unknown; session_id?: unknown; context_window?: { context_window_size?: unknown } };
-        if (match[3] === '/status') { const window = input.context_window?.context_window_size; if (typeof window === 'number' && Number.isInteger(window) && window > 0) this.onContextWindow(match[1], window); return; }
         // Only `session_id` is relied on; `transcript_path` is not trusted as a path, the conversation is found by its id.
         if (match[3] === '/session') { if (typeof input.session_id === 'string' && UUID.test(input.session_id)) this.onSession(match[1], input.session_id.toLowerCase()); return; }
         if (typeof input.notification_type === 'string' && NEEDS_PERSON.has(input.notification_type)) this.onAttention(match[1], cleanMessage(typeof input.message === 'string' ? input.message : '') || 'Waiting for your approval');
@@ -150,6 +155,20 @@ export class AttentionServer {
  * is followed. Claude Code skips HTTP hooks on SessionStart, so it is a command hook in exec form (no shell, no quoting)
  * that posts the hook's input as is.
  */
+/**
+ * The text of a Claude terminal's status line (the owner's choice of 2026-11-25: its row was otherwise empty): the model
+ * and how full its context is, from what Claude Code passes (2.1.332: model.display_name, context_window.used_percentage,
+ * null until the first reply, and context_window_size). One line, with control characters dropped, as the terminal prints it.
+ */
+export function statusLineText(input: Record<string, unknown>): string {
+  const field = (value: unknown, key: string) => value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+  const name = field(input.model, 'display_name'); const model = typeof name === 'string' ? name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 40) : '';
+  const size = field(input.context_window, 'context_window_size'); const used = field(input.context_window, 'used_percentage');
+  const window = typeof size === 'number' && Number.isInteger(size) && size > 0 ? (size >= 1_000_000 ? `${+(size / 1_000_000).toFixed(1)}M` : `${Math.round(size / 1000)}k`) : '';
+  const context = window && typeof used === 'number' && Number.isFinite(used) && used >= 0 && used <= 100 ? `context ${Math.round(used)}% of ${window}` : window ? `${window} context` : '';
+  return [model, context].filter(Boolean).join(' · ');
+}
+
 export function claudeAttentionSettings(url: string, curl: string | null = null, statusLine = false, allow: readonly string[] = []) {
   const resolved = [{ hooks: [{ type: 'http', url: `${url}/resolved`, timeout: 5 }] }];
   const finished = [{ hooks: [{ type: 'http', url: `${url}/finished`, timeout: 5 }] }];

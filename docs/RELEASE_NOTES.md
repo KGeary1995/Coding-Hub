@@ -1,5 +1,15 @@
 ## What's new
 
+1.45.0 gives the terminal more room on a laptop, shows the automatic handoff as it happens, and makes sure typed requests reach Claude Code.
+
+- **More room for the terminal.** The check result and **Undo last turn** share one row, and a passed check goes after 8 seconds (a failure stays until you close it). A channel 560 px or wider shows its context, tokens and activity in its header instead of a row under the terminal. Sent pictures are one slim line. On a laptop's screen (under 1600 points wide), terminals left at the default font size 13 show at 12; a size you set yourself is kept. In a laptop-sized window a channel's terminal gains about four lines.
+- **Claude Code's status line is no longer an empty row.** Trace sets Claude's status line to learn its context window; it now shows the model and how full the context is ("Opus 5.5 · context 56% of 1M").
+- **The automatic handoff shows what it is doing.** Near the end of its context, a channel shows **Handoff at turn end**, **Handoff asked**, **Handoff saved**, and then "Handoff saved, then compacted", and Needs you says the same. **Write handoff** stays where Trace does not ask: Gemini, Round Tables, automatic memory off, a budget limit, or an agent that did not save one.
+- **Fixed: a chat near its context limit was never compacted** after saving its handoff: each turn was counted twice, so Trace stopped waiting for the handoff too soon. Checked with real Claude Code and Codex chats filled past 80% (compacted to 3% and 0%).
+- **Fixed: requests typed into Claude Code were often left unsent** (Start in order's first request, a tile's first request, messages from the channel tools and the VS Code extension, the handoff request). Claude Code takes a burst of typing as a paste, in which Enter is a new line; the Enter now goes on its own a moment later. Checked with real Claude Code: Start in order started it on reopening Trace, its request was sent, and the automatic check passed on its fix.
+- **Fixed: Start in order could type into an agent's startup question.** Codex's folder trust question (Enter trusts the folder) and its hook review ("t" trusts every hook) now count as waiting for you, as Claude Code's trust question already did: the channel shows Needs you and the request waits. Not solved yet: when Codex opens the hook review a few seconds after the trust answer, a request sent in between can be lost under it.
+- **Tried:** unit tests, the desktop and design smoke tests, and the real checks above; also Gemini and Codex at one Round Table (Codex driving, Gemini reviewing).
+
 1.44.1 asks you less often: agents run Trace's tools that only look, and its shared memory tools, without asking, and Gemini chats run the safe commands as Gemini terminals do.
 
 - **Claude Code no longer asks before Trace's tools that only look** (list and read channels, wait for a channel, list tasks), as Codex and Gemini already did. Sending a message to a channel, adding or updating a task still asks. Checked with the real Claude Code: a chat listed tasks without asking, and asked before adding and updating one.

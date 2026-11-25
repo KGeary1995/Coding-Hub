@@ -4,11 +4,11 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { workbench } from './workbench';
 import type { Session } from '../../shared/types';
-import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../shared/types';
+import { isAgentConfig, isChatEngineConfig, isChatRun, SUBMIT_DELAY_MS } from '../../shared/types';
 import type { RunReference, SessionEvent } from '../../shared/ipc';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useHubStore } from '../state/hub-store';
-import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME } from './terminal-theme';
+import { ENGINE_CURSOR, TERMINAL_FONT, TERMINAL_THEME, terminalFontSize } from './terminal-theme';
 import { forgetActivity, isPersonInput, recordActivity } from '../state/activity-store';
 import { exitNotice } from '../../shared/terminal-input';
 import { measureLikeTheCLIs } from '../../shared/terminal-width';
@@ -101,7 +101,7 @@ useHubStore.subscribe((state, previous) => {
   // Terminals made before the preferences loaded, or before the setting changed, follow it now.
   if (state.preferences.terminalWebGL !== previous.preferences.terminalWebGL) for (const entry of terminals.values()) setWebGL(entry, webglWanted());
   if (state.preferences.terminalFontSize === previous.preferences.terminalFontSize) return;
-  for (const entry of terminals.values()) { entry.terminal.options.fontSize = state.preferences.terminalFontSize; try { entry.fit.fit(); } catch { /* Hidden terminal fits on remount. */ } }
+  for (const entry of terminals.values()) { entry.terminal.options.fontSize = terminalFontSize(state.preferences.terminalFontSize); try { entry.fit.fit(); } catch { /* Hidden terminal fits on remount. */ } }
 });
 
 /**
@@ -158,7 +158,7 @@ export function getTerminal(session: Session, container?: HTMLElement): Terminal
   const terminal = new Terminal({
     disableStdin: true, cursorBlink: false, scrollback: 5000, allowProposedApi: true,
     fontFamily: TERMINAL_FONT,
-    fontSize: useHubStore.getState().preferences.terminalFontSize, lineHeight: 1.45,
+    fontSize: terminalFontSize(useHubStore.getState().preferences.terminalFontSize), lineHeight: 1.45,
     theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[session.config.engine] },
     // Links a CLI marks itself (OSC 8), such as a file name that points at a pull request.
     linkHandler: { activate: openTerminalLink, ...linkHover(element) },
@@ -221,6 +221,12 @@ function sendSize(id: string, entry: TerminalEntry, cols: number, rows: number) 
   }).catch(() => reportInputError(id, 'The native terminal connection was lost.'));
 }
 
+/** Types a request into an agent's terminal and sends it: the text, then its Enter on its own (SUBMIT_DELAY_MS). */
+export async function submitTerminal(id: string, text: string): Promise<boolean> {
+  if (!await writeTerminal(id, text)) return false;
+  await new Promise((resolve) => setTimeout(resolve, SUBMIT_DELAY_MS));
+  return writeTerminal(id, '\r');
+}
 export function writeTerminal(id: string, data: string): Promise<boolean> {
   const entry = terminals.get(id);
   const run = entry?.run;

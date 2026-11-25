@@ -1,10 +1,21 @@
 import type { ITheme } from '@xterm/xterm';
+import { DEFAULT_PREFERENCES } from '../../shared/hub';
 
 /**
  * Trace terminal colours ("Midnight", docs/design/midnight/README.md). xterm takes literal values, not CSS variables, so
  * each one repeats a token of src/tokens.css, named beside it; terminal-theme.test.ts fails when the two drift apart.
  */
 export const TERMINAL_FONT = '"IBM Plex Mono", ui-monospace, Consolas, monospace';
+/** Narrower than this (points), a screen is a laptop's: a 13 or 14 inch MacBook is 1470-1512 wide at its default scale. */
+export const SMALL_SCREEN_WIDTH = 1600;
+/**
+ * The font size terminals use: the one in Settings, except that a size left at the default shows one smaller on a
+ * laptop's screen, for more lines in each channel (the owner's choice of 2026-11-25). A size the person set is kept as
+ * set, and the setting itself, which syncs between computers, is not changed.
+ */
+export function terminalFontSize(size: number, screenWidth = typeof window === 'undefined' ? Infinity : window.screen?.width ?? Infinity) {
+  return size === DEFAULT_PREFERENCES.terminalFontSize && screenWidth < SMALL_SCREEN_WIDTH ? size - 1 : size;
+}
 /** The cursor is the engine's colour: --tr-ch-claude, --tr-ch-codex, --tr-ch-gemini, --tr-ch-shell. */
 export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', custom: '#c4b5fd', shell: '#9fc3b8' } as const;
 export const TERMINAL_THEME: ITheme = {

@@ -5,7 +5,8 @@ import { LIMIT_THRESHOLD, usageFor } from '../state/channel-state';
 import { leadOf, useWorkspaceStore } from '../state/workspace-store';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { chatFailed, chatSent } from '../state/chat-store';
-import { writeTerminal } from './terminals';
+import { submitTerminal } from './terminals';
+import { contextShare, setHandoffPhase } from '../state/handoff-store';
 
 /**
  * Near the end of its context an agent is asked, by Trace, to save a handoff itself (the person's choice, 2026-11-22:
@@ -19,8 +20,6 @@ import { writeTerminal } from './terminals';
  * has thread/compact/start.
  */
 
-/** The share of the context window in use (0 when the CLI has not reported both numbers). */
-const contextShare = (usage: UsageRecord | undefined) => usage?.context && usage.context.limit > 0 ? usage.context.used / usage.context.limit : 0;
 
 /**
  * Whether to ask now: automatic memory is on, the channel is a running Claude Code or Codex agent that is not waiting
@@ -46,20 +45,20 @@ export const handoffSaved = (notes: Pick<MemoryNote, 'author' | 'createdAt'>[], 
 /** After the turn that followed the request: compacts a channel whose agent saved its handoff. Returns whether it did. */
 async function compactAfterHandoff(session: Session, sessions: Session[]): Promise<boolean> {
   const runId = session.runId!; const pending = waiting.get(runId); if (!pending) return false;
-  if (++pending.turns > 3) { waiting.delete(runId); return false; }
+  if (++pending.turns > 3) { waiting.delete(runId); setHandoffPhase(session.id, runId, 'not-saved'); return false; }
   if (!isChatEngineConfig(session.config) || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
   const directory = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : useWorkspaceStore.getState().rootDirectory); if (!directory) return false;
   try {
     const project = session.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory });
     if (!handoffSaved(await hubCall<MemoryNote[]>({ action: 'memory-list', project }), session.config.engine, pending.at)) return false;
   } catch { return false; }
-  waiting.delete(runId);
-  if (!session.config.chat) return writeTerminal(session.id, '/compact\r');
+  waiting.delete(runId); setHandoffPhase(session.id, runId, 'saved');
+  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); return sent; }
   if (!window.codingHub) return false;
   chatSent(session.id, '/compact', []);
   const result = await window.codingHub.chat({ action: 'compact', sessionId: session.id, runId }).catch(() => null);
   if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); return false; }
-  return true;
+  setHandoffPhase(session.id, runId, 'compacted'); return true;
 }
 
 /** A channel's turn ended: asks its agent for a handoff if one is due. `wait`: the turn's last usage arrives a moment after it ends. */
@@ -69,15 +68,15 @@ export async function askForHandoff(sessionId: string, wait = 1500): Promise<boo
   const usage = usageFor(session, useHubStore.getState().usage); const runId = session.runId;
   if (await compactAfterHandoff(session, sessions)) return false;
   // Back under the limit (compacted): the next climb asks again.
-  if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(runId); waiting.delete(runId); return false; }
+  if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(runId); if (waiting.delete(runId)) setHandoffPhase(session.id, runId, null); return false; }
   if (asked.has(runId) || !handoffDue(session, sessions, usage, useHubStore.getState().preferences)) return false;
   asked.add(runId); waiting.set(runId, { at: Date.now(), turns: 0 }); const text = handoffRequest(Math.round(contextShare(usage) * 100));
   if (isChatEngineConfig(session.config) && session.config.chat && window.codingHub) {
     chatSent(session.id, text, []);
     const result = await window.codingHub.chat({ action: 'send', sessionId: session.id, runId, text, images: [] }).catch(() => null);
     if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The handoff request could not be sent.'); asked.delete(runId); return false; }
-    return true;
+    setHandoffPhase(session.id, runId, 'asked'); return true;
   }
-  const sent = await writeTerminal(session.id, text + '\r'); if (!sent) asked.delete(runId);
+  const sent = await submitTerminal(session.id, text); if (!sent) asked.delete(runId); else setHandoffPhase(session.id, runId, 'asked');
   return sent;
 }
