@@ -2,10 +2,12 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginBrowseItem, PluginData, PluginPreview } from '../../../shared/plugins';
 import { browse, parseSource } from './github';
 import { Plugins, type PluginHost } from './plugins';
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 afterEach(() => { for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });

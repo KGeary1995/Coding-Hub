@@ -2,11 +2,14 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentFetched } from '../../../shared/agents';
 import type { PluginBrowseItem } from '../../../shared/plugins';
 import { setBackupRoot } from '../hub/file-backups';
 import { CustomAgents } from './agents';
+
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default (1.44.0's release failed on it twice). */
+vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 afterEach(() => { setBackupRoot(null); for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
