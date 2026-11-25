@@ -50,7 +50,7 @@ import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
 import { AutoChecks } from './services/workbench/auto-checks';
-import { geminiSafeSettings, safeActionRules } from '../shared/safe-actions';
+import { claudeLookOnlyRules, geminiSafeSettings, LOOK_ONLY_TOOLS, safeActionRules } from '../shared/safe-actions';
 import { TurnSnapshots } from './services/repository/turn-snapshots';
 import { PreviewOffers } from './services/workbench/preview-offers';
 import { AppPreview } from './services/workbench/app-preview';
@@ -347,6 +347,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
 }, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
+  safeActions: () => hub?.preferences().safeActions !== false,
   beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.engine === 'gemini' || config.engine === 'custom' ? undefined : config.memoryKey) : Promise.resolve(),
   customLaunch: (run, config, base, prompt) => customLaunch(run, config, base, prompt), customStatus: (agentId) => customAgents?.status(agentId) ?? null, prepareLaunch: (run, config, info, launch) => timed('launch-prepare', () => {
   hub?.rules.verifyLaunch(run.cwd);
@@ -363,8 +364,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (plugin) { autoMemory?.prepare(run, config.model, info, launch); const toolsUrl = channelTools.register(run.runId); if (toolsUrl) launch.env.CODING_HUB_CHANNEL_TOOLS_URL = toolsUrl; }
     // At Allow edits (shared/safe-actions.ts): the safe commands, as agy matches them exactly, and Trace's own tools that
     // Codex runs without asking, beside the person's own rules. A terminal only: `agy acp` (a chat, a Round Table seat)
-    // takes no --settings (agy 1.5.16 prints its help and exits 1). There file changes at Allow edits are allowed by
-    // acp-stream.ts, and every command, safe or not, comes as an approval card.
+    // takes no --settings (agy 1.5.16 prints its help and exits 1). There Trace answers agy's requests for the same safe
+    // commands and tools itself (geminiAllows, gemini-stream.ts).
     const safe = hub?.preferences().safeActions !== false;
     if (!config.chat && permissionLevel(config) === 'edits' && info.supportsSettings && (safe || plugin)) {
       let own: unknown = {}; try { own = (JSON.parse(fs.readFileSync(path.join(geminiHome(), 'settings.json'), 'utf8')) as { permissions?: unknown }).permissions; } catch { /* None saved. */ }
@@ -375,6 +376,9 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (config.resumeId) { if (hub?.telemetry?.isConversationActive(config.engine, config.resumeId)) throw new HubError('RESUME_BUSY', 'This conversation is still active in another tile. Stop it before resuming.'); const source = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); if (!source) throw new HubError('NATIVE_SESSION', 'This native conversation is unavailable. Refresh CLI history before resuming.'); hub?.telemetry?.setResumeSource(run.runId, source, config.engine, config.model); }
   if (config.engine === 'claude' && config.tokenLimits.maxSessionTokens !== null && !hub?.telemetry) throw new HubError('TELEMETRY_UNAVAILABLE', 'Token limits require writable local telemetry storage.');
   hub?.telemetry?.prepare(run, config, info, launch);
+  // The channel tools' address for this run (null when both settings are off), added to the CLI below. Registered once:
+  // each registration makes a new secret.
+  const toolsUrl = channelTools.register(run.runId);
   // Let the agent say when it is waiting for the person. Older CLIs run without it.
   if (config.engine === 'claude' && info.supportsSettings && supportsHttpHooks(info.version)) {
     const url = attention.register(run.runId);
@@ -382,7 +386,8 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     const claudeHome = config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
     const statusLine = !config.chat && !ownStatusLine(claudeHome, run.cwd);
     // At Allow edits, the safe commands run without asking unless the person turned that off (shared/safe-actions.ts).
-    const allow = permissionLevel(config) === 'edits' && hub?.preferences().safeActions !== false ? safeActionRules() : [];
+    // Trace's tools that only look run without asking at every level, as for Codex (the owner's decision of 2026-11-25).
+    const allow = [...(permissionLevel(config) === 'edits' && hub?.preferences().safeActions !== false ? safeActionRules() : []), ...(toolsUrl && info.supportsMcpConfig ? claudeLookOnlyRules() : [])];
     if (url) { launch.args.push('--settings', claudeAttentionSettings(url, supportsSessionHook(info.version) ? systemCurl() : null, statusLine, allow)); Object.assign(launch.env, withLoopbackNoProxy({ ...process.env, ...launch.env })); }
   }
   if (config.engine === 'codex' && info.supportsConfig) for (const value of CODEX_ATTENTION_CONFIG) launch.args.push('--config', value);
@@ -392,7 +397,6 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   // read, wait) without asking, so a Codex chat, which has no prompt for it, can use them too (1.33.2; checked with
   // codex-cli 0.171.0); sending a message still asks, which a chat shows as a card (an MCP elicitation, codex-stream.ts). The task tools ride the same
   // server when their own setting is on (either one adds it); list_tasks only looks, adding or updating a task asks.
-  const toolsUrl = channelTools.register(run.runId);
   if (toolsUrl) {
     const server = { command: process.execPath, args: [path.join(__dirname, 'services', 'hub', 'channel-server.js')], env: { ELECTRON_RUN_AS_NODE: '1', CODING_HUB_CHANNEL_TOOLS_URL: toolsUrl } };
     if (config.engine === 'claude' && info.supportsMcpConfig) {
@@ -401,7 +405,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
         const file = path.join(folder, `${run.runId}.mcp.json`); fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'trace-channels': server } }), { mode: 0o600 }); channelToolFiles.set(run.runId, file);
         if (launch.args.at(-2) === '--mcp-config') launch.args.push(file); else launch.args.push('--mcp-config', file);
       } catch { channelTools.unregister(run.runId); }
-    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'].flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
+    } else if (config.engine === 'codex' && info.supportsConfig) launch.args.push('--config', `mcp_servers.trace-channels.command=${JSON.stringify(server.command)}`, '--config', `mcp_servers.trace-channels.args=${JSON.stringify(server.args)}`, '--config', `mcp_servers.trace-channels.env={ELECTRON_RUN_AS_NODE="1",CODING_HUB_CHANNEL_TOOLS_URL=${JSON.stringify(toolsUrl)}}`, ...LOOK_ONLY_TOOLS.flatMap((tool) => ['--config', `mcp_servers.trace-channels.tools.${tool}.approval_mode="approve"`]));
     else channelTools.unregister(run.runId);
   }
 }), abandonLaunch: (run) => { attention.unregister(run.runId); channelTools.unregister(run.runId); const file = channelToolFiles.get(run.runId); if (file) { channelToolFiles.delete(run.runId); fs.rm(file, { force: true }, () => {}); } hub?.telemetry?.abandon(run.runId); autoMemory?.abandon(run.runId); }, onSeated: (runIds) => autoMemory?.seated(runIds), onStarted: (run, config, owner) => {

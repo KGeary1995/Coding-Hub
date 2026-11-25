@@ -30,9 +30,12 @@ export interface AcpMcpServer { name: string; command: string; args: string[]; e
  *   it, and what its `initialize` does not offer (loading, images) is not asked of it.
  * - `allowEdits`: at Allow edits Trace answers a file change's request itself (allow), as that level means; agy's own
  *   accept-edits mode does this for Gemini.
+ * - `allows`: at Allow edits, the other requests Trace answers itself (allow): for Gemini the safe commands and Trace's
+ *   own tools that a Gemini terminal's settings allow (gemini-stream.ts).
  */
-export interface AcpAgent { name: string; prefix: string; modes: Partial<Record<PermissionLevel, string>>; agy?: boolean; allowEdits?: boolean; mcpServers?: AcpMcpServer[] }
-export interface AcpOptions { cwd: string; model?: string; resumeId?: string; permissions?: PermissionLevel; confirmMs?: number }
+export interface AcpAgent { name: string; prefix: string; modes: Partial<Record<PermissionLevel, string>>; agy?: boolean; allowEdits?: boolean; mcpServers?: AcpMcpServer[]; allows?: (call: Record<string, unknown>, safeCommands: boolean) => boolean }
+/** `safeCommands`: the person's "Let agents run safe commands without asking" (on unless false). */
+export interface AcpOptions { cwd: string; model?: string; resumeId?: string; permissions?: PermissionLevel; confirmMs?: number; safeCommands?: boolean }
 
 /**
  * A chat run over the Agent Client Protocol: JSON-RPC over the program's stdin and stdout, one message per line. Gemini
@@ -291,7 +294,7 @@ export class AcpStream implements ChatStream {
     this.approvals.set(requestId, { id: message.id as number | string, options });
     // Full access on a run that may edit: allowed at once, with no approval card, as Claude's and Codex's full access never ask.
     // Allow edits, for an agent whose own mode does not already say so: its file changes likewise.
-    if (!this.readOnly && (this.level === 'full' || (this.level === 'edits' && this.agent.allowEdits && WRITES.has(kind)))) { this.answer(requestId, true, false, false); return; }
+    if (!this.readOnly && (this.level === 'full' || (this.level === 'edits' && ((this.agent.allowEdits && WRITES.has(kind)) || this.agent.allows?.(call, this.options.safeCommands !== false))))) { this.answer(requestId, true, false, false); return; }
     const paths = this.paths(call); const title = text(call.title) || text(call.name);
     const toolName = WRITES.has(kind) ? 'File changes' : kind === 'execute' ? 'Shell' : title || 'Tool';
     // A chat at Ask is read-only: a file change is declined, and said. (A table's read-only seat is the table's to decline.)

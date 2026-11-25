@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { readConfig, updateConfig } from './config';
+import { LOOK_ONLY_TOOLS } from '../../../shared/safe-actions';
 
 /**
  * Shared memory and the channel tools for Gemini (agy). agy takes MCP servers only from its own files, never from its
@@ -22,7 +23,7 @@ export const GEMINI_CHANNELS_SERVER = `${GEMINI_PLUGIN}_channels`;
  * Allowed at Allow edits (agy matches `mcp(server/tool)` exactly, checked with agy 1.5.15): every memory tool, as Codex
  * runs them without asking, and the channel and task tools that only look, as for Codex. Sending, adding or updating asks.
  */
-export const GEMINI_TOOL_RULES: readonly string[] = [...['memory_context', 'read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item'].map((tool) => `mcp(${GEMINI_MEMORY_SERVER}/${tool})`), ...['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'].map((tool) => `mcp(${GEMINI_CHANNELS_SERVER}/${tool})`)];
+export const GEMINI_TOOL_RULES: readonly string[] = [...['memory_context', 'read_memory', 'write_handoff', 'list_decisions', 'retire_decision', 'list_open_items', 'resolve_open_item'].map((tool) => `mcp(${GEMINI_MEMORY_SERVER}/${tool})`), ...LOOK_ONLY_TOOLS.map((tool) => `mcp(${GEMINI_CHANNELS_SERVER}/${tool})`)];
 /** agy's global customization folder. With CODING_HUB_GEMINI_HOME (tests and smoke runs), a folder inside that one. */
 export const geminiConfigRoot = () => process.env.CODING_HUB_GEMINI_HOME ? path.join(process.env.CODING_HUB_GEMINI_HOME, 'config') : path.join(homedir(), '.gemini', 'config');
 export interface GeminiPluginPrograms { executable: string; memoryServer: string; channelServer: string }

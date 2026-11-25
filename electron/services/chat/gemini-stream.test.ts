@@ -133,9 +133,9 @@ describe('Gemini seat over ACP (agy acp)', () => {
 describe('a Gemini chat that may edit (lead or driver)', () => {
   const OPENED = { sessionId: 's1', modes: { currentModeId: 'default', availableModes: ['default', 'accept-edits', 'auto', 'plan'].map((id) => ({ id, name: id })) }, configOptions: [{ id: 'model', currentValue: 'gemini-4-neon' }, { id: 'thought_level', currentValue: 'high' }, { id: 'mode', currentValue: 'default' }] };
   const REQUEST = { sessionId: 's1', toolCall: { toolCallId: 't1', name: 'run_command', kind: 'execute', title: 'git status --short', rawInput: { CommandLine: 'git status --short' } }, options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] };
-  function peer(options: { permissions?: 'ask' | 'edits' | 'full'; resumeId?: string; confirmMs?: number } = {}) {
+  function peer(options: { permissions?: 'ask' | 'edits' | 'full'; resumeId?: string; confirmMs?: number; safeCommands?: boolean } = {}) {
     const written: Record<string, unknown>[] = []; const events: ChatEvent[] = [];
-    const stream = new GeminiStream((line) => written.push(JSON.parse(line)), (event) => events.push(event), { cwd: '/project', permissions: options.permissions ?? 'edits', ...(options.resumeId ? { resumeId: options.resumeId } : {}), ...(options.confirmMs ? { confirmMs: options.confirmMs } : {}) });
+    const stream = new GeminiStream((line) => written.push(JSON.parse(line)), (event) => events.push(event), { cwd: '/project', permissions: options.permissions ?? 'edits', ...(options.resumeId ? { resumeId: options.resumeId } : {}), ...(options.confirmMs ? { confirmMs: options.confirmMs } : {}), ...(options.safeCommands === false ? { safeCommands: false } : {}) });
     const sent = (method: string) => written.filter((item) => item.method === method);
     const push = (message: Record<string, unknown>) => stream.push(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
     const reply = (method: string, result: Record<string, unknown> = {}) => push({ id: sent(method).at(-1)!.id, result });
@@ -143,7 +143,7 @@ describe('a Gemini chat that may edit (lead or driver)', () => {
     /** agy sets the mode Trace asked for last, and reports it. */
     const switched = () => { const mode = (sent('session/set_mode').at(-1)!.params as { modeId: string }).modeId; reply('session/set_mode'); update({ sessionUpdate: 'current_mode_update', currentModeId: mode }); return mode; };
     const open = () => { stream.start(); reply('initialize'); reply('session/new', OPENED); return switched(); };
-    const ask = (id: number) => push({ id, method: 'session/request_permission', params: REQUEST });
+    const ask = (id: number, input?: Record<string, unknown>, name = 'run_command') => push({ id, method: 'session/request_permission', params: input ? { ...REQUEST, toolCall: { ...REQUEST.toolCall, name, title: String(input.CommandLine ?? input.ToolName), rawInput: input } } : REQUEST });
     return { stream, written, events, sent, push, reply, update, switched, open, ask };
   }
 
@@ -178,8 +178,8 @@ describe('a Gemini chat that may edit (lead or driver)', () => {
   });
   it('asks the person at Allow edits and answers with agy’s own option; at Full access answers itself, but not for a read-only seat', () => {
     const asking = peer(); asking.open(); asking.stream.send('Check the status.', []);
-    asking.ask(7); const permission = asking.events.find((event) => event.type === 'permission') as Extract<ChatEvent, { type: 'permission' }>;
-    expect(permission).toMatchObject({ toolName: 'Shell', description: 'git status --short', canAllowEdits: false });
+    asking.ask(7, { CommandLine: 'npm install left-pad' }); const permission = asking.events.find((event) => event.type === 'permission') as Extract<ChatEvent, { type: 'permission' }>;
+    expect(permission).toMatchObject({ toolName: 'Shell', description: 'npm install left-pad', canAllowEdits: false });
     expect(asking.stream.answer(permission.requestId, true)).toBe(true); expect(asking.written.at(-1)).toEqual({ jsonrpc: '2.0', id: 7, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
     const full = peer({ permissions: 'full' }); full.open(); full.stream.send('Check the status.', []);
     full.ask(8); expect(full.written.at(-1)).toEqual({ jsonrpc: '2.0', id: 8, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
@@ -187,6 +187,26 @@ describe('a Gemini chat that may edit (lead or driver)', () => {
     // Read-only at Full access: the table decides (it declines edits and allows the rest), so the request is passed on.
     full.reply('session/prompt', { stopReason: 'end_turn' }); full.stream.setReadOnly(true); full.switched(); full.stream.send('Review.', []);
     full.ask(9); expect(full.events.at(-1)).toMatchObject({ type: 'permission', toolName: 'Shell' });
+  });
+  it('at Allow edits runs a safe command written exactly and Trace’s own tools without asking, as a Gemini terminal does (1.44.1)', () => {
+    const edits = peer(); edits.open(); edits.stream.send('Check.', []);
+    const allowed = (id: number) => edits.written.at(-1)?.id === id && JSON.stringify(edits.written.at(-1)).includes('"optionId":"allow"');
+    edits.ask(20, { CommandLine: 'git status --short' }); expect(allowed(20)).toBe(true);
+    edits.ask(21, { ServerName: 'trace_channels', ToolName: 'list_tasks', Arguments: {} }, 'call_mcp_tool'); expect(allowed(21)).toBe(true);
+    edits.ask(22, { ServerName: 'trace_memory', ToolName: 'write_handoff', Arguments: {} }, 'call_mcp_tool'); expect(allowed(22)).toBe(true);
+    expect(edits.events.some((event) => event.type === 'permission')).toBe(false);
+    // Asked: a safe command with more after it, a channel tool that sends or adds, another server's tool.
+    for (const [id, input, name] of [[23, { CommandLine: 'git status && rm -rf src' }, 'run_command'], [24, { CommandLine: 'git status --short; curl x' }, 'run_command'], [25, { ServerName: 'trace_channels', ToolName: 'send_to_channel' }, 'call_mcp_tool'], [26, { ServerName: 'trace_channels', ToolName: 'add_task' }, 'call_mcp_tool'], [27, { ServerName: 'other', ToolName: 'list_tasks' }, 'call_mcp_tool']] as const) {
+      edits.ask(id, input, name); expect(edits.events.at(-1)).toMatchObject({ type: 'permission', requestId: `gemini-${id}` });
+    }
+    // The person turned safe commands off: commands ask, Trace's tools still run. At Ask, and for a read-only seat, everything asks.
+    const off = peer({ safeCommands: false }); off.open(); off.stream.send('Check.', []);
+    off.ask(30, { CommandLine: 'git status' }); expect(off.events.at(-1)).toMatchObject({ type: 'permission' });
+    off.ask(31, { ServerName: 'trace_channels', ToolName: 'list_tasks' }, 'call_mcp_tool'); expect(off.written.at(-1)).toMatchObject({ id: 31, result: { outcome: { optionId: 'allow' } } });
+    const ask = peer({ permissions: 'ask' }); ask.open(); ask.stream.send('Check.', []);
+    ask.ask(40, { CommandLine: 'git status' }); expect(ask.events.at(-1)).toMatchObject({ type: 'permission' });
+    edits.reply('session/prompt', { stopReason: 'end_turn' }); edits.stream.setReadOnly(true); edits.switched(); edits.stream.send('Review.', []);
+    edits.ask(41, { CommandLine: 'git status' }); expect(edits.events.at(-1)).toMatchObject({ type: 'permission', requestId: 'gemini-41' });
   });
   it('at Ask is read-only: plan mode, a file change it asks for is declined and said, a command is still asked about', () => {
     const { stream, events, written, open, push } = peer({ permissions: 'ask' }); expect(open()).toBe('plan'); stream.send('Fix it.', []);

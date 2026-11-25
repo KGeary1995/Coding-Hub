@@ -33,5 +33,12 @@ export function geminiSafeSettings(own: unknown, allow: readonly string[] = [], 
   const deny = saved('deny'); const ask = saved('ask');
   return JSON.stringify({ permissions: { allow: [...new Set([...saved('allow'), ...(safe ? GEMINI_SAFE_COMMANDS.map((command) => `command(${command})`) : []), ...allow])], ...(deny.length ? { deny } : {}), ...(ask.length ? { ask } : {}) } });
 }
+/**
+ * Trace's channel and task tools that only look (1.33.2 for Codex): every agent runs them without asking, as reading a
+ * file. Sending a message, adding or updating a task still asks.
+ */
+export const LOOK_ONLY_TOOLS: readonly string[] = ['list_channels', 'read_channel', 'wait_for_channel', 'list_tasks'];
+/** Claude Code's permission rules for them (its MCP tools are named mcp__<server>__<tool>; Trace's server is trace-channels). */
+export const claudeLookOnlyRules = () => LOOK_ONLY_TOOLS.map((tool) => `mcp__trace-channels__${tool}`);
 /** The Claude Code permission rules for those commands. */
 export const safeActionRules = () => SAFE_COMMANDS.map((command) => `Bash(${command}:*)`);
