@@ -190,7 +190,9 @@ export type LinkedComputerRequest =
   /** That computer's Claude Code, Codex and Gemini conversations, newest first (RemoteHistoryItem[]), for History on its tab. */
   | { action: 'linked-history'; id: string }
   /** Resumes one of them there, as a new channel in its own workspace (`key` from linked-history). */
-  | { action: 'linked-history-resume'; id: string; key: string };
+  | { action: 'linked-history-resume'; id: string; key: string }
+  /** Starts Trace there when it is closed, through its screen service (a Windows computer sharing its screen). */
+  | { action: 'linked-open-trace'; id: string };
 /** Live updates about linked computers for the desktop window. */
 export type LinkedComputerEvent =
   | { type: 'computers'; computers: LinkedComputer[] }

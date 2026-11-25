@@ -340,17 +340,24 @@ function alertText(text: string) {
   line.textContent = text; line.hidden = false; setTimeout(() => { if (line.textContent === text) { line.textContent = ''; if (line.id === 'control-error') line.hidden = true; } }, 6000);
 }
 
-/** + Channel on the phone: the same kinds as the computer's, in its order (terminals; chats come with a Round Table), added there. Shown when this phone may start agents. */
+/**
+ * + Channel on the phone: the same kinds as the computer's, in its order (Round Tables open on the computer), added
+ * there. Since 1.43.0 each agent is one row with CLI and Chat; each button keeps the full name ("Codex chat"). Shown
+ * when this phone may start agents.
+ */
 function addMenu() {
-  // Then the custom agents turned on there (1.40.0), each by its name.
-  const kinds: { label: string; engine: ChannelEngine; chat: boolean; agent?: string }[] = [
-    { label: 'Terminal', engine: 'shell', chat: false }, { label: 'Claude Code', engine: 'claude', chat: false }, { label: 'Codex', engine: 'codex', chat: false }, { label: 'Gemini', engine: 'gemini', chat: false },
-    { label: 'Claude Code chat', engine: 'claude', chat: true }, { label: 'Codex chat', engine: 'codex', chat: true }, { label: 'Gemini chat', engine: 'gemini', chat: true },
-    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id })),
-    // Each that speaks ACP as a chat too (custom agents, phase 2).
-    ...(me?.agents ?? []).filter((agent) => agent.chat).map((agent) => ({ label: `${agent.name} chat`, engine: 'custom' as const, chat: true, agent: agent.id }))];
+  type Kind = { label: string; engine: ChannelEngine; chat: boolean; agent?: string };
+  // Then the custom agents turned on there (1.40.0), each by its name; one that speaks ACP as a chat too (phase 2).
+  const rows: { label: string; ways: Kind[] }[] = [
+    { label: 'Terminal', ways: [{ label: 'Terminal', engine: 'shell', chat: false }] },
+    ...([['Claude Code', 'claude'], ['Codex', 'codex'], ['Gemini', 'gemini']] as const).map(([label, engine]) => ({ label, ways: [{ label, engine, chat: false }, { label: `${label} chat`, engine, chat: true }] })),
+    ...(me?.agents ?? []).map((agent) => ({ label: agent.name, ways: [{ label: agent.name, engine: 'custom' as const, chat: false, agent: agent.id }, ...(agent.chat ? [{ label: `${agent.name} chat`, engine: 'custom' as const, chat: true, agent: agent.id }] : [])] }))];
+  const add = (kind: Kind) => async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat, undefined, kind.agent); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } };
   const menu = h('div', { className: 'add-menu', hidden: true, aria: { role: 'menu', label: 'New channel' } },
-    ...kinds.map((kind) => h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: async () => { menu.hidden = true; try { await addChannel(kind.engine, kind.chat, undefined, kind.agent); alertText(`${kind.label} added. Start it from its channel.`); } catch (e) { alertText((e as Error).message); } } }, kind.label)));
+    ...rows.map((row) => row.ways.length === 1
+      ? h('button', { type: 'button', aria: { role: 'menuitem' }, onclick: add(row.ways[0]) }, row.label)
+      : h('div', { className: 'add-row', aria: { role: 'group', label: row.label } }, h('span', {}, row.label),
+        ...row.ways.map((kind) => h('button', { type: 'button', className: 'add-way', aria: { role: 'menuitem', label: kind.label }, onclick: add(kind) }, kind.chat ? 'Chat' : 'CLI')))));
   const button = h('button', { id: 'add-channel', className: 'fab', type: 'button', aria: { label: 'New channel', haspopup: 'menu' }, onclick: () => { menu.hidden = !menu.hidden; } }, '+');
   return h('div', { id: 'add-wrap', className: 'add-wrap', hidden: !me?.canRun }, menu, button);
 }

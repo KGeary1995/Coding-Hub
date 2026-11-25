@@ -1,5 +1,14 @@
 ## What's new
 
+1.43.0 keeps your computers reachable from each other, and makes **New channel** shorter.
+
+- **Open Trace when you sign in.** Trace now starts in the tray when you sign in, so your phone and other computers can reach this computer after a restart or an update, without anyone opening Trace. It's on by default, set on each computer: Settings → Preferences → **Open Trace when you sign in**. On Windows it is **Trace** under Settings → Apps → Startup; if you turn it off there, Trace leaves it off.
+- **Ask before quitting.** While a phone or another computer can reach this one, Trace's **Quit** (in the tray, and Cmd+Q on a Mac) asks first and offers to keep Trace in the tray instead. **Don't ask again** turns it off. Shutting down or signing out of your computer never asks.
+- **Open Trace on your other computer.** When your Windows PC can't be reached because Trace is closed there, its tab here offers **Open Trace on** it. With **Share this screen** on, the PC's screen service, which runs from sign-in, starts Trace in its tray, and the tab connects by itself. Only your linked computers can ask; phones can't. On a Mac, or when the computer is asleep, the tab says what to do instead. The PC needs 1.43.0 for this.
+- **A shorter New channel.** One row per agent, with **CLI** or **Chat**, and one **Round Table** row with **Discussion** or **Hierarchy**. Agents you added get the same row when they have a chat. The phone's **+** menu has the same rows.
+- **Tried:** unit tests (the screen service only opens Trace for a linked computer's key, at most once in 20 seconds, and refuses phones, Funnel and sharing turned off); the desktop and Round Table smoke tests; and Trace started hidden (`--hidden`) loads its window without showing it.
+- **Not tried yet:** the sign-in entry in an installed Trace on Windows and on a Mac, the Quit question by hand, and opening Trace on a real Windows PC from the Mac.
+
 1.42.0 shows your other computer's conversations, and resumes them there.
 
 - **History on another computer's tab.** Open your other computer's tab and choose **History**: its Claude Code, Codex and Gemini conversations are listed, newest first, with a filter by title, folder or agent. **Resume** continues one on that computer: it is added there as a new channel, which shows on its tab here, ready to start.

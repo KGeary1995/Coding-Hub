@@ -1,7 +1,12 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
-/** `icon` is drawn before the label: a view's icon (the one its page heading shows) or an engine's avatar. */
-export interface MenuItem { label: string; detail?: string; icon?: ReactNode; onSelect: () => void; disabled?: boolean; current?: boolean }
+/** One way of an item that comes in two (an agent's CLI or chat, a Round Table's discussion or hierarchy): `label` is the button's word, `name` its full name. */
+export interface MenuChoice { label: string; name: string; onSelect: () => void }
+/**
+ * `icon` is drawn before the label: a view's icon (the one its page heading shows) or an engine's avatar. With
+ * `choices`, the row itself is no command: each choice is its own menu item, a small button on the row.
+ */
+export interface MenuItem { label: string; detail?: string; icon?: ReactNode; onSelect: () => void; disabled?: boolean; current?: boolean; choices?: MenuChoice[] }
 
 /**
  * A button that opens a keyboard-navigable menu (arrows, Home/End, Escape). Selecting an item closes it. Without a
@@ -33,7 +38,10 @@ export function MenuButton({ label, ariaLabel, items, className = '', buttonClas
   return <div className={`tr-menu ${className}`} ref={root} onKeyDown={onKeyDown}>
     <button ref={button} className={`tr-menu-button ${buttonClassName} ${active ? 'active' : ''}`} aria-label={ariaLabel} title={title} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => setOpen(!open)}>{label}<span aria-hidden="true" className="tr-caret">▾</span></button>
     {open && <div className="tr-menu-list" role="menu" id={id} aria-label={ariaLabel}>
-      {items.map((item) => <button key={item.label} role="menuitem" className={item.current ? 'current' : ''} aria-current={item.current ? 'page' : undefined} disabled={item.disabled} onClick={() => { setOpen(false); item.onSelect(); }}>
+      {items.map((item) => item.choices ? <div key={item.label} className="tr-menu-row" role="group" aria-label={item.label}>
+        {item.icon}<span className="tr-menu-row-label">{item.label}</span>
+        <span className="tr-menu-choices">{item.choices.map((choice) => <button key={choice.name} role="menuitem" aria-label={choice.name} title={choice.name} disabled={item.disabled} onClick={() => { setOpen(false); choice.onSelect(); }}>{choice.label}</button>)}</span>
+      </div> : <button key={item.label} role="menuitem" className={item.current ? 'current' : ''} aria-current={item.current ? 'page' : undefined} disabled={item.disabled} onClick={() => { setOpen(false); item.onSelect(); }}>
         {item.icon}<span>{item.label}</span>{item.detail && <small>{item.detail}</small>}
       </button>)}
     </div>}

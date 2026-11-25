@@ -74,6 +74,12 @@
 .tr-menu-list [role="menuitem"].current { background: var(--tr-raised); box-shadow: inset 3px 0 0 var(--tr-accent); color: var(--tr-fg-strong); }
 .tr-menu-list [role="menuitem"].current > svg { color: var(--tr-accent); }
 .tr-menu-list small { font: var(--tr-t-small); color: var(--tr-fg-dim); }
+/* An item in two ways: its name, then a small button for each (CLI | Chat, Discussion | Hierarchy). */
+.tr-menu-row { height: 36px; display: flex; align-items: center; gap: 12px; padding: 0 6px 0 12px; color: var(--tr-fg); font: var(--tr-t-control); white-space: nowrap; }
+.tr-menu-row-label { flex: 1; }
+.tr-menu-choices { display: inline-flex; gap: 4px; }
+.tr-menu-list .tr-menu-choices [role="menuitem"] { width: auto; height: 28px; padding: 0 10px; border: 1px solid var(--tr-line); font: var(--tr-t-small); color: var(--tr-fg); }
+.tr-menu-list .tr-menu-choices [role="menuitem"]:is(:hover, :focus-visible) { border-color: var(--tr-accent); background: var(--tr-accent-soft); }
 
 /* ---------- Command menu ---------- */
 /* A solid scrim, never blur (it is costly over terminals), and an overlay card 64 px from the top. */

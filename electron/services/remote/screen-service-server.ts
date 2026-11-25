@@ -42,7 +42,11 @@ export interface ScreenServiceHost {
   readClipboard?(): Promise<string>;
   /** Someone started (a name, with a way to disconnect them) or stopped (null) watching. */
   viewing(name: string | null, disconnect: () => void): void;
+  /** Starts Trace here in the tray (it shows nothing if it already runs), for a linked computer that found it closed. */
+  openTrace?(): void;
 }
+/** One start of Trace for linked computers at most this often: asking again while it opens does nothing more. */
+export const OPEN_TRACE_MS = 20000;
 
 /**
  * The Windows screen service's server: it listens on this computer only, and `tailscale serve` passes it
@@ -63,6 +67,7 @@ export class ScreenService {
   async listen(port: number) {
     const server = http.createServer((request, response) => {
       if (request.method === 'POST' && request.url?.endsWith('/check')) { void this.check(request, response); return; }
+      if (request.method === 'POST' && request.url?.endsWith('/open-trace')) { this.openTrace(request, response); return; }
       const ok = request.method === 'GET' && (request.url === '/health' || request.url?.endsWith('/health'));
       response.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(ok ? { ok: true, ...(this.version ? { version: this.version } : {}) } : { error: 'Not found.' }));
     });
@@ -92,6 +97,26 @@ export class ScreenService {
       try { await Promise.race([opening, late]); return null; } catch (error) { return (error as Error).message || 'the screen could not be captured'; } finally { clearTimeout(timer); }
     })().finally(() => { this.checking = null; });
     const problem = await this.checking; answer(200, problem ? { ok: false, error: problem } : { ok: true });
+  }
+  private openedAt = 0;
+  /**
+   * A linked computer that cannot reach Trace here (it was quit, or this computer restarted without Trace opening) asks
+   * the service, which runs from sign-in, to start it: with its link key, as for the screen, and only while sharing is on.
+   * Phones' keys and Tailscale Funnel are refused. Trace starts in the tray, so nothing appears on this screen.
+   */
+  private openTrace(request: http.IncomingMessage, response: http.ServerResponse) {
+    const answer = (status: number, body: unknown) => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(body)); };
+    request.resume();
+    if (request.headers['tailscale-funnel-request'] !== undefined) return answer(403, { error: 'Trace cannot be opened through Tailscale Funnel.' });
+    const header = request.headers.authorization; const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    let devices: z.infer<typeof devicesSchema> = []; try { devices = load(this.root, 'remote-devices.json', devicesSchema, []); } catch { /* Unreadable: nobody may. */ }
+    const device = /^[A-Za-z0-9_-]{43}$/.test(token) ? devices.find((item) => same(item.tokenHash, hash(token))) : undefined;
+    if (!device) return answer(401, { error: `${this.name()} no longer accepts this computer. Link it again in Settings → Other computers.` });
+    if (device.kind !== 'computer') return answer(403, { error: 'Only a linked computer can open Trace here.' });
+    if (!shareEnabled(this.root)) return answer(403, { error: `Share this screen is off on ${this.name()}, so Trace can't be opened from here.` });
+    if (!this.host.openTrace) return answer(404, { error: 'Not found.' });
+    const now = Date.now(); if (now - this.openedAt >= OPEN_TRACE_MS) { this.openedAt = now; try { this.host.openTrace(); } catch { this.openedAt = 0; return answer(500, { error: `Trace could not be started on ${this.name()}.` }); } }
+    return answer(200, { ok: true });
   }
   async close() { this.disconnect(); const server = this.server; this.server = null; if (server) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }); }
   get watching() { return this.viewer?.name ?? null; }

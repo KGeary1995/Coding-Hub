@@ -12,20 +12,33 @@ const until = async (check: () => boolean, what: string) => { for (let i = 0; i 
 const COMPUTER = 'c'.repeat(43); const PHONE = 'p'.repeat(43);
 const device = (name: string, token: string, kind: 'phone' | 'computer') => ({ id: crypto.randomUUID(), name, tokenHash: createHash('sha256').update(token).digest('hex'), createdAt: new Date().toISOString(), lastSeen: null, kind });
 
-async function service(enabled = true, options: { open?: () => Promise<never | { source: unknown }>; openTimeout?: number } = {}) {
+async function service(enabled = true, options: { open?: () => Promise<never | { source: unknown }>; openTimeout?: number; openTrace?: () => void } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-service-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'remote-devices.json'), JSON.stringify([device('MacBook-Air-2.local', COMPUTER, 'computer'), device('Phone', PHONE, 'phone')]));
   fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled }));
   const viewers: (string | null)[] = []; let opened = 0; let stopped = 0;
   const screen = new ScreenService(root, () => 'Obsidian-Halo', {
     open: options.open as never ?? (async () => { opened++; return { source: { width: 320, height: 200, frame: async () => [] }, input: { pointer: () => {}, key: () => {}, clipboard: () => {}, close: () => {} }, stop: () => { stopped++; } }; }),
-    viewing: (name) => viewers.push(name),
+    viewing: (name) => viewers.push(name), ...(options.openTrace ? { openTrace: options.openTrace } : {}),
   }, options.openTimeout);
   const port = await screen.listen(0); cleanup.push(() => screen.close());
   return { root, screen, url: `http://127.0.0.1:${port}/`, viewers, counts: () => ({ opened, stopped }) };
 }
 
 describe('the Windows screen service', () => {
+  it('opens Trace for a linked computer, at most once while it starts, and for nobody else', async () => {
+    let started = 0; const sharing = await service(true, { openTrace: () => { started++; } });
+    const ask = (url: string, token: string, headers: Record<string, string> = {}) => fetch(url + 'api/screen/open-trace', { method: 'POST', headers: { Authorization: `Bearer ${token}`, ...headers } });
+    expect((await ask(sharing.url, COMPUTER)).status).toBe(200); expect(started).toBe(1);
+    // Asked again while it opens: answered, not started twice.
+    expect((await ask(sharing.url, COMPUTER)).status).toBe(200); expect(started).toBe(1);
+    // A phone's key, no key, a key it doesn't know, or Funnel: refused, and nothing started.
+    expect((await ask(sharing.url, PHONE)).status).toBe(403); expect((await ask(sharing.url, '')).status).toBe(401); expect((await ask(sharing.url, 'x'.repeat(43))).status).toBe(401);
+    expect((await ask(sharing.url, COMPUTER, { 'Tailscale-Funnel-Request': '?1' })).status).toBe(403); expect(started).toBe(1);
+    // With sharing off, it says so.
+    const off = await service(false, { openTrace: () => { started++; } }); const refused = await ask(off.url, COMPUTER);
+    expect(refused.status).toBe(403); expect((await refused.json() as { error: string }).error).toContain('Share this screen is off'); expect(started).toBe(1);
+  });
   it('tells Trace, and only Trace, whether the screen can be captured, without showing anyone as watching', async () => {
     const working = await service(); const local = JSON.parse(fs.readFileSync(path.join(working.root, 'screen-service-local.json'), 'utf8')).token as string;
     const check = (url: string, token: string) => fetch(url + 'check', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
